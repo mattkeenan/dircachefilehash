@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // Update scans the directory and updates the index file
@@ -326,41 +326,41 @@ func (dc *DirectoryCache) ScanDirectory() error {
 	return nil
 }
 
-// processFilesParallel processes files using a pool of goroutines
+// processFilesParallel processes files using device-specific worker pools
 func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, error) {
-	// Determine number of workers (use number of CPU cores)
-	numWorkers := runtime.NumCPU()
-	if numWorkers > len(jobs) {
-		numWorkers = len(jobs)
-	}
-	if numWorkers < 1 {
-		numWorkers = 1
+	if len(jobs) == 0 {
+		return []fileResult{}, nil
 	}
 
-	// Create channels
-	jobChan := make(chan fileJob, len(jobs))
-	resultChan := make(chan fileResult, len(jobs))
-
-	// Start workers
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go dc.fileHashWorker(jobChan, resultChan, &wg)
-	}
-
-	// Send jobs
+	// Group jobs by device
+	deviceJobs := make(map[uint64][]fileJob)
 	for _, job := range jobs {
-		jobChan <- job
+		// Get device ID from file info
+		stat := job.info.Sys().(*syscall.Stat_t)
+		deviceID := stat.Dev
+		deviceJobs[deviceID] = append(deviceJobs[deviceID], job)
 	}
-	close(jobChan)
 
-	// Wait for workers to complete
+	// Create channels for collecting results from all devices
+	resultChan := make(chan fileResult, len(jobs))
+	var wg sync.WaitGroup
+
+	// Process each device with its own worker pool
+	for deviceID, jobs := range deviceJobs {
+		wg.Add(1)
+		go func(devID uint64, deviceJobs []fileJob) {
+			defer wg.Done()
+			dc.processDeviceJobs(devID, deviceJobs, resultChan)
+		}(deviceID, jobs)
+	}
+
+	// Wait for all devices to complete
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Collect results
+	// Collect results from all devices
 	var results []fileResult
 	for result := range resultChan {
 		results = append(results, result)
@@ -369,8 +369,39 @@ func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, er
 	return results, nil
 }
 
-// fileHashWorker is a worker goroutine that processes file hashing jobs
-func (dc *DirectoryCache) fileHashWorker(jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
+// processDeviceJobs processes jobs for a specific device using 2 workers
+func (dc *DirectoryCache) processDeviceJobs(deviceID uint64, jobs []fileJob, resultChan chan<- fileResult) {
+	// Create 2 workers per device for optimal I/O performance
+	numWorkers := 2
+	if numWorkers > len(jobs) {
+		numWorkers = len(jobs)
+	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	// Create device-specific channels
+	jobChan := make(chan fileJob, len(jobs))
+
+	// Start workers for this device
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go dc.deviceHashWorker(deviceID, jobChan, resultChan, &wg)
+	}
+
+	// Send jobs to device workers
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	// Wait for device workers to complete
+	wg.Wait()
+}
+
+// deviceHashWorker is a worker goroutine that processes file hashing jobs for a specific device
+func (dc *DirectoryCache) deviceHashWorker(deviceID uint64, jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range jobs {
