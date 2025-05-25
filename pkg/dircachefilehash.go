@@ -4,15 +4,15 @@
 package dircachefilehash
 
 import (
-	"bufio"
+	"bytes"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -20,20 +20,20 @@ import (
 // FileEntry represents a file with its hash and metadata
 // Fields are ordered to match git dircache index file format
 type FileEntry struct {
-	CTime        time.Time `json:"ctime"`         // Creation time (seconds since epoch)
-	CTimeNano    int32     `json:"ctime_nano"`    // Creation time nanoseconds
-	MTime        time.Time `json:"mtime"`         // Modification time (seconds since epoch)
+	CTime        time.Time `json:"ctime"`         // Change time (metadata last changed, seconds since epoch)
+	CTimeNano    int32     `json:"ctime_nano"`    // Change time nanoseconds
+	MTime        time.Time `json:"mtime"`         // Modification time (content last modified, seconds since epoch)
 	MTimeNano    int32     `json:"mtime_nano"`    // Modification time nanoseconds
 	Dev          uint32    `json:"dev"`           // Device ID
 	Ino          uint32    `json:"ino"`           // Inode number
-	Mode         uint32    `json:"mode"`          // File mode
-	UID          uint32    `json:"uid"`           // User ID
+	Mode         uint32    `json:"mode"`          // File mode (permissions and type)
+	UID          uint32    `json:"uid"`           // User ID (owner)
 	GID          uint32    `json:"gid"`           // Group ID
-	Size         uint32    `json:"size"`          // File size
+	Size         uint32    `json:"size"`          // File size in bytes
 	Hash         string    `json:"hash"`          // SHA-1 hash (40 hex chars)
 	Flags        uint16    `json:"flags"`         // Index flags
-	Path         string    `json:"path"`          // File path
-	RelativePath string    `json:"relative_path"` // Relative path from root
+	PathLen      uint16    `json:"path_len"`      // Length of relative path (big-endian)
+	RelativePath string    `json:"relative_path"` // Relative path from root directory
 }
 
 // DirectoryCache manages the file cache for a directory
@@ -41,14 +41,23 @@ type DirectoryCache struct {
 	RootDir   string
 	IndexFile string
 	entries   []FileEntry
+	signature [4]byte // "dcfh" signature
+	version   uint32  // Index version
 }
 
 // NewDirectoryCache creates a new directory cache instance
 func NewDirectoryCache(rootDir, indexFile string) *DirectoryCache {
+	// If indexFile is empty, use default location under rootDir
+	if indexFile == "" {
+		indexFile = filepath.Join(rootDir, ".dcfh", "index")
+	}
+
 	return &DirectoryCache{
 		RootDir:   rootDir,
 		IndexFile: indexFile,
 		entries:   make([]FileEntry, 0),
+		signature: [4]byte{'d', 'c', 'f', 'h'}, // "dcfh" signature
+		version:   1,                           // Version 1 format
 	}
 }
 
@@ -72,54 +81,61 @@ func (dc *DirectoryCache) hashFile(filePath string) (string, error) {
 func (dc *DirectoryCache) ScanDirectory() error {
 	dc.entries = make([]FileEntry, 0)
 
-	err := filepath.Walk(dc.RootDir, func(path string, info os.FileInfo, err error) error {
+	// FIFO slice for file paths - push to end, pop from front
+	pathQueue := []string{dc.RootDir}
+
+	// Process paths until queue is empty
+	for len(pathQueue) > 0 {
+		// Pop the first entry from the FIFO slice
+		currentPath := pathQueue[0]
+		pathQueue = pathQueue[1:]
+
+		// Get file info
+		info, err := os.Lstat(currentPath) // Use Lstat to handle symlinks properly
 		if err != nil {
-			return err
+			// Skip files we can't access
+			continue
 		}
 
-		// Skip directories and the index file itself
-		if info.IsDir() || path == dc.IndexFile {
-			return nil
+		// If it's a directory, read its contents and add to queue
+		if info.IsDir() {
+			// Skip the index directory if it's inside the scan directory
+			indexDir := filepath.Dir(dc.IndexFile)
+			if currentPath == indexDir {
+				continue
+			}
+
+			entries, err := os.ReadDir(currentPath)
+			if err != nil {
+				// Skip directories we can't read
+				continue
+			}
+
+			// Sort entries by name using bytewise comparison
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Name() < entries[j].Name()
+			})
+
+			// Add all entries to the FIFO queue
+			for _, entry := range entries {
+				fullPath := filepath.Join(currentPath, entry.Name())
+				pathQueue = append(pathQueue, fullPath)
+			}
+		} else if info.Mode().IsRegular() {
+			// Skip the index file itself
+			if currentPath == dc.IndexFile {
+				continue
+			}
+
+			// Process regular files - hash contents and create entry
+			if err := dc.processRegularFile(currentPath, info); err != nil {
+				// Log error but continue processing
+				fmt.Fprintf(os.Stderr, "Warning: failed to process file %s: %v\n", currentPath, err)
+				continue
+			}
 		}
-
-		// Calculate relative path from root directory
-		relPath, err := filepath.Rel(dc.RootDir, path)
-		if err != nil {
-			return fmt.Errorf("failed to get relative path for %s: %w", path, err)
-		}
-
-		// Hash the file contents
-		hash, err := dc.hashFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to hash file %s: %w", path, err)
-		}
-
-		// Get system-specific file information
-		stat := info.Sys().(*syscall.Stat_t)
-
-		entry := FileEntry{
-			CTime:        time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec),
-			CTimeNano:    int32(stat.Ctim.Nsec),
-			MTime:        info.ModTime(),
-			MTimeNano:    int32(info.ModTime().Nanosecond()),
-			Dev:          uint32(stat.Dev),
-			Ino:          uint32(stat.Ino),
-			Mode:         uint32(info.Mode()),
-			UID:          stat.Uid,
-			GID:          stat.Gid,
-			Size:         uint32(info.Size()),
-			Hash:         hash,
-			Flags:        uint16(len(relPath)), // Use path length as flags (git convention)
-			Path:         path,
-			RelativePath: relPath,
-		}
-
-		dc.entries = append(dc.entries, entry)
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to scan directory %s: %w", dc.RootDir, err)
+		// For other file types (symlinks, device files, etc.), we just skip them
+		// since we only want to index regular files with content hashes
 	}
 
 	// Sort entries by hash for byte comparison order
@@ -130,47 +146,191 @@ func (dc *DirectoryCache) ScanDirectory() error {
 	return nil
 }
 
-// WriteIndex writes the sorted index to the specified file
+// processRegularFile processes a regular file and adds it to the entries
+func (dc *DirectoryCache) processRegularFile(filePath string, info os.FileInfo) error {
+	// Calculate relative path from root directory
+	relPath, err := filepath.Rel(dc.RootDir, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to get relative path for %s: %w", filePath, err)
+	}
+
+	// Hash the file contents
+	hash, err := dc.hashFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to hash file %s: %w", filePath, err)
+	}
+
+	// Get system-specific file information
+	stat := info.Sys().(*syscall.Stat_t)
+
+	entry := FileEntry{
+		CTime:        time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec),
+		CTimeNano:    int32(stat.Ctim.Nsec),
+		MTime:        info.ModTime(),
+		MTimeNano:    int32(info.ModTime().Nanosecond()),
+		Dev:          uint32(stat.Dev),
+		Ino:          uint32(stat.Ino),
+		Mode:         uint32(info.Mode()),
+		UID:          stat.Uid,
+		GID:          stat.Gid,
+		Size:         uint32(info.Size()),
+		Hash:         hash,
+		Flags:        uint16(len(relPath)), // Use path length as flags (git convention)
+		PathLen:      uint16(len(relPath)), // Length of relative path
+		RelativePath: relPath,
+	}
+
+	dc.entries = append(dc.entries, entry)
+	return nil
+}
+
+// WriteIndex writes the sorted index to the specified file in binary format
 func (dc *DirectoryCache) WriteIndex() error {
+	// Ensure the directory for the index file exists
+	indexDir := filepath.Dir(dc.IndexFile)
+	if err := os.MkdirAll(indexDir, 0755); err != nil {
+		return fmt.Errorf("failed to create index directory %s: %w", indexDir, err)
+	}
+
 	file, err := os.Create(dc.IndexFile)
 	if err != nil {
 		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
 	}
 	defer file.Close()
 
-	writer := bufio.NewWriter(file)
-	defer writer.Flush()
+	// Write header: signature (4 bytes) + version (4 bytes) + entry count (4 bytes)
+	if err := binary.Write(file, binary.BigEndian, dc.signature); err != nil {
+		return fmt.Errorf("failed to write signature: %w", err)
+	}
+	if err := binary.Write(file, binary.BigEndian, dc.version); err != nil {
+		return fmt.Errorf("failed to write version: %w", err)
+	}
+	if err := binary.Write(file, binary.BigEndian, uint32(len(dc.entries))); err != nil {
+		return fmt.Errorf("failed to write entry count: %w", err)
+	}
 
-	// Write header
-	fmt.Fprintf(writer, "# Directory Cache Index (Git dircache format)\n")
-	fmt.Fprintf(writer, "# Generated: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(writer, "# Root Directory: %s\n", dc.RootDir)
-	fmt.Fprintf(writer, "# Format: CTIME|CTIME_NANO|MTIME|MTIME_NANO|DEV|INO|MODE|UID|GID|SIZE|HASH|FLAGS|RELATIVE_PATH\n")
-	fmt.Fprintf(writer, "#\n")
-
-	// Write entries in sorted order
+	// Write entries
 	for _, entry := range dc.entries {
-		fmt.Fprintf(writer, "%d|%d|%d|%d|%d|%d|%o|%d|%d|%d|%s|%d|%s\n",
-			entry.CTime.Unix(),
-			entry.CTimeNano,
-			entry.MTime.Unix(),
-			entry.MTimeNano,
-			entry.Dev,
-			entry.Ino,
-			entry.Mode,
-			entry.UID,
-			entry.GID,
-			entry.Size,
-			entry.Hash,
-			entry.Flags,
-			entry.RelativePath,
-		)
+		if err := dc.writeEntry(file, &entry); err != nil {
+			return fmt.Errorf("failed to write entry %s: %w", entry.RelativePath, err)
+		}
+	}
+
+	// Write checksum of the entire file (excluding the checksum itself)
+	if err := dc.writeChecksum(file); err != nil {
+		return fmt.Errorf("failed to write checksum: %w", err)
 	}
 
 	return nil
 }
 
-// LoadIndex loads an existing index file
+// writeEntry writes a single file entry in binary format
+func (dc *DirectoryCache) writeEntry(w io.Writer, entry *FileEntry) error {
+	// Write fixed-size fields (big-endian)
+	if err := binary.Write(w, binary.BigEndian, uint32(entry.CTime.Unix())); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.CTimeNano); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, uint32(entry.MTime.Unix())); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.MTimeNano); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.Dev); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.Ino); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.Mode); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.UID); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.GID); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.Size); err != nil {
+		return err
+	}
+
+	// Write SHA-1 hash (20 bytes)
+	hashBytes, err := hex.DecodeString(entry.Hash)
+	if err != nil {
+		return fmt.Errorf("invalid hash %s: %w", entry.Hash, err)
+	}
+	if len(hashBytes) != 20 {
+		return fmt.Errorf("hash must be 20 bytes, got %d", len(hashBytes))
+	}
+	if _, err := w.Write(hashBytes); err != nil {
+		return err
+	}
+
+	// Write flags
+	if err := binary.Write(w, binary.BigEndian, entry.Flags); err != nil {
+		return err
+	}
+
+	// Write path length
+	if err := binary.Write(w, binary.BigEndian, entry.PathLen); err != nil {
+		return err
+	}
+
+	// Write path (null-terminated, padded to 8-byte boundary)
+	pathBytes := []byte(entry.RelativePath)
+
+	if _, err := w.Write(pathBytes); err != nil {
+		return err
+	}
+
+	// Add null terminator
+	if _, err := w.Write([]byte{0}); err != nil {
+		return err
+	}
+
+	// Pad to 8-byte boundary (like git)
+	totalLen := 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 20 + 2 + 2 + int(entry.PathLen) + 1 // all fixed fields + path
+	padding := (8 - (totalLen % 8)) % 8
+	if padding > 0 {
+		paddingBytes := make([]byte, padding)
+		if _, err := w.Write(paddingBytes); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeChecksum writes SHA-1 checksum of the entire file content
+func (dc *DirectoryCache) writeChecksum(file *os.File) error {
+	// Seek to beginning to read entire file content
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+
+	hasher := sha1.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return err
+	}
+
+	// Seek to end to append checksum
+	if _, err := file.Seek(0, 2); err != nil {
+		return err
+	}
+
+	checksum := hasher.Sum(nil)
+	if _, err := file.Write(checksum); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// LoadIndex loads an existing binary index file
 func (dc *DirectoryCache) LoadIndex() error {
 	file, err := os.Open(dc.IndexFile)
 	if err != nil {
@@ -178,64 +338,162 @@ func (dc *DirectoryCache) LoadIndex() error {
 	}
 	defer file.Close()
 
-	dc.entries = make([]FileEntry, 0)
-	scanner := bufio.NewScanner(file)
+	// Read and verify header
+	var signature [4]byte
+	var version, entryCount uint32
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip comments and empty lines
-		if strings.HasPrefix(line, "#") || line == "" {
-			continue
-		}
-
-		parts := strings.Split(line, "|")
-		if len(parts) != 13 {
-			continue // Skip malformed lines
-		}
-
-		// Parse timestamps
-		var ctimeUnix, mtimeUnix int64
-		var ctimeNano, mtimeNano int32
-		var dev, ino, mode, uid, gid, size uint32
-		var flags uint16
-
-		fmt.Sscanf(parts[0], "%d", &ctimeUnix)
-		fmt.Sscanf(parts[1], "%d", &ctimeNano)
-		fmt.Sscanf(parts[2], "%d", &mtimeUnix)
-		fmt.Sscanf(parts[3], "%d", &mtimeNano)
-		fmt.Sscanf(parts[4], "%d", &dev)
-		fmt.Sscanf(parts[5], "%d", &ino)
-		fmt.Sscanf(parts[6], "%o", &mode) // Octal for mode
-		fmt.Sscanf(parts[7], "%d", &uid)
-		fmt.Sscanf(parts[8], "%d", &gid)
-		fmt.Sscanf(parts[9], "%d", &size)
-		// parts[10] is hash
-		fmt.Sscanf(parts[11], "%d", &flags)
-		// parts[12] is relative path
-
-		entry := FileEntry{
-			CTime:        time.Unix(ctimeUnix, int64(ctimeNano)),
-			CTimeNano:    ctimeNano,
-			MTime:        time.Unix(mtimeUnix, int64(mtimeNano)),
-			MTimeNano:    mtimeNano,
-			Dev:          dev,
-			Ino:          ino,
-			Mode:         mode,
-			UID:          uid,
-			GID:          gid,
-			Size:         size,
-			Hash:         parts[10],
-			Flags:        flags,
-			Path:         filepath.Join(dc.RootDir, parts[12]),
-			RelativePath: parts[12],
-		}
-
-		dc.entries = append(dc.entries, entry)
+	if err := binary.Read(file, binary.BigEndian, &signature); err != nil {
+		return fmt.Errorf("failed to read signature: %w", err)
+	}
+	if signature != dc.signature {
+		return fmt.Errorf("invalid signature: expected %s, got %s",
+			string(dc.signature[:]), string(signature[:]))
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading index file: %w", err)
+	if err := binary.Read(file, binary.BigEndian, &version); err != nil {
+		return fmt.Errorf("failed to read version: %w", err)
+	}
+	if version != dc.version {
+		return fmt.Errorf("unsupported version: expected %d, got %d", dc.version, version)
+	}
+
+	if err := binary.Read(file, binary.BigEndian, &entryCount); err != nil {
+		return fmt.Errorf("failed to read entry count: %w", err)
+	}
+
+	// Read entries
+	dc.entries = make([]FileEntry, entryCount)
+	for i := uint32(0); i < entryCount; i++ {
+		entry, err := dc.readEntry(file)
+		if err != nil {
+			return fmt.Errorf("failed to read entry %d: %w", i, err)
+		}
+		dc.entries[i] = *entry
+	}
+
+	// Verify checksum
+	if err := dc.verifyChecksum(file); err != nil {
+		return fmt.Errorf("checksum verification failed: %w", err)
+	}
+
+	return nil
+}
+
+// readEntry reads a single file entry from binary format
+func (dc *DirectoryCache) readEntry(r io.Reader) (*FileEntry, error) {
+	entry := &FileEntry{}
+
+	// Read fixed-size fields
+	var ctimeUnix, mtimeUnix uint32
+
+	if err := binary.Read(r, binary.BigEndian, &ctimeUnix); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.CTimeNano); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &mtimeUnix); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.MTimeNano); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.Dev); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.Ino); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.Mode); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.UID); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.GID); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(r, binary.BigEndian, &entry.Size); err != nil {
+		return nil, err
+	}
+
+	// Convert timestamps
+	entry.CTime = time.Unix(int64(ctimeUnix), int64(entry.CTimeNano))
+	entry.MTime = time.Unix(int64(mtimeUnix), int64(entry.MTimeNano))
+
+	// Read SHA-1 hash (20 bytes)
+	hashBytes := make([]byte, 20)
+	if _, err := io.ReadFull(r, hashBytes); err != nil {
+		return nil, err
+	}
+	entry.Hash = hex.EncodeToString(hashBytes)
+
+	// Read flags
+	if err := binary.Read(r, binary.BigEndian, &entry.Flags); err != nil {
+		return nil, err
+	}
+
+	// Read path length
+	if err := binary.Read(r, binary.BigEndian, &entry.PathLen); err != nil {
+		return nil, err
+	}
+
+	// Read path
+	pathBytes := make([]byte, entry.PathLen)
+	if _, err := io.ReadFull(r, pathBytes); err != nil {
+		return nil, err
+	}
+	entry.RelativePath = string(pathBytes)
+
+	// Read null terminator
+	var nullByte byte
+	if err := binary.Read(r, binary.BigEndian, &nullByte); err != nil {
+		return nil, err
+	}
+
+	// Read padding to 8-byte boundary
+	totalLen := 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 20 + 2 + 2 + int(entry.PathLen) + 1
+	padding := (8 - (totalLen % 8)) % 8
+	if padding > 0 {
+		paddingBytes := make([]byte, padding)
+		if _, err := io.ReadFull(r, paddingBytes); err != nil {
+			return nil, err
+		}
+	}
+
+	return entry, nil
+}
+
+// verifyChecksum verifies the SHA-1 checksum at the end of the file
+func (dc *DirectoryCache) verifyChecksum(file *os.File) error {
+	// Get current position (should be at end of entries)
+	currentPos, err := file.Seek(0, 1)
+	if err != nil {
+		return err
+	}
+
+	// Read the stored checksum (last 20 bytes)
+	storedChecksum := make([]byte, 20)
+	if _, err := io.ReadFull(file, storedChecksum); err != nil {
+		return err
+	}
+
+	// Calculate checksum of file content (excluding the checksum itself)
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+
+	hasher := sha1.New()
+	if _, err := io.CopyN(hasher, file, currentPos); err != nil {
+		return err
+	}
+
+	calculatedChecksum := hasher.Sum(nil)
+
+	// Compare checksums
+	if !bytes.Equal(storedChecksum, calculatedChecksum) {
+		return fmt.Errorf("checksum mismatch: stored=%x, calculated=%x",
+			storedChecksum, calculatedChecksum)
 	}
 
 	return nil
