@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,106 +11,253 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		showUsage()
-		os.Exit(1)
-	}
+// Global flags
+var (
+	jsonOutput = flag.Bool("json", false, "output in JSON format")
+	verbose    = flag.Bool("verbose", false, "verbose output")
+	version    = flag.Bool("version", false, "show version information")
+)
 
-	command := os.Args[1]
+// Command-specific flag sets
+var (
+	initFlags   = flag.NewFlagSet("init", flag.ExitOnError)
+	statusFlags = flag.NewFlagSet("status", flag.ExitOnError)
+	updateFlags = flag.NewFlagSet("update", flag.ExitOnError)
+	dupesFlags  = flag.NewFlagSet("dupes", flag.ExitOnError)
+)
 
-	switch command {
-	case "init":
-		handleInit()
-	case "status":
-		handleStatus()
-	case "update":
-		handleUpdate()
-	case "dupes":
-		handleDupes()
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
-		showUsage()
-		os.Exit(1)
-	}
+// Output structures for JSON
+type InitOutput struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	Repository  string `json:"repository"`
+	FileCount   int    `json:"file_count"`
+	TotalSize   int64  `json:"total_size"`
+	TimeElapsed string `json:"time_elapsed,omitempty"`
+}
+
+type StatusOutput struct {
+	Repository string        `json:"repository"`
+	WorkingDir string        `json:"working_dir,omitempty"`
+	Modified   []string      `json:"modified"`
+	Added      []string      `json:"added"`
+	Deleted    []string      `json:"deleted"`
+	Summary    StatusSummary `json:"summary"`
+	IndexInfo  IndexInfo     `json:"index_info"`
+}
+
+type StatusSummary struct {
+	ModifiedCount int  `json:"modified_count"`
+	AddedCount    int  `json:"added_count"`
+	DeletedCount  int  `json:"deleted_count"`
+	HasChanges    bool `json:"has_changes"`
+}
+
+type IndexInfo struct {
+	FileCount int `json:"file_count"`
+}
+
+type UpdateOutput struct {
+	Success      bool           `json:"success"`
+	Message      string         `json:"message"`
+	Repository   string         `json:"repository"`
+	PathsUpdated []string       `json:"paths_updated,omitempty"`
+	FileCount    int            `json:"file_count"`
+	TotalSize    int64          `json:"total_size"`
+	TimeElapsed  string         `json:"time_elapsed"`
+	Duplicates   *DuplicateInfo `json:"duplicates,omitempty"`
+}
+
+type DuplicateInfo struct {
+	SetCount  int `json:"set_count"`
+	FileCount int `json:"file_count"`
+}
+
+type DupesOutput struct {
+	Repository      string           `json:"repository"`
+	DuplicateGroups []DuplicateGroup `json:"duplicate_groups"`
+	Summary         DuplicateSummary `json:"summary"`
+}
+
+type DuplicateGroup struct {
+	Hash  string   `json:"hash"`
+	Files []string `json:"files"`
+	Count int      `json:"count"`
+}
+
+type DuplicateSummary struct {
+	GroupCount int `json:"group_count"`
+	FileCount  int `json:"file_count"`
+}
+
+type ErrorOutput struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error"`
 }
 
 func showUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh <command>\n\n")
-	fmt.Fprintf(os.Stderr, "Commands:\n")
-	fmt.Fprintf(os.Stderr, "  init <dir>    Initialize a new dcfh repository in the specified directory\n")
-	fmt.Fprintf(os.Stderr, "  status        Show the status of files in the current dcfh repository\n")
+	fmt.Fprintf(os.Stderr, "Usage: dcfh [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n\n")
+	fmt.Fprintf(os.Stderr, "Global Options:\n")
+	fmt.Fprintf(os.Stderr, "  --json           Output in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  --verbose        Verbose output\n")
+	fmt.Fprintf(os.Stderr, "  --version        Show version information\n")
+	fmt.Fprintf(os.Stderr, "  --help           Show this help message\n")
+	fmt.Fprintf(os.Stderr, "\nCommands:\n")
+	fmt.Fprintf(os.Stderr, "  init <dir>       Initialize a new dcfh repository in the specified directory\n")
+	fmt.Fprintf(os.Stderr, "  status           Show the status of files in the current dcfh repository\n")
 	fmt.Fprintf(os.Stderr, "  update [paths...] Update the index with current file states\n")
-	fmt.Fprintf(os.Stderr, "  dupes         Find and display duplicate files\n")
+	fmt.Fprintf(os.Stderr, "  dupes            Find and display duplicate files\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init .\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents\n")
-	fmt.Fprintf(os.Stderr, "  dcfh status\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json status\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update file.txt dir/\n")
-	fmt.Fprintf(os.Stderr, "  dcfh update /absolute/path relative/path\n")
-	fmt.Fprintf(os.Stderr, "  dcfh dupes\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json dupes\n")
 }
 
-func handleInit() {
-	if len(os.Args) != 3 {
-		fmt.Fprintf(os.Stderr, "Usage: dcfh init <directory>\n")
+func main() {
+	// Set up global flags
+	flag.Usage = showUsage
+
+	// Parse global flags first
+	flag.Parse()
+
+	// Handle version flag
+	if *version {
+		handleVersion()
+		return
+	}
+
+	// Get remaining arguments after global flags
+	args := flag.Args()
+	if len(args) < 1 {
+		showUsage()
 		os.Exit(1)
 	}
 
-	directory := os.Args[2]
+	command := args[0]
+
+	switch command {
+	case "init":
+		handleInit(args[1:])
+	case "status":
+		handleStatus(args[1:])
+	case "update":
+		handleUpdate(args[1:])
+	case "dupes":
+		handleDupes(args[1:])
+	default:
+		outputError(fmt.Sprintf("Unknown command: %s", command))
+		os.Exit(1)
+	}
+}
+
+func handleVersion() {
+	fmt.Println("dcfh version 1.0.0")
+	fmt.Println("Directory Cache File Hash - A fast file indexing and duplicate detection tool")
+}
+
+func outputError(message string) {
+	if *jsonOutput {
+		errorOut := ErrorOutput{
+			Success: false,
+			Error:   message,
+		}
+		json.NewEncoder(os.Stderr).Encode(errorOut)
+	} else {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", message)
+	}
+}
+
+func outputJSON(data interface{}) {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(data)
+}
+
+func handleInit(args []string) {
+	if len(args) != 1 {
+		outputError("Usage: dcfh init <directory>")
+		os.Exit(1)
+	}
+
+	directory := args[0]
+	start := time.Now()
 
 	// Convert to absolute path
 	absDir, err := filepath.Abs(directory)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to get absolute path for %s: %v\n", directory, err)
+		outputError(fmt.Sprintf("Failed to get absolute path for %s: %v", directory, err))
 		os.Exit(1)
 	}
 
 	// Check if directory exists
 	info, err := os.Stat(absDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to access directory %s: %v\n", absDir, err)
+		outputError(fmt.Sprintf("Failed to access directory %s: %v", absDir, err))
 		os.Exit(1)
 	}
 	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Error: %s is not a directory\n", absDir)
+		outputError(fmt.Sprintf("%s is not a directory", absDir))
 		os.Exit(1)
 	}
 
 	// Check if .dcfh already exists
 	dcfhDir := filepath.Join(absDir, ".dcfh")
 	if _, err := os.Stat(dcfhDir); err == nil {
-		fmt.Fprintf(os.Stderr, "Error: .dcfh directory already exists in %s\n", absDir)
+		outputError(fmt.Sprintf(".dcfh directory already exists in %s", absDir))
 		os.Exit(1)
 	}
 
 	// Create cache - this will automatically create .dcfh directory and index
 	cache := dcfh.NewDirectoryCache(absDir, absDir)
 
-	fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
-	fmt.Println("Scanning directory and creating initial index...")
+	if !*jsonOutput && *verbose {
+		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
+		fmt.Println("Scanning directory and creating initial index...")
+	}
 
 	if err := cache.Update(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to create initial index: %v\n", err)
+		outputError(fmt.Sprintf("Failed to create initial index: %v", err))
 		os.Exit(1)
 	}
 
+	duration := time.Since(start)
 	fileCount, totalSize, _ := cache.Stats()
-	fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
+
+	if *jsonOutput {
+		output := InitOutput{
+			Success:     true,
+			Message:     "Successfully initialized dcfh repository",
+			Repository:  absDir,
+			FileCount:   fileCount,
+			TotalSize:   totalSize,
+			TimeElapsed: duration.Round(time.Millisecond).String(),
+		}
+		outputJSON(output)
+	} else {
+		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
+		fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
+		if *verbose {
+			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
+		}
+	}
 }
 
-func handleStatus() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: dcfh status\n")
+func handleStatus(args []string) {
+	if len(args) != 0 {
+		outputError("Usage: dcfh status")
 		os.Exit(1)
 	}
 
 	// Find the dcfh repository root
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		outputError(err.Error())
+		if !*jsonOutput {
+			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		}
 		os.Exit(1)
 	}
 
@@ -119,6 +268,37 @@ func handleStatus() {
 		relCwd = ""
 	}
 
+	// Create cache and get status
+	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	status, err := cache.Status()
+	if err != nil {
+		outputError(err.Error())
+		os.Exit(1)
+	}
+
+	if *jsonOutput {
+		entries := cache.GetEntries()
+		output := StatusOutput{
+			Repository: repoRoot,
+			WorkingDir: relCwd,
+			Modified:   status.Modified,
+			Added:      status.Added,
+			Deleted:    status.Deleted,
+			Summary: StatusSummary{
+				ModifiedCount: len(status.Modified),
+				AddedCount:    len(status.Added),
+				DeletedCount:  len(status.Deleted),
+				HasChanges:    status.HasChanges(),
+			},
+			IndexInfo: IndexInfo{
+				FileCount: len(entries),
+			},
+		}
+		outputJSON(output)
+		return
+	}
+
+	// Text output
 	fmt.Printf("On branch main\n")
 	if relCwd != "" {
 		fmt.Printf("Working directory: %s\n", relCwd)
@@ -126,18 +306,9 @@ func handleStatus() {
 	fmt.Printf("Repository root: %s\n", repoRoot)
 	fmt.Println()
 
-	// Create cache and get status
-	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
-	status, err := cache.Status()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Show status
 	if !status.HasChanges() {
 		fmt.Println("Nothing to commit, working tree clean")
-		// Get entry count from loaded index
 		entries := cache.GetEntries()
 		fmt.Printf("Index contains %d files\n", len(entries))
 		return
@@ -177,45 +348,54 @@ func handleStatus() {
 		len(status.Modified), len(status.Added), len(status.Deleted))
 }
 
-func handleUpdate() {
+func handleUpdate(args []string) {
 	// Find the dcfh repository root
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		outputError(err.Error())
+		if !*jsonOutput {
+			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		}
 		os.Exit(1)
 	}
 
 	// Get paths to update (if any)
 	var paths []string
-	if len(os.Args) > 2 {
-		paths = os.Args[2:]
-		fmt.Printf("Updating specified paths in %s\n", repoRoot)
-		for _, path := range paths {
-			fmt.Printf("  %s\n", path)
+	if len(args) > 0 {
+		paths = args
+		if !*jsonOutput {
+			fmt.Printf("Updating specified paths in %s\n", repoRoot)
+			if *verbose {
+				for _, path := range paths {
+					fmt.Printf("  %s\n", path)
+				}
+			}
 		}
 	} else {
-		fmt.Printf("Updating entire repository in %s\n", repoRoot)
+		if !*jsonOutput {
+			fmt.Printf("Updating entire repository in %s\n", repoRoot)
+		}
 	}
 
 	// Update the index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 
-	fmt.Println("Scanning directory...")
+	if !*jsonOutput && *verbose {
+		fmt.Println("Scanning directory...")
+	}
+
 	start := time.Now()
 
 	if err := cache.Update(paths...); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to update index: %v\n", err)
+		outputError(fmt.Sprintf("Failed to update index: %v", err))
 		os.Exit(1)
 	}
 
 	duration := time.Since(start)
 	fileCount, totalSize, _ := cache.Stats()
 
-	fmt.Printf("✓ Updated index in %v\n", duration.Round(time.Millisecond))
-	fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
-
-	// Show some statistics
+	// Check for duplicates
+	var duplicateInfo *DuplicateInfo
 	entries := cache.GetEntries()
 	if len(entries) > 0 {
 		duplicates := cache.FindDuplicates()
@@ -224,29 +404,55 @@ func handleUpdate() {
 			for _, files := range duplicates {
 				duplicateCount += len(files)
 			}
-			fmt.Printf("⚠ Found %d duplicate files in %d sets\n", duplicateCount, len(duplicates))
+			duplicateInfo = &DuplicateInfo{
+				SetCount:  len(duplicates),
+				FileCount: duplicateCount,
+			}
+		}
+	}
+
+	if *jsonOutput {
+		output := UpdateOutput{
+			Success:      true,
+			Message:      "Successfully updated index",
+			Repository:   repoRoot,
+			PathsUpdated: paths,
+			FileCount:    fileCount,
+			TotalSize:    totalSize,
+			TimeElapsed:  duration.Round(time.Millisecond).String(),
+			Duplicates:   duplicateInfo,
+		}
+		outputJSON(output)
+	} else {
+		fmt.Printf("✓ Updated index in %v\n", duration.Round(time.Millisecond))
+		fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
+
+		if duplicateInfo != nil {
+			fmt.Printf("⚠ Found %d duplicate files in %d sets\n", duplicateInfo.FileCount, duplicateInfo.SetCount)
 		}
 	}
 }
 
-func handleDupes() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: dcfh dupes\n")
+func handleDupes(args []string) {
+	if len(args) != 0 {
+		outputError("Usage: dcfh dupes")
 		os.Exit(1)
 	}
 
 	// Find the dcfh repository root
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		outputError(err.Error())
+		if !*jsonOutput {
+			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
+		}
 		os.Exit(1)
 	}
 
 	// Load existing index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	if err := cache.LoadIndex(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to load index: %v\n", err)
+		outputError(fmt.Sprintf("Failed to load index: %v", err))
 		os.Exit(1)
 	}
 
@@ -254,7 +460,18 @@ func handleDupes() {
 	duplicates := cache.FindDuplicates()
 
 	if len(duplicates) == 0 {
-		return // No output if no duplicates found, like fdupes
+		if *jsonOutput {
+			output := DupesOutput{
+				Repository:      repoRoot,
+				DuplicateGroups: []DuplicateGroup{},
+				Summary: DuplicateSummary{
+					GroupCount: 0,
+					FileCount:  0,
+				},
+			}
+			outputJSON(output)
+		}
+		return // No output if no duplicates found (like fdupes in text mode)
 	}
 
 	// Sort hashes for consistent output
@@ -272,29 +489,72 @@ func handleDupes() {
 		}
 	}
 
-	// Print duplicates in fdupes format
-	for i, hash := range hashes {
-		files := duplicates[hash]
+	if *jsonOutput {
+		var groups []DuplicateGroup
+		totalFiles := 0
 
-		// Sort files within each duplicate group by path
-		for k := 0; k < len(files); k++ {
-			for l := k + 1; l < len(files); l++ {
-				if files[k].RelativePath > files[l].RelativePath {
-					files[k], files[l] = files[l], files[k]
+		for _, hash := range hashes {
+			files := duplicates[hash]
+
+			// Sort files within each duplicate group by path
+			for k := 0; k < len(files); k++ {
+				for l := k + 1; l < len(files); l++ {
+					if files[k].RelativePath > files[l].RelativePath {
+						files[k], files[l] = files[l], files[k]
+					}
 				}
 			}
+
+			// Convert to absolute paths
+			var filePaths []string
+			for _, file := range files {
+				absPath := filepath.Join(repoRoot, file.RelativePath)
+				filePaths = append(filePaths, absPath)
+			}
+
+			groups = append(groups, DuplicateGroup{
+				Hash:  hash,
+				Files: filePaths,
+				Count: len(files),
+			})
+
+			totalFiles += len(files)
 		}
 
-		// Print each file in the duplicate group
-		for _, file := range files {
-			// Convert relative path to absolute path for display
-			absPath := filepath.Join(repoRoot, file.RelativePath)
-			fmt.Println(absPath)
+		output := DupesOutput{
+			Repository:      repoRoot,
+			DuplicateGroups: groups,
+			Summary: DuplicateSummary{
+				GroupCount: len(hashes),
+				FileCount:  totalFiles,
+			},
 		}
+		outputJSON(output)
+	} else {
+		// Text output (fdupes format)
+		for i, hash := range hashes {
+			files := duplicates[hash]
 
-		// Add blank line between groups (except after the last group)
-		if i < len(hashes)-1 {
-			fmt.Println()
+			// Sort files within each duplicate group by path
+			for k := 0; k < len(files); k++ {
+				for l := k + 1; l < len(files); l++ {
+					if files[k].RelativePath > files[l].RelativePath {
+						files[k], files[l] = files[l], files[k]
+					}
+				}
+			}
+
+			// Print each file in the duplicate group
+			for _, file := range files {
+				// Convert relative path to absolute path for display
+				absPath := filepath.Join(repoRoot, file.RelativePath)
+				fmt.Println(absPath)
+			}
+
+			// Add blank line between groups (except after the last group)
+			if i < len(hashes)-1 {
+				fmt.Println()
+			}
 		}
 	}
 }
