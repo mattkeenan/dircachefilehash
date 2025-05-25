@@ -1,4 +1,4 @@
-// Package dircachefilehash provides functionality to scan directories,
+// FindDuplicates returns groups of files with identical hashes// binaryEntry represents the fixed-size binary portion of a file entry// Package dircachefilehash provides functionality to scan directories,
 // hash file contents, and maintain a sorted index file for file integrity
 // checking and change detection.
 package dircachefilehash
@@ -12,13 +12,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 )
 
-// binaryEntry represents the fixed-size binary portion of a file entry
+// fileJob represents a file hashing job
+type fileJob struct {
+	path    string
+	info    os.FileInfo
+	relPath string
+	index   int // Original order for sorting
+}
+
+// fileResult represents the result of a file hashing job
+type fileResult struct {
+	entry *FileEntry
+	err   error
+	index int // Original order for sorting
+}
 type binaryEntry struct {
 	CTimeUnix uint32   // Change time seconds
 	CTimeNano uint32   // Change time nanoseconds
@@ -95,9 +110,13 @@ func (dc *DirectoryCache) hashFile(filePath string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// ScanDirectory scans the directory and creates file entries with hashes
+// ScanDirectory scans the directory and creates file entries with hashes using parallel processing
 func (dc *DirectoryCache) ScanDirectory() error {
 	dc.entries = make([]FileEntry, 0)
+
+	// Collect all regular files first
+	var fileJobs []fileJob
+	jobIndex := 0
 
 	// FIFO slice for file paths - push to end, pop from front
 	pathQueue := []string{dc.RootDir}
@@ -145,61 +164,142 @@ func (dc *DirectoryCache) ScanDirectory() error {
 				continue
 			}
 
-			// Process regular files - hash contents and create entry
-			if err := dc.processRegularFile(currentPath, info); err != nil {
-				// Log error but continue processing
-				fmt.Fprintf(os.Stderr, "Warning: failed to process file %s: %v\n", currentPath, err)
+			// Calculate relative path from root directory
+			relPath, err := filepath.Rel(dc.RootDir, currentPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to get relative path for %s: %v\n", currentPath, err)
 				continue
 			}
+
+			// Add to jobs list
+			fileJobs = append(fileJobs, fileJob{
+				path:    currentPath,
+				info:    info,
+				relPath: relPath,
+				index:   jobIndex,
+			})
+			jobIndex++
 		}
 		// For other file types (symlinks, device files, etc.), we just skip them
 		// since we only want to index regular files with content hashes
 	}
 
-	// Sort entries by hash for byte comparison order
+	// Process files in parallel
+	if len(fileJobs) > 0 {
+		results, err := dc.processFilesParallel(fileJobs)
+		if err != nil {
+			return err
+		}
+
+		// Sort results by original index to maintain discovery order
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].index < results[j].index
+		})
+
+		// Extract entries from results
+		for _, result := range results {
+			if result.err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
+				continue
+			}
+			dc.entries = append(dc.entries, *result.entry)
+		}
+	}
+
+	// Sort entries by filename (RelativePath) for byte comparison order
 	sort.Slice(dc.entries, func(i, j int) bool {
-		return dc.entries[i].Hash < dc.entries[j].Hash
+		return dc.entries[i].RelativePath < dc.entries[j].RelativePath
 	})
 
 	return nil
 }
 
-// processRegularFile processes a regular file and adds it to the entries
-func (dc *DirectoryCache) processRegularFile(filePath string, info os.FileInfo) error {
-	// Calculate relative path from root directory
-	relPath, err := filepath.Rel(dc.RootDir, filePath)
-	if err != nil {
-		return fmt.Errorf("failed to get relative path for %s: %w", filePath, err)
+// processFilesParallel processes files using a pool of goroutines
+func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, error) {
+	// Determine number of workers (use number of CPU cores)
+	numWorkers := runtime.NumCPU()
+	if numWorkers > len(jobs) {
+		numWorkers = len(jobs)
+	}
+	if numWorkers < 1 {
+		numWorkers = 1
 	}
 
+	// Create channels
+	jobChan := make(chan fileJob, len(jobs))
+	resultChan := make(chan fileResult, len(jobs))
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go dc.fileHashWorker(jobChan, resultChan, &wg)
+	}
+
+	// Send jobs
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	// Wait for workers to complete
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var results []fileResult
+	for result := range resultChan {
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// fileHashWorker is a worker goroutine that processes file hashing jobs
+func (dc *DirectoryCache) fileHashWorker(jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for job := range jobs {
+		entry, err := dc.processFileJob(job)
+		results <- fileResult{
+			entry: entry,
+			err:   err,
+			index: job.index,
+		}
+	}
+}
+
+// processFileJob processes a single file job and returns a FileEntry
+func (dc *DirectoryCache) processFileJob(job fileJob) (*FileEntry, error) {
 	// Hash the file contents
-	hash, err := dc.hashFile(filePath)
+	hash, err := dc.hashFile(job.path)
 	if err != nil {
-		return fmt.Errorf("failed to hash file %s: %w", filePath, err)
+		return nil, fmt.Errorf("failed to hash file %s: %w", job.path, err)
 	}
 
 	// Get system-specific file information
-	stat := info.Sys().(*syscall.Stat_t)
+	stat := job.info.Sys().(*syscall.Stat_t)
 
-	entry := FileEntry{
+	entry := &FileEntry{
 		CTime:        time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec),
 		CTimeNano:    int32(stat.Ctim.Nsec),
-		MTime:        info.ModTime(),
-		MTimeNano:    int32(info.ModTime().Nanosecond()),
+		MTime:        job.info.ModTime(),
+		MTimeNano:    int32(job.info.ModTime().Nanosecond()),
 		Dev:          uint32(stat.Dev),
 		Ino:          uint32(stat.Ino),
-		Mode:         uint32(info.Mode()),
+		Mode:         uint32(job.info.Mode()),
 		UID:          stat.Uid,
 		GID:          stat.Gid,
-		Size:         uint32(info.Size()),
+		Size:         uint32(job.info.Size()),
 		Hash:         hash,
-		Flags:        uint16(len(relPath)), // Use path length as flags (git convention)
-		PathLen:      uint16(len(relPath)), // Length of relative path
-		RelativePath: relPath,
+		Flags:        uint16(len(job.relPath)), // Use path length as flags (git convention)
+		PathLen:      uint16(len(job.relPath)), // Length of relative path
+		RelativePath: job.relPath,
 	}
 
-	dc.entries = append(dc.entries, entry)
-	return nil
+	return entry, nil
 }
 
 // WriteIndex writes the sorted index to the specified file in binary format
@@ -505,7 +605,94 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 	return len(dc.entries), totalSize, nil
 }
 
-// FindDuplicates returns groups of files with identical hashes
+// FileStatus represents the status of a file
+type FileStatus int
+
+const (
+	StatusUnchanged FileStatus = iota
+	StatusModified
+	StatusAdded
+	StatusDeleted
+)
+
+// StatusResult represents the result of a status check
+type StatusResult struct {
+	Modified []string
+	Added    []string
+	Deleted  []string
+}
+
+// Status compares the current directory state with the loaded index
+func (dc *DirectoryCache) Status() (*StatusResult, error) {
+	// Load existing index if not already loaded
+	if len(dc.entries) == 0 {
+		if err := dc.LoadIndex(); err != nil {
+			return nil, fmt.Errorf("failed to load index: %w", err)
+		}
+	}
+
+	// Scan current state
+	currentCache := NewDirectoryCache(dc.RootDir, "")
+	if err := currentCache.ScanDirectory(); err != nil {
+		return nil, fmt.Errorf("failed to scan directory: %w", err)
+	}
+
+	// Compare states
+	oldEntries := dc.GetEntries()
+	newEntries := currentCache.GetEntries()
+
+	// Create maps for comparison
+	oldFiles := make(map[string]FileEntry)
+	newFiles := make(map[string]FileEntry)
+
+	for _, entry := range oldEntries {
+		oldFiles[entry.RelativePath] = entry
+	}
+	for _, entry := range newEntries {
+		newFiles[entry.RelativePath] = entry
+	}
+
+	result := &StatusResult{
+		Modified: make([]string, 0),
+		Added:    make([]string, 0),
+		Deleted:  make([]string, 0),
+	}
+
+	// Find modified and added files
+	for path, newEntry := range newFiles {
+		if oldEntry, exists := oldFiles[path]; exists {
+			if oldEntry.Hash != newEntry.Hash || oldEntry.Size != newEntry.Size {
+				result.Modified = append(result.Modified, path)
+			}
+		} else {
+			result.Added = append(result.Added, path)
+		}
+	}
+
+	// Find deleted files
+	for path := range oldFiles {
+		if _, exists := newFiles[path]; !exists {
+			result.Deleted = append(result.Deleted, path)
+		}
+	}
+
+	// Sort all slices for consistent output
+	sort.Strings(result.Modified)
+	sort.Strings(result.Added)
+	sort.Strings(result.Deleted)
+
+	return result, nil
+}
+
+// HasChanges returns true if there are any changes (modified, added, or deleted files)
+func (sr *StatusResult) HasChanges() bool {
+	return len(sr.Modified) > 0 || len(sr.Added) > 0 || len(sr.Deleted) > 0
+}
+
+// TotalChanges returns the total number of changed files
+func (sr *StatusResult) TotalChanges() int {
+	return len(sr.Modified) + len(sr.Added) + len(sr.Deleted)
+}
 func (dc *DirectoryCache) FindDuplicates() map[string][]FileEntry {
 	duplicates := make(map[string][]FileEntry)
 

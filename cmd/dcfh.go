@@ -117,13 +117,6 @@ func handleStatus() {
 		os.Exit(1)
 	}
 
-	// Load existing index
-	cache := dcfh.NewDirectoryCache(repoRoot, indexFile)
-	if err := cache.LoadIndex(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to load index: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Get current working directory relative to repo root
 	cwd, _ := os.Getwd()
 	relCwd, _ := filepath.Rel(repoRoot, cwd)
@@ -138,89 +131,55 @@ func handleStatus() {
 	fmt.Printf("Repository root: %s\n", repoRoot)
 	fmt.Println()
 
-	// Scan current state
-	currentCache := dcfh.NewDirectoryCache(repoRoot, "")
-	if err := currentCache.ScanDirectory(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to scan directory: %v\n", err)
+	// Create cache and get status
+	cache := dcfh.NewDirectoryCache(repoRoot, indexFile)
+	status, err := cache.Status()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Compare states
-	oldEntries := cache.GetEntries()
-	newEntries := currentCache.GetEntries()
-
-	// Create maps for comparison
-	oldFiles := make(map[string]dcfh.FileEntry)
-	newFiles := make(map[string]dcfh.FileEntry)
-
-	for _, entry := range oldEntries {
-		oldFiles[entry.RelativePath] = entry
-	}
-	for _, entry := range newEntries {
-		newFiles[entry.RelativePath] = entry
-	}
-
-	var modified, added, deleted []string
-
-	// Find modified and added files
-	for path, newEntry := range newFiles {
-		if oldEntry, exists := oldFiles[path]; exists {
-			if oldEntry.Hash != newEntry.Hash || oldEntry.Size != newEntry.Size {
-				modified = append(modified, path)
-			}
-		} else {
-			added = append(added, path)
-		}
-	}
-
-	// Find deleted files
-	for path := range oldFiles {
-		if _, exists := newFiles[path]; !exists {
-			deleted = append(deleted, path)
-		}
-	}
-
 	// Show status
-	hasChanges := len(modified) > 0 || len(added) > 0 || len(deleted) > 0
-
-	if !hasChanges {
+	if !status.HasChanges() {
 		fmt.Println("Nothing to commit, working tree clean")
-		fmt.Printf("Index contains %d files\n", len(oldEntries))
+		// Get entry count from loaded index
+		entries := cache.GetEntries()
+		fmt.Printf("Index contains %d files\n", len(entries))
 		return
 	}
 
-	if len(modified) > 0 {
+	if len(status.Modified) > 0 {
 		fmt.Println("Changes not staged for commit:")
 		fmt.Println("  (use \"dcfh update\" to update the index)")
 		fmt.Println()
-		for _, path := range modified {
+		for _, path := range status.Modified {
 			fmt.Printf("\tmodified:   %s\n", path)
 		}
 		fmt.Println()
 	}
 
-	if len(added) > 0 {
+	if len(status.Added) > 0 {
 		fmt.Println("Untracked files:")
 		fmt.Println("  (use \"dcfh update\" to include in what will be committed)")
 		fmt.Println()
-		for _, path := range added {
+		for _, path := range status.Added {
 			fmt.Printf("\t%s\n", path)
 		}
 		fmt.Println()
 	}
 
-	if len(deleted) > 0 {
+	if len(status.Deleted) > 0 {
 		fmt.Println("Changes not staged for commit:")
 		fmt.Println("  (use \"dcfh update\" to update the index)")
 		fmt.Println()
-		for _, path := range deleted {
+		for _, path := range status.Deleted {
 			fmt.Printf("\tdeleted:    %s\n", path)
 		}
 		fmt.Println()
 	}
 
 	fmt.Printf("Summary: %d modified, %d added, %d deleted\n",
-		len(modified), len(added), len(deleted))
+		len(status.Modified), len(status.Added), len(status.Deleted))
 }
 
 func handleUpdate() {
