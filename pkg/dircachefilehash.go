@@ -80,19 +80,86 @@ type DirectoryCache struct {
 }
 
 // NewDirectoryCache creates a new directory cache instance
-func NewDirectoryCache(rootDir, indexFile string) *DirectoryCache {
-	// If indexFile is empty, use default location under rootDir
-	if indexFile == "" {
-		indexFile = filepath.Join(rootDir, ".dcfh", "index")
+// rootDir: the directory to be indexed
+// dcfhDir: the directory containing the .dcfh repository (if empty, uses rootDir)
+// Automatically creates the .dcfh directory and empty index file if they don't exist
+func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
+	// If dcfhDir is empty, use rootDir as the repository location
+	if dcfhDir == "" {
+		dcfhDir = rootDir
 	}
 
-	return &DirectoryCache{
+	// The index file is always at dcfhDir/.dcfh/index
+	indexFile := filepath.Join(dcfhDir, ".dcfh", "index")
+
+	dc := &DirectoryCache{
 		RootDir:   rootDir,
 		IndexFile: indexFile,
 		entries:   make([]FileEntry, 0),
 		signature: [4]byte{'d', 'c', 'f', 'h'}, // "dcfh" signature
 		version:   1,                           // Version 1 format
 	}
+
+	// Ensure the .dcfh directory exists
+	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
+	if err := os.MkdirAll(dcfhPath, 0755); err != nil {
+		// Non-fatal error - log but continue
+		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dcfhPath, err)
+		return dc
+	}
+
+	// Check if index file exists
+	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
+		// Create empty index file
+		if err := dc.createEmptyIndex(); err != nil {
+			// Non-fatal error - log but continue
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create empty index file %s: %v\n", indexFile, err)
+		}
+	}
+
+	return dc
+}
+
+// createEmptyIndex creates an empty index file with proper header
+func (dc *DirectoryCache) createEmptyIndex() error {
+	file, err := os.Create(dc.IndexFile)
+	if err != nil {
+		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+	}
+	defer file.Close()
+
+	// Write header with zero entries
+	if err := binary.Write(file, binary.BigEndian, dc.signature); err != nil {
+		return fmt.Errorf("failed to write signature: %w", err)
+	}
+	if err := binary.Write(file, binary.BigEndian, dc.version); err != nil {
+		return fmt.Errorf("failed to write version: %w", err)
+	}
+	if err := binary.Write(file, binary.BigEndian, uint32(0)); err != nil {
+		return fmt.Errorf("failed to write entry count: %w", err)
+	}
+
+	// Write empty checksum (SHA-1 of header only)
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+
+	hasher := sha1.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return err
+	}
+
+	// Seek to end to append checksum
+	if _, err := file.Seek(0, 2); err != nil {
+		return err
+	}
+
+	checksum := hasher.Sum(nil)
+	if _, err := file.Write(checksum); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // hashFile calculates SHA-1 hash of a file's contents (matching git)
@@ -305,12 +372,6 @@ func (dc *DirectoryCache) processFileJob(job fileJob) (*FileEntry, error) {
 
 // WriteIndex writes the sorted index to the specified file in binary format
 func (dc *DirectoryCache) WriteIndex() error {
-	// Ensure the directory for the index file exists
-	indexDir := filepath.Dir(dc.IndexFile)
-	if err := os.MkdirAll(indexDir, 0755); err != nil {
-		return fmt.Errorf("failed to create index directory %s: %w", indexDir, err)
-	}
-
 	file, err := os.Create(dc.IndexFile)
 	if err != nil {
 		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
@@ -585,13 +646,214 @@ func (dc *DirectoryCache) FindByHash(hash string) []FileEntry {
 }
 
 // Update scans the directory and updates the index file
-func (dc *DirectoryCache) Update() error {
-	if err := dc.ScanDirectory(); err != nil {
-		return fmt.Errorf("failed to scan directory: %w", err)
+// If paths are provided, only those files/directories are updated
+// If no paths are provided, all files under rootDir are updated
+func (dc *DirectoryCache) Update(paths ...string) error {
+	if len(paths) == 0 {
+		// Update all files (original behavior)
+		if err := dc.ScanDirectory(); err != nil {
+			return fmt.Errorf("failed to scan directory: %w", err)
+		}
+	} else {
+		// Update only specified paths
+		if err := dc.UpdatePaths(paths); err != nil {
+			return fmt.Errorf("failed to update paths: %w", err)
+		}
 	}
 
 	if err := dc.WriteIndex(); err != nil {
 		return fmt.Errorf("failed to write index: %w", err)
+	}
+
+	return nil
+}
+
+// UpdatePaths updates only the specified paths in the index
+func (dc *DirectoryCache) UpdatePaths(paths []string) error {
+	// Load existing index to preserve other entries
+	existingEntries := make(map[string]FileEntry)
+	if err := dc.LoadIndex(); err == nil {
+		for _, entry := range dc.entries {
+			existingEntries[entry.RelativePath] = entry
+		}
+	}
+
+	// Collect files to process from specified paths
+	var fileJobs []fileJob
+	jobIndex := 0
+	pathsToRemove := make(map[string]bool)
+
+	for _, inputPath := range paths {
+		// Convert to absolute path
+		absPath := inputPath
+		if !filepath.IsAbs(inputPath) {
+			absPath = filepath.Join(dc.RootDir, inputPath)
+		}
+
+		// Clean the path
+		absPath = filepath.Clean(absPath)
+
+		// Check if path exists
+		info, err := os.Lstat(absPath)
+		if err != nil {
+			// Path doesn't exist - mark for removal from index
+			relPath, relErr := filepath.Rel(dc.RootDir, absPath)
+			if relErr == nil {
+				pathsToRemove[relPath] = true
+				// Also mark any files under this path for removal
+				for existingPath := range existingEntries {
+					if strings.HasPrefix(existingPath, relPath+"/") || existingPath == relPath {
+						pathsToRemove[existingPath] = true
+					}
+				}
+			}
+			continue
+		}
+
+		// Get relative path from root directory
+		relPath, err := filepath.Rel(dc.RootDir, absPath)
+		if err != nil {
+			return fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
+		}
+
+		// If it's a directory, scan it recursively
+		if info.IsDir() {
+			if err := dc.scanPathRecursively(absPath, &fileJobs, &jobIndex, pathsToRemove); err != nil {
+				return fmt.Errorf("failed to scan directory %s: %w", absPath, err)
+			}
+		} else if info.Mode().IsRegular() {
+			// Skip the index file itself
+			if absPath == dc.IndexFile {
+				continue
+			}
+
+			// Add single file
+			fileJobs = append(fileJobs, fileJob{
+				path:    absPath,
+				info:    info,
+				relPath: relPath,
+				index:   jobIndex,
+			})
+			jobIndex++
+
+			// Mark this path as being updated (remove from pathsToRemove if it was there)
+			delete(pathsToRemove, relPath)
+		}
+	}
+
+	// Process files in parallel
+	var newEntries []FileEntry
+	if len(fileJobs) > 0 {
+		results, err := dc.processFilesParallel(fileJobs)
+		if err != nil {
+			return err
+		}
+
+		// Sort results by original index to maintain discovery order
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].index < results[j].index
+		})
+
+		// Extract entries from results
+		for _, result := range results {
+			if result.err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
+				continue
+			}
+			newEntries = append(newEntries, *result.entry)
+		}
+	}
+
+	// Merge with existing entries
+	updatedPaths := make(map[string]bool)
+	for _, entry := range newEntries {
+		updatedPaths[entry.RelativePath] = true
+	}
+
+	// Start with new entries
+	dc.entries = make([]FileEntry, 0, len(newEntries)+len(existingEntries))
+	dc.entries = append(dc.entries, newEntries...)
+
+	// Add existing entries that weren't updated or removed
+	for path, entry := range existingEntries {
+		if !updatedPaths[path] && !pathsToRemove[path] {
+			dc.entries = append(dc.entries, entry)
+		}
+	}
+
+	// Sort entries by filename for byte comparison order
+	sort.Slice(dc.entries, func(i, j int) bool {
+		return dc.entries[i].RelativePath < dc.entries[j].RelativePath
+	})
+
+	return nil
+}
+
+// scanPathRecursively scans a directory path recursively and adds files to the job list
+func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJob, jobIndex *int, pathsToRemove map[string]bool) error {
+	// FIFO slice for directory traversal
+	pathQueue := []string{rootPath}
+
+	for len(pathQueue) > 0 {
+		// Pop the first entry from the FIFO slice
+		currentPath := pathQueue[0]
+		pathQueue = pathQueue[1:]
+
+		// Get file info
+		info, err := os.Lstat(currentPath)
+		if err != nil {
+			continue // Skip files we can't access
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(dc.RootDir, currentPath)
+		if err != nil {
+			continue
+		}
+
+		if info.IsDir() {
+			// Skip the index directory
+			indexDir := filepath.Dir(dc.IndexFile)
+			if currentPath == indexDir {
+				continue
+			}
+
+			// Remove this path from removal list since it exists
+			delete(pathsToRemove, relPath)
+
+			entries, err := os.ReadDir(currentPath)
+			if err != nil {
+				continue // Skip directories we can't read
+			}
+
+			// Sort entries by name using bytewise comparison
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Name() < entries[j].Name()
+			})
+
+			// Add all entries to the FIFO queue
+			for _, entry := range entries {
+				fullPath := filepath.Join(currentPath, entry.Name())
+				pathQueue = append(pathQueue, fullPath)
+			}
+		} else if info.Mode().IsRegular() {
+			// Skip the index file itself
+			if currentPath == dc.IndexFile {
+				continue
+			}
+
+			// Add to jobs list
+			*fileJobs = append(*fileJobs, fileJob{
+				path:    currentPath,
+				info:    info,
+				relPath: relPath,
+				index:   *jobIndex,
+			})
+			*jobIndex++
+
+			// Remove this path from removal list since it exists
+			delete(pathsToRemove, relPath)
+		}
 	}
 
 	return nil
