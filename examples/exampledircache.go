@@ -36,12 +36,8 @@ func main() {
 		log.Fatalf("%s is not a directory", absDir)
 	}
 
-	// Create index filename based on directory name
-	dirName := filepath.Base(absDir)
-	if dirName == "." || dirName == "/" {
-		dirName = "root"
-	}
-	indexFile := fmt.Sprintf(".dircachefilehash/%s.index", dirName)
+	// Create index filename in .dcfh subdirectory of the target directory
+	indexFile := filepath.Join(absDir, ".dcfh", "index")
 
 	fmt.Printf("Indexing directory: %s\n", absDir)
 	fmt.Printf("Index file: %s\n", indexFile)

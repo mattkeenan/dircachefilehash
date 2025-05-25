@@ -15,7 +15,25 @@ import (
 	"sort"
 	"syscall"
 	"time"
+	"unsafe"
 )
+
+// binaryEntry represents the fixed-size binary portion of a file entry
+type binaryEntry struct {
+	CTimeUnix uint32   // Change time seconds
+	CTimeNano uint32   // Change time nanoseconds
+	MTimeUnix uint32   // Modification time seconds
+	MTimeNano uint32   // Modification time nanoseconds
+	Dev       uint32   // Device ID
+	Ino       uint32   // Inode number
+	Mode      uint32   // File mode
+	UID       uint32   // User ID
+	GID       uint32   // Group ID
+	Size      uint32   // File size
+	Hash      [20]byte // SHA-1 hash (20 bytes)
+	Flags     uint16   // Index flags
+	PathLen   uint16   // Length of relative path
+}
 
 // FileEntry represents a file with its hash and metadata
 // Fields are ordered to match git dircache index file format
@@ -226,39 +244,7 @@ func (dc *DirectoryCache) WriteIndex() error {
 
 // writeEntry writes a single file entry in binary format
 func (dc *DirectoryCache) writeEntry(w io.Writer, entry *FileEntry) error {
-	// Write fixed-size fields (big-endian)
-	if err := binary.Write(w, binary.BigEndian, uint32(entry.CTime.Unix())); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.CTimeNano); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, uint32(entry.MTime.Unix())); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.MTimeNano); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.Dev); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.Ino); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.Mode); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.UID); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.GID); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, entry.Size); err != nil {
-		return err
-	}
-
-	// Write SHA-1 hash (20 bytes)
+	// Convert hash string to bytes
 	hashBytes, err := hex.DecodeString(entry.Hash)
 	if err != nil {
 		return fmt.Errorf("invalid hash %s: %w", entry.Hash, err)
@@ -266,34 +252,42 @@ func (dc *DirectoryCache) writeEntry(w io.Writer, entry *FileEntry) error {
 	if len(hashBytes) != 20 {
 		return fmt.Errorf("hash must be 20 bytes, got %d", len(hashBytes))
 	}
-	if _, err := w.Write(hashBytes); err != nil {
+
+	// Create binary entry struct
+	binEntry := binaryEntry{
+		CTimeUnix: uint32(entry.CTime.Unix()),
+		CTimeNano: uint32(entry.CTimeNano),
+		MTimeUnix: uint32(entry.MTime.Unix()),
+		MTimeNano: uint32(entry.MTimeNano),
+		Dev:       entry.Dev,
+		Ino:       entry.Ino,
+		Mode:      entry.Mode,
+		UID:       entry.UID,
+		GID:       entry.GID,
+		Size:      entry.Size,
+		Flags:     entry.Flags,
+		PathLen:   entry.PathLen,
+	}
+	copy(binEntry.Hash[:], hashBytes)
+
+	// Write fixed-size portion with single binary.Write
+	if err := binary.Write(w, binary.BigEndian, binEntry); err != nil {
 		return err
 	}
 
-	// Write flags
-	if err := binary.Write(w, binary.BigEndian, entry.Flags); err != nil {
-		return err
-	}
-
-	// Write path length
-	if err := binary.Write(w, binary.BigEndian, entry.PathLen); err != nil {
-		return err
-	}
-
-	// Write path (null-terminated, padded to 8-byte boundary)
+	// Write variable-size path
 	pathBytes := []byte(entry.RelativePath)
-
 	if _, err := w.Write(pathBytes); err != nil {
 		return err
 	}
 
 	// Add null terminator
-	if _, err := w.Write([]byte{0}); err != nil {
+	if err := binary.Write(w, binary.BigEndian, byte(0)); err != nil {
 		return err
 	}
 
-	// Pad to 8-byte boundary (like git)
-	totalLen := 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 20 + 2 + 2 + int(entry.PathLen) + 1 // all fixed fields + path
+	// Pad to 8-byte boundary
+	totalLen := int(unsafe.Sizeof(binEntry)) + int(entry.PathLen) + 1
 	padding := (8 - (totalLen % 8)) % 8
 	if padding > 0 {
 		paddingBytes := make([]byte, padding)
@@ -381,64 +375,30 @@ func (dc *DirectoryCache) LoadIndex() error {
 
 // readEntry reads a single file entry from binary format
 func (dc *DirectoryCache) readEntry(r io.Reader) (*FileEntry, error) {
-	entry := &FileEntry{}
-
-	// Read fixed-size fields
-	var ctimeUnix, mtimeUnix uint32
-
-	if err := binary.Read(r, binary.BigEndian, &ctimeUnix); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.CTimeNano); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &mtimeUnix); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.MTimeNano); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.Dev); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.Ino); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.Mode); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.UID); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.GID); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &entry.Size); err != nil {
+	// Read fixed-size portion with single binary.Read
+	var binEntry binaryEntry
+	if err := binary.Read(r, binary.BigEndian, &binEntry); err != nil {
 		return nil, err
 	}
 
-	// Convert timestamps
-	entry.CTime = time.Unix(int64(ctimeUnix), int64(entry.CTimeNano))
-	entry.MTime = time.Unix(int64(mtimeUnix), int64(entry.MTimeNano))
-
-	// Read SHA-1 hash (20 bytes)
-	hashBytes := make([]byte, 20)
-	if _, err := io.ReadFull(r, hashBytes); err != nil {
-		return nil, err
-	}
-	entry.Hash = hex.EncodeToString(hashBytes)
-
-	// Read flags
-	if err := binary.Read(r, binary.BigEndian, &entry.Flags); err != nil {
-		return nil, err
-	}
-
-	// Read path length
-	if err := binary.Read(r, binary.BigEndian, &entry.PathLen); err != nil {
-		return nil, err
+	// Create FileEntry from binary data
+	entry := &FileEntry{
+		CTime:     time.Unix(int64(binEntry.CTimeUnix), int64(binEntry.CTimeNano)),
+		CTimeNano: int32(binEntry.CTimeNano),
+		MTime:     time.Unix(int64(binEntry.MTimeUnix), int64(binEntry.MTimeNano)),
+		MTimeNano: int32(binEntry.MTimeNano),
+		Dev:       binEntry.Dev,
+		Ino:       binEntry.Ino,
+		Mode:      binEntry.Mode,
+		UID:       binEntry.UID,
+		GID:       binEntry.GID,
+		Size:      binEntry.Size,
+		Hash:      hex.EncodeToString(binEntry.Hash[:]),
+		Flags:     binEntry.Flags,
+		PathLen:   binEntry.PathLen,
 	}
 
-	// Read path
+	// Read variable-size path
 	pathBytes := make([]byte, entry.PathLen)
 	if _, err := io.ReadFull(r, pathBytes); err != nil {
 		return nil, err
@@ -452,7 +412,7 @@ func (dc *DirectoryCache) readEntry(r io.Reader) (*FileEntry, error) {
 	}
 
 	// Read padding to 8-byte boundary
-	totalLen := 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 20 + 2 + 2 + int(entry.PathLen) + 1
+	totalLen := int(unsafe.Sizeof(binEntry)) + int(entry.PathLen) + 1
 	padding := (8 - (totalLen % 8)) % 8
 	if padding > 0 {
 		paddingBytes := make([]byte, padding)
