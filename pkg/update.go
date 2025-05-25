@@ -14,16 +14,14 @@ import (
 // If paths are provided, only those files/directories are updated
 // If no paths are provided, all files under rootDir are updated
 func (dc *DirectoryCache) Update(paths ...string) error {
+	// If no paths provided, update the entire root directory
 	if len(paths) == 0 {
-		// Update all files (original behavior)
-		if err := dc.ScanDirectory(); err != nil {
-			return fmt.Errorf("failed to scan directory: %w", err)
-		}
-	} else {
-		// Update only specified paths
-		if err := dc.UpdatePaths(paths); err != nil {
-			return fmt.Errorf("failed to update paths: %w", err)
-		}
+		paths = []string{dc.RootDir}
+	}
+
+	// Always use UpdatePaths to handle both cases
+	if err := dc.UpdatePaths(paths); err != nil {
+		return fmt.Errorf("failed to update paths: %w", err)
 	}
 
 	if err := dc.WriteIndex(); err != nil {
