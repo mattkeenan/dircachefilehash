@@ -43,7 +43,7 @@ func main() {
 	fmt.Printf("Index file: %s\n", indexFile)
 
 	// Create a new directory cache
-	cache := dcfh.NewDirectoryCache(absDir, indexFile)
+	cache := dcfh.NewDirectoryCache(absDir, absDir)
 
 	// Scan directory and create index
 	fmt.Println("Scanning directory...")

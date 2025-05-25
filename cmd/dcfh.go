@@ -38,13 +38,15 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  init <dir>    Initialize a new dcfh repository in the specified directory\n")
 	fmt.Fprintf(os.Stderr, "  status        Show the status of files in the current dcfh repository\n")
-	fmt.Fprintf(os.Stderr, "  update        Update the index with current file states\n")
+	fmt.Fprintf(os.Stderr, "  update [paths...] Update the index with current file states\n")
 	fmt.Fprintf(os.Stderr, "  dupes         Find and display duplicate files\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init .\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents\n")
 	fmt.Fprintf(os.Stderr, "  dcfh status\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update\n")
+	fmt.Fprintf(os.Stderr, "  dcfh update file.txt dir/\n")
+	fmt.Fprintf(os.Stderr, "  dcfh update /absolute/path relative/path\n")
 	fmt.Fprintf(os.Stderr, "  dcfh dupes\n")
 }
 
@@ -81,15 +83,8 @@ func handleInit() {
 		os.Exit(1)
 	}
 
-	// Create .dcfh directory
-	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to create .dcfh directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Initialize index
-	indexFile := filepath.Join(dcfhDir, "index")
-	cache := dcfh.NewDirectoryCache(absDir, indexFile)
+	// Create cache - this will automatically create .dcfh directory and index
+	cache := dcfh.NewDirectoryCache(absDir, absDir)
 
 	fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
 	fmt.Println("Scanning directory and creating initial index...")
@@ -110,7 +105,7 @@ func handleStatus() {
 	}
 
 	// Find the dcfh repository root
-	repoRoot, indexFile, err := findDcfhRepo()
+	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
@@ -132,7 +127,7 @@ func handleStatus() {
 	fmt.Println()
 
 	// Create cache and get status
-	cache := dcfh.NewDirectoryCache(repoRoot, indexFile)
+	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	status, err := cache.Status()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -183,28 +178,33 @@ func handleStatus() {
 }
 
 func handleUpdate() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: dcfh update\n")
-		os.Exit(1)
-	}
-
 	// Find the dcfh repository root
-	repoRoot, indexFile, err := findDcfhRepo()
+	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Updating index in %s\n", repoRoot)
+	// Get paths to update (if any)
+	var paths []string
+	if len(os.Args) > 2 {
+		paths = os.Args[2:]
+		fmt.Printf("Updating specified paths in %s\n", repoRoot)
+		for _, path := range paths {
+			fmt.Printf("  %s\n", path)
+		}
+	} else {
+		fmt.Printf("Updating entire repository in %s\n", repoRoot)
+	}
 
 	// Update the index
-	cache := dcfh.NewDirectoryCache(repoRoot, indexFile)
+	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 
 	fmt.Println("Scanning directory...")
 	start := time.Now()
 
-	if err := cache.Update(); err != nil {
+	if err := cache.Update(paths...); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to update index: %v\n", err)
 		os.Exit(1)
 	}
@@ -236,7 +236,7 @@ func handleDupes() {
 	}
 
 	// Find the dcfh repository root
-	repoRoot, indexFile, err := findDcfhRepo()
+	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
@@ -244,7 +244,7 @@ func handleDupes() {
 	}
 
 	// Load existing index
-	cache := dcfh.NewDirectoryCache(repoRoot, indexFile)
+	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	if err := cache.LoadIndex(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to load index: %v\n", err)
 		os.Exit(1)
@@ -301,6 +301,7 @@ func handleDupes() {
 
 // findDcfhRepo searches for .dcfh directory starting from current directory
 // and moving up the directory tree
+// Returns: (repoRoot, dcfhDir, error)
 func findDcfhRepo() (string, string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -309,12 +310,12 @@ func findDcfhRepo() (string, string, error) {
 
 	dir := cwd
 	for {
-		dcfhDir := filepath.Join(dir, ".dcfh")
-		indexFile := filepath.Join(dcfhDir, "index")
+		dcfhPath := filepath.Join(dir, ".dcfh")
+		indexFile := filepath.Join(dcfhPath, "index")
 
-		if info, err := os.Stat(dcfhDir); err == nil && info.IsDir() {
+		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
 			if _, err := os.Stat(indexFile); err == nil {
-				return dir, indexFile, nil
+				return dir, dir, nil // repoRoot and dcfhDir are the same
 			}
 		}
 

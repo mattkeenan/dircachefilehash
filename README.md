@@ -1,4 +1,9 @@
-# dircachefilehash
+```go
+// Default: .dcfh directory in same location as indexed directory
+cache := dcfh.NewDirectoryCache("/home/user/documents", "")
+
+// Custom: .dcfh directory in different location  
+cache := dcfh.NewDirectoryCache("/home/user/# dircachefilehash
 
 A Go package for scanning directories, hashing file contents, and maintaining a sorted index file compatible with git's dircache format. Useful for file integrity checking, change detection, and duplicate file identification.
 
@@ -40,7 +45,7 @@ func main() {
     }
     
     // Create a new directory cache
-    cache := dircachefilehash.NewDirectoryCache(homeDir, ".dircachefilehash/index")
+    cache := dircachefilehash.NewDirectoryCache(homeDir, homeDir)
     
     // Scan directory and create index
     if err := cache.Update(); err != nil {
@@ -61,7 +66,7 @@ The main type for managing file caches.
 
 #### Methods
 
-- `NewDirectoryCache(rootDir, indexFile string) *DirectoryCache` - Creates a new cache instance
+- `NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache` - Creates a new cache instance
 - `ScanDirectory() error` - Scans the directory and generates file entries with hashes
 - `WriteIndex() error` - Writes the sorted index to file
 - `LoadIndex() error` - Loads an existing index file
