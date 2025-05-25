@@ -10,6 +10,203 @@ import (
 	"syscall"
 )
 
+// BPlusTreeNode represents a node in the B+ tree
+type BPlusTreeNode struct {
+	isLeaf   bool
+	keys     []string         // filenames for sorting
+	entries  []FileEntry      // actual file entries (leaf nodes only)
+	children []*BPlusTreeNode // child nodes (internal nodes only)
+	next     *BPlusTreeNode   // next leaf node (for range queries)
+}
+
+// BPlusTree represents a B+ tree indexed by filename
+type BPlusTree struct {
+	root  *BPlusTreeNode
+	order int // maximum number of keys per node
+	mutex sync.RWMutex
+}
+
+// NewBPlusTree creates a new B+ tree with the specified order
+func NewBPlusTree(order int) *BPlusTree {
+	if order < 3 {
+		order = 4 // minimum practical order
+	}
+	return &BPlusTree{
+		root:  &BPlusTreeNode{isLeaf: true},
+		order: order,
+	}
+}
+
+// Insert adds a file entry to the B+ tree
+func (tree *BPlusTree) Insert(entry FileEntry) {
+	tree.mutex.Lock()
+	defer tree.mutex.Unlock()
+
+	if tree.root == nil {
+		tree.root = &BPlusTreeNode{isLeaf: true}
+	}
+
+	tree.insertEntry(tree.root, entry)
+}
+
+// insertEntry recursively inserts an entry into the tree
+func (tree *BPlusTree) insertEntry(node *BPlusTreeNode, entry FileEntry) *BPlusTreeNode {
+	if node.isLeaf {
+		// Insert into leaf node
+		pos := tree.findInsertPosition(node.keys, entry.RelativePath)
+
+		// Insert key and entry at position
+		node.keys = append(node.keys, "")
+		node.entries = append(node.entries, FileEntry{})
+
+		// Shift elements to make room
+		copy(node.keys[pos+1:], node.keys[pos:])
+		copy(node.entries[pos+1:], node.entries[pos:])
+
+		node.keys[pos] = entry.RelativePath
+		node.entries[pos] = entry
+
+		// Check if node needs to be split
+		if len(node.keys) >= tree.order {
+			return tree.splitLeafNode(node)
+		}
+		return nil
+	} else {
+		// Find child to insert into
+		childIndex := tree.findChildIndex(node.keys, entry.RelativePath)
+		newChild := tree.insertEntry(node.children[childIndex], entry)
+
+		if newChild != nil {
+			// Child was split, need to add separator to this node
+			separator := newChild.keys[0]
+			return tree.insertInternalNode(node, separator, newChild)
+		}
+		return nil
+	}
+}
+
+// findInsertPosition finds the position to insert a key using binary search
+func (tree *BPlusTree) findInsertPosition(keys []string, key string) int {
+	left, right := 0, len(keys)
+	for left < right {
+		mid := (left + right) / 2
+		if keys[mid] < key {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+	return left
+}
+
+// findChildIndex finds the child index for a key
+func (tree *BPlusTree) findChildIndex(keys []string, key string) int {
+	for i, k := range keys {
+		if key < k {
+			return i
+		}
+	}
+	return len(keys)
+}
+
+// splitLeafNode splits a full leaf node
+func (tree *BPlusTree) splitLeafNode(node *BPlusTreeNode) *BPlusTreeNode {
+	mid := len(node.keys) / 2
+
+	newNode := &BPlusTreeNode{
+		isLeaf:  true,
+		keys:    make([]string, len(node.keys)-mid),
+		entries: make([]FileEntry, len(node.entries)-mid),
+		next:    node.next,
+	}
+
+	copy(newNode.keys, node.keys[mid:])
+	copy(newNode.entries, node.entries[mid:])
+
+	node.keys = node.keys[:mid]
+	node.entries = node.entries[:mid]
+	node.next = newNode
+
+	return newNode
+}
+
+// insertInternalNode inserts a key and child into an internal node
+func (tree *BPlusTree) insertInternalNode(node *BPlusTreeNode, key string, child *BPlusTreeNode) *BPlusTreeNode {
+	pos := tree.findInsertPosition(node.keys, key)
+
+	// Insert key
+	node.keys = append(node.keys, "")
+	copy(node.keys[pos+1:], node.keys[pos:])
+	node.keys[pos] = key
+
+	// Insert child
+	node.children = append(node.children, nil)
+	copy(node.children[pos+2:], node.children[pos+1:])
+	node.children[pos+1] = child
+
+	// Check if node needs to be split
+	if len(node.keys) >= tree.order {
+		return tree.splitInternalNode(node)
+	}
+	return nil
+}
+
+// splitInternalNode splits a full internal node
+func (tree *BPlusTree) splitInternalNode(node *BPlusTreeNode) *BPlusTreeNode {
+	mid := len(node.keys) / 2
+
+	newNode := &BPlusTreeNode{
+		isLeaf:   false,
+		keys:     make([]string, len(node.keys)-mid-1),
+		children: make([]*BPlusTreeNode, len(node.children)-mid-1),
+	}
+
+	copy(newNode.keys, node.keys[mid+1:])
+	copy(newNode.children, node.children[mid+1:])
+
+	promotedKey := node.keys[mid]
+	node.keys = node.keys[:mid]
+	node.children = node.children[:mid+1]
+
+	// Create new root if necessary
+	if tree.root == node {
+		newRoot := &BPlusTreeNode{
+			isLeaf:   false,
+			keys:     []string{promotedKey},
+			children: []*BPlusTreeNode{node, newNode},
+		}
+		tree.root = newRoot
+		return nil
+	}
+
+	return newNode
+}
+
+// GetSortedEntries returns all entries in sorted order by filename
+func (tree *BPlusTree) GetSortedEntries() []FileEntry {
+	tree.mutex.RLock()
+	defer tree.mutex.RUnlock()
+
+	var entries []FileEntry
+	tree.collectLeafEntries(tree.root, &entries)
+	return entries
+}
+
+// collectLeafEntries recursively collects all entries from leaf nodes
+func (tree *BPlusTree) collectLeafEntries(node *BPlusTreeNode, entries *[]FileEntry) {
+	if node == nil {
+		return
+	}
+
+	if node.isLeaf {
+		*entries = append(*entries, node.entries...)
+	} else {
+		for _, child := range node.children {
+			tree.collectLeafEntries(child, entries)
+		}
+	}
+}
+
 // Update scans the directory and updates the index file
 // If paths are provided, only those files/directories are updated
 // If no paths are provided, all files under rootDir are updated
@@ -296,40 +493,24 @@ func (dc *DirectoryCache) ScanDirectory() error {
 		// since we only want to index regular files with content hashes
 	}
 
-	// Process files in parallel
+	// Process files in parallel and get B+ tree
 	if len(fileJobs) > 0 {
-		results, err := dc.processFilesParallel(fileJobs)
+		resultTree, err := dc.processFilesParallel(fileJobs)
 		if err != nil {
 			return err
 		}
 
-		// Sort results by original index to maintain discovery order
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].index < results[j].index
-		})
-
-		// Extract entries from results
-		for _, result := range results {
-			if result.err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
-				continue
-			}
-			dc.entries = append(dc.entries, *result.entry)
-		}
+		// Get sorted entries from B+ tree
+		dc.entries = resultTree.GetSortedEntries()
 	}
-
-	// Sort entries by filename (RelativePath) for byte comparison order
-	sort.Slice(dc.entries, func(i, j int) bool {
-		return dc.entries[i].RelativePath < dc.entries[j].RelativePath
-	})
 
 	return nil
 }
 
-// processFilesParallel processes files using device-specific worker pools
-func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, error) {
+// processFilesParallel processes files using device-specific worker pools and returns a B+ tree
+func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) (*BPlusTree, error) {
 	if len(jobs) == 0 {
-		return []fileResult{}, nil
+		return NewBPlusTree(16), nil // Return empty B+ tree with order 16
 	}
 
 	// Group jobs by device
@@ -341,9 +522,24 @@ func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, er
 		deviceJobs[deviceID] = append(deviceJobs[deviceID], job)
 	}
 
+	// Create B+ tree for results (order 16 for good performance)
+	resultTree := NewBPlusTree(16)
+
 	// Create channels for collecting results from all devices
 	resultChan := make(chan fileResult, len(jobs))
 	var wg sync.WaitGroup
+
+	// Start goroutine to collect results and insert into B+ tree
+	var insertWg sync.WaitGroup
+	insertWg.Add(1)
+	go func() {
+		defer insertWg.Done()
+		for result := range resultChan {
+			if result.err == nil && result.entry != nil {
+				resultTree.Insert(*result.entry)
+			}
+		}
+	}()
 
 	// Process each device with its own worker pool
 	for deviceID, jobs := range deviceJobs {
@@ -355,18 +551,13 @@ func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) ([]fileResult, er
 	}
 
 	// Wait for all devices to complete
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
+	wg.Wait()
+	close(resultChan)
 
-	// Collect results from all devices
-	var results []fileResult
-	for result := range resultChan {
-		results = append(results, result)
-	}
+	// Wait for all insertions to complete
+	insertWg.Wait()
 
-	return results, nil
+	return resultTree, nil
 }
 
 // processDeviceJobs processes jobs for a specific device using 2 workers
