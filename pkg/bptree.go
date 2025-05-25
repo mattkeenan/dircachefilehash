@@ -1,4 +1,4 @@
-package dircachefilehash
+// insertEntryUnsafe inserts an entry without locking (internal use during rebuild)package dircachefilehash
 
 import (
 	"sync"
@@ -416,7 +416,135 @@ func (tree *BPlusTree) rebuildFromSortedEntries(entries []FileEntry) {
 	}
 }
 
-// insertEntryUnsafe inserts an entry without locking (internal use during rebuild)
+// Delete removes entries from this tree that exist in the other tree using Hwang-Lin algorithm
+// This is optimized for bulk deletion operations
+func (tree *BPlusTree) Delete(other *BPlusTree) {
+	if other == nil || other.root == nil {
+		return
+	}
+
+	// Lock both trees during delete operation
+	tree.mutex.Lock()
+	defer tree.mutex.Unlock()
+	other.mutex.RLock()
+	defer other.mutex.RUnlock()
+
+	// Get sorted entries from both trees
+	thisEntries := tree.getSortedEntriesUnsafe()
+	deleteEntries := other.getSortedEntriesUnsafe()
+
+	// Use Hwang-Lin algorithm to efficiently find and remove entries
+	remainingEntries := tree.hwangLinDelete(thisEntries, deleteEntries)
+
+	// Rebuild tree with remaining entries
+	tree.rebuildFromSortedEntries(remainingEntries)
+}
+
+// hwangLinDelete implements Hwang-Lin algorithm for efficient bulk deletion
+// Returns entries from 'this' that are NOT in 'toDelete'
+func (tree *BPlusTree) hwangLinDelete(thisEntries, toDelete []FileEntry) []FileEntry {
+	if len(toDelete) == 0 {
+		return thisEntries
+	}
+	if len(thisEntries) == 0 {
+		return []FileEntry{}
+	}
+
+	result := make([]FileEntry, 0, len(thisEntries))
+	i, j := 0, 0 // i for thisEntries, j for toDelete
+
+	for i < len(thisEntries) && j < len(toDelete) {
+		// For small remaining sequences, use traditional approach
+		if len(toDelete)-j <= 16 {
+			result = append(result, tree.traditionalDelete(thisEntries[i:], toDelete[j:])...)
+			break
+		}
+
+		thisKey := thisEntries[i].RelativePath
+		deleteKey := toDelete[j].RelativePath
+
+		if thisKey < deleteKey {
+			// Current entry in 'this' is not in delete list
+
+			// Use binary search to find how many consecutive entries we can keep
+			nextDeletePos := tree.binarySearchInsertPosition(toDelete[j:], thisKey)
+			actualNextDeletePos := j + nextDeletePos
+
+			// Find the range of entries we can safely keep
+			keepUntil := i + 1
+			if actualNextDeletePos < len(toDelete) {
+				nextDeleteKey := toDelete[actualNextDeletePos].RelativePath
+				// Find position where next delete key would be inserted
+				keepUntilPos := tree.binarySearchInsertPositionInEntries(thisEntries[i:], nextDeleteKey)
+				keepUntil = i + keepUntilPos
+			} else {
+				// No more delete keys, keep all remaining
+				keepUntil = len(thisEntries)
+			}
+
+			// Add the range of entries that should be kept
+			result = append(result, thisEntries[i:keepUntil]...)
+			i = keepUntil
+
+		} else if thisKey > deleteKey {
+			// Advance delete pointer
+			j++
+		} else {
+			// thisKey == deleteKey: skip this entry (delete it)
+			i++
+			j++
+		}
+	}
+
+	// Add any remaining entries from 'this' (they're not in delete list)
+	if i < len(thisEntries) {
+		result = append(result, thisEntries[i:]...)
+	}
+
+	return result
+}
+
+// binarySearchInsertPositionInEntries finds insert position in FileEntry slice by RelativePath
+func (tree *BPlusTree) binarySearchInsertPositionInEntries(entries []FileEntry, key string) int {
+	left, right := 0, len(entries)
+	for left < right {
+		mid := (left + right) / 2
+		if entries[mid].RelativePath < key {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+	return left
+}
+
+// traditionalDelete performs traditional deletion for small sequences
+func (tree *BPlusTree) traditionalDelete(thisEntries, toDelete []FileEntry) []FileEntry {
+	result := make([]FileEntry, 0, len(thisEntries))
+	i, j := 0, 0
+
+	for i < len(thisEntries) && j < len(toDelete) {
+		thisKey := thisEntries[i].RelativePath
+		deleteKey := toDelete[j].RelativePath
+
+		if thisKey < deleteKey {
+			// Keep this entry
+			result = append(result, thisEntries[i])
+			i++
+		} else if thisKey > deleteKey {
+			// Advance delete pointer
+			j++
+		} else {
+			// thisKey == deleteKey: skip (delete) this entry
+			i++
+			j++
+		}
+	}
+
+	// Add remaining entries from 'this'
+	result = append(result, thisEntries[i:]...)
+	return result
+}
 func (tree *BPlusTree) insertEntryUnsafe(node *BPlusTreeNode, entry FileEntry) *BPlusTreeNode {
 	if node.isLeaf {
 		// Insert into leaf node
