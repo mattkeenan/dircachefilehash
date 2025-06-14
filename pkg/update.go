@@ -34,10 +34,10 @@ func (dc *DirectoryCache) Update(paths ...string) error {
 // UpdatePaths updates only the specified paths in the index
 func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 	// Load existing index to preserve other entries
-	existingEntries := make(map[string]FileEntry)
+	existingEntries := NewSkiplistWrapper(16)
 	if err := dc.LoadIndex(); err == nil {
 		for _, entry := range dc.entries {
-			existingEntries[entry.RelativePath] = entry
+			existingEntries.Insert(entry)
 		}
 	}
 
@@ -64,7 +64,8 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 			if relErr == nil {
 				pathsToRemove[relPath] = true
 				// Also mark any files under this path for removal
-				for existingPath := range existingEntries {
+				for current := existingEntries.skiplist.First(); current != nil; current = current.Next() {
+					existingPath := current.Key()
 					if strings.HasPrefix(existingPath, relPath+"/") || existingPath == relPath {
 						pathsToRemove[existingPath] = true
 					}
@@ -107,15 +108,10 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 	// Process files in parallel
 	var newEntries []FileEntry
 	if len(fileJobs) > 0 {
-		results, err := dc.processFilesParallel(fileJobs)
+		results, err := dc.processFilesParallelResults(fileJobs)
 		if err != nil {
 			return err
 		}
-
-		// Sort results by original index to maintain discovery order
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].index < results[j].index
-		})
 
 		// Extract entries from results
 		for _, result := range results {
@@ -134,13 +130,14 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 	}
 
 	// Start with new entries
-	dc.entries = make([]FileEntry, 0, len(newEntries)+len(existingEntries))
+	dc.entries = make([]FileEntry, 0, len(newEntries)+existingEntries.Length())
 	dc.entries = append(dc.entries, newEntries...)
 
 	// Add existing entries that weren't updated or removed
-	for path, entry := range existingEntries {
+	for current := existingEntries.skiplist.First(); current != nil; current = current.Next() {
+		path := current.Key()
 		if !updatedPaths[path] && !pathsToRemove[path] {
-			dc.entries = append(dc.entries, entry)
+			dc.entries = append(dc.entries, *current.Item())
 		}
 	}
 
@@ -296,24 +293,34 @@ func (dc *DirectoryCache) ScanDirectory() error {
 		// since we only want to index regular files with content hashes
 	}
 
-	// Process files in parallel and get B+ tree
+	// Process files in parallel and get skiplist wrapper
 	if len(fileJobs) > 0 {
-		resultTree, err := dc.processFilesParallel(fileJobs)
+		results, err := dc.processFilesParallelResults(fileJobs)
 		if err != nil {
 			return err
 		}
 
-		// Get sorted entries from B+ tree
-		dc.entries = resultTree.GetSortedEntries()
+		// Create skiplist wrapper and add results
+		resultWrapper := NewSkiplistWrapper(16)
+		for _, result := range results {
+			if result.err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
+				continue
+			}
+			resultWrapper.Insert(*result.entry)
+		}
+
+		// Get sorted entries from skiplist wrapper
+		dc.entries = resultWrapper.GetSortedEntries()
 	}
 
 	return nil
 }
 
-// processFilesParallel processes files using device-specific worker pools and returns a B+ tree
-func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) (*BPlusTree, error) {
+// processFilesParallelResults processes files using device-specific worker pools and returns results
+func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileResult, error) {
 	if len(jobs) == 0 {
-		return NewBPlusTree(16), nil // Return empty B+ tree with order 16
+		return nil, nil
 	}
 
 	// Group jobs by device
@@ -325,24 +332,9 @@ func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) (*BPlusTree, erro
 		deviceJobs[deviceID] = append(deviceJobs[deviceID], job)
 	}
 
-	// Create B+ tree for results (order 16 for good performance)
-	resultTree := NewBPlusTree(16)
-
 	// Create channels for collecting results from all devices
 	resultChan := make(chan fileResult, len(jobs))
 	var wg sync.WaitGroup
-
-	// Start goroutine to collect results and insert into B+ tree
-	var insertWg sync.WaitGroup
-	insertWg.Add(1)
-	go func() {
-		defer insertWg.Done()
-		for result := range resultChan {
-			if result.err == nil && result.entry != nil {
-				resultTree.Insert(*result.entry)
-			}
-		}
-	}()
 
 	// Process each device with its own worker pool
 	for deviceID, jobs := range deviceJobs {
@@ -357,10 +349,13 @@ func (dc *DirectoryCache) processFilesParallel(jobs []fileJob) (*BPlusTree, erro
 	wg.Wait()
 	close(resultChan)
 
-	// Wait for all insertions to complete
-	insertWg.Wait()
+	// Collect all results
+	var results []fileResult
+	for result := range resultChan {
+		results = append(results, result)
+	}
 
-	return resultTree, nil
+	return results, nil
 }
 
 // processDeviceJobs processes jobs for a specific device using 2 workers
