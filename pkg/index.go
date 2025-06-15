@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	HeaderSize   = 20 // signature(4) + version(4) + byte_order(8) + entry_count(4)
+	HeaderSize   = 20 // signature(4) + byte_order(8) + version(4) + entry_count(4)
 	ChecksumSize = 20 // SHA-1 checksum size
 )
 
@@ -29,8 +29,8 @@ type MmapIndex struct {
 // IndexHeader represents the file header in host byte order (cast directly to mmap'd memory)
 type IndexHeader struct {
 	Signature  [4]byte // "dcfh" signature
+	ByteOrder  uint64  // Byte order detection magic (0x0102030405060708) - MUST be checked before other fields
 	Version    uint32  // Index version (host order)
-	ByteOrder  uint64  // Byte order detection magic (0x0102030405060708)
 	EntryCount uint32  // Number of entries (host order)
 }
 
@@ -68,8 +68,8 @@ func (ih *IndexHeader) ValidateByteOrder() error {
 // SetHeader initializes the header fields in mmap'd memory
 func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32) {
 	ih.Signature = signature
-	ih.Version = version
 	ih.ByteOrder = ByteOrderMagic
+	ih.Version = version
 	ih.EntryCount = entryCount
 }
 
@@ -278,14 +278,14 @@ func (dc *DirectoryCache) LoadIndex() error {
 	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := mmapIndex.Header()
 
-	// Verify header using helper methods
+	// Verify header using helper methods in logical order
 	if err := header.ValidateSignature(dc.signature); err != nil {
 		return err
 	}
-	if err := header.ValidateVersion(dc.version); err != nil {
+	if err := header.ValidateByteOrder(); err != nil {
 		return err
 	}
-	if err := header.ValidateByteOrder(); err != nil {
+	if err := header.ValidateVersion(dc.version); err != nil {
 		return err
 	}
 
