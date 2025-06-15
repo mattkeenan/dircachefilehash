@@ -9,6 +9,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Hash type constants
+const (
+	HashTypeSHA1   uint16 = 1 // SHA-1 (20 bytes)
+	HashTypeSHA256 uint16 = 2 // SHA-256 (32 bytes)
+	HashTypeSHA512 uint16 = 3 // SHA-512 (64 bytes)
+)
+
+// Hash size constants
+const (
+	HashSizeSHA1   = 20 // SHA-1 hash size in bytes
+	HashSizeSHA256 = 32 // SHA-256 hash size in bytes
+	HashSizeSHA512 = 64 // SHA-512 hash size in bytes
+)
+
 // DirectoryCache manages the file cache for a directory
 type DirectoryCache struct {
 	RootDir   string
@@ -34,7 +48,8 @@ type binaryEntry struct {
 	GID       uint32   // Group ID (host order)
 	FileSize  uint64   // File size in bytes (host order) - supports files >4GB
 	Flags     uint16   // Index flags (host order)
-	Hash      [20]byte // SHA-1 hash (20 bytes, byte order irrelevant)
+	HashType  uint16   // Hash algorithm type (SHA1=1, SHA256=2, SHA512=3)
+	Hash      [64]byte // Hash value (up to 64 bytes for SHA-512)
 	// Variable-length path follows immediately after this struct
 }
 
@@ -66,13 +81,27 @@ func (be *binaryEntry) RelativePathBytes() []byte {
 
 // HashString returns the hash as a hex string
 func (be *binaryEntry) HashString() string {
+	// Determine hash size based on type
+	var hashSize int
+	switch be.HashType {
+	case HashTypeSHA1:
+		hashSize = HashSizeSHA1
+	case HashTypeSHA256:
+		hashSize = HashSizeSHA256
+	case HashTypeSHA512:
+		hashSize = HashSizeSHA512
+	default:
+		hashSize = HashSizeSHA1 // Default to SHA1 for compatibility
+	}
+
 	const hexChars = "0123456789abcdef"
-	var result [40]byte
-	for i, b := range be.Hash {
+	result := make([]byte, hashSize*2)
+	for i := 0; i < hashSize; i++ {
+		b := be.Hash[i]
 		result[i*2] = hexChars[b>>4]
 		result[i*2+1] = hexChars[b&0xf]
 	}
-	return unsafe.String(&result[0], 40)
+	return unsafe.String(&result[0], len(result))
 }
 
 // EntrySize returns the total size of this entry including padding

@@ -1,148 +1,232 @@
 package dircachefilehash
 
 import (
-	"hash"
-	"os"
-	"time"
-	"unsafe"
-
-	"golang.org/x/sys/unix"
+	"fmt"
+	"strings"
 )
 
-// DirectoryCache manages the file cache for a directory
-type DirectoryCache struct {
-	RootDir   string
-	IndexFile string
-	entries   []*binaryEntry // Direct pointers to mmap'd entries
-	signature [4]byte        // "dcfh" signature
-	version   uint32         // Index version
-	hasher    hash.Hash      // SHA-1 hasher for checksums
-	mmapIndex *MmapIndex     // Memory-mapped index file
+// FileStatus represents the status of a file
+type FileStatus int
+
+const (
+	StatusUnchanged FileStatus = iota
+	StatusModified
+	StatusAdded
+	StatusDeleted
+)
+
+// StatusResult represents the result of a status check
+type StatusResult struct {
+	Modified []string
+	Added    []string
+	Deleted  []string
 }
 
-// binaryEntry represents a file entry in mmap'd memory (zero-copy)
-// All fields are in host byte order for direct access
-// Time fields use Go's wall time format (uint64 encoding)
-type binaryEntry struct {
-	Size      uint32   // Total size of this entry including padding (host order) - MUST BE FIRST
-	CTimeWall uint64   // Change time wall clock (Go wall time format)
-	MTimeWall uint64   // Modification time wall clock (Go wall time format)
-	Dev       uint32   // Device ID (host order)
-	Ino       uint32   // Inode number (host order)
-	Mode      uint32   // File mode (host order)
-	UID       uint32   // User ID (host order)
-	GID       uint32   // Group ID (host order)
-	FileSize  uint64   // File size in bytes (host order) - supports files >4GB
-	Flags     uint16   // Index flags (host order)
-	Hash      [20]byte // SHA-1 hash (20 bytes, byte order irrelevant)
-	// Variable-length path follows immediately after this struct
-}
-
-// RelativePath returns the relative path string from mmap'd memory (zero-copy)
-func (be *binaryEntry) RelativePath() string {
-	pathBytes := be.RelativePathBytes()
-	if len(pathBytes) == 0 {
-		return ""
-	}
-	return unsafe.String(&pathBytes[0], len(pathBytes))
-}
-
-// RelativePathBytes returns the relative path as byte slice from mmap'd memory (zero-copy)
-func (be *binaryEntry) RelativePathBytes() []byte {
-	entryStart := uintptr(unsafe.Pointer(be))
-	entryEnd := entryStart + uintptr(be.Size)
-	pathStart := entryStart + unsafe.Sizeof(*be)
-
-	// Scan backwards byte by byte from the end (endian-neutral)
-	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
-	pathEnd := entryEnd
-	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 {
-		pathEnd--
+// Status compares the current directory state with the loaded index using zero-copy operations
+func (dc *DirectoryCache) Status() (*StatusResult, error) {
+	if len(dc.entries) == 0 {
+		if err := dc.LoadIndex(); err != nil {
+			return nil, fmt.Errorf("failed to load index: %w", err)
+		}
 	}
 
-	pathLen := int(pathEnd - pathStart)
-	return unsafe.Slice((*byte)(unsafe.Pointer(pathStart)), pathLen)
-}
-
-// HashString returns the hash as a hex string
-func (be *binaryEntry) HashString() string {
-	const hexChars = "0123456789abcdef"
-	var result [40]byte
-	for i, b := range be.Hash {
-		result[i*2] = hexChars[b>>4]
-		result[i*2+1] = hexChars[b&0xf]
+	// Scan current state
+	currentCache := NewDirectoryCache(dc.RootDir, "")
+	if err := currentCache.ScanDirectory(); err != nil {
+		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
-	return unsafe.String(&result[0], 40)
-}
+	defer currentCache.Close()
 
-// EntrySize returns the total size of this entry including padding
-func (be *binaryEntry) EntrySize() int {
-	return int(be.Size)
-}
+	// Get zero-copy access to entries
+	indexEntries := dc.entries
+	diskEntries := currentCache.entries
 
-// PathLenToSize calculates the necessary size of a binaryEntry struct given pathname length
-func PathLenToSize(pathLen int) int {
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + pathLen + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	return totalSize + padding
-}
-
-// fileJob represents a file hashing job
-type fileJob struct {
-	path    string
-	info    os.FileInfo
-	relPath string
-	index   int // Original order for sorting
-}
-
-// fileResult represents the result of a file hashing job
-type fileResult struct {
-	entry *binaryEntry
-	err   error
-	index int // Original order for sorting
-}
-
-// GetEntries returns direct pointers to mmap'd entries (zero-copy)
-func (dc *DirectoryCache) GetEntries() []*binaryEntry {
-	return dc.entries
-}
-
-// Stats returns statistics about the cache
-func (dc *DirectoryCache) Stats() (int, int64, error) {
-	var totalSize int64
-	for _, entry := range dc.entries {
-		totalSize += int64(entry.FileSize)
+	result := &StatusResult{
+		Modified: make([]string, 0),
+		Added:    make([]string, 0),
+		Deleted:  make([]string, 0),
 	}
-	return len(dc.entries), totalSize, nil
+
+	// Hwang-Lin merge algorithm
+	i, j := 0, 0
+
+	for i < len(indexEntries) && j < len(diskEntries) {
+		indexEntry := indexEntries[i]
+		diskEntry := diskEntries[j]
+
+		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
+
+		if cmp == 0 {
+			if dc.isFileModified(indexEntry, diskEntry) {
+				result.Modified = append(result.Modified, indexEntry.RelativePath())
+			}
+			i++
+			j++
+		} else if cmp < 0 {
+			result.Deleted = append(result.Deleted, indexEntry.RelativePath())
+			i++
+		} else {
+			result.Added = append(result.Added, diskEntry.RelativePath())
+			j++
+		}
+	}
+
+	// Handle remaining entries
+	for i < len(indexEntries) {
+		result.Deleted = append(result.Deleted, indexEntries[i].RelativePath())
+		i++
+	}
+
+	for j < len(diskEntries) {
+		result.Added = append(result.Added, diskEntries[j].RelativePath())
+		j++
+	}
+
+	return result, nil
 }
 
-// IsMmapped returns true if the cache is using memory-mapped storage
-func (dc *DirectoryCache) IsMmapped() bool {
-	return dc.mmapIndex != nil
+// StatusWithCallback compares directory state using a callback for zero-copy operation
+func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) error {
+	if len(dc.entries) == 0 {
+		if err := dc.LoadIndex(); err != nil {
+			return fmt.Errorf("failed to load index: %w", err)
+		}
+	}
+
+	currentCache := NewDirectoryCache(dc.RootDir, "")
+	if err := currentCache.ScanDirectory(); err != nil {
+		return fmt.Errorf("failed to scan directory: %w", err)
+	}
+	defer currentCache.Close()
+
+	indexEntries := dc.entries
+	diskEntries := currentCache.entries
+
+	// Hwang-Lin merge with callback
+	i, j := 0, 0
+
+	for i < len(indexEntries) && j < len(diskEntries) {
+		indexEntry := indexEntries[i]
+		diskEntry := diskEntries[j]
+
+		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
+
+		if cmp == 0 {
+			if dc.isFileModified(indexEntry, diskEntry) {
+				callback(StatusModified, indexEntry.RelativePath(), indexEntry, diskEntry)
+			} else {
+				callback(StatusUnchanged, indexEntry.RelativePath(), indexEntry, diskEntry)
+			}
+			i++
+			j++
+		} else if cmp < 0 {
+			callback(StatusDeleted, indexEntry.RelativePath(), indexEntry, nil)
+			i++
+		} else {
+			callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
+			j++
+		}
+	}
+
+	for i < len(indexEntries) {
+		callback(StatusDeleted, indexEntries[i].RelativePath(), indexEntries[i], nil)
+		i++
+	}
+
+	for j < len(diskEntries) {
+		callback(StatusAdded, diskEntries[j].RelativePath(), nil, diskEntries[j])
+		j++
+	}
+
+	return nil
 }
 
-// sysUnusedOS hints to the OS that this memory region can be written to disk
-func sysUnusedOS(ptr unsafe.Pointer, size int) {
-	// Use madvise to hint that this memory is no longer needed in RAM
-	unix.Madvise((*[1 << 30]byte)(ptr)[:size:size], unix.MADV_DONTNEED)
+// isFileModified checks if a file has been modified using fast metadata comparison
+func (dc *DirectoryCache) isFileModified(indexEntry, diskEntry *binaryEntry) bool {
+	// Quick size check
+	if indexEntry.FileSize != diskEntry.FileSize {
+		return true
+	}
+
+	// Check ownership
+	if indexEntry.UID != diskEntry.UID || indexEntry.GID != diskEntry.GID {
+		return true
+	}
+
+	// Check timestamps using wall time
+	indexCTime := timeFromWall(indexEntry.CTimeWall)
+	diskCTime := timeFromWall(diskEntry.CTimeWall)
+	if indexCTime.Unix() != diskCTime.Unix() || indexCTime.Nanosecond() != diskCTime.Nanosecond() {
+		return true
+	}
+
+	indexMTime := timeFromWall(indexEntry.MTimeWall)
+	diskMTime := timeFromWall(diskEntry.MTimeWall)
+	if indexMTime.Unix() != diskMTime.Unix() || indexMTime.Nanosecond() != diskMTime.Nanosecond() {
+		return true
+	}
+
+	return false
 }
 
-// timeWall extracts the wall field from time.Time using unsafe operations
-func timeWall(t time.Time) uint64 {
-	return *(*uint64)(unsafe.Pointer(&t))
+// GetModifiedFiles returns only the paths of modified files
+func (dc *DirectoryCache) GetModifiedFiles() ([]string, error) {
+	var modified []string
+
+	err := dc.StatusWithCallback(func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		if status == StatusModified {
+			modified = append(modified, path)
+		}
+	})
+
+	return modified, err
 }
 
-// timeFromWall reconstructs a time.Time from wall time format
-func timeFromWall(wall uint64) time.Time {
-	var t time.Time
-	*(*uint64)(unsafe.Pointer(&t)) = wall
-	return t
+// GetAddedFiles returns only the paths of added files
+func (dc *DirectoryCache) GetAddedFiles() ([]string, error) {
+	var added []string
+
+	err := dc.StatusWithCallback(func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		if status == StatusAdded {
+			added = append(added, path)
+		}
+	})
+
+	return added, err
 }
 
-// encodeWallTime directly encodes seconds and nanoseconds into Go's wall time format
-func encodeWallTime(sec int64, nsec int64) uint64 {
-	// Create time.Time with full nanosecond precision and extract wall time
-	t := time.Unix(sec, nsec)
-	return timeWall(t)
+// GetDeletedFiles returns only the paths of deleted files
+func (dc *DirectoryCache) GetDeletedFiles() ([]string, error) {
+	var deleted []string
+
+	err := dc.StatusWithCallback(func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		if status == StatusDeleted {
+			deleted = append(deleted, path)
+		}
+	})
+
+	return deleted, err
+}
+
+// HasChanges returns true if there are any changes
+func (sr *StatusResult) HasChanges() bool {
+	return len(sr.Modified) > 0 || len(sr.Added) > 0 || len(sr.Deleted) > 0
+}
+
+// TotalChanges returns the total number of changed files
+func (sr *StatusResult) TotalChanges() int {
+	return len(sr.Modified) + len(sr.Added) + len(sr.Deleted)
+}
+
+// HasChangesQuick performs a quick check for any changes without collecting all results
+func (dc *DirectoryCache) HasChangesQuick() (bool, error) {
+	hasChanges := false
+
+	err := dc.StatusWithCallback(func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		if status != StatusUnchanged {
+			hasChanges = true
+		}
+	})
+
+	return hasChanges, err
 }
