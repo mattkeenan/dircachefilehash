@@ -499,7 +499,7 @@ func handleDupes(args []string) {
 			// Sort files within each duplicate group by path
 			for k := 0; k < len(files); k++ {
 				for l := k + 1; l < len(files); l++ {
-					if files[k].RelativePath > files[l].RelativePath {
+					if files[k].RelativePath() > files[l].RelativePath() {
 						files[k], files[l] = files[l], files[k]
 					}
 				}
@@ -508,7 +508,7 @@ func handleDupes(args []string) {
 			// Convert to absolute paths
 			var filePaths []string
 			for _, file := range files {
-				absPath := filepath.Join(repoRoot, file.RelativePath)
+				absPath := filepath.Join(repoRoot, file.RelativePath())
 				filePaths = append(filePaths, absPath)
 			}
 
@@ -538,7 +538,7 @@ func handleDupes(args []string) {
 			// Sort files within each duplicate group by path
 			for k := 0; k < len(files); k++ {
 				for l := k + 1; l < len(files); l++ {
-					if files[k].RelativePath > files[l].RelativePath {
+					if files[k].RelativePath() > files[l].RelativePath() {
 						files[k], files[l] = files[l], files[k]
 					}
 				}
@@ -547,7 +547,7 @@ func handleDupes(args []string) {
 			// Print each file in the duplicate group
 			for _, file := range files {
 				// Convert relative path to absolute path for display
-				absPath := filepath.Join(repoRoot, file.RelativePath)
+				absPath := filepath.Join(repoRoot, file.RelativePath())
 				fmt.Println(absPath)
 			}
 
