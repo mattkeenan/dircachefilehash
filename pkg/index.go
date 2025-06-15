@@ -10,9 +10,12 @@ import (
 )
 
 const (
-	HeaderSize   = 12 // signature(4) + version(4) + entry_count(4)
+	HeaderSize   = 20 // signature(4) + version(4) + byte_order(8) + entry_count(4)
 	ChecksumSize = 20 // SHA-1 checksum size
 )
+
+// ByteOrderMagic is used to detect byte order mismatches between host and index file
+const ByteOrderMagic uint64 = 0x0102030405060708
 
 // MmapIndex represents a memory-mapped index file
 type MmapIndex struct {
@@ -27,6 +30,7 @@ type MmapIndex struct {
 type IndexHeader struct {
 	Signature  [4]byte // "dcfh" signature
 	Version    uint32  // Index version (host order)
+	ByteOrder  uint64  // Byte order detection magic (0x0102030405060708)
 	EntryCount uint32  // Number of entries (host order)
 }
 
@@ -52,10 +56,20 @@ func (ih *IndexHeader) ValidateVersion(expected uint32) error {
 	return nil
 }
 
+// ValidateByteOrder checks if the byte order matches the host machine
+func (ih *IndexHeader) ValidateByteOrder() error {
+	if ih.ByteOrder != ByteOrderMagic {
+		return fmt.Errorf("byte order mismatch: index file byte order 0x%016x does not match host byte order 0x%016x",
+			ih.ByteOrder, ByteOrderMagic)
+	}
+	return nil
+}
+
 // SetHeader initializes the header fields in mmap'd memory
 func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32) {
 	ih.Signature = signature
 	ih.Version = version
+	ih.ByteOrder = ByteOrderMagic
 	ih.EntryCount = entryCount
 }
 
@@ -269,6 +283,9 @@ func (dc *DirectoryCache) LoadIndex() error {
 		return err
 	}
 	if err := header.ValidateVersion(dc.version); err != nil {
+		return err
+	}
+	if err := header.ValidateByteOrder(); err != nil {
 		return err
 	}
 
