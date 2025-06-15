@@ -4,6 +4,8 @@ import (
 	"hash"
 	"os"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // DirectoryCache manages the file cache for a directory
@@ -21,6 +23,7 @@ type DirectoryCache struct {
 // All fields are in host byte order for direct access
 // Time fields use Go's wall time format (uint64 encoding)
 type binaryEntry struct {
+	Size      uint32   // Total size of this entry including padding (host order) - MUST BE FIRST
 	CTimeWall uint64   // Change time wall clock (Go wall time format)
 	MTimeWall uint64   // Modification time wall clock (Go wall time format)
 	Dev       uint32   // Device ID (host order)
@@ -28,24 +31,36 @@ type binaryEntry struct {
 	Mode      uint32   // File mode (host order)
 	UID       uint32   // User ID (host order)
 	GID       uint32   // Group ID (host order)
-	Size      uint32   // File size (host order)
-	Hash      [20]byte // SHA-1 hash (20 bytes, byte order irrelevant)
+	FileSize  uint32   // File size in bytes (host order)
 	Flags     uint16   // Index flags (host order)
-	PathLen   uint16   // Length of relative path (host order)
+	Hash      [20]byte // SHA-1 hash (20 bytes, byte order irrelevant)
 	// Variable-length path follows immediately after this struct
 }
 
 // RelativePath returns the relative path string from mmap'd memory (zero-copy)
 func (be *binaryEntry) RelativePath() string {
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(be)) + unsafe.Sizeof(*be))
-	pathBytes := unsafe.Slice((*byte)(pathPtr), be.PathLen)
-	return unsafe.String((*byte)(pathPtr), be.PathLen)
+	pathBytes := be.RelativePathBytes()
+	if len(pathBytes) == 0 {
+		return ""
+	}
+	return unsafe.String(&pathBytes[0], len(pathBytes))
 }
 
 // RelativePathBytes returns the relative path as byte slice from mmap'd memory (zero-copy)
 func (be *binaryEntry) RelativePathBytes() []byte {
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(be)) + unsafe.Sizeof(*be))
-	return unsafe.Slice((*byte)(pathPtr), be.PathLen)
+	entryStart := uintptr(unsafe.Pointer(be))
+	entryEnd := entryStart + uintptr(be.Size)
+	pathStart := entryStart + unsafe.Sizeof(*be)
+
+	// Scan backwards byte by byte from the end (endian-neutral)
+	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
+	pathEnd := entryEnd
+	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 {
+		pathEnd--
+	}
+
+	pathLen := int(pathEnd - pathStart)
+	return unsafe.Slice((*byte)(unsafe.Pointer(pathStart)), pathLen)
 }
 
 // HashString returns the hash as a hex string
@@ -61,10 +76,7 @@ func (be *binaryEntry) HashString() string {
 
 // EntrySize returns the total size of this entry including padding
 func (be *binaryEntry) EntrySize() int {
-	baseSize := int(unsafe.Sizeof(*be))
-	totalSize := baseSize + int(be.PathLen) + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	return totalSize + padding
+	return int(be.Size)
 }
 
 // fileJob represents a file hashing job
@@ -91,7 +103,7 @@ func (dc *DirectoryCache) GetEntries() []*binaryEntry {
 func (dc *DirectoryCache) Stats() (int, int64, error) {
 	var totalSize int64
 	for _, entry := range dc.entries {
-		totalSize += int64(entry.Size)
+		totalSize += int64(entry.FileSize)
 	}
 	return len(dc.entries), totalSize, nil
 }
@@ -99,4 +111,10 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 // IsMmapped returns true if the cache is using memory-mapped storage
 func (dc *DirectoryCache) IsMmapped() bool {
 	return dc.mmapIndex != nil
+}
+
+// sysUnusedOS hints to the OS that this memory region can be written to disk
+func sysUnusedOS(ptr unsafe.Pointer, size int) {
+	// Use madvise to hint that this memory is no longer needed in RAM
+	unix.Madvise((*[1 << 30]byte)(ptr)[:size:size], unix.MADV_DONTNEED)
 }
