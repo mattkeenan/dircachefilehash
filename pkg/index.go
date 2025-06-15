@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -19,6 +20,8 @@ type MmapIndex struct {
 	file    *os.File
 	header  *IndexHeader
 	entries []byte // Raw entry data after header
+	size    int    // Current mapped size
+	offset  int    // Current write offset
 }
 
 // IndexHeader represents the file header in host byte order
@@ -28,14 +31,102 @@ type IndexHeader struct {
 	EntryCount uint32
 }
 
+// makeSpaceForEntry ensures space for an entry, expands mapping if needed, and returns pointer
+func (dc *DirectoryCache) makeSpaceForEntry(mmapIdx *MmapIndex, entrySize int) (*binaryEntry, error) {
+	// Check if we need more space (including checksum space)
+	requiredSpace := mmapIdx.offset + entrySize + ChecksumSize
+	if requiredSpace > mmapIdx.size {
+		// Need to expand the mapping
+		newSize := mmapIdx.size * 2
+		if newSize < requiredSpace {
+			newSize = requiredSpace + (1024 * 1024) // Add 1MB buffer
+		}
+
+		// Unmap current mapping
+		if err := unix.Munmap(mmapIdx.data); err != nil {
+			return nil, fmt.Errorf("failed to unmap: %w", err)
+		}
+
+		// Expand file
+		if err := mmapIdx.file.Truncate(int64(newSize)); err != nil {
+			return nil, fmt.Errorf("failed to expand file: %w", err)
+		}
+
+		// Remap with new size
+		newData, err := unix.Mmap(int(mmapIdx.file.Fd()), 0, newSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+		if err != nil {
+			return nil, fmt.Errorf("failed to remap file: %w", err)
+		}
+
+		// Update mapping
+		mmapIdx.data = newData
+		mmapIdx.size = newSize
+		mmapIdx.entries = newData[HeaderSize:]
+		mmapIdx.header = (*IndexHeader)(unsafe.Pointer(&newData[0]))
+	}
+
+	// Get pointer to entry location
+	entryPtr := (*binaryEntry)(unsafe.Pointer(&mmapIdx.data[mmapIdx.offset]))
+
+	// Zero out the entire entry space
+	entryBytes := (*[1 << 20]byte)(unsafe.Pointer(entryPtr))[:entrySize:entrySize]
+	for i := range entryBytes {
+		entryBytes[i] = 0
+	}
+
+	// Set only the Size field
+	entryPtr.Size = uint32(entrySize)
+
+	// Update offset for next entry
+	mmapIdx.offset += entrySize
+
+	return entryPtr, nil
+}
+
+// writeEntryToMmap writes a binaryEntry directly to mmap'd memory
+func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash [20]byte, info os.FileInfo, stat *syscall.Stat_t) int {
+	// Calculate total entry size first
+	baseSize := int(unsafe.Sizeof(binaryEntry{}))
+	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
+	padding := (8 - (totalSize % 8)) % 8
+	entrySize := totalSize + padding
+
+	// Write binaryEntry directly to mmap'd memory
+	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
+
+	entry.Size = uint32(entrySize) // Total size of this entry
+	entry.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	entry.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+	entry.Dev = uint32(stat.Dev)
+	entry.Ino = uint32(stat.Ino)
+	entry.Mode = uint32(info.Mode())
+	entry.UID = stat.Uid
+	entry.GID = stat.Gid
+	entry.FileSize = uint64(info.Size()) // File content size
+	entry.Flags = uint16(len(relPath))
+	entry.Hash = hash
+
+	// Write variable-size path directly after struct
+	pathOffset := int(unsafe.Sizeof(*entry))
+	copy(data[pathOffset:pathOffset+len(relPath)], relPath)
+
+	// Add null terminator
+	data[pathOffset+len(relPath)] = 0
+
+	// Zero out padding
+	for i := 0; i < padding; i++ {
+		data[totalSize+i] = 0
+	}
+
+	return entrySize
+}
+
 // WriteIndex writes entries directly to mmap'd index file
 func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	// Calculate total file size needed
 	totalSize := HeaderSize + ChecksumSize
 	for _, job := range jobs {
-		entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(job.relPath) + 1
-		padding := (8 - (entrySize % 8)) % 8
-		totalSize += entrySize + padding
+		totalSize += PathLenToSize(len(job.relPath))
 	}
 
 	// Create the file
@@ -121,6 +212,8 @@ func (dc *DirectoryCache) LoadIndex() error {
 		file:    file,
 		header:  (*IndexHeader)(unsafe.Pointer(&data[0])),
 		entries: data[HeaderSize:],
+		size:    int(stat.Size()),
+		offset:  HeaderSize,
 	}
 	dc.mmapIndex = mmapIndex
 
@@ -152,8 +245,8 @@ func (dc *DirectoryCache) LoadIndex() error {
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 		dc.entries = append(dc.entries, entry)
 
-		// Move to next entry
-		offset += entry.EntrySize()
+		// Move to next entry using Size field
+		offset += int(entry.Size)
 	}
 
 	return nil

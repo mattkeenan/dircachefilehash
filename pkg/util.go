@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"hash"
 	"os"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -31,7 +32,7 @@ type binaryEntry struct {
 	Mode      uint32   // File mode (host order)
 	UID       uint32   // User ID (host order)
 	GID       uint32   // Group ID (host order)
-	FileSize  uint32   // File size in bytes (host order)
+	FileSize  uint64   // File size in bytes (host order) - supports files >4GB
 	Flags     uint16   // Index flags (host order)
 	Hash      [20]byte // SHA-1 hash (20 bytes, byte order irrelevant)
 	// Variable-length path follows immediately after this struct
@@ -79,6 +80,14 @@ func (be *binaryEntry) EntrySize() int {
 	return int(be.Size)
 }
 
+// PathLenToSize calculates the necessary size of a binaryEntry struct given pathname length
+func PathLenToSize(pathLen int) int {
+	baseSize := int(unsafe.Sizeof(binaryEntry{}))
+	totalSize := baseSize + pathLen + 1 // +1 for null terminator
+	padding := (8 - (totalSize % 8)) % 8
+	return totalSize + padding
+}
+
 // fileJob represents a file hashing job
 type fileJob struct {
 	path    string
@@ -117,4 +126,23 @@ func (dc *DirectoryCache) IsMmapped() bool {
 func sysUnusedOS(ptr unsafe.Pointer, size int) {
 	// Use madvise to hint that this memory is no longer needed in RAM
 	unix.Madvise((*[1 << 30]byte)(ptr)[:size:size], unix.MADV_DONTNEED)
+}
+
+// timeWall extracts the wall field from time.Time using unsafe operations
+func timeWall(t time.Time) uint64 {
+	return *(*uint64)(unsafe.Pointer(&t))
+}
+
+// timeFromWall reconstructs a time.Time from wall time format
+func timeFromWall(wall uint64) time.Time {
+	var t time.Time
+	*(*uint64)(unsafe.Pointer(&t)) = wall
+	return t
+}
+
+// encodeWallTime directly encodes seconds and nanoseconds into Go's wall time format
+func encodeWallTime(sec int64, nsec int64) uint64 {
+	// Create time.Time with full nanosecond precision and extract wall time
+	t := time.Unix(sec, nsec)
+	return timeWall(t)
 }

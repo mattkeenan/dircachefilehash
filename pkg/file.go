@@ -49,7 +49,7 @@ func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash [20
 	entry.Mode = uint32(info.Mode())
 	entry.UID = stat.Uid
 	entry.GID = stat.Gid
-	entry.FileSize = uint32(info.Size()) // File content size
+	entry.FileSize = uint64(info.Size()) // File content size
 	entry.Hash = hash
 	entry.Flags = uint16(len(relPath))
 
