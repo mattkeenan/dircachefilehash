@@ -23,15 +23,15 @@ const (
 	HashSizeSHA512 = 64 // SHA-512 hash size in bytes
 )
 
-// DirectoryCache manages the file cache for a directory
+// DirectoryCache manages the file cache for a directory using zero-copy skiplist
 type DirectoryCache struct {
 	RootDir   string
 	IndexFile string
-	entries   []*binaryEntry // Direct pointers to mmap'd entries
-	signature [4]byte        // "dcfh" signature
-	version   uint32         // Index version
-	hasher    hash.Hash      // SHA-1 hasher for checksums
-	mmapIndex *MmapIndex     // Memory-mapped index file
+	skiplist  *SkiplistWrapper // Zero-copy skiplist for mmap'd entries
+	signature [4]byte          // "dcfh" signature
+	version   uint32           // Index version
+	hasher    hash.Hash        // SHA-1 hasher for checksums
+	mmapIndex *MmapIndex       // Memory-mapped index file
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
@@ -132,18 +132,30 @@ type fileResult struct {
 	index int // Original order for sorting
 }
 
-// GetEntries returns direct pointers to mmap'd entries (zero-copy)
+// GetEntries returns direct pointers to mmap'd entries via skiplist (zero-copy)
 func (dc *DirectoryCache) GetEntries() []*binaryEntry {
-	return dc.entries
+	if dc.skiplist == nil {
+		return nil
+	}
+	return dc.skiplist.GetSortedEntries()
 }
 
-// Stats returns statistics about the cache
+// Stats returns statistics about the cache using skiplist iteration
 func (dc *DirectoryCache) Stats() (int, int64, error) {
-	var totalSize int64
-	for _, entry := range dc.entries {
-		totalSize += int64(entry.FileSize)
+	if dc.skiplist == nil {
+		return 0, 0, nil
 	}
-	return len(dc.entries), totalSize, nil
+
+	var totalSize int64
+	count := 0
+
+	dc.skiplist.ForEach(func(entry *binaryEntry) bool {
+		totalSize += int64(entry.FileSize)
+		count++
+		return true // Continue iteration
+	})
+
+	return count, totalSize, nil
 }
 
 // IsMmapped returns true if the cache is using memory-mapped storage

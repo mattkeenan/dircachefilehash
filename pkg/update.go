@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -14,7 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Update scans the directory and updates the index file
+// Update scans the directory and updates the index file using skiplist
 func (dc *DirectoryCache) Update(paths ...string) error {
 	if len(paths) == 0 {
 		paths = []string{dc.RootDir}
@@ -161,8 +162,22 @@ type hashResult struct {
 	err      error
 }
 
-// UpdatePaths updates only the specified paths with truly parallel processing
+// UpdatePaths updates only the specified paths using skiplist and Hwang-Lin merge algorithm
 func (dc *DirectoryCache) UpdatePaths(paths []string) error {
+	// Load existing index into skiplist
+	var existingSkiplist *SkiplistWrapper
+	if err := dc.LoadIndex(); err == nil {
+		existingSkiplist = dc.skiplist.Copy()
+	} else {
+		existingSkiplist = NewSkiplistWrapper(16)
+	}
+
+	// Collect file jobs for new/changed files
+	jobs, err := dc.collectFileJobs(paths)
+	if err != nil {
+		return fmt.Errorf("failed to collect file jobs: %w", err)
+	}
+
 	// Calculate approximate size for temporary mmap
 	estimatedSize := HeaderSize + ChecksumSize + (1024 * 1024) // Start with 1MB
 
@@ -190,12 +205,15 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 	tempHeader.Version = dc.version
 	tempHeader.EntryCount = 0
 
+	// Create new skiplist for updated entries
+	newSkiplist := NewSkiplistWrapper(16)
+
 	// Setup channels for worker communication
 	jobChan := make(chan hashJob, 100)
 	resultChan := make(chan hashResult, 100)
 	doneChan := make(chan struct{})
 
-	// Start workerMuxHandler BEFORE scanning paths
+	// Start worker processes
 	var muxWg sync.WaitGroup
 	muxWg.Add(1)
 	go func() {
@@ -203,7 +221,6 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 		dc.workerMuxHandler(jobChan, resultChan)
 	}()
 
-	// Start result handler
 	var resultWg sync.WaitGroup
 	resultWg.Add(1)
 	go func() {
@@ -211,36 +228,20 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 		dc.handleHashResults(resultChan, doneChan)
 	}()
 
-	// Load existing index for comparison
-	existingEntries := make(map[string]*binaryEntry)
-	if err := dc.LoadIndex(); err == nil {
-		for _, entry := range dc.entries {
-			existingEntries[entry.RelativePath()] = entry
-		}
-	}
-
-	// Process paths with parallel hashing
+	// Process paths with parallel hashing using Hwang-Lin merge
 	offset := HeaderSize
 	entryCount := uint32(0)
 
-	for _, inputPath := range paths {
-		absPath := inputPath
-		if !filepath.IsAbs(inputPath) {
-			absPath = filepath.Join(dc.RootDir, inputPath)
-		}
-		absPath = filepath.Clean(absPath)
-
-		if err := dc.processPathParallel(absPath, existingEntries, tempData, &offset, &entryCount,
-			estimatedSize, jobChan); err != nil {
-			close(jobChan)
-			return err
-		}
+	if err := dc.processPathsWithHwangLin(paths, existingSkiplist, newSkiplist, tempData, &offset,
+		&entryCount, estimatedSize, jobChan); err != nil {
+		close(jobChan)
+		return err
 	}
 
 	// Signal no more jobs and wait for completion
 	close(jobChan)
-	muxWg.Wait() // Wait for mux handler to finish
-	<-doneChan   // Wait for result handler to finish
+	muxWg.Wait()
+	<-doneChan
 	resultWg.Wait()
 
 	// Update header with final count
@@ -260,117 +261,133 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 		return fmt.Errorf("failed to replace index file: %w", err)
 	}
 
-	return nil
-}
-
-// processPathParallel processes a single path with parallel hashing
-func (dc *DirectoryCache) processPathParallel(absPath string, existingEntries map[string]*binaryEntry,
-	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
-
-	info, err := os.Lstat(absPath)
-	if err != nil {
-		return nil // Skip inaccessible paths
-	}
-
-	relPath, err := filepath.Rel(dc.RootDir, absPath)
-	if err != nil {
-		return fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
-	}
-
-	if info.IsDir() {
-		return dc.scanDirParallel(absPath, existingEntries, tempData, offset, entryCount, maxSize, jobChan)
-	} else if info.Mode().IsRegular() {
-		if absPath == dc.IndexFile {
-			return nil
-		}
-		return dc.processFileParallel(absPath, relPath, info, existingEntries, tempData, offset, entryCount, maxSize, jobChan)
-	}
+	// Update our skiplist with the new data
+	dc.skiplist = newSkiplist
 
 	return nil
 }
 
-// scanDirParallel scans directory recursively with parallel processing
-func (dc *DirectoryCache) scanDirParallel(rootPath string, existingEntries map[string]*binaryEntry,
+// processPathsWithHwangLin uses Hwang-Lin algorithm to merge existing and new entries
+func (dc *DirectoryCache) processPathsWithHwangLin(paths []string, existingSkiplist, newSkiplist *SkiplistWrapper,
 	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
 
-	pathQueue := []string{rootPath}
+	// Collect all file jobs for the paths
+	allJobs, err := dc.collectFileJobs(paths)
+	if err != nil {
+		return err
+	}
 
-	for len(pathQueue) > 0 {
-		currentPath := pathQueue[0]
-		pathQueue = pathQueue[1:]
+	// Create a map for quick lookup of new files
+	newFiles := make(map[string]fileJob)
+	for _, job := range allJobs {
+		newFiles[job.relPath] = job
+	}
 
-		info, err := os.Lstat(currentPath)
-		if err != nil {
-			continue
-		}
+	// Get existing entries in sorted order
+	existingEntries := existingSkiplist.GetSortedEntries()
 
-		if info.IsDir() {
-			indexDir := filepath.Dir(dc.IndexFile)
-			if currentPath == indexDir {
-				continue
+	// Create sorted list of new file paths
+	var newPaths []string
+	for path := range newFiles {
+		newPaths = append(newPaths, path)
+	}
+	sort.Strings(newPaths)
+
+	// Hwang-Lin merge algorithm
+	i, j := 0, 0
+	for i < len(existingEntries) && j < len(newPaths) {
+		existing := existingEntries[i]
+		newPath := newPaths[j]
+		newJob := newFiles[newPath]
+
+		cmp := strings.Compare(existing.RelativePath(), newPath)
+
+		if cmp == 0 {
+			// File exists in both - check if changed
+			if dc.fileChangedFromJob(existing, newJob) {
+				// File changed - process with new data
+				if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
+					return err
+				}
+			} else {
+				// File unchanged - copy existing entry
+				if err := dc.copyExistingEntry(existing, tempData, offset, entryCount, maxSize, newSkiplist); err != nil {
+					return err
+				}
 			}
-
-			entries, err := os.ReadDir(currentPath)
-			if err != nil {
-				continue
-			}
-
-			sort.Slice(entries, func(i, j int) bool {
-				return entries[i].Name() < entries[j].Name()
-			})
-
-			for _, entry := range entries {
-				fullPath := filepath.Join(currentPath, entry.Name())
-				pathQueue = append(pathQueue, fullPath)
-			}
-		} else if info.Mode().IsRegular() {
-			if currentPath == dc.IndexFile {
-				continue
-			}
-
-			relPath, err := filepath.Rel(dc.RootDir, currentPath)
-			if err != nil {
-				continue
-			}
-
-			if err := dc.processFileParallel(currentPath, relPath, info, existingEntries, tempData,
-				offset, entryCount, maxSize, jobChan); err != nil {
+			i++
+			j++
+		} else if cmp < 0 {
+			// Existing file not in new set - skip (effectively delete)
+			i++
+		} else {
+			// New file not in existing set - add
+			if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
 				return err
 			}
+			j++
 		}
+	}
+
+	// Handle remaining new files
+	for j < len(newPaths) {
+		newJob := newFiles[newPaths[j]]
+		if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
+			return err
+		}
+		j++
 	}
 
 	return nil
 }
 
-// processFileParallel processes a single file with parallel hashing
-func (dc *DirectoryCache) processFileParallel(filePath, relPath string, info os.FileInfo,
-	existingEntries map[string]*binaryEntry, tempData []byte, offset *int, entryCount *uint32,
-	maxSize int, jobChan chan<- hashJob) error {
+// fileChangedFromJob checks if a file has changed compared to existing entry
+func (dc *DirectoryCache) fileChangedFromJob(existing *binaryEntry, job fileJob) bool {
+	stat := job.info.Sys().(*syscall.Stat_t)
 
-	stat := info.Sys().(*syscall.Stat_t)
-
-	// Check if file changed compared to existing entry
-	if existing, exists := existingEntries[relPath]; exists {
-		if dc.fileUnchanged(existing, info, stat) {
-			// Copy unchanged entry to temp index
-			existingSize := existing.EntrySize()
-			if *offset+existingSize > maxSize-ChecksumSize {
-				return fmt.Errorf("temp file too small")
-			}
-
-			// Copy entire entry including Size field
-			copy(tempData[*offset:*offset+existingSize],
-				(*[1 << 20]byte)(unsafe.Pointer(existing))[:existingSize:existingSize])
-
-			*offset += existingSize
-			*entryCount++
-			return nil
-		}
+	if existing.FileSize != uint64(job.info.Size()) {
+		return true
+	}
+	if existing.UID != stat.Uid || existing.GID != stat.Gid {
+		return true
 	}
 
-	// File is new or changed - create entry and queue for hashing
-	entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(relPath) + 1
+	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+
+	return existing.CTimeWall != currentCTime || existing.MTimeWall != currentMTime
+}
+
+// copyExistingEntry copies an unchanged entry to the new index
+func (dc *DirectoryCache) copyExistingEntry(existing *binaryEntry, tempData []byte, offset *int,
+	entryCount *uint32, maxSize int, newSkiplist *SkiplistWrapper) error {
+
+	existingSize := existing.EntrySize()
+	if *offset+existingSize > maxSize-ChecksumSize {
+		return fmt.Errorf("temp file too small")
+	}
+
+	// Copy entire entry
+	copy(tempData[*offset:*offset+existingSize],
+		(*[1 << 20]byte)(unsafe.Pointer(existing))[:existingSize:existingSize])
+
+	// Get pointer to copied entry and add to new skiplist
+	copiedEntry := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
+	newSkiplist.Insert(copiedEntry)
+
+	*offset += existingSize
+	*entryCount++
+	return nil
+}
+
+// processNewFileEntry processes a new or changed file entry
+func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offset *int,
+	entryCount *uint32, maxSize int, jobChan chan<- hashJob, newSkiplist *SkiplistWrapper) error {
+
+	stat := job.info.Sys().(*syscall.Stat_t)
+
+	// Calculate entry size
+	entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(job.relPath) + 1
 	padding := (8 - (entrySize % 8)) % 8
 	totalSize := entrySize + padding
 
@@ -380,37 +397,39 @@ func (dc *DirectoryCache) processFileParallel(filePath, relPath string, info os.
 
 	// Create entry in temp mmap
 	entryPtr := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
-	entryPtr.Size = uint32(totalSize) // Total size of this entry
+	entryPtr.Size = uint32(totalSize)
 	entryPtr.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
 	entryPtr.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
 	entryPtr.Dev = uint32(stat.Dev)
 	entryPtr.Ino = uint32(stat.Ino)
-	entryPtr.Mode = uint32(info.Mode())
+	entryPtr.Mode = uint32(job.info.Mode())
 	entryPtr.UID = stat.Uid
 	entryPtr.GID = stat.Gid
-	entryPtr.FileSize = uint64(info.Size()) // File content size
-	entryPtr.Flags = uint16(len(relPath))
-	// Hash will be filled by worker
+	entryPtr.FileSize = uint64(job.info.Size())
+	entryPtr.Flags = uint16(len(job.relPath))
 
 	// Write path
 	pathOffset := int(unsafe.Sizeof(*entryPtr))
-	copy(tempData[*offset+pathOffset:], relPath)
-	tempData[*offset+pathOffset+len(relPath)] = 0
+	copy(tempData[*offset+pathOffset:], job.relPath)
+	tempData[*offset+pathOffset+len(job.relPath)] = 0
 
 	// Zero padding
 	for i := 0; i < padding; i++ {
 		tempData[*offset+entrySize+i] = 0
 	}
 
+	// Add to skiplist
+	newSkiplist.Insert(entryPtr)
+
 	// Queue for hashing
-	job := hashJob{
+	hashJob := hashJob{
 		entry:    entryPtr,
-		filePath: filePath,
+		filePath: job.path,
 		deviceID: stat.Dev,
 	}
 
 	select {
-	case jobChan <- job:
+	case jobChan <- hashJob:
 	default:
 		return fmt.Errorf("job channel full")
 	}
@@ -552,6 +571,8 @@ func (dc *DirectoryCache) handleHashResults(resultChan <-chan hashResult, doneCh
 
 	close(doneChan)
 }
+
+// Legacy methods for compatibility - now using skiplist internally
 
 // processFilesParallelResults processes files using device-specific worker pools
 func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileResult, error) {

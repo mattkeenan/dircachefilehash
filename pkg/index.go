@@ -127,7 +127,7 @@ func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash []b
 	return entrySize
 }
 
-// WriteIndex writes entries directly to mmap'd index file
+// WriteIndex writes entries directly to mmap'd index file using skiplist
 func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	// Calculate total file size needed
 	totalSize := HeaderSize + ChecksumSize
@@ -160,7 +160,10 @@ func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	header.Version = dc.version
 	header.EntryCount = uint32(len(jobs))
 
-	// Write entries directly to mmap'd memory
+	// Clear and recreate skiplist for new entries
+	dc.skiplist = NewSkiplistWrapper(16)
+
+	// Write entries directly to mmap'd memory and add to skiplist iteratively
 	offset := HeaderSize
 	for _, job := range jobs {
 		// Process file and get hash
@@ -171,6 +174,11 @@ func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 
 		// Write entry directly to mmap'd memory
 		entrySize := dc.writeEntryToMmap(data[offset:], job.relPath, hashBytes, hashType, job.info, stat)
+
+		// Get pointer to the entry we just wrote and add to skiplist immediately
+		entryPtr := (*binaryEntry)(unsafe.Pointer(&data[offset]))
+		dc.skiplist.Insert(entryPtr)
+
 		offset += entrySize
 	}
 
@@ -186,7 +194,7 @@ func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	return nil
 }
 
-// LoadIndex loads and maps the index file, populating direct pointers to entries
+// LoadIndex loads and maps the index file, populating skiplist with direct pointers to entries
 func (dc *DirectoryCache) LoadIndex() error {
 	file, err := os.Open(dc.IndexFile)
 	if err != nil {
@@ -237,8 +245,10 @@ func (dc *DirectoryCache) LoadIndex() error {
 		return fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Parse entries - create direct pointers to mmap'd binaryEntry structs
-	dc.entries = make([]*binaryEntry, 0, mmapIndex.header.EntryCount)
+	// Clear and recreate skiplist
+	dc.skiplist = NewSkiplistWrapper(16)
+
+	// Parse entries - create direct pointers to mmap'd binaryEntry structs and add to skiplist
 	offset := 0
 	entryData := mmapIndex.entries
 
@@ -249,7 +259,9 @@ func (dc *DirectoryCache) LoadIndex() error {
 
 		// Get direct pointer to binaryEntry in mmap'd memory
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-		dc.entries = append(dc.entries, entry)
+
+		// Insert immediately while parsing for better cache locality and memory efficiency
+		dc.skiplist.Insert(entry)
 
 		// Move to next entry using Size field
 		offset += int(entry.Size)

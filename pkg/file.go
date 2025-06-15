@@ -43,8 +43,13 @@ func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash [20
 	entry.UID = stat.Uid
 	entry.GID = stat.Gid
 	entry.FileSize = uint64(info.Size()) // File content size
-	entry.Hash = hash
 	entry.Flags = uint16(len(relPath))
+
+	// Clear hash field and copy hash data
+	for i := range entry.Hash {
+		entry.Hash[i] = 0
+	}
+	copy(entry.Hash[:], hash[:])
 
 	// Write variable-size path directly after struct
 	pathOffset := int(unsafe.Sizeof(*entry))

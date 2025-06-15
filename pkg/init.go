@@ -26,7 +26,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	dc := &DirectoryCache{
 		RootDir:   rootDir,
 		IndexFile: indexFile,
-		entries:   make([]*binaryEntry, 0),     // Direct pointers to mmap'd entries
+		skiplist:  NewSkiplistWrapper(16),      // Initialize skiplist with 16 max levels
 		signature: [4]byte{'d', 'c', 'f', 'h'}, // "dcfh" signature
 		version:   1,                           // Version 1 format
 		hasher:    sha1.New(),                  // SHA-1 hasher for checksums

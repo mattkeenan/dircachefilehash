@@ -22,24 +22,20 @@ type StatusResult struct {
 	Deleted  []string
 }
 
-// Status compares the current directory state with the loaded index using zero-copy operations
+// Status compares the current directory state with the loaded index using Hwang-Lin algorithm on skiplists
 func (dc *DirectoryCache) Status() (*StatusResult, error) {
-	if len(dc.entries) == 0 {
+	if dc.skiplist.IsEmpty() {
 		if err := dc.LoadIndex(); err != nil {
 			return nil, fmt.Errorf("failed to load index: %w", err)
 		}
 	}
 
-	// Scan current state
+	// Scan current state into a new cache
 	currentCache := NewDirectoryCache(dc.RootDir, "")
 	if err := currentCache.ScanDirectory(); err != nil {
 		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
 	defer currentCache.Close()
-
-	// Get zero-copy access to entries
-	indexEntries := dc.entries
-	diskEntries := currentCache.entries
 
 	result := &StatusResult{
 		Modified: make([]string, 0),
@@ -47,47 +43,24 @@ func (dc *DirectoryCache) Status() (*StatusResult, error) {
 		Deleted:  make([]string, 0),
 	}
 
-	// Hwang-Lin merge algorithm
-	i, j := 0, 0
-
-	for i < len(indexEntries) && j < len(diskEntries) {
-		indexEntry := indexEntries[i]
-		diskEntry := diskEntries[j]
-
-		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
-
-		if cmp == 0 {
-			if dc.isFileModified(indexEntry, diskEntry) {
-				result.Modified = append(result.Modified, indexEntry.RelativePath())
-			}
-			i++
-			j++
-		} else if cmp < 0 {
-			result.Deleted = append(result.Deleted, indexEntry.RelativePath())
-			i++
-		} else {
-			result.Added = append(result.Added, diskEntry.RelativePath())
-			j++
+	// Hwang-Lin merge algorithm using skiplist iterators
+	dc.hwangLinStatus(dc.skiplist, currentCache.skiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		switch status {
+		case StatusModified:
+			result.Modified = append(result.Modified, path)
+		case StatusAdded:
+			result.Added = append(result.Added, path)
+		case StatusDeleted:
+			result.Deleted = append(result.Deleted, path)
 		}
-	}
-
-	// Handle remaining entries
-	for i < len(indexEntries) {
-		result.Deleted = append(result.Deleted, indexEntries[i].RelativePath())
-		i++
-	}
-
-	for j < len(diskEntries) {
-		result.Added = append(result.Added, diskEntries[j].RelativePath())
-		j++
-	}
+	})
 
 	return result, nil
 }
 
-// StatusWithCallback compares directory state using a callback for zero-copy operation
+// StatusWithCallback compares directory state using Hwang-Lin algorithm with callback for zero-copy operation
 func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) error {
-	if len(dc.entries) == 0 {
+	if dc.skiplist.IsEmpty() {
 		if err := dc.LoadIndex(); err != nil {
 			return fmt.Errorf("failed to load index: %w", err)
 		}
@@ -99,12 +72,22 @@ func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, pa
 	}
 	defer currentCache.Close()
 
-	indexEntries := dc.entries
-	diskEntries := currentCache.entries
+	// Use Hwang-Lin algorithm directly
+	dc.hwangLinStatus(dc.skiplist, currentCache.skiplist, callback)
+	return nil
+}
 
-	// Hwang-Lin merge with callback
+// hwangLinStatus implements the Hwang-Lin merge algorithm for comparing two sorted skiplists
+func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWrapper,
+	callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) {
+
+	// Get sorted entries from both skiplists (zero-copy)
+	indexEntries := indexSkiplist.GetSortedEntries()
+	diskEntries := diskSkiplist.GetSortedEntries()
+
 	i, j := 0, 0
 
+	// Hwang-Lin merge
 	for i < len(indexEntries) && j < len(diskEntries) {
 		indexEntry := indexEntries[i]
 		diskEntry := diskEntries[j]
@@ -112,6 +95,7 @@ func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, pa
 		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
 
 		if cmp == 0 {
+			// Same file - check if modified
 			if dc.isFileModified(indexEntry, diskEntry) {
 				callback(StatusModified, indexEntry.RelativePath(), indexEntry, diskEntry)
 			} else {
@@ -120,25 +104,27 @@ func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, pa
 			i++
 			j++
 		} else if cmp < 0 {
+			// File exists in index but not on disk - deleted
 			callback(StatusDeleted, indexEntry.RelativePath(), indexEntry, nil)
 			i++
 		} else {
+			// File exists on disk but not in index - added
 			callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
 			j++
 		}
 	}
 
+	// Handle remaining entries from index (all deleted)
 	for i < len(indexEntries) {
 		callback(StatusDeleted, indexEntries[i].RelativePath(), indexEntries[i], nil)
 		i++
 	}
 
+	// Handle remaining entries from disk (all added)
 	for j < len(diskEntries) {
 		callback(StatusAdded, diskEntries[j].RelativePath(), nil, diskEntries[j])
 		j++
 	}
-
-	return nil
 }
 
 // isFileModified checks if a file has been modified using fast metadata comparison
@@ -169,7 +155,7 @@ func (dc *DirectoryCache) isFileModified(indexEntry, diskEntry *binaryEntry) boo
 	return false
 }
 
-// GetModifiedFiles returns only the paths of modified files
+// GetModifiedFiles returns only the paths of modified files using Hwang-Lin algorithm
 func (dc *DirectoryCache) GetModifiedFiles() ([]string, error) {
 	var modified []string
 
@@ -182,7 +168,7 @@ func (dc *DirectoryCache) GetModifiedFiles() ([]string, error) {
 	return modified, err
 }
 
-// GetAddedFiles returns only the paths of added files
+// GetAddedFiles returns only the paths of added files using Hwang-Lin algorithm
 func (dc *DirectoryCache) GetAddedFiles() ([]string, error) {
 	var added []string
 
@@ -195,7 +181,7 @@ func (dc *DirectoryCache) GetAddedFiles() ([]string, error) {
 	return added, err
 }
 
-// GetDeletedFiles returns only the paths of deleted files
+// GetDeletedFiles returns only the paths of deleted files using Hwang-Lin algorithm
 func (dc *DirectoryCache) GetDeletedFiles() ([]string, error) {
 	var deleted []string
 
@@ -218,7 +204,7 @@ func (sr *StatusResult) TotalChanges() int {
 	return len(sr.Modified) + len(sr.Added) + len(sr.Deleted)
 }
 
-// HasChangesQuick performs a quick check for any changes without collecting all results
+// HasChangesQuick performs a quick check for any changes using Hwang-Lin algorithm without collecting all results
 func (dc *DirectoryCache) HasChangesQuick() (bool, error) {
 	hasChanges := false
 
