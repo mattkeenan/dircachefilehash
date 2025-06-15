@@ -1,97 +1,78 @@
 package dircachefilehash
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
-	"strings"
 	"sync"
 	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // Update scans the directory and updates the index file
-// If paths are provided, only those files/directories are updated
-// If no paths are provided, all files under rootDir are updated
 func (dc *DirectoryCache) Update(paths ...string) error {
-	// If no paths provided, update the entire root directory
 	if len(paths) == 0 {
 		paths = []string{dc.RootDir}
 	}
 
-	// Always use UpdatePaths to handle both cases
-	if err := dc.UpdatePaths(paths); err != nil {
-		return fmt.Errorf("failed to update paths: %w", err)
+	jobs, err := dc.collectFileJobs(paths)
+	if err != nil {
+		return fmt.Errorf("failed to collect file jobs: %w", err)
 	}
 
-	if err := dc.WriteIndex(); err != nil {
+	if err := dc.WriteIndex(jobs); err != nil {
 		return fmt.Errorf("failed to write index: %w", err)
 	}
 
 	return nil
 }
 
-// UpdatePaths updates only the specified paths in the index
-func (dc *DirectoryCache) UpdatePaths(paths []string) error {
-	// Load existing index to preserve other entries
-	existingEntries := NewSkiplistWrapper(16)
-	if err := dc.LoadIndex(); err == nil {
-		for _, entry := range dc.entries {
-			existingEntries.Insert(entry)
-		}
+// ScanDirectory scans the directory and creates file jobs for parallel processing
+func (dc *DirectoryCache) ScanDirectory() error {
+	jobs, err := dc.collectFileJobs([]string{dc.RootDir})
+	if err != nil {
+		return err
 	}
 
-	// Collect files to process from specified paths
+	return dc.WriteIndex(jobs)
+}
+
+// collectFileJobs collects file jobs from specified paths
+func (dc *DirectoryCache) collectFileJobs(paths []string) ([]fileJob, error) {
 	var fileJobs []fileJob
 	jobIndex := 0
-	pathsToRemove := make(map[string]bool)
 
 	for _, inputPath := range paths {
-		// Convert to absolute path
 		absPath := inputPath
 		if !filepath.IsAbs(inputPath) {
 			absPath = filepath.Join(dc.RootDir, inputPath)
 		}
-
-		// Clean the path
 		absPath = filepath.Clean(absPath)
 
-		// Check if path exists
 		info, err := os.Lstat(absPath)
 		if err != nil {
-			// Path doesn't exist - mark for removal from index
-			relPath, relErr := filepath.Rel(dc.RootDir, absPath)
-			if relErr == nil {
-				pathsToRemove[relPath] = true
-				// Also mark any files under this path for removal
-				for current := existingEntries.skiplist.First(); current != nil; current = current.Next() {
-					existingPath := current.Key()
-					if strings.HasPrefix(existingPath, relPath+"/") || existingPath == relPath {
-						pathsToRemove[existingPath] = true
-					}
-				}
-			}
-			continue
+			continue // Skip inaccessible paths
 		}
 
-		// Get relative path from root directory
 		relPath, err := filepath.Rel(dc.RootDir, absPath)
 		if err != nil {
-			return fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
+			return nil, fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
 		}
 
-		// If it's a directory, scan it recursively
 		if info.IsDir() {
-			if err := dc.scanPathRecursively(absPath, &fileJobs, &jobIndex, pathsToRemove); err != nil {
-				return fmt.Errorf("failed to scan directory %s: %w", absPath, err)
+			if err := dc.scanPathRecursively(absPath, &fileJobs, &jobIndex); err != nil {
+				return nil, fmt.Errorf("failed to scan directory %s: %w", absPath, err)
 			}
 		} else if info.Mode().IsRegular() {
-			// Skip the index file itself
 			if absPath == dc.IndexFile {
 				continue
 			}
 
-			// Add single file
 			fileJobs = append(fileJobs, fileJob{
 				path:    absPath,
 				info:    info,
@@ -99,110 +80,59 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 				index:   jobIndex,
 			})
 			jobIndex++
-
-			// Mark this path as being updated (remove from pathsToRemove if it was there)
-			delete(pathsToRemove, relPath)
 		}
 	}
 
-	// Process files in parallel
-	var newEntries []FileEntry
-	if len(fileJobs) > 0 {
-		results, err := dc.processFilesParallelResults(fileJobs)
-		if err != nil {
-			return err
-		}
-
-		// Extract entries from results
-		for _, result := range results {
-			if result.err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
-				continue
-			}
-			newEntries = append(newEntries, *result.entry)
-		}
-	}
-
-	// Merge with existing entries
-	updatedPaths := make(map[string]bool)
-	for _, entry := range newEntries {
-		updatedPaths[entry.RelativePath] = true
-	}
-
-	// Start with new entries
-	dc.entries = make([]FileEntry, 0, len(newEntries)+existingEntries.Length())
-	dc.entries = append(dc.entries, newEntries...)
-
-	// Add existing entries that weren't updated or removed
-	for current := existingEntries.skiplist.First(); current != nil; current = current.Next() {
-		path := current.Key()
-		if !updatedPaths[path] && !pathsToRemove[path] {
-			dc.entries = append(dc.entries, *current.Item())
-		}
-	}
-
-	// Sort entries by filename for byte comparison order
-	sort.Slice(dc.entries, func(i, j int) bool {
-		return dc.entries[i].RelativePath < dc.entries[j].RelativePath
+	// Sort jobs by relative path for consistent ordering
+	sort.Slice(fileJobs, func(i, j int) bool {
+		return fileJobs[i].relPath < fileJobs[j].relPath
 	})
 
-	return nil
+	return fileJobs, nil
 }
 
-// scanPathRecursively scans a directory path recursively and adds files to the job list
-func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJob, jobIndex *int, pathsToRemove map[string]bool) error {
-	// FIFO slice for directory traversal
+// scanPathRecursively scans a directory recursively
+func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJob, jobIndex *int) error {
 	pathQueue := []string{rootPath}
 
 	for len(pathQueue) > 0 {
-		// Pop the first entry from the FIFO slice
 		currentPath := pathQueue[0]
 		pathQueue = pathQueue[1:]
 
-		// Get file info
 		info, err := os.Lstat(currentPath)
-		if err != nil {
-			continue // Skip files we can't access
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(dc.RootDir, currentPath)
 		if err != nil {
 			continue
 		}
 
 		if info.IsDir() {
-			// Skip the index directory
 			indexDir := filepath.Dir(dc.IndexFile)
 			if currentPath == indexDir {
 				continue
 			}
 
-			// Remove this path from removal list since it exists
-			delete(pathsToRemove, relPath)
-
 			entries, err := os.ReadDir(currentPath)
 			if err != nil {
-				continue // Skip directories we can't read
+				continue
 			}
 
-			// Sort entries by name using bytewise comparison
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].Name() < entries[j].Name()
 			})
 
-			// Add all entries to the FIFO queue
 			for _, entry := range entries {
 				fullPath := filepath.Join(currentPath, entry.Name())
 				pathQueue = append(pathQueue, fullPath)
 			}
 		} else if info.Mode().IsRegular() {
-			// Skip the index file itself
 			if currentPath == dc.IndexFile {
 				continue
 			}
 
-			// Add to jobs list
+			relPath, err := filepath.Rel(dc.RootDir, currentPath)
+			if err != nil {
+				continue
+			}
+
 			*fileJobs = append(*fileJobs, fileJob{
 				path:    currentPath,
 				info:    info,
@@ -210,42 +140,170 @@ func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJ
 				index:   *jobIndex,
 			})
 			*jobIndex++
-
-			// Remove this path from removal list since it exists
-			delete(pathsToRemove, relPath)
 		}
 	}
 
 	return nil
 }
 
-// ScanDirectory scans the directory and creates file entries with hashes using parallel processing
-func (dc *DirectoryCache) ScanDirectory() error {
-	dc.entries = make([]FileEntry, 0)
+// hashJob represents a file hashing job with pointer to binEntry
+type hashJob struct {
+	entry    *binaryEntry
+	filePath string
+	deviceID uint64
+}
 
-	// Collect all regular files first
-	var fileJobs []fileJob
-	jobIndex := 0
+// hashResult represents the result of a hash operation
+type hashResult struct {
+	entry *binaryEntry
+	hash  [20]byte
+	err   error
+}
 
-	// FIFO slice for file paths - push to end, pop from front
-	pathQueue := []string{dc.RootDir}
+// UpdatePaths updates only the specified paths with truly parallel processing
+func (dc *DirectoryCache) UpdatePaths(paths []string) error {
+	// Calculate approximate size for temporary mmap
+	estimatedSize := HeaderSize + ChecksumSize + (1024 * 1024) // Start with 1MB
 
-	// Process paths until queue is empty
+	// Create temporary mmap for building new index
+	tempFile, err := os.CreateTemp(filepath.Dir(dc.IndexFile), "index_temp_*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	if err := tempFile.Truncate(int64(estimatedSize)); err != nil {
+		return fmt.Errorf("failed to truncate temp file: %w", err)
+	}
+
+	tempData, err := unix.Mmap(int(tempFile.Fd()), 0, estimatedSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap temp file: %w", err)
+	}
+	defer unix.Munmap(tempData)
+
+	// Write temp header
+	tempHeader := (*IndexHeader)(unsafe.Pointer(&tempData[0]))
+	tempHeader.Signature = dc.signature
+	tempHeader.Version = dc.version
+	tempHeader.EntryCount = 0
+
+	// Setup channels for worker communication
+	jobChan := make(chan hashJob, 100)
+	resultChan := make(chan hashResult, 100)
+	doneChan := make(chan struct{})
+
+	// Start workerMuxHandler BEFORE scanning paths
+	var muxWg sync.WaitGroup
+	muxWg.Add(1)
+	go func() {
+		defer muxWg.Done()
+		dc.workerMuxHandler(jobChan, resultChan)
+	}()
+
+	// Start result handler
+	var resultWg sync.WaitGroup
+	resultWg.Add(1)
+	go func() {
+		defer resultWg.Done()
+		dc.handleHashResults(resultChan, doneChan)
+	}()
+
+	// Load existing index for comparison
+	existingEntries := make(map[string]*binaryEntry)
+	if err := dc.LoadIndex(); err == nil {
+		for _, entry := range dc.entries {
+			existingEntries[entry.RelativePath()] = entry
+		}
+	}
+
+	// Process paths with parallel hashing
+	offset := HeaderSize
+	entryCount := uint32(0)
+
+	for _, inputPath := range paths {
+		absPath := inputPath
+		if !filepath.IsAbs(inputPath) {
+			absPath = filepath.Join(dc.RootDir, inputPath)
+		}
+		absPath = filepath.Clean(absPath)
+
+		if err := dc.processPathParallel(absPath, existingEntries, tempData, &offset, &entryCount,
+			estimatedSize, jobChan); err != nil {
+			close(jobChan)
+			return err
+		}
+	}
+
+	// Signal no more jobs and wait for completion
+	close(jobChan)
+	muxWg.Wait() // Wait for mux handler to finish
+	<-doneChan   // Wait for result handler to finish
+	resultWg.Wait()
+
+	// Update header with final count
+	tempHeader.EntryCount = entryCount
+
+	// Calculate and write checksum
+	checksum := dc.calculateChecksum(tempData[:offset])
+	copy(tempData[offset:offset+ChecksumSize], checksum)
+
+	// Sync temp file
+	if err := unix.Msync(tempData[:offset+ChecksumSize], unix.MS_SYNC); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
+	// Replace index file with temp file
+	if err := os.Rename(tempFile.Name(), dc.IndexFile); err != nil {
+		return fmt.Errorf("failed to replace index file: %w", err)
+	}
+
+	return nil
+}
+
+// processPathParallel processes a single path with parallel hashing
+func (dc *DirectoryCache) processPathParallel(absPath string, existingEntries map[string]*binaryEntry,
+	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
+
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil // Skip inaccessible paths
+	}
+
+	relPath, err := filepath.Rel(dc.RootDir, absPath)
+	if err != nil {
+		return fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
+	}
+
+	if info.IsDir() {
+		return dc.scanDirParallel(absPath, existingEntries, tempData, offset, entryCount, maxSize, jobChan)
+	} else if info.Mode().IsRegular() {
+		if absPath == dc.IndexFile {
+			return nil
+		}
+		return dc.processFileParallel(absPath, relPath, info, existingEntries, tempData, offset, entryCount, maxSize, jobChan)
+	}
+
+	return nil
+}
+
+// scanDirParallel scans directory recursively with parallel processing
+func (dc *DirectoryCache) scanDirParallel(rootPath string, existingEntries map[string]*binaryEntry,
+	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
+
+	pathQueue := []string{rootPath}
+
 	for len(pathQueue) > 0 {
-		// Pop the first entry from the FIFO slice
 		currentPath := pathQueue[0]
 		pathQueue = pathQueue[1:]
 
-		// Get file info
-		info, err := os.Lstat(currentPath) // Use Lstat to handle symlinks properly
+		info, err := os.Lstat(currentPath)
 		if err != nil {
-			// Skip files we can't access
 			continue
 		}
 
-		// If it's a directory, read its contents and add to queue
 		if info.IsDir() {
-			// Skip the index directory if it's inside the scan directory
 			indexDir := filepath.Dir(dc.IndexFile)
 			if currentPath == indexDir {
 				continue
@@ -253,71 +311,234 @@ func (dc *DirectoryCache) ScanDirectory() error {
 
 			entries, err := os.ReadDir(currentPath)
 			if err != nil {
-				// Skip directories we can't read
 				continue
 			}
 
-			// Sort entries by name using bytewise comparison
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].Name() < entries[j].Name()
 			})
 
-			// Add all entries to the FIFO queue
 			for _, entry := range entries {
 				fullPath := filepath.Join(currentPath, entry.Name())
 				pathQueue = append(pathQueue, fullPath)
 			}
 		} else if info.Mode().IsRegular() {
-			// Skip the index file itself
 			if currentPath == dc.IndexFile {
 				continue
 			}
 
-			// Calculate relative path from root directory
 			relPath, err := filepath.Rel(dc.RootDir, currentPath)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to get relative path for %s: %v\n", currentPath, err)
 				continue
 			}
 
-			// Add to jobs list
-			fileJobs = append(fileJobs, fileJob{
-				path:    currentPath,
-				info:    info,
-				relPath: relPath,
-				index:   jobIndex,
-			})
-			jobIndex++
-		}
-		// For other file types (symlinks, device files, etc.), we just skip them
-		// since we only want to index regular files with content hashes
-	}
-
-	// Process files in parallel and get skiplist wrapper
-	if len(fileJobs) > 0 {
-		results, err := dc.processFilesParallelResults(fileJobs)
-		if err != nil {
-			return err
-		}
-
-		// Create skiplist wrapper and add results
-		resultWrapper := NewSkiplistWrapper(16)
-		for _, result := range results {
-			if result.err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to process file: %v\n", result.err)
-				continue
+			if err := dc.processFileParallel(currentPath, relPath, info, existingEntries, tempData,
+				offset, entryCount, maxSize, jobChan); err != nil {
+				return err
 			}
-			resultWrapper.Insert(*result.entry)
 		}
-
-		// Get sorted entries from skiplist wrapper
-		dc.entries = resultWrapper.GetSortedEntries()
 	}
 
 	return nil
 }
 
-// processFilesParallelResults processes files using device-specific worker pools and returns results
+// processFileParallel processes a single file with parallel hashing
+func (dc *DirectoryCache) processFileParallel(filePath, relPath string, info os.FileInfo,
+	existingEntries map[string]*binaryEntry, tempData []byte, offset *int, entryCount *uint32,
+	maxSize int, jobChan chan<- hashJob) error {
+
+	stat := info.Sys().(*syscall.Stat_t)
+
+	// Check if file changed compared to existing entry
+	if existing, exists := existingEntries[relPath]; exists {
+		if dc.fileUnchanged(existing, info, stat) {
+			// Copy unchanged entry to temp index
+			existingSize := existing.EntrySize()
+			if *offset+existingSize > maxSize-ChecksumSize {
+				return fmt.Errorf("temp file too small")
+			}
+
+			// Create entry in temp mmap and copy data
+			entryPtr := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
+			*entryPtr = *existing
+
+			// Copy path data
+			pathOffset := int(unsafe.Sizeof(*entryPtr))
+			copy(tempData[*offset+pathOffset:], existing.RelativePathBytes())
+			tempData[*offset+pathOffset+len(relPath)] = 0
+
+			*offset += existingSize
+			*entryCount++
+			return nil
+		}
+	}
+
+	// File is new or changed - create entry and queue for hashing
+	entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(relPath) + 1
+	padding := (8 - (entrySize % 8)) % 8
+	totalSize := entrySize + padding
+
+	if *offset+totalSize > maxSize-ChecksumSize {
+		return fmt.Errorf("temp file too small")
+	}
+
+	// Create entry in temp mmap
+	entryPtr := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
+	entryPtr.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	entryPtr.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+	entryPtr.Dev = uint32(stat.Dev)
+	entryPtr.Ino = uint32(stat.Ino)
+	entryPtr.Mode = uint32(info.Mode())
+	entryPtr.UID = stat.Uid
+	entryPtr.GID = stat.Gid
+	entryPtr.Size = uint32(info.Size())
+	entryPtr.Flags = uint16(len(relPath))
+	entryPtr.PathLen = uint16(len(relPath))
+	// Hash will be filled by worker
+
+	// Write path
+	pathOffset := int(unsafe.Sizeof(*entryPtr))
+	copy(tempData[*offset+pathOffset:], relPath)
+	tempData[*offset+pathOffset+len(relPath)] = 0
+
+	// Zero padding
+	for i := 0; i < padding; i++ {
+		tempData[*offset+entrySize+i] = 0
+	}
+
+	// Queue for hashing
+	job := hashJob{
+		entry:    entryPtr,
+		filePath: filePath,
+		deviceID: stat.Dev,
+	}
+
+	select {
+	case jobChan <- job:
+	default:
+		return fmt.Errorf("job channel full")
+	}
+
+	*offset += totalSize
+	*entryCount++
+	return nil
+}
+
+// fileUnchanged checks if file metadata indicates no changes
+func (dc *DirectoryCache) fileUnchanged(existing *binaryEntry, info os.FileInfo, stat *syscall.Stat_t) bool {
+	if existing.Size != uint32(info.Size()) {
+		return false
+	}
+	if existing.UID != stat.Uid || existing.GID != stat.Gid {
+		return false
+	}
+
+	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+
+	return existing.CTimeWall == currentCTime && existing.MTimeWall == currentMTime
+}
+
+// workerMuxHandler manages device-specific worker pools, creating them on demand
+func (dc *DirectoryCache) workerMuxHandler(jobChan <-chan hashJob, resultChan chan<- hashResult) {
+	devicePools := make(map[uint64]chan hashJob)
+	var poolWg sync.WaitGroup
+
+	// Calculate workers per device pool
+	workersPerDevice := runtime.NumCPU() / 2
+	if workersPerDevice < 2 {
+		workersPerDevice = 2
+	}
+
+	for job := range jobChan {
+		deviceChan, exists := devicePools[job.deviceID]
+		if !exists {
+			// Create new device-specific worker pool
+			deviceChan = make(chan hashJob, workersPerDevice*2) // Buffer for workers
+			devicePools[job.deviceID] = deviceChan
+
+			poolWg.Add(1)
+			go func(devID uint64, devChan chan hashJob) {
+				defer poolWg.Done()
+				dc.runDevicePool(devID, devChan, resultChan, workersPerDevice)
+			}(job.deviceID, deviceChan)
+		}
+
+		// Send job to device-specific worker pool
+		deviceChan <- job
+	}
+
+	// Close all device pools
+	for _, deviceChan := range devicePools {
+		close(deviceChan)
+	}
+
+	// Wait for all device pools to finish
+	poolWg.Wait()
+	close(resultChan)
+}
+
+// runDevicePool runs workers for a specific device
+func (dc *DirectoryCache) runDevicePool(deviceID uint64, jobChan <-chan hashJob, resultChan chan<- hashResult, numWorkers int) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dc.deviceHashWorkerNew(jobChan, resultChan)
+		}()
+	}
+
+	wg.Wait()
+}
+
+// deviceHashWorkerNew processes hash jobs for a device
+func (dc *DirectoryCache) deviceHashWorkerNew(jobChan <-chan hashJob, resultChan chan<- hashResult) {
+	for job := range jobChan {
+		hashStr, err := dc.hashFile(job.filePath)
+
+		var hash [20]byte
+		if err == nil {
+			hashBytes, hexErr := hex.DecodeString(hashStr)
+			if hexErr == nil && len(hashBytes) == 20 {
+				copy(hash[:], hashBytes)
+			} else {
+				err = hexErr
+			}
+		}
+
+		result := hashResult{
+			entry: job.entry,
+			hash:  hash,
+			err:   err,
+		}
+
+		resultChan <- result
+		// Clear reference to prevent memory leak
+		job.entry = nil
+	}
+}
+
+// handleHashResults processes hash results and updates entries
+func (dc *DirectoryCache) handleHashResults(resultChan <-chan hashResult, doneChan chan<- struct{}) {
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: hash error: %v\n", result.err)
+			continue
+		}
+
+		// Update hash in-place via pointer
+		result.entry.Hash = result.hash
+
+		// Clear reference to prevent memory leak
+		result.entry = nil
+	}
+
+	close(doneChan)
+}
+
+// processFilesParallelResults processes files using device-specific worker pools
 func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileResult, error) {
 	if len(jobs) == 0 {
 		return nil, nil
@@ -326,17 +547,14 @@ func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileRes
 	// Group jobs by device
 	deviceJobs := make(map[uint64][]fileJob)
 	for _, job := range jobs {
-		// Get device ID from file info
 		stat := job.info.Sys().(*syscall.Stat_t)
 		deviceID := stat.Dev
 		deviceJobs[deviceID] = append(deviceJobs[deviceID], job)
 	}
 
-	// Create channels for collecting results from all devices
 	resultChan := make(chan fileResult, len(jobs))
 	var wg sync.WaitGroup
 
-	// Process each device with its own worker pool
 	for deviceID, jobs := range deviceJobs {
 		wg.Add(1)
 		go func(devID uint64, deviceJobs []fileJob) {
@@ -345,11 +563,9 @@ func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileRes
 		}(deviceID, jobs)
 	}
 
-	// Wait for all devices to complete
 	wg.Wait()
 	close(resultChan)
 
-	// Collect all results
 	var results []fileResult
 	for result := range resultChan {
 		results = append(results, result)
@@ -360,7 +576,6 @@ func (dc *DirectoryCache) processFilesParallelResults(jobs []fileJob) ([]fileRes
 
 // processDeviceJobs processes jobs for a specific device using 2 workers
 func (dc *DirectoryCache) processDeviceJobs(deviceID uint64, jobs []fileJob, resultChan chan<- fileResult) {
-	// Create 2 workers per device for optimal I/O performance
 	numWorkers := 2
 	if numWorkers > len(jobs) {
 		numWorkers = len(jobs)
@@ -369,36 +584,34 @@ func (dc *DirectoryCache) processDeviceJobs(deviceID uint64, jobs []fileJob, res
 		numWorkers = 1
 	}
 
-	// Create device-specific channels
 	jobChan := make(chan fileJob, len(jobs))
-
-	// Start workers for this device
 	var wg sync.WaitGroup
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go dc.deviceHashWorker(deviceID, jobChan, resultChan, &wg)
 	}
 
-	// Send jobs to device workers
 	for _, job := range jobs {
 		jobChan <- job
 	}
 	close(jobChan)
 
-	// Wait for device workers to complete
 	wg.Wait()
 }
 
-// deviceHashWorker is a worker goroutine that processes file hashing jobs for a specific device
+// deviceHashWorker processes file hashing jobs for a specific device
 func (dc *DirectoryCache) deviceHashWorker(deviceID uint64, jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for job := range jobs {
-		entry, err := dc.processFileJob(job)
+		hash, stat, err := dc.processFileJob(job)
 		results <- fileResult{
-			entry: entry,
+			entry: nil, // We'll create the binaryEntry directly in mmap
 			err:   err,
 			index: job.index,
 		}
+		_ = hash
+		_ = stat
 	}
 }

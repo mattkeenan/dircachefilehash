@@ -1,14 +1,12 @@
 package dircachefilehash
 
-// FindDuplicates returns groups of files with identical hashes
-func (dc *DirectoryCache) FindDuplicates() map[string][]FileEntry {
-	duplicates := make(map[string][]FileEntry)
+// FindDuplicates returns groups of files with identical hashes (zero-copy)
+func (dc *DirectoryCache) FindDuplicates() map[string][]*binaryEntry {
+	duplicates := make(map[string][]*binaryEntry)
 
 	for _, entry := range dc.entries {
-		if _, exists := duplicates[entry.Hash]; !exists {
-			duplicates[entry.Hash] = make([]FileEntry, 0)
-		}
-		duplicates[entry.Hash] = append(duplicates[entry.Hash], entry)
+		hashStr := entry.HashString()
+		duplicates[hashStr] = append(duplicates[hashStr], entry)
 	}
 
 	// Remove entries with only one file
@@ -21,13 +19,12 @@ func (dc *DirectoryCache) FindDuplicates() map[string][]FileEntry {
 	return duplicates
 }
 
-// FindByHash finds entries with the specified hash
-func (dc *DirectoryCache) FindByHash(hash string) []FileEntry {
-	var matches []FileEntry
+// FindByHash finds entries with the specified hash (zero-copy)
+func (dc *DirectoryCache) FindByHash(hash string) []*binaryEntry {
+	var matches []*binaryEntry
 
-	// Since entries are now sorted by filename, we need to do a linear search
 	for _, entry := range dc.entries {
-		if entry.Hash == hash {
+		if entry.HashString() == hash {
 			matches = append(matches, entry)
 		}
 	}

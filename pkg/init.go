@@ -1,13 +1,11 @@
 // Package dircachefilehash provides functionality to scan directories,
 // hash file contents, and maintain a sorted index file for file integrity
-// checking and change detection.
+// checking and change detection using memory-mapped files for zero-copy operation.
 package dircachefilehash
 
 import (
 	"crypto/sha1"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -28,9 +26,11 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	dc := &DirectoryCache{
 		RootDir:   rootDir,
 		IndexFile: indexFile,
-		entries:   make([]FileEntry, 0),
+		entries:   make([]*binaryEntry, 0),     // Direct pointers to mmap'd entries
 		signature: [4]byte{'d', 'c', 'f', 'h'}, // "dcfh" signature
 		version:   1,                           // Version 1 format
+		hasher:    sha1.New(),                  // SHA-1 hasher for checksums
+		mmapIndex: nil,                         // Will be set when loading mmap'd index
 	}
 
 	// Ensure the .dcfh directory exists
@@ -51,46 +51,4 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	}
 
 	return dc
-}
-
-// createEmptyIndex creates an empty index file with proper header
-func (dc *DirectoryCache) createEmptyIndex() error {
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
-	}
-	defer file.Close()
-
-	// Write header with zero entries
-	if err := binary.Write(file, binary.BigEndian, dc.signature); err != nil {
-		return fmt.Errorf("failed to write signature: %w", err)
-	}
-	if err := binary.Write(file, binary.BigEndian, dc.version); err != nil {
-		return fmt.Errorf("failed to write version: %w", err)
-	}
-	if err := binary.Write(file, binary.BigEndian, uint32(0)); err != nil {
-		return fmt.Errorf("failed to write entry count: %w", err)
-	}
-
-	// Write empty checksum (SHA-1 of header only)
-	if _, err := file.Seek(0, 0); err != nil {
-		return err
-	}
-
-	hasher := sha1.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return err
-	}
-
-	// Seek to end to append checksum
-	if _, err := file.Seek(0, 2); err != nil {
-		return err
-	}
-
-	checksum := hasher.Sum(nil)
-	if _, err := file.Write(checksum); err != nil {
-		return err
-	}
-
-	return nil
 }

@@ -4,12 +4,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mattkeenan/zerocopyskiplist"
+	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
-// SkiplistWrapper wraps zerocopyskiplist to provide the same interface as BPlusTree
+// SkiplistWrapper wraps zerocopyskiplist for zero-copy access to mmap'd binaryEntry pointers
 type SkiplistWrapper struct {
-	skiplist *zerocopyskiplist.ZeroCopySkiplist[FileEntry, string]
+	skiplist *zcsl.ZeroCopySkiplist[binaryEntry, string]
 	mutex    sync.RWMutex
 }
 
@@ -20,14 +20,13 @@ func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
 	}
 
 	// Key extractor function - extracts RelativePath as the key
-	getKeyFromItem := func(entry *FileEntry) string {
-		return entry.RelativePath
+	getKeyFromItem := func(entry *binaryEntry) string {
+		return entry.RelativePath()
 	}
 
-	// Size function for serialization (not used in our current implementation)
-	getItemSize := func(entry *FileEntry) int {
-		// Rough estimate of FileEntry size including variable path length
-		return 80 + len(entry.RelativePath) + len(entry.Hash)
+	// Size function for serialization
+	getItemSize := func(entry *binaryEntry) int {
+		return entry.EntrySize()
 	}
 
 	// String comparator function
@@ -35,7 +34,7 @@ func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
 		return strings.Compare(a, b)
 	}
 
-	skiplist := zerocopyskiplist.MakeZeroCopySkiplist(
+	skiplist := zcsl.MakeZeroCopySkiplist(
 		maxLevels,
 		getKeyFromItem,
 		getItemSize,
@@ -47,29 +46,45 @@ func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
 	}
 }
 
-// Insert adds a file entry to the skiplist
-func (sw *SkiplistWrapper) Insert(entry FileEntry) {
+// Insert adds a binaryEntry pointer to the skiplist (zero-copy)
+func (sw *SkiplistWrapper) Insert(entry *binaryEntry) {
+	sw.mutex.Lock()
+	defer sw.mutex.Unlock()
+	sw.skiplist.Insert(entry)
+}
+
+// InsertBatch inserts multiple entry pointers efficiently (zero-copy)
+func (sw *SkiplistWrapper) InsertBatch(entries []*binaryEntry) {
 	sw.mutex.Lock()
 	defer sw.mutex.Unlock()
 
-	// Create a copy of the entry to store in the skiplist
-	entryCopy := entry
-	sw.skiplist.Insert(&entryCopy)
+	for _, entry := range entries {
+		sw.skiplist.Insert(entry)
+	}
 }
 
-// GetSortedEntries returns all entries in sorted order by filename
-func (sw *SkiplistWrapper) GetSortedEntries() []FileEntry {
+// GetSortedEntries returns pointers to all entries in sorted order (zero-copy)
+func (sw *SkiplistWrapper) GetSortedEntries() []*binaryEntry {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
 
-	var entries []FileEntry
-
-	// Iterate through the skiplist from first to last
+	var entries []*binaryEntry
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
-		entries = append(entries, *current.Item())
+		entries = append(entries, current.Item())
 	}
-
 	return entries
+}
+
+// ForEach iterates through all entries in sorted order with a callback (zero-copy)
+func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry) bool) {
+	sw.mutex.RLock()
+	defer sw.mutex.RUnlock()
+
+	for current := sw.skiplist.First(); current != nil; current = current.Next() {
+		if !callback(current.Item()) {
+			break
+		}
+	}
 }
 
 // Merge merges another skiplist into this skiplist
@@ -83,23 +98,17 @@ func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper) {
 	other.mutex.RLock()
 	defer other.mutex.RUnlock()
 
-	// Use MergeTheirs strategy to prefer entries from the other skiplist (newer entries)
-	err := sw.skiplist.Merge(other.skiplist, zerocopyskiplist.MergeTheirs)
+	err := sw.skiplist.Merge(other.skiplist, zcsl.MergeTheirs)
 	if err != nil {
-		// In case of error, fall back to manual merge
 		sw.manualMerge(other)
 	}
 }
 
 // manualMerge performs manual merge as fallback
 func (sw *SkiplistWrapper) manualMerge(other *SkiplistWrapper) {
-	// Get all entries from the other skiplist
 	otherEntries := other.getSortedEntriesUnsafe()
-
-	// Insert all entries (duplicates will replace existing ones)
 	for _, entry := range otherEntries {
-		entryCopy := entry
-		sw.skiplist.Insert(&entryCopy)
+		sw.skiplist.Insert(entry)
 	}
 }
 
@@ -114,28 +123,23 @@ func (sw *SkiplistWrapper) Delete(other *SkiplistWrapper) {
 	other.mutex.RLock()
 	defer other.mutex.RUnlock()
 
-	// Get entries to delete
 	entriesToDelete := other.getSortedEntriesUnsafe()
-
-	// Delete each entry by its key (RelativePath)
 	for _, entry := range entriesToDelete {
-		sw.skiplist.Delete(entry.RelativePath)
+		sw.skiplist.Delete(entry.RelativePath())
 	}
 }
 
 // getSortedEntriesUnsafe returns sorted entries without locking (internal use)
-func (sw *SkiplistWrapper) getSortedEntriesUnsafe() []FileEntry {
-	var entries []FileEntry
-
+func (sw *SkiplistWrapper) getSortedEntriesUnsafe() []*binaryEntry {
+	var entries []*binaryEntry
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
-		entries = append(entries, *current.Item())
+		entries = append(entries, current.Item())
 	}
-
 	return entries
 }
 
 // Find searches for an entry by its relative path
-func (sw *SkiplistWrapper) Find(relativePath string) *FileEntry {
+func (sw *SkiplistWrapper) Find(relativePath string) *binaryEntry {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
 
@@ -149,7 +153,6 @@ func (sw *SkiplistWrapper) Find(relativePath string) *FileEntry {
 func (sw *SkiplistWrapper) Length() int {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
-
 	return sw.skiplist.Length()
 }
 
@@ -157,7 +160,6 @@ func (sw *SkiplistWrapper) Length() int {
 func (sw *SkiplistWrapper) IsEmpty() bool {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
-
 	return sw.skiplist.IsEmpty()
 }
 
@@ -166,9 +168,7 @@ func (sw *SkiplistWrapper) Copy() *SkiplistWrapper {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
 
-	newWrapper := &SkiplistWrapper{
+	return &SkiplistWrapper{
 		skiplist: sw.skiplist.Copy(),
 	}
-
-	return newWrapper
 }
