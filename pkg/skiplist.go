@@ -32,7 +32,7 @@ func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
 		return strings.Compare(a, b)
 	}
 
-	skiplist := zcsl.makeZeroCopySkiplist(
+	skiplist := zcsl.MakeZeroCopySkiplist(
 		maxLevels,
 		getKeyFromItem,
 		getItemSize,

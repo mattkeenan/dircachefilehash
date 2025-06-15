@@ -7,64 +7,7 @@ import (
 	"io"
 	"os"
 	"syscall"
-	"time"
-	"unsafe"
 )
-
-// timeWall extracts the wall field from time.Time using unsafe operations
-func timeWall(t time.Time) uint64 {
-	return *(*uint64)(unsafe.Pointer(&t))
-}
-
-// timeFromWall reconstructs a time.Time from wall time format
-func timeFromWall(wall uint64) time.Time {
-	var t time.Time
-	*(*uint64)(unsafe.Pointer(&t)) = wall
-	return t
-}
-
-// writeEntryToMmap writes a binaryEntry directly to mmap'd memory
-func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash [20]byte, info os.FileInfo, stat *syscall.Stat_t) int {
-	// Calculate total entry size first
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
-
-	// Write binaryEntry directly to mmap'd memory
-	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-
-	entry.Size = uint32(entrySize) // Total size of this entry
-	entry.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
-	entry.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
-	entry.Dev = uint32(stat.Dev)
-	entry.Ino = uint32(stat.Ino)
-	entry.Mode = uint32(info.Mode())
-	entry.UID = stat.Uid
-	entry.GID = stat.Gid
-	entry.FileSize = uint64(info.Size()) // File content size
-	entry.Flags = uint16(len(relPath))
-
-	// Clear hash field and copy hash data
-	for i := range entry.Hash {
-		entry.Hash[i] = 0
-	}
-	copy(entry.Hash[:], hash[:])
-
-	// Write variable-size path directly after struct
-	pathOffset := int(unsafe.Sizeof(*entry))
-	copy(data[pathOffset:pathOffset+len(relPath)], relPath)
-
-	// Add null terminator
-	data[pathOffset+len(relPath)] = 0
-
-	// Zero out padding
-	for i := 0; i < padding; i++ {
-		data[totalSize+i] = 0
-	}
-
-	return entrySize
-}
 
 // processFileJob processes a single file job and returns hash, hash type, and file info
 func (dc *DirectoryCache) processFileJob(job fileJob) ([]byte, uint16, *syscall.Stat_t, error) {

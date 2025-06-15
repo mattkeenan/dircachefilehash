@@ -1,377 +1,582 @@
 package dircachefilehash
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-const (
-	HeaderSize   = 12 // signature(4) + version(4) + entry_count(4)
-	ChecksumSize = 20 // SHA-1 checksum size
-)
-
-// MmapIndex represents a memory-mapped index file
-type MmapIndex struct {
-	data    []byte
-	file    *os.File
-	entries []byte // Raw entry data after header
-	size    int    // Current mapped size
-	offset  int    // Current write offset
-}
-
-// IndexHeader represents the file header in host byte order (cast directly to mmap'd memory)
-type IndexHeader struct {
-	Signature  [4]byte // "dcfh" signature
-	Version    uint32  // Index version (host order)
-	EntryCount uint32  // Number of entries (host order)
-}
-
-// Header returns a direct pointer to the header in mmap'd memory (zero-copy)
-func (mi *MmapIndex) Header() *IndexHeader {
-	return (*IndexHeader)(unsafe.Pointer(&mi.data[0]))
-}
-
-// ValidateSignature checks if the signature matches expected value
-func (ih *IndexHeader) ValidateSignature(expected [4]byte) error {
-	if ih.Signature != expected {
-		return fmt.Errorf("invalid signature: got %q, expected %q",
-			string(ih.Signature[:]), string(expected[:]))
+// Update scans the directory and updates the index file using skiplist
+func (dc *DirectoryCache) Update(paths ...string) error {
+	if len(paths) == 0 {
+		paths = []string{dc.RootDir}
 	}
+
+	jobs, err := dc.collectFileJobs(paths)
+	if err != nil {
+		return fmt.Errorf("failed to collect file jobs: %w", err)
+	}
+
+	if err := dc.WriteIndex(jobs); err != nil {
+		return fmt.Errorf("failed to write index: %w", err)
+	}
+
 	return nil
 }
 
-// ValidateVersion checks if the version is supported
-func (ih *IndexHeader) ValidateVersion(expected uint32) error {
-	if ih.Version != expected {
-		return fmt.Errorf("unsupported version: got %d, expected %d", ih.Version, expected)
+// ScanDirectory scans the directory and creates file jobs for parallel processing
+func (dc *DirectoryCache) ScanDirectory() error {
+	jobs, err := dc.collectFileJobs([]string{dc.RootDir})
+	if err != nil {
+		return err
 	}
-	return nil
+
+	return dc.WriteIndex(jobs)
 }
 
-// SetHeader initializes the header fields in mmap'd memory
-func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32) {
-	ih.Signature = signature
-	ih.Version = version
-	ih.EntryCount = entryCount
-}
+// collectFileJobs collects file jobs from specified paths
+func (dc *DirectoryCache) collectFileJobs(paths []string) ([]fileJob, error) {
+	var fileJobs []fileJob
+	jobIndex := 0
 
-// EntryDataOffset returns the offset where entry data begins
-func (ih *IndexHeader) EntryDataOffset() int {
-	return HeaderSize
-}
-
-// makeSpaceForEntry ensures space for an entry, expands mapping if needed, and returns pointer
-func (dc *DirectoryCache) makeSpaceForEntry(mmapIdx *MmapIndex, entrySize int) (*binaryEntry, error) {
-	// Check if we need more space (including checksum space)
-	requiredSpace := mmapIdx.offset + entrySize + ChecksumSize
-	if requiredSpace > mmapIdx.size {
-		// Need to expand the mapping
-		newSize := mmapIdx.size * 2
-		if newSize < requiredSpace {
-			newSize = requiredSpace + (1024 * 1024) // Add 1MB buffer
+	for _, inputPath := range paths {
+		absPath := inputPath
+		if !filepath.IsAbs(inputPath) {
+			absPath = filepath.Join(dc.RootDir, inputPath)
 		}
+		absPath = filepath.Clean(absPath)
 
-		// Unmap current mapping
-		if err := unix.Munmap(mmapIdx.data); err != nil {
-			return nil, fmt.Errorf("failed to unmap: %w", err)
-		}
-
-		// Expand file
-		if err := mmapIdx.file.Truncate(int64(newSize)); err != nil {
-			return nil, fmt.Errorf("failed to expand file: %w", err)
-		}
-
-		// Remap with new size
-		newData, err := unix.Mmap(int(mmapIdx.file.Fd()), 0, newSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+		info, err := os.Lstat(absPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to remap file: %w", err)
+			continue // Skip inaccessible paths
 		}
 
-		// Update mapping
-		mmapIdx.data = newData
-		mmapIdx.size = newSize
-		mmapIdx.entries = newData[HeaderSize:]
-		// Note: header pointer is now accessed via mmapIdx.Header() method
+		relPath, err := filepath.Rel(dc.RootDir, absPath)
+		if err != nil {
+			return nil, fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
+		}
+
+		if info.IsDir() {
+			if err := dc.scanPathRecursively(absPath, &fileJobs, &jobIndex); err != nil {
+				return nil, fmt.Errorf("failed to scan directory %s: %w", absPath, err)
+			}
+		} else if info.Mode().IsRegular() {
+			if absPath == dc.IndexFile {
+				continue
+			}
+
+			fileJobs = append(fileJobs, fileJob{
+				path:    absPath,
+				info:    info,
+				relPath: relPath,
+				index:   jobIndex,
+			})
+			jobIndex++
+		}
 	}
 
-	// Get pointer to entry location
-	entryPtr := (*binaryEntry)(unsafe.Pointer(&mmapIdx.data[mmapIdx.offset]))
+	// Sort jobs by relative path for consistent ordering
+	sort.Slice(fileJobs, func(i, j int) bool {
+		return fileJobs[i].relPath < fileJobs[j].relPath
+	})
 
-	// Zero out the entire entry space
-	entryBytes := (*[1 << 20]byte)(unsafe.Pointer(entryPtr))[:entrySize:entrySize]
-	for i := range entryBytes {
-		entryBytes[i] = 0
-	}
-
-	// Set only the Size field
-	entryPtr.Size = uint32(entrySize)
-
-	// Update offset for next entry
-	mmapIdx.offset += entrySize
-
-	return entryPtr, nil
+	return fileJobs, nil
 }
 
-// writeEntryToMmap writes a binaryEntry directly to mmap'd memory
-func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t) int {
-	// Calculate total entry size first
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
+// scanPathRecursively scans a directory recursively
+func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJob, jobIndex *int) error {
+	pathQueue := []string{rootPath}
 
-	// Write binaryEntry directly to mmap'd memory
-	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
+	for len(pathQueue) > 0 {
+		currentPath := pathQueue[0]
+		pathQueue = pathQueue[1:]
 
-	entry.Size = uint32(entrySize) // Total size of this entry
-	entry.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
-	entry.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
-	entry.Dev = uint32(stat.Dev)
-	entry.Ino = uint32(stat.Ino)
-	entry.Mode = uint32(info.Mode())
-	entry.UID = stat.Uid
-	entry.GID = stat.Gid
-	entry.FileSize = uint64(info.Size()) // File content size
-	entry.Flags = uint16(len(relPath))
-	entry.HashType = hashType
+		info, err := os.Lstat(currentPath)
+		if err != nil {
+			continue
+		}
 
-	// Clear hash field and copy hash data
-	for i := range entry.Hash {
-		entry.Hash[i] = 0
+		if info.IsDir() {
+			indexDir := filepath.Dir(dc.IndexFile)
+			if currentPath == indexDir {
+				continue
+			}
+
+			entries, err := os.ReadDir(currentPath)
+			if err != nil {
+				continue
+			}
+
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Name() < entries[j].Name()
+			})
+
+			for _, entry := range entries {
+				fullPath := filepath.Join(currentPath, entry.Name())
+				pathQueue = append(pathQueue, fullPath)
+			}
+		} else if info.Mode().IsRegular() {
+			if currentPath == dc.IndexFile {
+				continue
+			}
+
+			relPath, err := filepath.Rel(dc.RootDir, currentPath)
+			if err != nil {
+				continue
+			}
+
+			*fileJobs = append(*fileJobs, fileJob{
+				path:    currentPath,
+				info:    info,
+				relPath: relPath,
+				index:   *jobIndex,
+			})
+			*jobIndex++
+		}
 	}
-	copy(entry.Hash[:], hash)
 
-	// Write variable-size path directly after struct
-	pathOffset := int(unsafe.Sizeof(*entry))
-	copy(data[pathOffset:pathOffset+len(relPath)], relPath)
-
-	// Add null terminator
-	data[pathOffset+len(relPath)] = 0
-
-	// Zero out padding
-	for i := 0; i < padding; i++ {
-		data[totalSize+i] = 0
-	}
-
-	return entrySize
+	return nil
 }
 
-// WriteIndex writes entries directly to mmap'd index file using skiplist
-func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
-	// Calculate total file size needed
-	totalSize := HeaderSize + ChecksumSize
-	for _, job := range jobs {
-		totalSize += PathLenToSize(len(job.relPath))
+// hashJob represents a file hashing job with pointer to binEntry
+type hashJob struct {
+	entry    *binaryEntry
+	filePath string
+	deviceID uint64
+}
+
+// hashResult represents the result of a hash operation
+type hashResult struct {
+	entry    *binaryEntry
+	hash     []byte
+	hashType uint16
+	err      error
+}
+
+// UpdatePaths updates only the specified paths using skiplist and Hwang-Lin merge algorithm
+func (dc *DirectoryCache) UpdatePaths(paths []string) error {
+	// Load existing index into skiplist
+	var existingSkiplist *SkiplistWrapper
+	if err := dc.LoadIndex(); err == nil {
+		existingSkiplist = dc.skiplist.Copy()
+	} else {
+		existingSkiplist = NewSkiplistWrapper(16)
 	}
 
-	// Create the file
-	file, err := os.Create(dc.IndexFile)
+	// Calculate approximate size for temporary mmap
+	estimatedSize := HeaderSize + ChecksumSize + (1024 * 1024) // Start with 1MB
+
+	// Create temporary mmap for building new index
+	tempFile, err := os.CreateTemp(filepath.Dir(dc.IndexFile), "index_temp_*.tmp")
 	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer file.Close()
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
 
-	// Truncate to exact size
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
+	if err := tempFile.Truncate(int64(estimatedSize)); err != nil {
+		return fmt.Errorf("failed to truncate temp file: %w", err)
 	}
 
-	// Memory map the file
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	tempData, err := unix.Mmap(int(tempFile.Fd()), 0, estimatedSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
+		return fmt.Errorf("failed to mmap temp file: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer unix.Munmap(tempData)
 
-	// Write header directly to mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, uint32(len(jobs)))
+	// Write temp header directly to mmap'd memory (zero-copy)
+	tempHeader := (*IndexHeader)(unsafe.Pointer(&tempData[0]))
+	tempHeader.SetHeader(dc.signature, dc.version, 0)
 
-	// Clear and recreate skiplist for new entries
-	dc.skiplist = NewSkiplistWrapper(16)
+	// Create new skiplist for updated entries
+	newSkiplist := NewSkiplistWrapper(16)
 
-	// Write entries directly to mmap'd memory and add to skiplist iteratively
+	// Setup channels for worker communication
+	jobChan := make(chan hashJob, 100)
+	resultChan := make(chan hashResult, 100)
+	doneChan := make(chan struct{})
+
+	// Start worker processes
+	var muxWg sync.WaitGroup
+	muxWg.Add(1)
+	go func() {
+		defer muxWg.Done()
+		dc.workerMuxHandler(jobChan, resultChan)
+	}()
+
+	var resultWg sync.WaitGroup
+	resultWg.Add(1)
+	go func() {
+		defer resultWg.Done()
+		dc.handleHashResults(resultChan, doneChan)
+	}()
+
+	// Process paths with parallel hashing using Hwang-Lin merge
 	offset := HeaderSize
-	for _, job := range jobs {
-		// Process file and get hash
-		hashBytes, hashType, stat, err := dc.processFileJob(job)
-		if err != nil {
-			return fmt.Errorf("failed to process file %s: %w", job.path, err)
-		}
+	entryCount := uint32(0)
 
-		// Write entry directly to mmap'd memory
-		entrySize := dc.writeEntryToMmap(data[offset:], job.relPath, hashBytes, hashType, job.info, stat)
-
-		// Get pointer to the entry we just wrote and add to skiplist immediately
-		entryPtr := (*binaryEntry)(unsafe.Pointer(&data[offset]))
-		dc.skiplist.Insert(entryPtr)
-
-		offset += entrySize
+	if err := dc.processPathsWithHwangLin(paths, existingSkiplist, newSkiplist, tempData, &offset,
+		&entryCount, estimatedSize, jobChan); err != nil {
+		close(jobChan)
+		return err
 	}
+
+	// Signal no more jobs and wait for completion
+	close(jobChan)
+	muxWg.Wait()
+	<-doneChan
+	resultWg.Wait()
+
+	// Update header with final count (direct access to mmap'd memory)
+	tempHeader.EntryCount = entryCount
 
 	// Calculate and write checksum
-	checksum := dc.calculateChecksum(data[:offset])
-	copy(data[offset:offset+ChecksumSize], checksum)
+	checksum := dc.calculateChecksum(tempData[:offset])
+	copy(tempData[offset:offset+ChecksumSize], checksum)
 
-	// Sync to disk
-	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
-		return fmt.Errorf("failed to sync mmap: %w", err)
+	// Sync temp file
+	if err := unix.Msync(tempData[:offset+ChecksumSize], unix.MS_SYNC); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
 	}
+
+	// Replace index file with temp file
+	if err := os.Rename(tempFile.Name(), dc.IndexFile); err != nil {
+		return fmt.Errorf("failed to replace index file: %w", err)
+	}
+
+	// Update our skiplist with the new data
+	dc.skiplist = newSkiplist
 
 	return nil
 }
 
-// LoadIndex loads and maps the index file, populating skiplist with direct pointers to entries
-func (dc *DirectoryCache) LoadIndex() error {
-	file, err := os.Open(dc.IndexFile)
+// processPathsWithHwangLin uses Hwang-Lin algorithm to merge existing and new entries
+func (dc *DirectoryCache) processPathsWithHwangLin(paths []string, existingSkiplist, newSkiplist *SkiplistWrapper,
+	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
+
+	// Collect all file jobs for the paths
+	allJobs, err := dc.collectFileJobs(paths)
 	if err != nil {
-		return fmt.Errorf("failed to open index file %s: %w", dc.IndexFile, err)
-	}
-
-	// Get file size
-	stat, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	if stat.Size() < HeaderSize+ChecksumSize {
-		file.Close()
-		return fmt.Errorf("file too small: %d bytes", stat.Size())
-	}
-
-	// Memory map the file for reading
-	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
-	if err != nil {
-		file.Close()
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-
-	// Create MmapIndex with direct header access
-	mmapIndex := &MmapIndex{
-		data:    data,
-		file:    file,
-		entries: data[HeaderSize:],
-		size:    int(stat.Size()),
-		offset:  HeaderSize,
-	}
-	dc.mmapIndex = mmapIndex
-
-	// Get direct pointer to header in mmap'd memory (zero-copy)
-	header := mmapIndex.Header()
-
-	// Verify header using helper methods
-	if err := header.ValidateSignature(dc.signature); err != nil {
-		return err
-	}
-	if err := header.ValidateVersion(dc.version); err != nil {
 		return err
 	}
 
-	// Verify checksum
-	contentSize := int(stat.Size()) - ChecksumSize
-	if err := dc.verifyChecksumMmap(data, contentSize); err != nil {
-		return fmt.Errorf("checksum verification failed: %w", err)
+	// Create a map for quick lookup of new files
+	newFiles := make(map[string]fileJob)
+	for _, job := range allJobs {
+		newFiles[job.relPath] = job
 	}
 
-	// Clear and recreate skiplist
-	dc.skiplist = NewSkiplistWrapper(16)
+	// Get existing entries in sorted order
+	existingEntries := existingSkiplist.GetSortedEntries()
 
-	// Parse entries - create direct pointers to mmap'd binaryEntry structs and add to skiplist
-	offset := 0
-	entryData := mmapIndex.entries
+	// Create sorted list of new file paths
+	var newPaths []string
+	for path := range newFiles {
+		newPaths = append(newPaths, path)
+	}
+	sort.Strings(newPaths)
 
-	for i := uint32(0); i < header.EntryCount; i++ {
-		if offset >= len(entryData)-ChecksumSize {
-			return fmt.Errorf("unexpected end of data at entry %d", i)
+	// Hwang-Lin merge algorithm
+	i, j := 0, 0
+	for i < len(existingEntries) && j < len(newPaths) {
+		existing := existingEntries[i]
+		newPath := newPaths[j]
+		newJob := newFiles[newPath]
+
+		cmp := strings.Compare(existing.RelativePath(), newPath)
+
+		if cmp == 0 {
+			// File exists in both - check if changed
+			if dc.fileChangedFromJob(existing, newJob) {
+				// File changed - process with new data
+				if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
+					return err
+				}
+			} else {
+				// File unchanged - copy existing entry
+				if err := dc.copyExistingEntry(existing, tempData, offset, entryCount, maxSize, newSkiplist); err != nil {
+					return err
+				}
+			}
+			i++
+			j++
+		} else if cmp < 0 {
+			// Existing file not in new set - skip (effectively delete)
+			i++
+		} else {
+			// New file not in existing set - add
+			if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
+				return err
+			}
+			j++
 		}
+	}
 
-		// Get direct pointer to binaryEntry in mmap'd memory
-		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-
-		// Insert immediately while parsing for better cache locality and memory efficiency
-		dc.skiplist.Insert(entry)
-
-		// Move to next entry using Size field
-		offset += int(entry.Size)
+	// Handle remaining new files
+	for j < len(newPaths) {
+		newJob := newFiles[newPaths[j]]
+		if err := dc.processNewFileEntry(newJob, tempData, offset, entryCount, maxSize, jobChan, newSkiplist); err != nil {
+			return err
+		}
+		j++
 	}
 
 	return nil
 }
 
-// verifyChecksumMmap verifies the SHA-1 checksum for mmap'd data
-func (dc *DirectoryCache) verifyChecksumMmap(data []byte, contentSize int) error {
-	if len(data) < contentSize+ChecksumSize {
-		return fmt.Errorf("insufficient data for checksum")
+// fileChangedFromJob checks if a file has changed compared to existing entry
+func (dc *DirectoryCache) fileChangedFromJob(existing *binaryEntry, job fileJob) bool {
+	stat := job.info.Sys().(*syscall.Stat_t)
+
+	if existing.FileSize != uint64(job.info.Size()) {
+		return true
+	}
+	if existing.UID != stat.Uid || existing.GID != stat.Gid {
+		return true
 	}
 
-	storedChecksum := data[contentSize : contentSize+ChecksumSize]
-	calculatedChecksum := dc.calculateChecksum(data[:contentSize])
+	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
 
-	for i := 0; i < ChecksumSize; i++ {
-		if storedChecksum[i] != calculatedChecksum[i] {
-			return fmt.Errorf("checksum mismatch at byte %d", i)
-		}
+	return existing.CTimeWall != currentCTime || existing.MTimeWall != currentMTime
+}
+
+// copyExistingEntry copies an unchanged entry to the new index
+func (dc *DirectoryCache) copyExistingEntry(existing *binaryEntry, tempData []byte, offset *int,
+	entryCount *uint32, maxSize int, newSkiplist *SkiplistWrapper) error {
+
+	existingSize := existing.EntrySize()
+	if *offset+existingSize > maxSize-ChecksumSize {
+		return fmt.Errorf("temp file too small")
 	}
+
+	// Copy entire entry
+	copy(tempData[*offset:*offset+existingSize],
+		(*[1 << 20]byte)(unsafe.Pointer(existing))[:existingSize:existingSize])
+
+	// Get pointer to copied entry and add to new skiplist
+	copiedEntry := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
+	newSkiplist.Insert(copiedEntry)
+
+	*offset += existingSize
+	*entryCount++
 	return nil
 }
 
-// calculateChecksum calculates SHA-1 checksum of data
-func (dc *DirectoryCache) calculateChecksum(data []byte) []byte {
-	dc.hasher.Reset()
-	dc.hasher.Write(data)
-	return dc.hasher.Sum(nil)
-}
+// processNewFileEntry processes a new or changed file entry
+func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offset *int,
+	entryCount *uint32, maxSize int, jobChan chan<- hashJob, newSkiplist *SkiplistWrapper) error {
 
-// Close cleans up mmap'd resources
-func (dc *DirectoryCache) Close() error {
-	if dc.mmapIndex != nil {
-		if err := unix.Munmap(dc.mmapIndex.data); err != nil {
-			return fmt.Errorf("failed to unmap: %w", err)
-		}
-		if err := dc.mmapIndex.file.Close(); err != nil {
-			return fmt.Errorf("failed to close file: %w", err)
-		}
-		dc.mmapIndex = nil
+	stat := job.info.Sys().(*syscall.Stat_t)
+
+	// Calculate entry size
+	entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(job.relPath) + 1
+	padding := (8 - (entrySize % 8)) % 8
+	totalSize := entrySize + padding
+
+	if *offset+totalSize > maxSize-ChecksumSize {
+		return fmt.Errorf("temp file too small")
 	}
+
+	// Create entry in temp mmap
+	entryPtr := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
+	entryPtr.Size = uint32(totalSize)
+	entryPtr.CTimeWall = encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	entryPtr.MTimeWall = encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+	entryPtr.Dev = uint32(stat.Dev)
+	entryPtr.Ino = uint32(stat.Ino)
+	entryPtr.Mode = uint32(job.info.Mode())
+	entryPtr.UID = stat.Uid
+	entryPtr.GID = stat.Gid
+	entryPtr.FileSize = uint64(job.info.Size())
+	entryPtr.Flags = uint16(len(job.relPath))
+
+	// Write path
+	pathOffset := int(unsafe.Sizeof(*entryPtr))
+	copy(tempData[*offset+pathOffset:], job.relPath)
+	tempData[*offset+pathOffset+len(job.relPath)] = 0
+
+	// Zero padding
+	for i := 0; i < padding; i++ {
+		tempData[*offset+entrySize+i] = 0
+	}
+
+	// Add to skiplist
+	newSkiplist.Insert(entryPtr)
+
+	// Queue for hashing
+	hashJob := hashJob{
+		entry:    entryPtr,
+		filePath: job.path,
+		deviceID: stat.Dev,
+	}
+
+	select {
+	case jobChan <- hashJob:
+	default:
+		return fmt.Errorf("job channel full")
+	}
+
+	*offset += totalSize
+	*entryCount++
 	return nil
 }
 
-// createEmptyIndex creates an empty index file
-func (dc *DirectoryCache) createEmptyIndex() error {
-	totalSize := HeaderSize + ChecksumSize
-
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+// fileUnchanged checks if file metadata indicates no changes
+func (dc *DirectoryCache) fileUnchanged(existing *binaryEntry, info os.FileInfo, stat *syscall.Stat_t) bool {
+	if existing.FileSize != uint64(info.Size()) {
+		return false
 	}
-	defer file.Close()
-
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
+	if existing.UID != stat.Uid || existing.GID != stat.Gid {
+		return false
 	}
 
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
+	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
+
+	return existing.CTimeWall == currentCTime && existing.MTimeWall == currentMTime
+}
+
+// workerMuxHandler manages device-specific worker pools, creating them on demand
+func (dc *DirectoryCache) workerMuxHandler(jobChan <-chan hashJob, resultChan chan<- hashResult) {
+	devicePools := make(map[uint64]chan hashJob)
+	var poolWg sync.WaitGroup
+
+	// Calculate workers per device pool
+	workersPerDevice := runtime.NumCPU() / 2
+	if workersPerDevice < 2 {
+		workersPerDevice = 2
 	}
-	defer unix.Munmap(data)
 
-	// Write header directly to mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, 0)
+	for job := range jobChan {
+		deviceChan, exists := devicePools[job.deviceID]
+		if !exists {
+			// Create new device-specific worker pool
+			deviceChan = make(chan hashJob, workersPerDevice*2) // Buffer for workers
+			devicePools[job.deviceID] = deviceChan
 
-	// Write checksum
-	checksum := dc.calculateChecksum(data[:HeaderSize])
-	copy(data[HeaderSize:HeaderSize+ChecksumSize], checksum)
+			poolWg.Add(1)
+			go func(devID uint64, devChan chan hashJob) {
+				defer poolWg.Done()
+				dc.runDevicePool(devID, devChan, resultChan, workersPerDevice)
+			}(job.deviceID, deviceChan)
+		}
 
-	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
-		return fmt.Errorf("failed to sync mmap: %w", err)
+		// Send job to device-specific worker pool
+		deviceChan <- job
 	}
 
-	return nil
+	// Close all device pools
+	for _, deviceChan := range devicePools {
+		close(deviceChan)
+	}
+
+	// Wait for all device pools to finish
+	poolWg.Wait()
+	close(resultChan)
+}
+
+// runDevicePool runs workers for a specific device
+func (dc *DirectoryCache) runDevicePool(deviceID uint64, jobChan <-chan hashJob, resultChan chan<- hashResult, numWorkers int) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dc.deviceHashWorkerNew(jobChan, resultChan)
+		}()
+	}
+
+	wg.Wait()
+}
+
+// deviceHashWorkerNew processes hash jobs for a device
+func (dc *DirectoryCache) deviceHashWorkerNew(jobChan <-chan hashJob, resultChan chan<- hashResult) {
+	for job := range jobChan {
+		hashStr, err := dc.hashFile(job.filePath)
+
+		var hashBytes []byte
+		var hashType uint16
+		if err == nil {
+			hashBytes, hexErr := hex.DecodeString(hashStr)
+			if hexErr == nil {
+				hashType = HashTypeSHA1 // Currently using SHA1 - TODO: make configurable
+			} else {
+				err = hexErr
+			}
+		}
+
+		result := hashResult{
+			entry:    job.entry,
+			hash:     hashBytes,
+			hashType: hashType,
+			err:      err,
+		}
+
+		resultChan <- result
+		// Clear reference to prevent memory leak
+		job.entry = nil
+	}
+}
+
+// handleHashResults processes hash results and updates entries
+func (dc *DirectoryCache) handleHashResults(resultChan <-chan hashResult, doneChan chan<- struct{}) {
+	pageSize := os.Getpagesize()
+
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: hash error: %v\n", result.err)
+			continue
+		}
+
+		// Update hash and hash type in-place via pointer
+		result.entry.HashType = result.hashType
+
+		// Clear hash field and copy new hash data
+		for i := range result.entry.Hash {
+			result.entry.Hash[i] = 0
+		}
+		copy(result.entry.Hash[:], result.hash)
+
+		// Only hint to OS if entry is within Size bytes of page end
+		entryAddr := uintptr(unsafe.Pointer(result.entry))
+		nextPageBoundary := (entryAddr + uintptr(pageSize)) &^ uintptr(pageSize-1)
+		distanceToPageEnd := nextPageBoundary - entryAddr
+
+		if distanceToPageEnd <= uintptr(result.entry.Size) {
+			sysUnusedOS(unsafe.Pointer(result.entry), int(result.entry.Size))
+		}
+
+		// Clear reference to prevent memory leak
+		result.entry = nil
+	}
+
+	close(doneChan)
+}
+
+// deviceHashWorker processes file hashing jobs for a specific device
+func (dc *DirectoryCache) deviceHashWorker(deviceID uint64, jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for job := range jobs {
+		hashBytes, hashType, stat, err := dc.processFileJob(job)
+		results <- fileResult{
+			entry: nil, // We'll create the binaryEntry directly in mmap
+			err:   err,
+			index: job.index,
+		}
+		_ = hashBytes
+		_ = hashType
+		_ = stat
+	}
 }
