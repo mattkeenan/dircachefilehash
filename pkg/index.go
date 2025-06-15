@@ -18,17 +18,50 @@ const (
 type MmapIndex struct {
 	data    []byte
 	file    *os.File
-	header  *IndexHeader
 	entries []byte // Raw entry data after header
 	size    int    // Current mapped size
 	offset  int    // Current write offset
 }
 
-// IndexHeader represents the file header in host byte order
+// IndexHeader represents the file header in host byte order (cast directly to mmap'd memory)
 type IndexHeader struct {
-	Signature  [4]byte
-	Version    uint32
-	EntryCount uint32
+	Signature  [4]byte // "dcfh" signature
+	Version    uint32  // Index version (host order)
+	EntryCount uint32  // Number of entries (host order)
+}
+
+// Header returns a direct pointer to the header in mmap'd memory (zero-copy)
+func (mi *MmapIndex) Header() *IndexHeader {
+	return (*IndexHeader)(unsafe.Pointer(&mi.data[0]))
+}
+
+// ValidateSignature checks if the signature matches expected value
+func (ih *IndexHeader) ValidateSignature(expected [4]byte) error {
+	if ih.Signature != expected {
+		return fmt.Errorf("invalid signature: got %q, expected %q",
+			string(ih.Signature[:]), string(expected[:]))
+	}
+	return nil
+}
+
+// ValidateVersion checks if the version is supported
+func (ih *IndexHeader) ValidateVersion(expected uint32) error {
+	if ih.Version != expected {
+		return fmt.Errorf("unsupported version: got %d, expected %d", ih.Version, expected)
+	}
+	return nil
+}
+
+// SetHeader initializes the header fields in mmap'd memory
+func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32) {
+	ih.Signature = signature
+	ih.Version = version
+	ih.EntryCount = entryCount
+}
+
+// EntryDataOffset returns the offset where entry data begins
+func (ih *IndexHeader) EntryDataOffset() int {
+	return HeaderSize
 }
 
 // makeSpaceForEntry ensures space for an entry, expands mapping if needed, and returns pointer
@@ -62,7 +95,7 @@ func (dc *DirectoryCache) makeSpaceForEntry(mmapIdx *MmapIndex, entrySize int) (
 		mmapIdx.data = newData
 		mmapIdx.size = newSize
 		mmapIdx.entries = newData[HeaderSize:]
-		mmapIdx.header = (*IndexHeader)(unsafe.Pointer(&newData[0]))
+		// Note: header pointer is now accessed via mmapIdx.Header() method
 	}
 
 	// Get pointer to entry location
@@ -154,11 +187,9 @@ func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	}
 	defer unix.Munmap(data)
 
-	// Write header
+	// Write header directly to mmap'd memory (zero-copy)
 	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.Signature = dc.signature
-	header.Version = dc.version
-	header.EntryCount = uint32(len(jobs))
+	header.SetHeader(dc.signature, dc.version, uint32(len(jobs)))
 
 	// Clear and recreate skiplist for new entries
 	dc.skiplist = NewSkiplistWrapper(16)
@@ -220,23 +251,25 @@ func (dc *DirectoryCache) LoadIndex() error {
 		return fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create MmapIndex
+	// Create MmapIndex with direct header access
 	mmapIndex := &MmapIndex{
 		data:    data,
 		file:    file,
-		header:  (*IndexHeader)(unsafe.Pointer(&data[0])),
 		entries: data[HeaderSize:],
 		size:    int(stat.Size()),
 		offset:  HeaderSize,
 	}
 	dc.mmapIndex = mmapIndex
 
-	// Verify header
-	if mmapIndex.header.Signature != dc.signature {
-		return fmt.Errorf("invalid signature")
+	// Get direct pointer to header in mmap'd memory (zero-copy)
+	header := mmapIndex.Header()
+
+	// Verify header using helper methods
+	if err := header.ValidateSignature(dc.signature); err != nil {
+		return err
 	}
-	if mmapIndex.header.Version != dc.version {
-		return fmt.Errorf("unsupported version: %d", mmapIndex.header.Version)
+	if err := header.ValidateVersion(dc.version); err != nil {
+		return err
 	}
 
 	// Verify checksum
@@ -252,7 +285,7 @@ func (dc *DirectoryCache) LoadIndex() error {
 	offset := 0
 	entryData := mmapIndex.entries
 
-	for i := uint32(0); i < mmapIndex.header.EntryCount; i++ {
+	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData)-ChecksumSize {
 			return fmt.Errorf("unexpected end of data at entry %d", i)
 		}
@@ -328,11 +361,9 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	}
 	defer unix.Munmap(data)
 
-	// Write header
+	// Write header directly to mmap'd memory (zero-copy)
 	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.Signature = dc.signature
-	header.Version = dc.version
-	header.EntryCount = 0
+	header.SetHeader(dc.signature, dc.version, 0)
 
 	// Write checksum
 	checksum := dc.calculateChecksum(data[:HeaderSize])
