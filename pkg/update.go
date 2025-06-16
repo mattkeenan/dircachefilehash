@@ -508,7 +508,8 @@ func (dc *DirectoryCache) deviceHashWorkerNew(jobChan <-chan hashJob, resultChan
 		var hashBytes []byte
 		var hashType uint16
 		if err == nil {
-			hashBytes, hexErr := hex.DecodeString(hashStr)
+			var hexErr error
+			hashBytes, hexErr = hex.DecodeString(hashStr)
 			if hexErr == nil {
 				hashType = HashTypeSHA1 // Currently using SHA1 - TODO: make configurable
 			} else {
@@ -562,21 +563,4 @@ func (dc *DirectoryCache) handleHashResults(resultChan <-chan hashResult, doneCh
 	}
 
 	close(doneChan)
-}
-
-// deviceHashWorker processes file hashing jobs for a specific device
-func (dc *DirectoryCache) deviceHashWorker(deviceID uint64, jobs <-chan fileJob, results chan<- fileResult, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	for job := range jobs {
-		hashBytes, hashType, stat, err := dc.processFileJob(job)
-		results <- fileResult{
-			entry: nil, // We'll create the binaryEntry directly in mmap
-			err:   err,
-			index: job.index,
-		}
-		_ = hashBytes
-		_ = hashType
-		_ = stat
-	}
 }
