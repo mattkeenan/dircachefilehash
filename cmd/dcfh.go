@@ -270,6 +270,8 @@ func handleStatus(args []string) {
 
 	// Create cache and get status
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
+
 	status, err := cache.Status()
 	if err != nil {
 		outputError(err.Error())
@@ -379,6 +381,7 @@ func handleUpdate(args []string) {
 
 	// Update the index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
 
 	if !*jsonOutput && *verbose {
 		fmt.Println("Scanning directory...")
@@ -396,18 +399,20 @@ func handleUpdate(args []string) {
 
 	// Check for duplicates
 	var duplicateInfo *DuplicateInfo
-	entries := cache.GetEntries()
-	if len(entries) > 0 {
-		duplicates := cache.FindDuplicates()
-		if len(duplicates) > 0 {
-			duplicateCount := 0
-			for _, files := range duplicates {
-				duplicateCount += len(files)
-			}
-			duplicateInfo = &DuplicateInfo{
-				SetCount:  len(duplicates),
-				FileCount: duplicateCount,
-			}
+	duplicates, err := cache.FindDuplicates()
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to find duplicates: %v", err))
+		os.Exit(1)
+	}
+
+	if len(duplicates) > 0 {
+		duplicateCount := 0
+		for _, files := range duplicates {
+			duplicateCount += len(files)
+		}
+		duplicateInfo = &DuplicateInfo{
+			SetCount:  len(duplicates),
+			FileCount: duplicateCount,
 		}
 	}
 
@@ -451,13 +456,19 @@ func handleDupes(args []string) {
 
 	// Load existing index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
+
 	if err := cache.LoadIndex(); err != nil {
 		outputError(fmt.Sprintf("Failed to load index: %v", err))
 		os.Exit(1)
 	}
 
 	// Find duplicates
-	duplicates := cache.FindDuplicates()
+	duplicates, err := cache.FindDuplicates()
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to find duplicates: %v", err))
+		os.Exit(1)
+	}
 
 	if len(duplicates) == 0 {
 		if *jsonOutput {

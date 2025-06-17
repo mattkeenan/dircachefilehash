@@ -40,7 +40,9 @@ A copy of the main index skiplist is made, this copy is then merged with the on 
 
 During this process, entries with the `Deleted` flag are filtered out to ensure deleted files are properly removed from the new main index. Once this new full in order index is written to disk then it is renamed over the old full index file and the update is complete, then the no longer needed `index.cache` file and any temporary index files are deleted (as they are now out of date).
 
-### cache index management for status and dupes operations
+### index cache management for status and dupes operations
+
+we really should avoid building the cache from scratch wherever possible; the whole point of the cache is to persistently store changes and hash calculations between uses. the index.cache file should also NOT have entries that are in the main index file; it should be an "exclusive cache", when the index.cache file is updated the skiplist (after it is merged) should filter out entries that are in the main index file, this can be done because the skiplist context should be tracking which file the entry is stored in (remember the a copy of the main index is made first (setting those entries with a context of the main index file), then the current index.cache skiplist is merged (with entries whose context points to the index.cache file), and then a scan is done with a new temporary skiplist with entries in a temporary index file with the context pointing to that temporary index file, and the skiplist for the temporary scan index file is then merged into the copy of the main index skiplist. finally that fulled merged skiplist is then written to a new temporary index cache file by filtering out any entries that have a context pointing to the main index file (i.e. all entries that aren't already in the main index), this temporary file is then renamed over the old index.cache file which completes the update of the new index.cache file.
 
 When a `status` or `dupes` command is run, the system updates the cache index (but not the main index) through the following process:
 
@@ -49,7 +51,7 @@ When a `status` or `dupes` command is run, the system updates the cache index (b
 3. Create a new skiplist by scanning the dcfh root directory
 4. Merge the scan results with the cache skiplist
 5. Filter the resulting skiplist to include only entries that are not present in the main index
-6. Write these filtered entries to a new `index.cache` file
+6. Write these filtered entries to a new temporary `index.cache` file
 7. Atomically rename the new cache file over the existing `index.cache`
 
 This approach ensures that `status` and `dupes` operations always work with current data while maintaining performance by avoiding updates to the main index file for read-only operations. The cache index serves as a staging area for tracking changes without the overhead of full index rebuilds.

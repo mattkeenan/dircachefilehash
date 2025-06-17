@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -22,20 +23,37 @@ type StatusResult struct {
 	Deleted  []string
 }
 
-// Status compares the current directory state with the loaded index using Hwang-Lin algorithm on skiplists
+// Status compares the current directory state with the loaded index using context-aware cache management
 func (dc *DirectoryCache) Status() (*StatusResult, error) {
+	// Load main index with context
 	if dc.skiplist.IsEmpty() {
-		if err := dc.LoadIndex(); err != nil {
+		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
 			return nil, fmt.Errorf("failed to load index: %w", err)
 		}
 	}
 
-	// Scan current state into a new cache
-	currentCache := NewDirectoryCache(dc.RootDir, "")
-	if err := currentCache.ScanDirectory(); err != nil {
+	// Update cache index with current state using context-aware logic
+	if err := dc.UpdateCacheIndex(); err != nil {
+		return nil, fmt.Errorf("failed to update cache index: %w", err)
+	}
+
+	// Load cache index with context
+	cacheSkiplist, err := dc.LoadCacheIndex("cache")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load cache index: %w", err)
+	}
+
+	// Create combined view: main index + cache index for complete current state
+	workingSkiplist := dc.skiplist.Copy("main")
+	if err := workingSkiplist.Merge(cacheSkiplist); err != nil {
+		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
+	}
+
+	// Scan current directory state for comparison with context
+	currentSkiplist, err := dc.scanPathsToSkiplist([]string{dc.RootDir}, "current")
+	if err != nil {
 		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
-	defer currentCache.Close()
 
 	result := &StatusResult{
 		Modified: make([]string, 0),
@@ -43,8 +61,8 @@ func (dc *DirectoryCache) Status() (*StatusResult, error) {
 		Deleted:  make([]string, 0),
 	}
 
-	// Hwang-Lin merge algorithm using skiplist iterators
-	dc.hwangLinStatus(dc.skiplist, currentCache.skiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+	// Use Hwang-Lin merge algorithm to compare states (all context-aware)
+	dc.hwangLinStatus(workingSkiplist, currentSkiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
 		switch status {
 		case StatusModified:
 			result.Modified = append(result.Modified, path)
@@ -58,22 +76,170 @@ func (dc *DirectoryCache) Status() (*StatusResult, error) {
 	return result, nil
 }
 
+// UpdateCacheIndex updates the cache index with current state following the exclusive cache design
+func (dc *DirectoryCache) UpdateCacheIndex() error {
+	// Step 1: Load main index with context tracking
+	if dc.skiplist.IsEmpty() {
+		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
+			return fmt.Errorf("failed to load main index: %w", err)
+		}
+	}
+
+	// Step 2: Copy main index skiplist with main context
+	mainSkiplist := dc.skiplist.Copy("main")
+
+	// Step 3: Load and merge existing cache if present
+	if _, err := os.Stat(dc.CacheFile); err == nil {
+		cacheSkiplist, err := dc.LoadCacheIndex("cache")
+		if err != nil {
+			return fmt.Errorf("failed to load existing cache: %w", err)
+		}
+
+		// Merge existing cache into working skiplist
+		if err := mainSkiplist.Merge(cacheSkiplist); err != nil {
+			return fmt.Errorf("failed to merge existing cache: %w", err)
+		}
+	}
+
+	// Step 4: Scan current directory state into temporary skiplist
+	tempScanSkiplist, err := dc.scanPathsToSkiplist([]string{dc.RootDir}, "scan")
+	if err != nil {
+		return fmt.Errorf("failed to scan directory: %w", err)
+	}
+
+	// Step 5: Merge scan results into working skiplist
+	if err := mainSkiplist.Merge(tempScanSkiplist); err != nil {
+		return fmt.Errorf("failed to merge scan results: %w", err)
+	}
+
+	// Step 6: Filter out entries that have "main" context (exclusive cache)
+	exclusiveCacheSkiplist := mainSkiplist.FilterExcluding("main")
+
+	// Step 7: Write new cache index
+	if !exclusiveCacheSkiplist.IsEmpty() {
+		tempCachePath := dc.generateTempFileName("cache")
+		if err := dc.writeSparseIndexFromSkiplist(exclusiveCacheSkiplist, tempCachePath); err != nil {
+			return fmt.Errorf("failed to write cache index: %w", err)
+		}
+
+		// Atomic rename
+		if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
+			os.Remove(tempCachePath) // Cleanup on failure
+			return fmt.Errorf("failed to rename cache file: %w", err)
+		}
+	} else {
+		// No cache entries needed, ensure cache file doesn't exist
+		os.Remove(dc.CacheFile)
+	}
+
+	return nil
+}
+
+// LoadIndex loads an index file and sets the context for all entries
+func (dc *DirectoryCache) LoadIndex(filePath, context string) error {
+	// Save current skiplist
+	oldSkiplist := dc.skiplist
+
+	// Create new skiplist with context
+	dc.skiplist = NewSkiplistWrapper(16, context)
+
+	// Load the index
+	if err := dc.loadIndexFromFile(filePath); err != nil {
+		dc.skiplist = oldSkiplist // Restore on error
+		return err
+	}
+
+	return nil
+}
+
+// LoadCacheIndex loads the cache index file with context
+func (dc *DirectoryCache) LoadCacheIndex(context string) (*SkiplistWrapper, error) {
+	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
+		return NewSkiplistWrapper(16, context), nil
+	}
+
+	// Temporarily create a cache instance to load from cache file
+	tempCache := NewDirectoryCache(dc.RootDir, "")
+	tempCache.IndexFile = dc.CacheFile
+	tempCache.skiplist = NewSkiplistWrapper(16, context)
+
+	if err := tempCache.loadIndexFromFile(dc.CacheFile); err != nil {
+		return nil, err
+	}
+
+	// Return the loaded skiplist
+	return tempCache.skiplist.Copy(context), nil
+}
+
+// scanPathsToSkiplist scans paths and returns a skiplist with context
+func (dc *DirectoryCache) scanPathsToSkiplist(paths []string, context string) (*SkiplistWrapper, error) {
+	jobs, err := dc.collectFileJobs(paths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect file jobs: %w", err)
+	}
+
+	if len(jobs) == 0 {
+		return NewSkiplistWrapper(16, context), nil
+	}
+
+	// Create temporary index file for the scan
+	tempScanPath := dc.generateTempFileName("scan")
+
+	// Create temporary cache to write the jobs
+	tempCache := NewDirectoryCache(dc.RootDir, "")
+	tempCache.IndexFile = tempScanPath
+	tempCache.skiplist = NewSkiplistWrapper(16, context)
+
+	// Write jobs to temporary index file
+	if err := tempCache.WriteIndex(jobs); err != nil {
+		return nil, fmt.Errorf("failed to write temp scan index: %w", err)
+	}
+
+	// Load the temporary index with context
+	if err := tempCache.LoadIndex(tempScanPath, context); err != nil {
+		os.Remove(tempScanPath)
+		return nil, fmt.Errorf("failed to load temp scan index: %w", err)
+	}
+
+	// Return the skiplist with proper context
+	result := tempCache.skiplist.Copy(context)
+	return result, nil
+}
+
 // StatusWithCallback compares directory state using Hwang-Lin algorithm with callback for zero-copy operation
 func (dc *DirectoryCache) StatusWithCallback(callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) error {
+	// Load main index with context
 	if dc.skiplist.IsEmpty() {
-		if err := dc.LoadIndex(); err != nil {
+		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
 			return fmt.Errorf("failed to load index: %w", err)
 		}
 	}
 
-	currentCache := NewDirectoryCache(dc.RootDir, "")
-	if err := currentCache.ScanDirectory(); err != nil {
+	// Update cache index first (status operation)
+	if err := dc.UpdateCacheIndex(); err != nil {
+		return fmt.Errorf("failed to update cache index: %w", err)
+	}
+
+	// Load cache index with context
+	cacheSkiplist, err := dc.LoadCacheIndex("cache")
+	if err != nil {
+		return fmt.Errorf("failed to load cache index: %w", err)
+	}
+
+	// Create combined view: main index + cache index for complete current state
+	workingSkiplist := dc.skiplist.Copy("main")
+	if err := workingSkiplist.Merge(cacheSkiplist); err != nil {
+		return fmt.Errorf("failed to merge cache with main index: %w", err)
+	}
+
+	// Scan current directory state using context-aware entries only
+	currentSkiplist, err := dc.scanPathsToSkiplist([]string{dc.RootDir}, "current")
+	if err != nil {
 		return fmt.Errorf("failed to scan directory: %w", err)
 	}
-	defer currentCache.Close()
 
-	// Use Hwang-Lin algorithm directly
-	dc.hwangLinStatus(dc.skiplist, currentCache.skiplist, callback)
+	// Use Hwang-Lin algorithm directly with context-aware entries
+	dc.hwangLinStatus(workingSkiplist, currentSkiplist, callback)
 	return nil
 }
 
@@ -91,6 +257,12 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 	for i < len(indexEntries) && j < len(diskEntries) {
 		indexEntry := indexEntries[i]
 		diskEntry := diskEntries[j]
+
+		// Skip deleted entries from index
+		if indexEntry.IsDeleted() {
+			i++
+			continue
+		}
 
 		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
 
@@ -116,7 +288,9 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 
 	// Handle remaining entries from index (all deleted)
 	for i < len(indexEntries) {
-		callback(StatusDeleted, indexEntries[i].RelativePath(), indexEntries[i], nil)
+		if !indexEntries[i].IsDeleted() {
+			callback(StatusDeleted, indexEntries[i].RelativePath(), indexEntries[i], nil)
+		}
 		i++
 	}
 

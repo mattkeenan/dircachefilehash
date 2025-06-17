@@ -15,25 +15,162 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Update scans the directory and updates the index file using skiplist
+// Update scans the directory and updates the index file following design workflow with context tracking
 func (dc *DirectoryCache) Update(paths ...string) error {
+	// Load main index with context
+	if dc.skiplist.IsEmpty() {
+		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
+			return fmt.Errorf("failed to load index: %w", err)
+		}
+	}
+
 	if len(paths) == 0 {
-		paths = []string{dc.RootDir}
+		// No specific paths: update entire repository - put everything in main index
+		return dc.updateFullRepository()
+	} else {
+		// Specific paths: selective update - put only specified paths in main index
+		return dc.updateSpecificPaths(paths)
 	}
+}
 
-	jobs, err := dc.collectFileJobs(paths)
+// updateFullRepository updates the entire repository and puts everything in main index
+func (dc *DirectoryCache) updateFullRepository() error {
+	// Scan entire repository with context
+	scanSkiplist, err := dc.scanPathsToSkiplist([]string{dc.RootDir}, "scan")
 	if err != nil {
-		return fmt.Errorf("failed to collect file jobs: %w", err)
+		return fmt.Errorf("failed to scan repository: %w", err)
 	}
 
-	if err := dc.WriteIndex(jobs); err != nil {
-		return fmt.Errorf("failed to write index: %w", err)
+	// Write everything to main index
+	tempIndexPath := dc.generateTempFileName("index")
+	if err := dc.writeCompleteIndexFromSkiplist(scanSkiplist, tempIndexPath); err != nil {
+		return fmt.Errorf("failed to write new index: %w", err)
 	}
 
+	// Atomic replace main index
+	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
+		os.Remove(tempIndexPath) // Cleanup on failure
+		return fmt.Errorf("failed to rename index file: %w", err)
+	}
+
+	// Remove cache file since everything is now in main index
+	os.Remove(dc.CacheFile) // Non-fatal if it fails
+	dc.CleanupTempFiles()
+
+	// Reload main index with proper context
+	dc.skiplist = scanSkiplist.Copy("main")
 	return nil
 }
 
-// ScanDirectory scans the directory and creates file jobs for parallel processing
+// updateSpecificPaths updates only specified paths and manages main index vs cache with context tracking
+func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
+	// Step 1: Load existing cache if present
+	cacheSkiplist, err := dc.LoadCacheIndex("cache")
+	if err != nil {
+		return fmt.Errorf("failed to load cache index: %w", err)
+	}
+
+	// Step 2: Scan specified paths only with context
+	updatedSkiplist, err := dc.scanPathsToSkiplist(paths, "updated")
+	if err != nil {
+		return fmt.Errorf("failed to scan specified paths: %w", err)
+	}
+
+	// Step 3: Create updated main index with current main + newly updated paths
+	mainSkiplist := dc.skiplist.Copy("main")
+
+	// Remove any entries from main index that are in the updated paths
+	// and add the new versions
+	updatedPaths := make(map[string]bool)
+	updatedSkiplist.ForEach(func(entry *binaryEntry) bool {
+		updatedPaths[entry.RelativePath()] = true
+		return true
+	})
+
+	// Filter main index to remove updated paths
+	filteredMain := NewSkiplistWrapper(16, "main")
+	mainSkiplist.ForEach(func(entry *binaryEntry) bool {
+		if !updatedPaths[entry.RelativePath()] {
+			filteredMain.Insert(entry, "main")
+		}
+		return true
+	})
+
+	// Merge updated entries into filtered main
+	if err := filteredMain.Merge(updatedSkiplist); err != nil {
+		return fmt.Errorf("failed to merge updated entries: %w", err)
+	}
+
+	// Step 4: Write new main index with updated entries
+	tempIndexPath := dc.generateTempFileName("index")
+	if err := dc.writeCompleteIndexFromSkiplist(filteredMain, tempIndexPath); err != nil {
+		return fmt.Errorf("failed to write new index: %w", err)
+	}
+
+	// Atomic replace main index
+	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
+		os.Remove(tempIndexPath) // Cleanup on failure
+		return fmt.Errorf("failed to rename index file: %w", err)
+	}
+
+	// Step 5: Update cache to contain non-updated files
+	// Scan entire repository to get current state with context
+	allCurrentSkiplist, err := dc.scanPathsToSkiplist([]string{dc.RootDir}, "current")
+	if err != nil {
+		return fmt.Errorf("failed to scan for cache update: %w", err)
+	}
+
+	// Filter cache to only contain files NOT in main index
+	cacheOnlySkiplist := NewSkiplistWrapper(16, "cache")
+	allCurrentSkiplist.ForEach(func(entry *binaryEntry) bool {
+		if !updatedPaths[entry.RelativePath()] {
+			// This file was not explicitly updated, so it belongs in cache
+			cacheOnlySkiplist.Insert(entry, "cache")
+		}
+		return true
+	})
+
+	// Step 6: Write updated cache index
+	if !cacheOnlySkiplist.IsEmpty() {
+		tempCachePath := dc.generateTempFileName("cache")
+		if err := dc.writeSparseIndexFromSkiplist(cacheOnlySkiplist, tempCachePath); err != nil {
+			return fmt.Errorf("failed to write cache index: %w", err)
+		}
+
+		// Atomic replace cache
+		if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
+			os.Remove(tempCachePath) // Cleanup on failure
+			return fmt.Errorf("failed to rename cache file: %w", err)
+		}
+	} else {
+		// No cache entries needed, remove cache file
+		os.Remove(dc.CacheFile)
+	}
+
+	dc.CleanupTempFiles()
+
+	// Reload main index with proper context
+	dc.skiplist = filteredMain.Copy("main")
+	return nil
+}
+
+// filterDeletedEntries returns a new skiplist without deleted entries while preserving context
+func (dc *DirectoryCache) filterDeletedEntries(skiplist *SkiplistWrapper) *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, skiplist.GetContext())
+
+	skiplist.ForEach(func(entry *binaryEntry) bool {
+		if !entry.IsDeleted() {
+			relativePath := entry.RelativePath()
+			entryContext := skiplist.GetEntry(relativePath)
+			result.Insert(entry, entryContext)
+		}
+		return true // Continue iteration
+	})
+
+	return result
+}
+
+// ScanDirectory scans the directory and creates file jobs for parallel processing with context
 func (dc *DirectoryCache) ScanDirectory() error {
 	jobs, err := dc.collectFileJobs([]string{dc.RootDir})
 	if err != nil {
@@ -43,10 +180,15 @@ func (dc *DirectoryCache) ScanDirectory() error {
 	return dc.WriteIndex(jobs)
 }
 
-// collectFileJobs collects file jobs from specified paths
+// collectFileJobs collects file jobs from specified paths (unchanged)
 func (dc *DirectoryCache) collectFileJobs(paths []string) ([]fileJob, error) {
 	var fileJobs []fileJob
 	jobIndex := 0
+
+	// Load ignore patterns if not already loaded
+	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
+		return nil, fmt.Errorf("failed to load ignore patterns: %w", err)
+	}
 
 	for _, inputPath := range paths {
 		absPath := inputPath
@@ -63,6 +205,11 @@ func (dc *DirectoryCache) collectFileJobs(paths []string) ([]fileJob, error) {
 		relPath, err := filepath.Rel(dc.RootDir, absPath)
 		if err != nil {
 			return nil, fmt.Errorf("path %s is not under root directory %s", absPath, dc.RootDir)
+		}
+
+		// Check if path should be ignored
+		if dc.ignoreManager.ShouldIgnore(relPath) {
+			continue
 		}
 
 		if info.IsDir() {
@@ -92,7 +239,7 @@ func (dc *DirectoryCache) collectFileJobs(paths []string) ([]fileJob, error) {
 	return fileJobs, nil
 }
 
-// scanPathRecursively scans a directory recursively
+// scanPathRecursively scans a directory recursively (unchanged)
 func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJob, jobIndex *int) error {
 	pathQueue := []string{rootPath}
 
@@ -102,6 +249,17 @@ func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJ
 
 		info, err := os.Lstat(currentPath)
 		if err != nil {
+			continue
+		}
+
+		// Get relative path for ignore checking
+		relPath, err := filepath.Rel(dc.RootDir, currentPath)
+		if err != nil {
+			continue
+		}
+
+		// Check if path should be ignored
+		if dc.ignoreManager.ShouldIgnore(relPath) {
 			continue
 		}
 
@@ -126,11 +284,6 @@ func (dc *DirectoryCache) scanPathRecursively(rootPath string, fileJobs *[]fileJ
 			}
 		} else if info.Mode().IsRegular() {
 			if currentPath == dc.IndexFile {
-				continue
-			}
-
-			relPath, err := filepath.Rel(dc.RootDir, currentPath)
-			if err != nil {
 				continue
 			}
 
@@ -162,14 +315,14 @@ type hashResult struct {
 	err      error
 }
 
-// UpdatePaths updates only the specified paths using skiplist and Hwang-Lin merge algorithm
+// UpdatePaths updates only the specified paths using skiplist and Hwang-Lin merge algorithm with context tracking
 func (dc *DirectoryCache) UpdatePaths(paths []string) error {
-	// Load existing index into skiplist
+	// Load existing index into skiplist with context
 	var existingSkiplist *SkiplistWrapper
-	if err := dc.LoadIndex(); err == nil {
-		existingSkiplist = dc.skiplist.Copy()
+	if err := dc.LoadIndex(dc.IndexFile, "main"); err == nil {
+		existingSkiplist = dc.skiplist.Copy("main")
 	} else {
-		existingSkiplist = NewSkiplistWrapper(16)
+		existingSkiplist = NewSkiplistWrapper(16, "main")
 	}
 
 	// Calculate approximate size for temporary mmap
@@ -195,10 +348,10 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 
 	// Write temp header directly to mmap'd memory (zero-copy)
 	tempHeader := (*IndexHeader)(unsafe.Pointer(&tempData[0]))
-	tempHeader.SetHeader(dc.signature, dc.version, 0)
+	tempHeader.SetHeader(dc.signature, dc.version, 0, 0)
 
-	// Create new skiplist for updated entries
-	newSkiplist := NewSkiplistWrapper(16)
+	// Create new skiplist for updated entries with context
+	newSkiplist := NewSkiplistWrapper(16, "updated")
 
 	// Setup channels for worker communication
 	jobChan := make(chan hashJob, 100)
@@ -253,13 +406,13 @@ func (dc *DirectoryCache) UpdatePaths(paths []string) error {
 		return fmt.Errorf("failed to replace index file: %w", err)
 	}
 
-	// Update our skiplist with the new data
-	dc.skiplist = newSkiplist
+	// Update our skiplist with the new data and proper context
+	dc.skiplist = newSkiplist.Copy("main")
 
 	return nil
 }
 
-// processPathsWithHwangLin uses Hwang-Lin algorithm to merge existing and new entries
+// processPathsWithHwangLin uses Hwang-Lin algorithm to merge existing and new entries with context tracking
 func (dc *DirectoryCache) processPathsWithHwangLin(paths []string, existingSkiplist, newSkiplist *SkiplistWrapper,
 	tempData []byte, offset *int, entryCount *uint32, maxSize int, jobChan chan<- hashJob) error {
 
@@ -333,7 +486,7 @@ func (dc *DirectoryCache) processPathsWithHwangLin(paths []string, existingSkipl
 	return nil
 }
 
-// fileChangedFromJob checks if a file has changed compared to existing entry
+// fileChangedFromJob checks if a file has changed compared to existing entry (unchanged)
 func (dc *DirectoryCache) fileChangedFromJob(existing *binaryEntry, job fileJob) bool {
 	stat := job.info.Sys().(*syscall.Stat_t)
 
@@ -350,7 +503,7 @@ func (dc *DirectoryCache) fileChangedFromJob(existing *binaryEntry, job fileJob)
 	return existing.CTimeWall != currentCTime || existing.MTimeWall != currentMTime
 }
 
-// copyExistingEntry copies an unchanged entry to the new index
+// copyExistingEntry copies an unchanged entry to the new index with context preservation
 func (dc *DirectoryCache) copyExistingEntry(existing *binaryEntry, tempData []byte, offset *int,
 	entryCount *uint32, maxSize int, newSkiplist *SkiplistWrapper) error {
 
@@ -363,16 +516,16 @@ func (dc *DirectoryCache) copyExistingEntry(existing *binaryEntry, tempData []by
 	copy(tempData[*offset:*offset+existingSize],
 		(*[1 << 20]byte)(unsafe.Pointer(existing))[:existingSize:existingSize])
 
-	// Get pointer to copied entry and add to new skiplist
+	// Get pointer to copied entry and add to new skiplist with context
 	copiedEntry := (*binaryEntry)(unsafe.Pointer(&tempData[*offset]))
-	newSkiplist.Insert(copiedEntry)
+	newSkiplist.Insert(copiedEntry, "updated")
 
 	*offset += existingSize
 	*entryCount++
 	return nil
 }
 
-// processNewFileEntry processes a new or changed file entry
+// processNewFileEntry processes a new or changed file entry with context tracking
 func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offset *int,
 	entryCount *uint32, maxSize int, jobChan chan<- hashJob, newSkiplist *SkiplistWrapper) error {
 
@@ -399,6 +552,7 @@ func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offs
 	entryPtr.GID = stat.Gid
 	entryPtr.FileSize = uint64(job.info.Size())
 	entryPtr.Flags = uint16(len(job.relPath))
+	entryPtr.EntryFlags = 0
 
 	// Write path
 	pathOffset := int(unsafe.Sizeof(*entryPtr))
@@ -410,8 +564,8 @@ func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offs
 		tempData[*offset+entrySize+i] = 0
 	}
 
-	// Add to skiplist
-	newSkiplist.Insert(entryPtr)
+	// Add to skiplist with context
+	newSkiplist.Insert(entryPtr, "updated")
 
 	// Queue for hashing
 	hashJob := hashJob{
@@ -431,7 +585,7 @@ func (dc *DirectoryCache) processNewFileEntry(job fileJob, tempData []byte, offs
 	return nil
 }
 
-// fileUnchanged checks if file metadata indicates no changes
+// fileUnchanged checks if file metadata indicates no changes (unchanged)
 func (dc *DirectoryCache) fileUnchanged(existing *binaryEntry, info os.FileInfo, stat *syscall.Stat_t) bool {
 	if existing.FileSize != uint64(info.Size()) {
 		return false
@@ -446,7 +600,7 @@ func (dc *DirectoryCache) fileUnchanged(existing *binaryEntry, info os.FileInfo,
 	return existing.CTimeWall == currentCTime && existing.MTimeWall == currentMTime
 }
 
-// workerMuxHandler manages device-specific worker pools, creating them on demand
+// workerMuxHandler manages device-specific worker pools, creating them on demand (unchanged)
 func (dc *DirectoryCache) workerMuxHandler(jobChan <-chan hashJob, resultChan chan<- hashResult) {
 	devicePools := make(map[uint64]chan hashJob)
 	var poolWg sync.WaitGroup
@@ -485,7 +639,7 @@ func (dc *DirectoryCache) workerMuxHandler(jobChan <-chan hashJob, resultChan ch
 	close(resultChan)
 }
 
-// runDevicePool runs workers for a specific device
+// runDevicePool runs workers for a specific device (unchanged)
 func (dc *DirectoryCache) runDevicePool(deviceID uint64, jobChan <-chan hashJob, resultChan chan<- hashResult, numWorkers int) {
 	var wg sync.WaitGroup
 
@@ -500,7 +654,7 @@ func (dc *DirectoryCache) runDevicePool(deviceID uint64, jobChan <-chan hashJob,
 	wg.Wait()
 }
 
-// deviceHashWorkerNew processes hash jobs for a device
+// deviceHashWorkerNew processes hash jobs for a device (unchanged)
 func (dc *DirectoryCache) deviceHashWorkerNew(jobChan <-chan hashJob, resultChan chan<- hashResult) {
 	for job := range jobChan {
 		hashStr, err := dc.hashFile(job.filePath)
@@ -530,7 +684,7 @@ func (dc *DirectoryCache) deviceHashWorkerNew(jobChan <-chan hashJob, resultChan
 	}
 }
 
-// handleHashResults processes hash results and updates entries
+// handleHashResults processes hash results and updates entries (unchanged)
 func (dc *DirectoryCache) handleHashResults(resultChan <-chan hashResult, doneChan chan<- struct{}) {
 	pageSize := os.Getpagesize()
 

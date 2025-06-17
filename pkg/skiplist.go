@@ -8,11 +8,13 @@ import (
 
 // SkiplistWrapper wraps zerocopyskiplist for zero-copy access to mmap'd binaryEntry pointers
 type SkiplistWrapper struct {
-	skiplist *zcsl.ZeroCopySkiplist[binaryEntry, string]
+	skiplist     *zcsl.ZeroCopySkiplist[binaryEntry, string]
+	context      string
+	entryContext map[string]string // Maps relative path to context
 }
 
-// NewSkiplistWrapper creates a new skiplist wrapper with the specified max levels
-func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
+// NewSkiplistWrapper creates a new skiplist wrapper with context tracking
+func NewSkiplistWrapper(maxLevels int, context string) *SkiplistWrapper {
 	if maxLevels < 8 {
 		maxLevels = 16 // reasonable default
 	}
@@ -40,13 +42,16 @@ func NewSkiplistWrapper(maxLevels int) *SkiplistWrapper {
 	)
 
 	return &SkiplistWrapper{
-		skiplist: skiplist,
+		skiplist:     skiplist,
+		context:      context,
+		entryContext: make(map[string]string),
 	}
 }
 
-// Insert adds a binaryEntry pointer to the skiplist (zero-copy)
-func (sw *SkiplistWrapper) Insert(entry *binaryEntry) {
+// Insert adds a binaryEntry pointer with specific context
+func (sw *SkiplistWrapper) Insert(entry *binaryEntry, context string) {
 	sw.skiplist.Insert(entry)
+	sw.entryContext[entry.RelativePath()] = context
 }
 
 // GetSortedEntries returns pointers to all entries in sorted order (zero-copy)
@@ -67,10 +72,10 @@ func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry) bool) {
 	}
 }
 
-// Merge merges another skiplist into this skiplist
-func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper) {
+// Merge merges another skiplist into this skiplist with context tracking
+func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper) error {
 	if other == nil {
-		return
+		return nil
 	}
 
 	err := sw.skiplist.Merge(other.skiplist, zcsl.MergeTheirs)
@@ -78,6 +83,13 @@ func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper) {
 		// Fallback to manual merge if the built-in merge fails
 		sw.manualMerge(other)
 	}
+
+	// Merge context mappings
+	for path, context := range other.entryContext {
+		sw.entryContext[path] = context
+	}
+
+	return nil
 }
 
 // manualMerge performs manual merge as fallback
@@ -85,6 +97,9 @@ func (sw *SkiplistWrapper) manualMerge(other *SkiplistWrapper) {
 	otherEntries := other.GetSortedEntries()
 	for _, entry := range otherEntries {
 		sw.skiplist.Insert(entry)
+		if context, exists := other.entryContext[entry.RelativePath()]; exists {
+			sw.entryContext[entry.RelativePath()] = context
+		}
 	}
 }
 
@@ -96,7 +111,9 @@ func (sw *SkiplistWrapper) Delete(other *SkiplistWrapper) {
 
 	entriesToDelete := other.GetSortedEntries()
 	for _, entry := range entriesToDelete {
-		sw.skiplist.Delete(entry.RelativePath())
+		relativePath := entry.RelativePath()
+		sw.skiplist.Delete(relativePath)
+		delete(sw.entryContext, relativePath)
 	}
 }
 
@@ -120,7 +137,96 @@ func (sw *SkiplistWrapper) IsEmpty() bool {
 
 // Copy creates a copy of the skiplist structure
 func (sw *SkiplistWrapper) Copy() *SkiplistWrapper {
-	return &SkiplistWrapper{
-		skiplist: sw.skiplist.Copy(),
+	newWrapper := &SkiplistWrapper{
+		skiplist:     sw.skiplist.Copy(),
+		context:      sw.context,
+		entryContext: make(map[string]string),
 	}
+
+	// Copy context mappings
+	for path, context := range sw.entryContext {
+		newWrapper.entryContext[path] = context
+	}
+
+	return newWrapper
+}
+
+// CopyWithContext creates a copy with a specific context
+func (sw *SkiplistWrapper) CopyWithContext(context string) *SkiplistWrapper {
+	newWrapper := &SkiplistWrapper{
+		skiplist:     sw.skiplist.Copy(),
+		context:      context,
+		entryContext: make(map[string]string),
+	}
+
+	// Copy context mappings
+	for path, entryContext := range sw.entryContext {
+		newWrapper.entryContext[path] = entryContext
+	}
+
+	return newWrapper
+}
+
+// GetContext returns the default context for this skiplist
+func (sw *SkiplistWrapper) GetContext() string {
+	return sw.context
+}
+
+// GetEntry returns the context for a specific entry
+func (sw *SkiplistWrapper) GetEntry(relativePath string) string {
+	if context, exists := sw.entryContext[relativePath]; exists {
+		return context
+	}
+	return sw.context
+}
+
+// SetContext sets the default context for this skiplist
+func (sw *SkiplistWrapper) SetContext(context string) {
+	sw.context = context
+}
+
+// FilterExcluding returns a new skiplist excluding entries with specified context
+func (sw *SkiplistWrapper) FilterExcluding(excludeContext string) *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, sw.context)
+
+	sw.ForEach(func(entry *binaryEntry) bool {
+		relativePath := entry.RelativePath()
+		entryContext := sw.GetEntry(relativePath)
+		if entryContext != excludeContext {
+			result.Insert(entry, entryContext)
+		}
+		return true
+	})
+
+	return result
+}
+
+// FilterDeleted returns a new skiplist without deleted entries
+func (sw *SkiplistWrapper) FilterDeleted() *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, sw.context)
+
+	sw.ForEach(func(entry *binaryEntry) bool {
+		if !entry.IsDeleted() {
+			relativePath := entry.RelativePath()
+			entryContext := sw.GetEntry(relativePath)
+			result.Insert(entry, entryContext)
+		}
+		return true
+	})
+
+	return result
+}
+
+// Stats returns statistics about the skiplist entries
+func (sw *SkiplistWrapper) Stats() (total, deleted, active int) {
+	sw.ForEach(func(entry *binaryEntry) bool {
+		total++
+		if entry.IsDeleted() {
+			deleted++
+		} else {
+			active++
+		}
+		return true
+	})
+	return total, deleted, active
 }

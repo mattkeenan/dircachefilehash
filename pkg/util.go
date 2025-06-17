@@ -1,8 +1,10 @@
 package dircachefilehash
 
 import (
+	"fmt"
 	"hash"
 	"os"
+	"path/filepath"
 	"time"
 	"unsafe"
 
@@ -23,34 +25,62 @@ const (
 	HashSizeSHA512 = 64 // SHA-512 hash size in bytes
 )
 
-// DirectoryCache manages the file cache for a directory using zero-copy skiplist
+// Index header flags
+const (
+	IndexFlagSparse uint32 = 1 << 0 // Sparse index flag
+)
+
+// Entry flags
+const (
+	EntryFlagDeleted uint32 = 1 << 0 // Entry marked as deleted
+)
+
+// DirectoryCache manages the file cache for a directory using zero-copy skiplist with context tracking
 type DirectoryCache struct {
-	RootDir   string
-	IndexFile string
-	skiplist  *SkiplistWrapper // Zero-copy skiplist for mmap'd entries
-	signature [4]byte          // "dcfh" signature
-	version   uint32           // Index version
-	hasher    hash.Hash        // SHA-1 hasher for checksums
-	mmapIndex *MmapIndex       // Memory-mapped index file
+	RootDir       string
+	IndexFile     string
+	CacheFile     string           // Path to index.cache file
+	skiplist      *SkiplistWrapper // Zero-copy skiplist for mmap'd entries with context tracking
+	signature     [4]byte          // "dcfh" signature
+	version       uint32           // Index version
+	hasher        hash.Hash        // SHA-1 hasher for checksums
+	mmapIndex     *MmapIndex       // Memory-mapped index file
+	ignoreManager *IgnoreManager   // Ignore pattern manager
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
 // All fields are in host byte order for direct access
 // Time fields use Go's wall time format (uint64 encoding)
 type binaryEntry struct {
-	Size      uint32   // Total size of this entry including padding (host order) - MUST BE FIRST
-	CTimeWall uint64   // Change time wall clock (Go wall time format)
-	MTimeWall uint64   // Modification time wall clock (Go wall time format)
-	Dev       uint32   // Device ID (host order)
-	Ino       uint32   // Inode number (host order)
-	Mode      uint32   // File mode (host order)
-	UID       uint32   // User ID (host order)
-	GID       uint32   // Group ID (host order)
-	FileSize  uint64   // File size in bytes (host order) - supports files >4GB
-	Flags     uint16   // Index flags (host order)
-	HashType  uint16   // Hash algorithm type (SHA1=1, SHA256=2, SHA512=3)
-	Hash      [64]byte // Hash value (up to 64 bytes for SHA-512)
+	Size       uint32   // Total size of this entry including padding (host order) - MUST BE FIRST
+	CTimeWall  uint64   // Change time wall clock (Go wall time format)
+	MTimeWall  uint64   // Modification time wall clock (Go wall time format)
+	Dev        uint32   // Device ID (host order)
+	Ino        uint32   // Inode number (host order)
+	Mode       uint32   // File mode (host order)
+	UID        uint32   // User ID (host order)
+	GID        uint32   // Group ID (host order)
+	FileSize   uint64   // File size in bytes (host order) - supports files >4GB
+	Flags      uint16   // Path length flags (host order)
+	HashType   uint16   // Hash algorithm type (SHA1=1, SHA256=2, SHA512=3)
+	EntryFlags uint32   // Entry flags (deleted, etc.)
+	Hash       [64]byte // Hash value (up to 64 bytes for SHA-512)
 	// Variable-length path follows immediately after this struct
+}
+
+// IsDeleted returns true if this entry is marked as deleted
+func (be *binaryEntry) IsDeleted() bool {
+	return be.EntryFlags&EntryFlagDeleted != 0
+}
+
+// SetDeleted marks this entry as deleted
+func (be *binaryEntry) SetDeleted() {
+	be.EntryFlags |= EntryFlagDeleted
+}
+
+// ClearDeleted removes the deleted flag from this entry
+func (be *binaryEntry) ClearDeleted() {
+	be.EntryFlags &^= EntryFlagDeleted
 }
 
 // RelativePath returns the relative path string from mmap'd memory (zero-copy)
@@ -150,8 +180,10 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 	count := 0
 
 	dc.skiplist.ForEach(func(entry *binaryEntry) bool {
-		totalSize += int64(entry.FileSize)
-		count++
+		if !entry.IsDeleted() {
+			totalSize += int64(entry.FileSize)
+			count++
+		}
 		return true // Continue iteration
 	})
 
@@ -186,4 +218,12 @@ func encodeWallTime(sec int64, nsec int64) uint64 {
 	// Create time.Time with full nanosecond precision and extract wall time
 	t := time.Unix(sec, nsec)
 	return timeWall(t)
+}
+
+// generateTempFileName generates a temporary filename with PID and timestamp
+func (dc *DirectoryCache) generateTempFileName(prefix string) string {
+	pid := os.Getpid()
+	timestamp := time.Now().UnixNano()
+	return filepath.Join(filepath.Dir(dc.IndexFile),
+		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
 }
