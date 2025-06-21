@@ -2,19 +2,18 @@ package dircachefilehash
 
 import (
 	"strings"
+	"syscall"
 
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
-// SkiplistWrapper wraps zerocopyskiplist for zero-copy access to mmap'd binaryEntry pointers
+// SkiplistWrapper wraps the new generic zerocopyskiplist with context support
 type SkiplistWrapper struct {
-	skiplist     *zcsl.ZeroCopySkiplist[binaryEntry, string]
-	context      string
-	entryContext map[string]string // Maps relative path to context
+	skiplist *zcsl.ZeroCopySkiplist[binaryEntry, string, string]
 }
 
 // NewSkiplistWrapper creates a new skiplist wrapper with context tracking
-func NewSkiplistWrapper(maxLevels int, context string) *SkiplistWrapper {
+func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 	if maxLevels < 8 {
 		maxLevels = 16 // reasonable default
 	}
@@ -34,7 +33,7 @@ func NewSkiplistWrapper(maxLevels int, context string) *SkiplistWrapper {
 		return strings.Compare(a, b)
 	}
 
-	skiplist := zcsl.MakeZeroCopySkiplist(
+	skiplist := zcsl.MakeZeroCopySkiplist[binaryEntry, string, string](
 		maxLevels,
 		getKeyFromItem,
 		getItemSize,
@@ -42,87 +41,64 @@ func NewSkiplistWrapper(maxLevels int, context string) *SkiplistWrapper {
 	)
 
 	return &SkiplistWrapper{
-		skiplist:     skiplist,
-		context:      context,
-		entryContext: make(map[string]string),
+		skiplist: skiplist,
 	}
 }
 
 // Insert adds a binaryEntry pointer with specific context
-func (sw *SkiplistWrapper) Insert(entry *binaryEntry, context string) {
-	sw.skiplist.Insert(entry)
-	sw.entryContext[entry.RelativePath()] = context
+func (sw *SkiplistWrapper) Insert(entry *binaryEntry, context string) bool {
+	ctx := &context
+	return sw.skiplist.Insert(entry, ctx)
 }
 
-// GetSortedEntries returns pointers to all entries in sorted order (zero-copy)
-func (sw *SkiplistWrapper) GetSortedEntries() []*binaryEntry {
-	var entries []*binaryEntry
-	for current := sw.skiplist.First(); current != nil; current = current.Next() {
-		entries = append(entries, current.Item())
+// Find searches for an entry by its relative path and returns entry with context
+func (sw *SkiplistWrapper) Find(relativePath string) (*binaryEntry, string) {
+	found, ctx := sw.skiplist.Find(relativePath)
+	if found != nil {
+		contextStr := ""
+		if ctx != nil {
+			contextStr = *ctx
+		}
+		return found.Item(), contextStr
 	}
-	return entries
+	return nil, ""
+}
+
+// Delete removes an entry by its relative path
+func (sw *SkiplistWrapper) Delete(relativePath string) bool {
+	return sw.skiplist.Delete(relativePath)
 }
 
 // ForEach iterates through all entries in sorted order with a callback (zero-copy)
-func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry) bool) {
+func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry, string) bool) {
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
-		if !callback(current.Item()) {
+		context := ""
+		if current.Context() != nil {
+			context = *current.Context()
+		}
+		if !callback(current.Item(), context) {
 			break
 		}
 	}
 }
 
-// Merge merges another skiplist into this skiplist with context tracking
-func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper) error {
+// ForEachContext iterates through entries matching a specific context
+func (sw *SkiplistWrapper) ForEachContext(context string, callback func(*binaryEntry) bool) {
+	sw.ForEach(func(entry *binaryEntry, entryContext string) bool {
+		if entryContext == context {
+			return callback(entry)
+		}
+		return true // Continue iteration
+	})
+}
+
+// Merge merges another skiplist into this skiplist
+func (sw *SkiplistWrapper) Merge(other *SkiplistWrapper, strategy zcsl.MergeStrategy) error {
 	if other == nil {
 		return nil
 	}
 
-	err := sw.skiplist.Merge(other.skiplist, zcsl.MergeTheirs)
-	if err != nil {
-		// Fallback to manual merge if the built-in merge fails
-		sw.manualMerge(other)
-	}
-
-	// Merge context mappings
-	for path, context := range other.entryContext {
-		sw.entryContext[path] = context
-	}
-
-	return nil
-}
-
-// manualMerge performs manual merge as fallback
-func (sw *SkiplistWrapper) manualMerge(other *SkiplistWrapper) {
-	otherEntries := other.GetSortedEntries()
-	for _, entry := range otherEntries {
-		sw.skiplist.Insert(entry)
-		if context, exists := other.entryContext[entry.RelativePath()]; exists {
-			sw.entryContext[entry.RelativePath()] = context
-		}
-	}
-}
-
-// Delete removes entries from this skiplist that exist in the other skiplist
-func (sw *SkiplistWrapper) Delete(other *SkiplistWrapper) {
-	if other == nil {
-		return
-	}
-
-	entriesToDelete := other.GetSortedEntries()
-	for _, entry := range entriesToDelete {
-		relativePath := entry.RelativePath()
-		sw.skiplist.Delete(relativePath)
-		delete(sw.entryContext, relativePath)
-	}
-}
-
-// Find searches for an entry by its relative path
-func (sw *SkiplistWrapper) Find(relativePath string) *binaryEntry {
-	if found := sw.skiplist.Find(relativePath); found != nil {
-		return found.Item()
-	}
-	return nil
+	return sw.skiplist.Merge(other.skiplist, strategy)
 }
 
 // Length returns the number of entries in the skiplist
@@ -138,88 +114,80 @@ func (sw *SkiplistWrapper) IsEmpty() bool {
 // Copy creates a copy of the skiplist structure
 func (sw *SkiplistWrapper) Copy() *SkiplistWrapper {
 	newWrapper := &SkiplistWrapper{
-		skiplist:     sw.skiplist.Copy(),
-		context:      sw.context,
-		entryContext: make(map[string]string),
+		skiplist: sw.skiplist.Copy(),
 	}
-
-	// Copy context mappings
-	for path, context := range sw.entryContext {
-		newWrapper.entryContext[path] = context
-	}
-
 	return newWrapper
 }
 
-// CopyWithContext creates a copy with a specific context
-func (sw *SkiplistWrapper) CopyWithContext(context string) *SkiplistWrapper {
-	newWrapper := &SkiplistWrapper{
-		skiplist:     sw.skiplist.Copy(),
-		context:      context,
-		entryContext: make(map[string]string),
+// First returns the first entry in the skiplist
+func (sw *SkiplistWrapper) First() *binaryEntry {
+	first := sw.skiplist.First()
+	if first != nil {
+		return first.Item()
 	}
+	return nil
+}
 
-	// Copy context mappings
-	for path, entryContext := range sw.entryContext {
-		newWrapper.entryContext[path] = entryContext
+// Last returns the last entry in the skiplist
+func (sw *SkiplistWrapper) Last() *binaryEntry {
+	last := sw.skiplist.Last()
+	if last != nil {
+		return last.Item()
 	}
-
-	return newWrapper
+	return nil
 }
 
-// GetContext returns the default context for this skiplist
-func (sw *SkiplistWrapper) GetContext() string {
-	return sw.context
+// ToIovecSlice generates Iovec slices for all items
+func (sw *SkiplistWrapper) ToIovecSlice() []syscall.Iovec {
+	return sw.skiplist.ToIovecSlice("")
 }
 
-// GetEntry returns the context for a specific entry
-func (sw *SkiplistWrapper) GetEntry(relativePath string) string {
-	if context, exists := sw.entryContext[relativePath]; exists {
-		return context
-	}
-	return sw.context
+// ToContextIovecSlice generates Iovec slices for items matching the context
+func (sw *SkiplistWrapper) ToContextIovecSlice(context string) []syscall.Iovec {
+	return sw.skiplist.ToContextIovecSlice(context)
 }
 
-// SetContext sets the default context for this skiplist
-func (sw *SkiplistWrapper) SetContext(context string) {
-	sw.context = context
+// ToNotContextIovecSlice generates Iovec slices for items not matching the context
+func (sw *SkiplistWrapper) ToNotContextIovecSlice(context string) []syscall.Iovec {
+	return sw.skiplist.ToNotContextIovecSlice(context)
 }
 
-// FilterExcluding returns a new skiplist excluding entries with specified context
-func (sw *SkiplistWrapper) FilterExcluding(excludeContext string) *SkiplistWrapper {
-	result := NewSkiplistWrapper(16, sw.context)
-
-	sw.ForEach(func(entry *binaryEntry) bool {
-		relativePath := entry.RelativePath()
-		entryContext := sw.GetEntry(relativePath)
-		if entryContext != excludeContext {
-			result.Insert(entry, entryContext)
+// CallbackToIovecSlice generates Iovec slices for items that match the callback filter
+func (sw *SkiplistWrapper) CallbackToIovecSlice(callback func(*binaryEntry, string) bool) []syscall.Iovec {
+	return sw.skiplist.CallbackToIovecSlice(func(item *zcsl.ItemPtr[binaryEntry, string, string]) bool {
+		context := ""
+		if item.Context() != nil {
+			context = *item.Context()
 		}
+		return callback(item.Item(), context)
+	})
+}
+
+// FilterByContext returns a new skiplist containing only entries with the specified context
+func (sw *SkiplistWrapper) FilterByContext(context string) *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, context)
+	sw.ForEachContext(context, func(entry *binaryEntry) bool {
+		result.Insert(entry, context)
 		return true
 	})
-
 	return result
 }
 
-// FilterDeleted returns a new skiplist without deleted entries
-func (sw *SkiplistWrapper) FilterDeleted() *SkiplistWrapper {
-	result := NewSkiplistWrapper(16, sw.context)
-
-	sw.ForEach(func(entry *binaryEntry) bool {
-		if !entry.IsDeleted() {
-			relativePath := entry.RelativePath()
-			entryContext := sw.GetEntry(relativePath)
+// FilterNotByContext returns a new skiplist containing only entries NOT matching the specified context
+func (sw *SkiplistWrapper) FilterNotByContext(context string) *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, "filtered")
+	sw.ForEach(func(entry *binaryEntry, entryContext string) bool {
+		if entryContext != context {
 			result.Insert(entry, entryContext)
 		}
 		return true
 	})
-
 	return result
 }
 
 // Stats returns statistics about the skiplist entries
 func (sw *SkiplistWrapper) Stats() (total, deleted, active int) {
-	sw.ForEach(func(entry *binaryEntry) bool {
+	sw.ForEach(func(entry *binaryEntry, context string) bool {
 		total++
 		if entry.IsDeleted() {
 			deleted++
@@ -229,4 +197,9 @@ func (sw *SkiplistWrapper) Stats() (total, deleted, active int) {
 		return true
 	})
 	return total, deleted, active
+}
+
+// UpdateContext updates the context for an existing entry
+func (sw *SkiplistWrapper) UpdateContext(relativePath string, newContext string) bool {
+	return sw.skiplist.UpdateContext(relativePath, &newContext)
 }

@@ -35,12 +35,12 @@ const (
 	EntryFlagDeleted uint32 = 1 << 0 // Entry marked as deleted
 )
 
-// DirectoryCache manages the file cache for a directory using zero-copy skiplist with context tracking
+// DirectoryCache manages the file cache for a directory using zero-copy skiplist
 type DirectoryCache struct {
 	RootDir       string
 	IndexFile     string
 	CacheFile     string           // Path to index.cache file
-	skiplist      *SkiplistWrapper // Zero-copy skiplist for mmap'd entries with context tracking
+	skiplist      *SkiplistWrapper // Zero-copy skiplist for mmap'd entries
 	signature     [4]byte          // "dcfh" signature
 	version       uint32           // Index version
 	hasher        hash.Hash        // SHA-1 hasher for checksums
@@ -61,11 +61,10 @@ type binaryEntry struct {
 	UID        uint32   // User ID (host order)
 	GID        uint32   // Group ID (host order)
 	FileSize   uint64   // File size in bytes (host order) - supports files >4GB
-	Flags      uint16   // Path length flags (host order)
+	EntryFlags uint16   // Entry Flags
 	HashType   uint16   // Hash algorithm type (SHA1=1, SHA256=2, SHA512=3)
-	EntryFlags uint32   // Entry flags (deleted, etc.)
 	Hash       [64]byte // Hash value (up to 64 bytes for SHA-512)
-	// Variable-length path follows immediately after this struct
+	Path       [8]byte  // Path as bytes, actual length variable but must be at least 8 bytes long
 }
 
 // IsDeleted returns true if this entry is marked as deleted
@@ -83,20 +82,11 @@ func (be *binaryEntry) ClearDeleted() {
 	be.EntryFlags &^= EntryFlagDeleted
 }
 
-// RelativePath returns the relative path string from mmap'd memory (zero-copy)
+// RelativePath returns the relative path as string from mmap'd memory (zero-copy)
 func (be *binaryEntry) RelativePath() string {
-	pathBytes := be.RelativePathBytes()
-	if len(pathBytes) == 0 {
-		return ""
-	}
-	return unsafe.String(&pathBytes[0], len(pathBytes))
-}
-
-// RelativePathBytes returns the relative path as byte slice from mmap'd memory (zero-copy)
-func (be *binaryEntry) RelativePathBytes() []byte {
 	entryStart := uintptr(unsafe.Pointer(be))
 	entryEnd := entryStart + uintptr(be.Size)
-	pathStart := entryStart + unsafe.Sizeof(*be)
+	pathStart := uintptr(unsafe.Pointer(be.Path))
 
 	// Scan backwards byte by byte from the end (endian-neutral)
 	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
@@ -106,7 +96,7 @@ func (be *binaryEntry) RelativePathBytes() []byte {
 	}
 
 	pathLen := int(pathEnd - pathStart)
-	return unsafe.Slice((*byte)(unsafe.Pointer(pathStart)), pathLen)
+	return unsafe.String((*byte)(unsafe.Pointer(pathStart)), pathLen)
 }
 
 // HashString returns the hash as a hex string
@@ -139,8 +129,8 @@ func (be *binaryEntry) EntrySize() int {
 	return int(be.Size)
 }
 
-// PathLenToSize calculates the necessary size of a binaryEntry struct given pathname length
-func PathLenToSize(pathLen int) int {
+// BESizeFromPathLen calculates the necessary size of a binaryEntry struct given pathname length
+func BESizeFromPathLen(pathLen int) int {
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
 	totalSize := baseSize + pathLen + 1 // +1 for null terminator
 	padding := (8 - (totalSize % 8)) % 8
@@ -152,22 +142,7 @@ type fileJob struct {
 	path    string
 	info    os.FileInfo
 	relPath string
-	index   int // Original order for sorting
-}
-
-// fileResult represents the result of a file hashing job
-type fileResult struct {
-	entry *binaryEntry
-	err   error
-	index int // Original order for sorting
-}
-
-// GetEntries returns direct pointers to mmap'd entries via skiplist (zero-copy)
-func (dc *DirectoryCache) GetEntries() []*binaryEntry {
-	if dc.skiplist == nil {
-		return nil
-	}
-	return dc.skiplist.GetSortedEntries()
+	index   int
 }
 
 // Stats returns statistics about the cache using skiplist iteration
@@ -179,7 +154,7 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 	var totalSize int64
 	count := 0
 
-	dc.skiplist.ForEach(func(entry *binaryEntry) bool {
+	dc.skiplist.ForEach(func(entry *binaryEntry, context string) bool {
 		if !entry.IsDeleted() {
 			totalSize += int64(entry.FileSize)
 			count++
@@ -190,9 +165,12 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 	return count, totalSize, nil
 }
 
-// IsMmapped returns true if the cache is using memory-mapped storage
-func (dc *DirectoryCache) IsMmapped() bool {
-	return dc.mmapIndex != nil
+// Length returns the total number of entries in the index (including deleted)
+func (dc *DirectoryCache) Length() int {
+	if dc.skiplist == nil {
+		return 0
+	}
+	return dc.skiplist.Length()
 }
 
 // sysUnusedOS hints to the OS that this memory region can be written to disk
@@ -226,4 +204,16 @@ func (dc *DirectoryCache) generateTempFileName(prefix string) string {
 	timestamp := time.Now().UnixNano()
 	return filepath.Join(filepath.Dir(dc.IndexFile),
 		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
+}
+
+// LoadIndex ensures the main index is loaded (required by dcfh.go)
+func (dc *DirectoryCache) LoadIndex() error {
+	if dc.skiplist == nil || dc.skiplist.IsEmpty() {
+		mainSkiplist, err := dc.LoadMainIndex()
+		if err != nil {
+			return err
+		}
+		dc.skiplist = mainSkiplist
+	}
+	return nil
 }

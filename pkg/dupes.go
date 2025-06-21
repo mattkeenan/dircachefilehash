@@ -2,36 +2,40 @@ package dircachefilehash
 
 import "fmt"
 
-// FindDuplicates returns groups of files with identical hashes using context-aware cache management (read-only)
-func (dc *DirectoryCache) FindDuplicates() (map[string][]*binaryEntry, error) {
-	// Load main index with context
-	if dc.skiplist.IsEmpty() {
-		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
-			return nil, fmt.Errorf("failed to load index: %w", err)
-		}
-	}
+// DuplicateGroup represents a group of files with the same hash
+type DuplicateGroup struct {
+	Hash  string
+	Files []string
+}
 
-	// Update cache index using context-aware logic (dupes operation - read-only for main index)
-	if err := dc.UpdateCacheIndex(); err != nil {
+// FindDuplicates returns groups of files with identical hashes using the new workflow
+func (dc *DirectoryCache) FindDuplicates() ([]DuplicateGroup, error) {
+	// Use the new cache update workflow to ensure we have current data
+	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 
-	// Load cache index with context
-	cacheSkiplist, err := dc.LoadCacheIndex("cache")
+	// Load both main and cache indices
+	mainSkiplist, err := dc.LoadMainIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load main index: %w", err)
+	}
+
+	cacheSkiplist, err := dc.LoadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
 
-	// Create combined view: main index + cache for complete current state (all context-aware)
-	workingSkiplist := dc.skiplist.Copy("main")
-	if err := workingSkiplist.Merge(cacheSkiplist); err != nil {
+	// Create combined view: main index + cache for complete current state
+	workingSkiplist := mainSkiplist.Copy()
+	if err := workingSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
 		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
 
 	duplicates := make(map[string][]*binaryEntry)
 
-	// Use skiplist iteration to collect duplicates (all entries with context tracking)
-	workingSkiplist.ForEach(func(entry *binaryEntry) bool {
+	// Use skiplist iteration to collect duplicates
+	workingSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
 		// Skip deleted entries
 		if entry.IsDeleted() {
 			return true // Continue iteration
@@ -42,56 +46,20 @@ func (dc *DirectoryCache) FindDuplicates() (map[string][]*binaryEntry, error) {
 		return true // Continue iteration
 	})
 
-	// Remove entries with only one file
+	// Convert to exported type and remove entries with only one file
+	var result []DuplicateGroup
 	for hash, entries := range duplicates {
-		if len(entries) <= 1 {
-			delete(duplicates, hash)
+		if len(entries) > 1 {
+			var files []string
+			for _, entry := range entries {
+				files = append(files, entry.RelativePath())
+			}
+			result = append(result, DuplicateGroup{
+				Hash:  hash,
+				Files: files,
+			})
 		}
 	}
 
-	return duplicates, nil
-}
-
-// FindByHash finds entries with the specified hash using context-aware cache management (read-only)
-func (dc *DirectoryCache) FindByHash(hash string) ([]*binaryEntry, error) {
-	// Load main index with context
-	if dc.skiplist.IsEmpty() {
-		if err := dc.LoadIndex(dc.IndexFile, "main"); err != nil {
-			return nil, fmt.Errorf("failed to load index: %w", err)
-		}
-	}
-
-	// Update cache index using context-aware logic (dupes operation - read-only for main index)
-	if err := dc.UpdateCacheIndex(); err != nil {
-		return nil, fmt.Errorf("failed to update cache index: %w", err)
-	}
-
-	// Load cache index with context
-	cacheSkiplist, err := dc.LoadCacheIndex("cache")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load cache index: %w", err)
-	}
-
-	// Create combined view: main index + cache for complete current state (all context-aware)
-	workingSkiplist := dc.skiplist.Copy("main")
-	if err := workingSkiplist.Merge(cacheSkiplist); err != nil {
-		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
-	}
-
-	var matches []*binaryEntry
-
-	// Use skiplist iteration to find matching hashes (all entries with context tracking)
-	workingSkiplist.ForEach(func(entry *binaryEntry) bool {
-		// Skip deleted entries
-		if entry.IsDeleted() {
-			return true // Continue iteration
-		}
-
-		if entry.HashString() == hash {
-			matches = append(matches, entry)
-		}
-		return true // Continue iteration
-	})
-
-	return matches, nil
+	return result, nil
 }

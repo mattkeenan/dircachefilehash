@@ -279,7 +279,7 @@ func handleStatus(args []string) {
 	}
 
 	if *jsonOutput {
-		entries := cache.GetEntries()
+		fileCount := cache.Length() // Use Length() method
 		output := StatusOutput{
 			Repository: repoRoot,
 			WorkingDir: relCwd,
@@ -293,7 +293,7 @@ func handleStatus(args []string) {
 				HasChanges:    status.HasChanges(),
 			},
 			IndexInfo: IndexInfo{
-				FileCount: len(entries),
+				FileCount: fileCount,
 			},
 		}
 		outputJSON(output)
@@ -311,8 +311,8 @@ func handleStatus(args []string) {
 	// Show status
 	if !status.HasChanges() {
 		fmt.Println("Nothing to commit, working tree clean")
-		entries := cache.GetEntries()
-		fmt.Printf("Index contains %d files\n", len(entries))
+		fileCount := cache.Length() // Use Length() method
+		fmt.Printf("Index contains %d files\n", fileCount)
 		return
 	}
 
@@ -407,8 +407,8 @@ func handleUpdate(args []string) {
 
 	if len(duplicates) > 0 {
 		duplicateCount := 0
-		for _, files := range duplicates {
-			duplicateCount += len(files)
+		for _, group := range duplicates {
+			duplicateCount += len(group.Files)
 		}
 		duplicateInfo = &DuplicateInfo{
 			SetCount:  len(duplicates),
@@ -485,17 +485,11 @@ func handleDupes(args []string) {
 		return // No output if no duplicates found (like fdupes in text mode)
 	}
 
-	// Sort hashes for consistent output
-	var hashes []string
-	for hash := range duplicates {
-		hashes = append(hashes, hash)
-	}
-
-	// Sort hashes to ensure deterministic output
-	for i := 0; i < len(hashes); i++ {
-		for j := i + 1; j < len(hashes); j++ {
-			if hashes[i] > hashes[j] {
-				hashes[i], hashes[j] = hashes[j], hashes[i]
+	// Sort groups by hash for consistent output
+	for i := 0; i < len(duplicates); i++ {
+		for j := i + 1; j < len(duplicates); j++ {
+			if duplicates[i].Hash > duplicates[j].Hash {
+				duplicates[i], duplicates[j] = duplicates[j], duplicates[i]
 			}
 		}
 	}
@@ -504,66 +498,65 @@ func handleDupes(args []string) {
 		var groups []DuplicateGroup
 		totalFiles := 0
 
-		for _, hash := range hashes {
-			files := duplicates[hash]
+		for _, group := range duplicates {
+			// Use relative paths directly (like git)
+			var filePaths []string
+			for _, relPath := range group.Files {
+				filePaths = append(filePaths, relPath)
+			}
 
-			// Sort files within each duplicate group by path
-			for k := 0; k < len(files); k++ {
-				for l := k + 1; l < len(files); l++ {
-					if files[k].RelativePath() > files[l].RelativePath() {
-						files[k], files[l] = files[l], files[k]
+			// Sort the file paths
+			for k := 0; k < len(filePaths); k++ {
+				for l := k + 1; l < len(filePaths); l++ {
+					if filePaths[k] > filePaths[l] {
+						filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
 					}
 				}
 			}
 
-			// Convert to absolute paths
-			var filePaths []string
-			for _, file := range files {
-				absPath := filepath.Join(repoRoot, file.RelativePath())
-				filePaths = append(filePaths, absPath)
-			}
-
 			groups = append(groups, DuplicateGroup{
-				Hash:  hash,
+				Hash:  group.Hash,
 				Files: filePaths,
-				Count: len(files),
+				Count: len(filePaths),
 			})
 
-			totalFiles += len(files)
+			totalFiles += len(filePaths)
 		}
 
 		output := DupesOutput{
 			Repository:      repoRoot,
 			DuplicateGroups: groups,
 			Summary: DuplicateSummary{
-				GroupCount: len(hashes),
+				GroupCount: len(duplicates),
 				FileCount:  totalFiles,
 			},
 		}
 		outputJSON(output)
 	} else {
-		// Text output (fdupes format)
-		for i, hash := range hashes {
-			files := duplicates[hash]
+		// Text output (fdupes format) with relative paths
+		for i, group := range duplicates {
+			// Use relative paths directly and sort them
+			var filePaths []string
+			for _, relPath := range group.Files {
+				filePaths = append(filePaths, relPath)
+			}
 
-			// Sort files within each duplicate group by path
-			for k := 0; k < len(files); k++ {
-				for l := k + 1; l < len(files); l++ {
-					if files[k].RelativePath() > files[l].RelativePath() {
-						files[k], files[l] = files[l], files[k]
+			// Sort the file paths
+			for k := 0; k < len(filePaths); k++ {
+				for l := k + 1; l < len(filePaths); l++ {
+					if filePaths[k] > filePaths[l] {
+						filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
 					}
 				}
 			}
 
-			// Print each file in the duplicate group
-			for _, file := range files {
-				// Convert relative path to absolute path for display
-				absPath := filepath.Join(repoRoot, file.RelativePath())
-				fmt.Println(absPath)
+			// Print each file in the duplicate group (relative paths)
+			for _, relPath := range filePaths {
+				fmt.Println(relPath)
 			}
 
 			// Add blank line between groups (except after the last group)
-			if i < len(hashes)-1 {
+			if i < len(duplicates)-1 {
 				fmt.Println()
 			}
 		}
@@ -582,7 +575,7 @@ func findDcfhRepo() (string, string, error) {
 	dir := cwd
 	for {
 		dcfhPath := filepath.Join(dir, ".dcfh")
-		indexFile := filepath.Join(dcfhPath, "index")
+		indexFile := filepath.Join(dcfhPath, "main.idx")
 
 		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
 			if _, err := os.Stat(indexFile); err == nil {
