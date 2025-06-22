@@ -3,6 +3,8 @@ package dircachefilehash
 import (
 	"fmt"
 	"strings"
+
+	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
 // FileStatus represents the status of a file
@@ -42,7 +44,7 @@ func (dc *DirectoryCache) Status() (*StatusResult, error) {
 
 	// Create combined view: main index + cache index for complete indexed state
 	indexedSkiplist := mainSkiplist.Copy()
-	if err := indexedSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
+	if err := indexedSkiplist.Merge(cacheSkiplist, zcsl.MergeTheirs); err != nil {
 		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
 

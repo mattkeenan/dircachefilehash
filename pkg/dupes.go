@@ -1,6 +1,10 @@
 package dircachefilehash
 
-import "fmt"
+import (
+	"fmt"
+
+	zcsl "github.com/mattkeenan/zerocopyskiplist"
+)
 
 // DuplicateGroup represents a group of files with the same hash
 type DuplicateGroup struct {
@@ -28,7 +32,7 @@ func (dc *DirectoryCache) FindDuplicates() ([]DuplicateGroup, error) {
 
 	// Create combined view: main index + cache for complete current state
 	workingSkiplist := mainSkiplist.Copy()
-	if err := workingSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
+	if err := workingSkiplist.Merge(cacheSkiplist, zcsl.MergeTheirs); err != nil {
 		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
 

@@ -25,7 +25,7 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 
 	// Size function for serialization
 	getItemSize := func(entry *binaryEntry) int {
-		return entry.EntrySize()
+		return int(entry.Size)
 	}
 
 	// String comparator function
@@ -47,19 +47,14 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 
 // Insert adds a binaryEntry pointer with specific context
 func (sw *SkiplistWrapper) Insert(entry *binaryEntry, context string) bool {
-	ctx := &context
-	return sw.skiplist.Insert(entry, ctx)
+	return sw.skiplist.Insert(entry, context)
 }
 
 // Find searches for an entry by its relative path and returns entry with context
 func (sw *SkiplistWrapper) Find(relativePath string) (*binaryEntry, string) {
-	found, ctx := sw.skiplist.Find(relativePath)
-	if found != nil {
-		contextStr := ""
-		if ctx != nil {
-			contextStr = *ctx
-		}
-		return found.Item(), contextStr
+	itemPtr, context := sw.skiplist.Find(relativePath)
+	if itemPtr != nil {
+		return itemPtr.Item(), context
 	}
 	return nil, ""
 }
@@ -72,10 +67,7 @@ func (sw *SkiplistWrapper) Delete(relativePath string) bool {
 // ForEach iterates through all entries in sorted order with a callback (zero-copy)
 func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry, string) bool) {
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
-		context := ""
-		if current.Context() != nil {
-			context = *current.Context()
-		}
+		context := current.Context()
 		if !callback(current.Item(), context) {
 			break
 		}
@@ -155,34 +147,9 @@ func (sw *SkiplistWrapper) ToNotContextIovecSlice(context string) []syscall.Iove
 // CallbackToIovecSlice generates Iovec slices for items that match the callback filter
 func (sw *SkiplistWrapper) CallbackToIovecSlice(callback func(*binaryEntry, string) bool) []syscall.Iovec {
 	return sw.skiplist.CallbackToIovecSlice(func(item *zcsl.ItemPtr[binaryEntry, string, string]) bool {
-		context := ""
-		if item.Context() != nil {
-			context = *item.Context()
-		}
+		context := item.Context()
 		return callback(item.Item(), context)
 	})
-}
-
-// FilterByContext returns a new skiplist containing only entries with the specified context
-func (sw *SkiplistWrapper) FilterByContext(context string) *SkiplistWrapper {
-	result := NewSkiplistWrapper(16, context)
-	sw.ForEachContext(context, func(entry *binaryEntry) bool {
-		result.Insert(entry, context)
-		return true
-	})
-	return result
-}
-
-// FilterNotByContext returns a new skiplist containing only entries NOT matching the specified context
-func (sw *SkiplistWrapper) FilterNotByContext(context string) *SkiplistWrapper {
-	result := NewSkiplistWrapper(16, "filtered")
-	sw.ForEach(func(entry *binaryEntry, entryContext string) bool {
-		if entryContext != context {
-			result.Insert(entry, entryContext)
-		}
-		return true
-	})
-	return result
 }
 
 // Stats returns statistics about the skiplist entries
@@ -201,5 +168,17 @@ func (sw *SkiplistWrapper) Stats() (total, deleted, active int) {
 
 // UpdateContext updates the context for an existing entry
 func (sw *SkiplistWrapper) UpdateContext(relativePath string, newContext string) bool {
-	return sw.skiplist.UpdateContext(relativePath, &newContext)
+	return sw.skiplist.UpdateContext(relativePath, newContext)
+}
+
+// FilterNotByContext returns a new skiplist with entries not matching the given context
+func (sw *SkiplistWrapper) FilterNotByContext(context string) *SkiplistWrapper {
+	result := NewSkiplistWrapper(16, "")
+	sw.ForEach(func(entry *binaryEntry, entryContext string) bool {
+		if entryContext != context {
+			result.Insert(entry, entryContext)
+		}
+		return true
+	})
+	return result
 }

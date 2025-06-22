@@ -221,7 +221,7 @@ func (dc *DirectoryCache) writeIndexWithFlags(jobs []fileJob, flags uint32) erro
 }
 
 // loadIndexFromFile loads and maps the specified index file
-func (dc *DirectoryCache) loadIndexFromFile(filePath string) error {
+func (dc *DirectoryCache) loadIndexFromFile(filePath string, context string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -277,7 +277,7 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) error {
 	}
 
 	// Clear and recreate skiplist
-	dc.skiplist = NewSkiplistWrapper(16, MainContext)
+	dc.skiplist = NewSkiplistWrapper(16, context)
 
 	// Parse entries - create direct pointers to mmap'd binaryEntry structs and add to skiplist
 	offset := 0
@@ -291,8 +291,8 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) error {
 		// Get direct pointer to binaryEntry in mmap'd memory
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 
-		// Insert with main context
-		dc.skiplist.Insert(entry, MainContext)
+		// Insert with specified context
+		dc.skiplist.Insert(entry, context)
 
 		// Move to next entry using Size field
 		offset += int(entry.Size)
@@ -339,7 +339,84 @@ func (dc *DirectoryCache) Close() error {
 	return nil
 }
 
-// createEmptyIndex creates an empty index file
+// WriteEntries writes existing binaryEntry pointers directly to index file
+func (dc *DirectoryCache) WriteEntries(entries []*binaryEntry, flags uint32) error {
+	// Calculate total file size needed
+	totalSize := HeaderSize + ChecksumSize
+	for _, entry := range entries {
+		totalSize += entry.EntrySize()
+	}
+
+	// Create the file
+	file, err := os.Create(dc.IndexFile)
+	if err != nil {
+		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+	}
+	defer file.Close()
+
+	// Truncate to exact size
+	if err := file.Truncate(int64(totalSize)); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
+	}
+
+	// Memory map the file
+	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Write header directly to mmap'd memory (zero-copy)
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeader(dc.signature, dc.version, uint32(len(entries)), flags)
+
+	// Clear and recreate skiplist for entries
+	dc.skiplist = NewSkiplistWrapper(16, MainContext)
+
+	// Copy entries directly to mmap'd memory
+	offset := HeaderSize
+	for _, entry := range entries {
+		entrySize := entry.EntrySize()
+
+		// Copy entry data directly
+		copy(data[offset:offset+entrySize],
+			(*[1 << 20]byte)(unsafe.Pointer(entry))[:entrySize:entrySize])
+
+		// Get pointer to copied entry and add to skiplist
+		copiedEntry := (*binaryEntry)(unsafe.Pointer(&data[offset]))
+		dc.skiplist.Insert(copiedEntry, MainContext)
+
+		offset += entrySize
+	}
+
+	// Calculate and write checksum
+	checksum := dc.calculateChecksum(data[:offset])
+	copy(data[offset:offset+ChecksumSize], checksum)
+
+	// Sync to disk
+	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
+		return fmt.Errorf("failed to sync mmap: %w", err)
+	}
+
+	return nil
+}
+
+// WriteSparseEntries writes existing binaryEntry pointers as a sparse index file
+func (dc *DirectoryCache) WriteSparseEntries(entries []*binaryEntry, filePath string) error {
+	oldIndexFile := dc.IndexFile
+	dc.IndexFile = filePath
+	defer func() { dc.IndexFile = oldIndexFile }()
+	return dc.WriteEntries(entries, IndexFlagSparse)
+}
+
+// createEmptyIndexAt creates an empty index file at the specified path
+func (dc *DirectoryCache) createEmptyIndexAt(filePath string) error {
+	oldIndexFile := dc.IndexFile
+	dc.IndexFile = filePath
+	defer func() { dc.IndexFile = oldIndexFile }()
+	return dc.createEmptyIndex()
+}
+
 func (dc *DirectoryCache) createEmptyIndex() error {
 	totalSize := HeaderSize + ChecksumSize
 
