@@ -3,16 +3,6 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-
-	zcsl "github.com/mattkeenan/zerocopyskiplist"
-)
-
-const (
-	MainContext  = "main"
-	CacheContext = "cache"
-	ScanContext  = "scan"
-	TempContext  = "temp"
 )
 
 // LoadMainIndex loads the main index file into a skiplist with "main" context
@@ -24,28 +14,19 @@ func (dc *DirectoryCache) LoadMainIndex() (*SkiplistWrapper, error) {
 		}
 	}
 
-	skiplist := NewSkiplistWrapper(16, MainContext)
-
-	// Save current skiplist
-	oldSkiplist := dc.skiplist
-	dc.skiplist = skiplist
-
-	// Load the index using existing functionality
-	if err := dc.loadIndexFromFile(dc.IndexFile, MainContext); err != nil {
-		dc.skiplist = oldSkiplist // Restore on error
+	// Load entries from file using pure file I/O
+	entries, err := dc.LoadIndexFromFile(dc.IndexFile)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
 
-	// Set all entries to main context
-	tempSkiplist := NewSkiplistWrapper(16, MainContext)
-	dc.skiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		tempSkiplist.Insert(entry, MainContext)
-		return true
-	})
+	// Create skiplist and insert all entries with main context
+	skiplist := NewSkiplistWrapper(16, MainContext)
+	for _, entry := range entries {
+		skiplist.Insert(entry, MainContext)
+	}
 
-	// Restore original skiplist and return the loaded one
-	dc.skiplist = oldSkiplist
-	return tempSkiplist, nil
+	return skiplist, nil
 }
 
 // LoadCacheIndex loads the cache index file into a skiplist with "cache" context
@@ -54,31 +35,24 @@ func (dc *DirectoryCache) LoadCacheIndex() (*SkiplistWrapper, error) {
 		return NewSkiplistWrapper(16, CacheContext), nil
 	}
 
-	// Create temporary cache instance to load from cache file
-	tempCache := &DirectoryCache{
-		RootDir:       dc.RootDir,
-		IndexFile:     dc.CacheFile, // Point to cache file
-		CacheFile:     dc.CacheFile,
-		skiplist:      NewSkiplistWrapper(16, CacheContext),
-		signature:     dc.signature,
-		version:       dc.version,
-		hasher:        dc.hasher,
-		ignoreManager: dc.ignoreManager,
-	}
-
-	// Use existing loadIndexFromFile functionality
-	if err := tempCache.loadIndexFromFile(dc.CacheFile, CacheContext); err != nil {
+	// Load entries from file using pure file I/O
+	entries, err := dc.LoadIndexFromFile(dc.CacheFile)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
 
-	// Set all entries to cache context
-	result := NewSkiplistWrapper(16, CacheContext)
-	tempCache.skiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		result.Insert(entry, CacheContext)
-		return true
-	})
+	// Create skiplist and insert all entries with cache context
+	skiplist := NewSkiplistWrapper(16, CacheContext)
+	for _, entry := range entries {
+		skiplist.Insert(entry, CacheContext)
+	}
 
-	return result, nil
+	return skiplist, nil
+}
+
+// LoadIndex ensures the main index is loaded (moved from util.go)
+func (dc *DirectoryCache) LoadIndex() (*SkiplistWrapper, error) {
+	return dc.LoadMainIndex()
 }
 
 // CreateTmpIndexFromScan scans the directory and creates a temporary index using Hwang-Lin algorithm
@@ -142,14 +116,13 @@ func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 		RootDir:       dc.RootDir,
 		IndexFile:     tempScanPath,
 		CacheFile:     tempScanPath,
-		skiplist:      NewSkiplistWrapper(16, ScanContext),
 		signature:     dc.signature,
 		version:       dc.version,
 		hasher:        dc.hasher,
 		ignoreManager: dc.ignoreManager,
 	}
 
-	// Write new/changed entries using existing WriteIndex functionality
+	// Write new/changed entries using pure file I/O
 	if len(jobsToProcess) > 0 {
 		if err := tempCache.WriteIndex(jobsToProcess); err != nil {
 			return nil, fmt.Errorf("failed to write temp scan index: %w", err)
@@ -161,8 +134,8 @@ func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 		}
 	}
 
-	// Load the temporary index using existing functionality
-	processedSkiplist, err := tempCache.LoadMainIndex()
+	// Load the temporary index and create skiplist
+	processedEntries, err := tempCache.LoadIndexFromFile(tempScanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load temp scan index: %w", err)
 	}
@@ -171,10 +144,9 @@ func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 	result := NewSkiplistWrapper(16, ScanContext)
 
 	// Add all processed entries
-	processedSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
+	for _, entry := range processedEntries {
 		result.Insert(entry, ScanContext)
-		return true
-	})
+	}
 
 	// Add unchanged entries from comparison skiplist
 	comparisonCurrent = comparisonSkiplist.skiplist.First()
@@ -201,42 +173,6 @@ func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 	return result, nil
 }
 
-// WriteSkiplistToFile writes a skiplist to a file using existing index writing functionality
-func (dc *DirectoryCache) WriteSkiplistToFile(skiplist *SkiplistWrapper, filePath string, flags uint32) error {
-	// Convert skiplist entries to fileJobs for existing WriteIndex functionality
-	var jobs []fileJob
-	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		// Create a dummy fileJob from the existing entry
-		// This is a bit of a hack, but allows us to reuse existing functionality
-		job := fileJob{
-			path:    filepath.Join(dc.RootDir, entry.RelativePath()),
-			relPath: entry.RelativePath(),
-			index:   len(jobs),
-			// Note: info field will need special handling since we don't have os.FileInfo
-		}
-		jobs = append(jobs, job)
-		return true
-	})
-
-	if len(jobs) == 0 {
-		// Create empty index using existing functionality
-		oldIndexFile := dc.IndexFile
-		dc.IndexFile = filePath
-		err := dc.createEmptyIndex()
-		dc.IndexFile = oldIndexFile
-		return err
-	}
-
-	// Use existing writeIndexWithFlags functionality
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = filePath
-	defer func() { dc.IndexFile = oldIndexFile }()
-
-	// For this to work properly, we need to modify the approach
-	// Instead of trying to fake fileJobs, we should write entries directly
-	return fmt.Errorf("WriteSkiplistToFile needs refactoring to work with existing index.go functions")
-}
-
 // WriteSkiplistToTmpIndex writes a skiplist to a temporary index file
 func (dc *DirectoryCache) WriteSkiplistToTmpIndex(skiplist *SkiplistWrapper, tempPath string, defaultContext string) error {
 	// Collect all entries from the skiplist
@@ -246,7 +182,7 @@ func (dc *DirectoryCache) WriteSkiplistToTmpIndex(skiplist *SkiplistWrapper, tem
 		return true
 	})
 
-	// Use existing WriteEntries functionality
+	// Use existing WriteEntries functionality (pure file I/O)
 	oldIndexFile := dc.IndexFile
 	dc.IndexFile = tempPath
 	defer func() { dc.IndexFile = oldIndexFile }()
@@ -272,7 +208,7 @@ func (dc *DirectoryCache) UpdateCacheIndexWithWorkflow() error {
 	workingSkiplist := mainSkiplist.Copy()
 
 	// Step 4: Merge the cache index skiplist
-	if err := workingSkiplist.Merge(cacheSkiplist, zcsl.MergeTheirs); err != nil {
+	if err := workingSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
 		return fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
 
@@ -293,35 +229,28 @@ func (dc *DirectoryCache) UpdateCacheIndexWithWorkflow() error {
 		return nil
 	}
 
-	// Step 10 & 11: Write cache index using existing functionality
-	// Create file jobs from cache entries
-	var cacheJobs []fileJob
+	// Step 10 & 11: Write cache index using pure file I/O
+	// Collect entries from cache-only skiplist
+	var cacheEntries []*binaryEntry
 	cacheOnlySkiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		// We need to reconstruct file info from the entry
-		// This is challenging since we need os.FileInfo but only have entry data
-		job := fileJob{
-			path:    filepath.Join(dc.RootDir, entry.RelativePath()),
-			relPath: entry.RelativePath(),
-			index:   len(cacheJobs),
-			// info: needs to be reconstructed from entry data
-		}
-		cacheJobs = append(cacheJobs, job)
+		cacheEntries = append(cacheEntries, entry)
 		return true
 	})
 
 	// Create temporary cache file
 	tempCachePath := dc.generateTempFileName("cache")
 
-	// Write cache using existing WriteSparseIndex functionality
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = tempCachePath
+	// Write cache using existing WriteSparseEntries functionality
+	if err := dc.WriteSparseEntries(cacheEntries, tempCachePath); err != nil {
+		os.Remove(tempCachePath)
+		return fmt.Errorf("failed to write cache index: %w", err)
+	}
 
-	// This approach has a fundamental problem - we need to refactor
-	// the existing index writing to work with entries, not just fileJobs
-	dc.IndexFile = oldIndexFile
+	// Atomic replace cache file
+	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
+		os.Remove(tempCachePath) // Cleanup on failure
+		return fmt.Errorf("failed to rename cache file: %w", err)
+	}
 
-	// For now, remove cache file to avoid corruption
-	os.Remove(dc.CacheFile)
-
-	return fmt.Errorf("cache writing needs refactoring to work with existing index.go functions")
+	return nil
 }

@@ -11,41 +11,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Hash type constants
-const (
-	HashTypeSHA1   uint16 = 1 // SHA-1 (20 bytes)
-	HashTypeSHA256 uint16 = 2 // SHA-256 (32 bytes)
-	HashTypeSHA512 uint16 = 3 // SHA-512 (64 bytes)
-)
-
-// Hash size constants
-const (
-	HashSizeSHA1   = 20 // SHA-1 hash size in bytes
-	HashSizeSHA256 = 32 // SHA-256 hash size in bytes
-	HashSizeSHA512 = 64 // SHA-512 hash size in bytes
-)
-
-// Index header flags
-const (
-	IndexFlagSparse uint32 = 1 << 0 // Sparse index flag
-)
-
-// Entry flags
-const (
-	EntryFlagDeleted uint32 = 1 << 0 // Entry marked as deleted
-)
-
-// DirectoryCache manages the file cache for a directory using zero-copy skiplist
+// DirectoryCache manages the file cache for a directory
+// Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
 	RootDir       string
 	IndexFile     string
-	CacheFile     string           // Path to index.cache file
-	skiplist      *SkiplistWrapper // Zero-copy skiplist for mmap'd entries
-	signature     [4]byte          // "dcfh" signature
-	version       uint32           // Index version
-	hasher        hash.Hash        // SHA-1 hasher for checksums
-	mmapIndex     *MmapIndex       // Memory-mapped index file
-	ignoreManager *IgnoreManager   // Ignore pattern manager
+	CacheFile     string         // Path to index.cache file
+	signature     [4]byte        // "dcfh" signature
+	version       uint32         // Index version
+	hasher        hash.Hash      // SHA-1 hasher for checksums
+	mmapIndex     *MmapIndex     // Memory-mapped index file
+	ignoreManager *IgnoreManager // Ignore pattern manager
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
@@ -145,34 +121,6 @@ type fileJob struct {
 	index   int
 }
 
-// Stats returns statistics about the cache using skiplist iteration
-func (dc *DirectoryCache) Stats() (int, int64, error) {
-	if dc.skiplist == nil {
-		return 0, 0, nil
-	}
-
-	var totalSize int64
-	count := 0
-
-	dc.skiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		if !entry.IsDeleted() {
-			totalSize += int64(entry.FileSize)
-			count++
-		}
-		return true // Continue iteration
-	})
-
-	return count, totalSize, nil
-}
-
-// Length returns the total number of entries in the index (including deleted)
-func (dc *DirectoryCache) Length() int {
-	if dc.skiplist == nil {
-		return 0
-	}
-	return dc.skiplist.Length()
-}
-
 // sysUnusedOS hints to the OS that this memory region can be written to disk
 func sysUnusedOS(ptr unsafe.Pointer, size int) {
 	// Use madvise to hint that this memory is no longer needed in RAM
@@ -204,16 +152,4 @@ func (dc *DirectoryCache) generateTempFileName(prefix string) string {
 	timestamp := time.Now().UnixNano()
 	return filepath.Join(filepath.Dir(dc.IndexFile),
 		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
-}
-
-// LoadIndex ensures the main index is loaded (required by dcfh.go)
-func (dc *DirectoryCache) LoadIndex() error {
-	if dc.skiplist == nil || dc.skiplist.IsEmpty() {
-		mainSkiplist, err := dc.LoadMainIndex()
-		if err != nil {
-			return err
-		}
-		dc.skiplist = mainSkiplist
-	}
-	return nil
 }

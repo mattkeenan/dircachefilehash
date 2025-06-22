@@ -6,15 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	zcsl "github.com/mattkeenan/zerocopyskiplist"
-)
-
-// Import merge strategies from zerocopyskiplist
-const (
-	MergeTheirs = zcsl.MergeTheirs
-	MergeOurs   = zcsl.MergeOurs
-	MergeError  = zcsl.MergeError
 )
 
 // CleanupTempFiles removes temporary files from the .dcfh directory
@@ -49,6 +40,36 @@ func (dc *DirectoryCache) CleanupTempFilesOnExit() {
 	dc.CleanupTempFiles() // Ignore errors during cleanup
 }
 
+// Stats returns statistics about the cache by loading the main index
+func (dc *DirectoryCache) Stats() (int, int64, error) {
+	skiplist, err := dc.LoadIndex()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var totalSize int64
+	count := 0
+
+	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
+		if !entry.IsDeleted() {
+			totalSize += int64(entry.FileSize)
+			count++
+		}
+		return true // Continue iteration
+	})
+
+	return count, totalSize, nil
+}
+
+// Length returns the total number of entries in the index (including deleted)
+func (dc *DirectoryCache) Length() int {
+	skiplist, err := dc.LoadIndex()
+	if err != nil {
+		return 0
+	}
+	return skiplist.Length()
+}
+
 // NewDirectoryCache creates a new directory cache instance
 // rootDir: the directory to be indexed
 // dcfhDir: the directory containing the .dcfh repository (if empty, uses rootDir)
@@ -67,7 +88,6 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		RootDir:       rootDir,
 		IndexFile:     indexFile,
 		CacheFile:     cacheFile,
-		skiplist:      NewSkiplistWrapper(16, MainContext),
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
 		version:       0,
 		hasher:        sha1.New(),
