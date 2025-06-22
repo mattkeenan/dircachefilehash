@@ -87,8 +87,8 @@ func (ih *IndexHeader) EntryDataOffset() int {
 	return HeaderSize
 }
 
-// writeEntryToMmap writes a binaryEntry directly to mmap'd memory
-func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) int {
+// writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (unified function)
+func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) int {
 	// Calculate total entry size first
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
 	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
@@ -136,6 +136,11 @@ func (dc *DirectoryCache) writeEntryToMmap(data []byte, relPath string, hash []b
 	return entrySize
 }
 
+// writeProcessedEntryToMmap writes a ProcessedEntry to mmap'd memory
+func (dc *DirectoryCache) writeProcessedEntryToMmap(data []byte, entry ProcessedEntry) int {
+	return dc.writeBinaryEntryToMmap(data, entry.RelPath, entry.Hash, entry.HashType, entry.FileInfo, entry.StatInfo, entry.IsDeleted)
+}
+
 // WriteIndex writes entries directly to mmap'd index file (pure file I/O)
 func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
 	return dc.writeIndexWithFlags(jobs, 0) // Default: not sparse
@@ -181,8 +186,8 @@ func (dc *DirectoryCache) writeIndexWithFlags(jobs []fileJob, flags uint32) erro
 			return fmt.Errorf("failed to process file %s: %w", job.path, err)
 		}
 
-		// Write entry directly to mmap'd memory
-		entrySize := dc.writeEntryToMmap(data[offset:], job.relPath, hashBytes, hashType, job.info, stat, false)
+		// Write entry directly to mmap'd memory using unified function
+		entrySize := dc.writeBinaryEntryToMmap(data[offset:], job.relPath, hashBytes, hashType, job.info, stat, false)
 		offset += entrySize
 	}
 
@@ -382,6 +387,49 @@ func (dc *DirectoryCache) createEmptyIndexAt(filePath string) error {
 	dc.IndexFile = filePath
 	defer func() { dc.IndexFile = oldIndexFile }()
 	return dc.createEmptyIndex()
+}
+
+// WriteProcessedEntries writes processed entries using pure file I/O (moved from scan.go)
+func (dc *DirectoryCache) WriteProcessedEntries(entries []ProcessedEntry, flags uint32) error {
+	// Calculate total file size needed
+	totalSize := HeaderSize + ChecksumSize
+	for _, entry := range entries {
+		totalSize += BESizeFromPathLen(len(entry.RelPath))
+	}
+
+	// Create and mmap file
+	file, err := os.Create(dc.IndexFile)
+	if err != nil {
+		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+	}
+	defer file.Close()
+
+	if err := file.Truncate(int64(totalSize)); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
+	}
+
+	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Write header
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeader(dc.signature, dc.version, uint32(len(entries)), flags)
+
+	// Write entries
+	offset := HeaderSize
+	for _, entry := range entries {
+		entrySize := dc.writeProcessedEntryToMmap(data[offset:], entry)
+		offset += entrySize
+	}
+
+	// Write checksum and sync
+	checksum := dc.calculateChecksum(data[:offset])
+	copy(data[offset:offset+ChecksumSize], checksum)
+
+	return unix.Msync(data, unix.MS_SYNC)
 }
 
 func (dc *DirectoryCache) createEmptyIndex() error {

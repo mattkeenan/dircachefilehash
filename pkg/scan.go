@@ -57,12 +57,6 @@ type ProcessedEntry struct {
 	IsDeleted bool
 }
 
-// HashJobResult stores hash results for new files
-type HashJobResult struct {
-	Hash     []byte
-	HashType uint16
-}
-
 // HashJobStart represents a hash job being started
 type HashJobStart struct {
 	JobID       uint64
@@ -71,32 +65,19 @@ type HashJobStart struct {
 	ScannedPath *ScannedPath
 }
 
-// HashJobCompletion represents a hash job completion (just the ID)
-type HashJobCompletion struct {
-	JobID uint64
-	Error error // Only set if there was an error
+// Helper function for efficient slice removal (order doesn't matter)
+func remove(s []uint64, i int) []uint64 {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
 }
 
-// HashJobMonitor manages asynchronous hash job tracking
-type HashJobMonitor struct {
-	startedJobs   map[uint64]bool
-	completedJobs map[uint64]bool
-	pendingCount  int
-	mutex         sync.RWMutex
-	allDoneChan   chan struct{}
-	closed        bool
-}
-
-// StreamingHashJobManager coordinates streaming hash job processing
-type StreamingHashJobManager struct {
-	hashJobChan     chan *HashJobStart
-	completionChan  chan *HashJobCompletion
-	startNotifyChan chan uint64
-	monitor         *HashJobMonitor
-	hashResultStore map[uint64]HashJobResult // Store results for new files
-	storeMutex      sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
+// SimpleHashManager - coordinates hash job completion
+type SimpleHashManager struct {
+	hashJobChan    chan *HashJobStart
+	callFinishChan chan uint64 // job completion notifications
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
 }
 
 // ============================================================================
@@ -339,7 +320,8 @@ func (dc *DirectoryCache) hwangLinCompare(
 	scanChan <-chan *ScannedPath,
 	skiplist *SkiplistWrapper,
 	resultChan chan<- *HwangLinResult,
-	hashJobManager *StreamingHashJobManager,
+	hashJobManager *SimpleHashManager,
+	callStartChan chan<- uint64,
 ) error {
 	defer close(resultChan)
 
@@ -398,7 +380,7 @@ func (dc *DirectoryCache) hwangLinCompare(
 				}
 
 				// Submit hash job asynchronously - this doesn't block!
-				hashJobManager.SubmitHashJob(hashJob)
+				hashJobManager.SubmitHashJob(hashJob, callStartChan)
 
 				result := &HwangLinResult{
 					Type:        HLModified,
@@ -454,7 +436,7 @@ func (dc *DirectoryCache) hwangLinCompare(
 			}
 
 			// Submit hash job asynchronously
-			hashJobManager.SubmitHashJob(hashJob)
+			hashJobManager.SubmitHashJob(hashJob, callStartChan)
 
 			result := &HwangLinResult{
 				Type:        HLNew,
@@ -538,134 +520,60 @@ func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scan
 // HASH JOB MANAGEMENT
 // ============================================================================
 
-// NewHashJobMonitor creates a new hash job monitor
-func NewHashJobMonitor() *HashJobMonitor {
-	return &HashJobMonitor{
-		startedJobs:   make(map[uint64]bool),
-		completedJobs: make(map[uint64]bool),
-		pendingCount:  0,
-		allDoneChan:   make(chan struct{}),
-		closed:        false,
+// NewSimpleHashManager creates a new simple hash manager
+func (dc *DirectoryCache) NewSimpleHashManager(numWorkers int, callFinishChan chan uint64) *SimpleHashManager {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	manager := &SimpleHashManager{
+		hashJobChan:    make(chan *HashJobStart, 100),
+		callFinishChan: callFinishChan,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		manager.wg.Add(1)
+		go manager.hashWorker(dc)
+	}
+
+	return manager
 }
 
-// StartJob registers a new hash job as started
-func (hjm *HashJobMonitor) StartJob(jobID uint64) {
-	hjm.mutex.Lock()
-	defer hjm.mutex.Unlock()
-
-	if !hjm.closed {
-		hjm.startedJobs[jobID] = true
-		hjm.pendingCount++
-	}
+// SubmitHashJob submits a hash job and signals the start
+func (hjm *SimpleHashManager) SubmitHashJob(job *HashJobStart, callStartChan chan<- uint64) {
+	hjm.hashJobChan <- job
+	callStartChan <- job.JobID // Signal job started
 }
 
-// CompleteJob marks a hash job as completed
-func (hjm *HashJobMonitor) CompleteJob(jobID uint64, err error) {
-	hjm.mutex.Lock()
-	defer hjm.mutex.Unlock()
+// FinishSubmitting signals that no more hash jobs will be submitted
+func (hjm *SimpleHashManager) FinishSubmitting() {
+	close(hjm.hashJobChan)
+}
 
-	if hjm.closed {
-		return
-	}
+// hashWorker processes hash jobs
+func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
+	defer hjm.wg.Done()
 
-	// Only process if we know about this job
-	if hjm.startedJobs[jobID] && !hjm.completedJobs[jobID] {
-		hjm.completedJobs[jobID] = true
-		hjm.pendingCount--
+	for job := range hjm.hashJobChan {
+		// Hash the file and update binaryEntry directly in mmap memory
+		hashStr, err := dc.hashFile(job.FilePath)
 
-		if err != nil {
-			// Log error but don't fail the whole process
-			fmt.Printf("Hash job %d failed: %v\n", jobID, err)
+		if err == nil {
+			if hashBytes, hexErr := hex.DecodeString(hashStr); hexErr == nil {
+				dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, HashTypeSHA1)
+			}
 		}
 
-		// Check if all jobs are done
-		if hjm.pendingCount == 0 {
-			hjm.closed = true
-			close(hjm.allDoneChan)
-		}
+		// Signal completion
+		hjm.callFinishChan <- job.JobID
 	}
 }
 
-// FinishScanning signals that no more jobs will be started
-func (hjm *HashJobMonitor) FinishScanning() {
-	hjm.mutex.Lock()
-	defer hjm.mutex.Unlock()
-
-	// If no jobs were started, signal completion immediately
-	if hjm.pendingCount == 0 && !hjm.closed {
-		hjm.closed = true
-		close(hjm.allDoneChan)
-	}
-}
-
-// AllDone returns a channel that will be closed when all hash jobs are complete
-func (hjm *HashJobMonitor) AllDone() <-chan struct{} {
-	return hjm.allDoneChan
-}
-
-// GetStats returns current job statistics
-func (hjm *HashJobMonitor) GetStats() (started, completed, pending int) {
-	hjm.mutex.RLock()
-	defer hjm.mutex.RUnlock()
-	return len(hjm.startedJobs), len(hjm.completedJobs), hjm.pendingCount
-}
-
-// AsyncHashWorker processes hash jobs and updates binaryEntry directly or stores hash for new files
-func (dc *DirectoryCache) AsyncHashWorker(
-	ctx context.Context,
-	hashJobChan <-chan *HashJobStart,
-	completionChan chan<- *HashJobCompletion,
-	hashResultStore map[uint64]HashJobResult, // Store results for new files
-	storeMutex *sync.RWMutex,
-) {
-	for {
-		select {
-		case job, ok := <-hashJobChan:
-			if !ok {
-				return
-			}
-
-			// Hash the file
-			hashStr, err := dc.hashFile(job.FilePath)
-
-			if err == nil {
-				// Convert hash string to bytes
-				hashBytes, hexErr := hex.DecodeString(hashStr)
-				if hexErr == nil {
-					if job.IndexEntry != nil {
-						// Update existing entry directly
-						dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, HashTypeSHA1)
-					} else {
-						// Store hash result for new files
-						storeMutex.Lock()
-						hashResultStore[job.JobID] = HashJobResult{
-							Hash:     hashBytes,
-							HashType: HashTypeSHA1,
-						}
-						storeMutex.Unlock()
-					}
-				} else {
-					err = hexErr
-				}
-			}
-
-			// Send completion notification
-			completion := &HashJobCompletion{
-				JobID: job.JobID,
-				Error: err,
-			}
-
-			select {
-			case completionChan <- completion:
-			case <-ctx.Done():
-				return
-			}
-
-		case <-ctx.Done():
-			return
-		}
-	}
+// Shutdown gracefully shuts down the hash manager
+func (hjm *SimpleHashManager) Shutdown() {
+	hjm.cancel()
+	hjm.wg.Wait()
 }
 
 // updateBinaryEntryHash safely updates the hash in a binaryEntry
@@ -680,146 +588,38 @@ func (dc *DirectoryCache) updateBinaryEntryHash(entry *binaryEntry, hash []byte,
 	entry.HashType = hashType
 }
 
-// AsyncHashWorkerPool manages a pool of async hash workers
-func (dc *DirectoryCache) AsyncHashWorkerPool(
-	ctx context.Context,
-	hashJobChan <-chan *HashJobStart,
-	completionChan chan<- *HashJobCompletion,
-	hashResultStore map[uint64]HashJobResult,
-	storeMutex *sync.RWMutex,
-	numWorkers int,
+// monitorJobs tracks hash job starts and completions
+func (dc *DirectoryCache) monitorJobs(
+	callStartChan <-chan uint64,
+	callFinishChan <-chan uint64,
+	collectionStop <-chan struct{},
 ) {
-	var wg sync.WaitGroup
+	var jobs []uint64 // Track pending hash jobs
+	stopped := false
 
-	// Start hash workers
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			dc.AsyncHashWorker(ctx, hashJobChan, completionChan, hashResultStore, storeMutex)
-		}()
-	}
-
-	// Wait for all workers to finish and close completion channel
-	go func() {
-		wg.Wait()
-		close(completionChan)
-	}()
-}
-
-// HashJobMonitorProcess runs the hash job monitoring process
-func (hjm *HashJobMonitor) HashJobMonitorProcess(
-	ctx context.Context,
-	startChan <-chan uint64,
-	completionChan <-chan *HashJobCompletion,
-) {
 	for {
 		select {
-		case jobID, ok := <-startChan:
-			if !ok {
-				// No more jobs will be started
-				hjm.FinishScanning()
-				goto waitForCompletions
-			}
-			hjm.StartJob(jobID)
+		case jobID := <-callStartChan:
+			jobs = append(jobs, jobID)
 
-		case completion, ok := <-completionChan:
-			if !ok {
-				// Workers are done, but we might still have pending jobs
-				goto waitForCompletions
+		case completedJobID := <-callFinishChan:
+			// Remove completed job from jobs slice
+			for i, id := range jobs {
+				if id == completedJobID {
+					jobs = remove(jobs, i)
+					break
+				}
 			}
-			hjm.CompleteJob(completion.JobID, completion.Error)
 
-		case <-ctx.Done():
+		case <-collectionStop:
+			stopped = true
+		}
+
+		// If stopped and no pending jobs, we're done
+		if stopped && len(jobs) == 0 {
 			return
 		}
 	}
-
-waitForCompletions:
-	// Continue processing completions until all jobs are done
-	for {
-		select {
-		case completion, ok := <-completionChan:
-			if !ok {
-				// Workers are done and channel closed
-				hjm.FinishScanning()
-				return
-			}
-			hjm.CompleteJob(completion.JobID, completion.Error)
-
-		case <-hjm.AllDone():
-			// All jobs completed
-			return
-
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// NewStreamingHashJobManager creates a new streaming hash job manager
-func (dc *DirectoryCache) NewStreamingHashJobManager(numWorkers int) *StreamingHashJobManager {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	manager := &StreamingHashJobManager{
-		hashJobChan:     make(chan *HashJobStart, 100),
-		completionChan:  make(chan *HashJobCompletion, 100),
-		startNotifyChan: make(chan uint64, 100),
-		monitor:         NewHashJobMonitor(),
-		hashResultStore: make(map[uint64]HashJobResult),
-		ctx:             ctx,
-		cancel:          cancel,
-	}
-
-	// Start the worker pool
-	dc.AsyncHashWorkerPool(ctx, manager.hashJobChan, manager.completionChan, manager.hashResultStore, &manager.storeMutex, numWorkers)
-
-	// Start the monitor process
-	go manager.monitor.HashJobMonitorProcess(ctx, manager.startNotifyChan, manager.completionChan)
-
-	return manager
-}
-
-// SubmitHashJob submits a hash job for async processing
-func (hjm *StreamingHashJobManager) SubmitHashJob(job *HashJobStart) {
-	select {
-	case hjm.hashJobChan <- job:
-		// Notify monitor that job was started
-		select {
-		case hjm.startNotifyChan <- job.JobID:
-		case <-hjm.ctx.Done():
-		}
-	case <-hjm.ctx.Done():
-	}
-}
-
-// FinishSubmitting signals that no more hash jobs will be submitted
-func (hjm *StreamingHashJobManager) FinishSubmitting() {
-	close(hjm.hashJobChan)
-	close(hjm.startNotifyChan)
-}
-
-// WaitForCompletion waits for all submitted hash jobs to complete
-func (hjm *StreamingHashJobManager) WaitForCompletion() {
-	<-hjm.monitor.AllDone()
-}
-
-// Shutdown gracefully shuts down the hash job manager
-func (hjm *StreamingHashJobManager) Shutdown() {
-	hjm.cancel()
-}
-
-// GetHashResult retrieves hash result for a job ID (for new files)
-func (hjm *StreamingHashJobManager) GetHashResult(jobID uint64) (HashJobResult, bool) {
-	hjm.storeMutex.RLock()
-	defer hjm.storeMutex.RUnlock()
-	result, exists := hjm.hashResultStore[jobID]
-	return result, exists
-}
-
-// GetStats returns current statistics
-func (hjm *StreamingHashJobManager) GetStats() (started, completed, pending int) {
-	return hjm.monitor.GetStats()
 }
 
 // ============================================================================
@@ -937,48 +737,7 @@ func (dc *DirectoryCache) WriteProcessedEntries(entries []ProcessedEntry, flags 
 	return unix.Msync(data, unix.MS_SYNC)
 }
 
-// writeProcessedEntryToMmap writes a ProcessedEntry to mmap'd memory (pure binary operations)
-func (dc *DirectoryCache) writeProcessedEntryToMmap(data []byte, entry ProcessedEntry) int {
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(entry.RelPath) + 1
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
-
-	binEntry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-	binEntry.Size = uint32(entrySize)
-	binEntry.CTimeWall = encodeWallTime(entry.StatInfo.Ctim.Sec, entry.StatInfo.Ctim.Nsec)
-	binEntry.MTimeWall = encodeWallTime(entry.StatInfo.Mtim.Sec, entry.StatInfo.Mtim.Nsec)
-	binEntry.Dev = uint32(entry.StatInfo.Dev)
-	binEntry.Ino = uint32(entry.StatInfo.Ino)
-	binEntry.Mode = uint32(entry.FileInfo.Mode())
-	binEntry.UID = entry.StatInfo.Uid
-	binEntry.GID = entry.StatInfo.Gid
-	binEntry.FileSize = uint64(entry.FileInfo.Size())
-	binEntry.HashType = entry.HashType
-	binEntry.EntryFlags = 0
-
-	if entry.IsDeleted {
-		binEntry.SetDeleted()
-	}
-
-	// Clear and copy hash
-	for i := range binEntry.Hash {
-		binEntry.Hash[i] = 0
-	}
-	copy(binEntry.Hash[:], entry.Hash)
-
-	// Write path
-	pathOffset := int(unsafe.Sizeof(*binEntry))
-	copy(data[pathOffset:pathOffset+len(entry.RelPath)], entry.RelPath)
-	data[pathOffset+len(entry.RelPath)] = 0
-
-	// Zero padding
-	for i := 0; i < padding; i++ {
-		data[totalSize+i] = 0
-	}
-
-	return entrySize
-}
+// writeProcessedEntryToMmap is now in index.go - this function delegates to the unified implementation
 
 // ============================================================================
 // MAIN SCAN FUNCTION
@@ -990,11 +749,15 @@ func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []strin
 	// This reduces memory usage while maintaining good performance
 	scanChan := make(chan *ScannedPath, 50)      // Smaller buffer for streaming
 	resultChan := make(chan *HwangLinResult, 50) // Results stream as comparisons happen
+	callStartChan := make(chan uint64, 100)      // Job start notifications
+	callFinishChan := make(chan uint64, 100)     // Job finish notifications
+	collectionStop := make(chan struct{})        // Stop monitoring signal
 
-	// Create streaming hash job manager (replaces old hash job channels)
-	numWorkers := 4 // Configurable
-	hashJobManager := dc.NewStreamingHashJobManager(numWorkers)
+	// Create simple hash job manager
+	hashJobManager := dc.NewSimpleHashManager(4, callFinishChan) // Configurable workers
 	defer hashJobManager.Shutdown()
+
+	var results []*HwangLinResult
 
 	// Start filesystem scan
 	var scanWg sync.WaitGroup
@@ -1006,18 +769,30 @@ func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []strin
 		}
 	}()
 
-	// Start Hwang-Lin comparison (now with async hash job manager)
+	// Start Hwang-Lin comparison (now with simple hash job manager)
 	var compareWg sync.WaitGroup
 	compareWg.Add(1)
 	go func() {
 		defer compareWg.Done()
-		if err := dc.hwangLinCompare(ctx, scanChan, skiplist, resultChan, hashJobManager); err != nil {
+		if err := dc.hwangLinCompare(ctx, scanChan, skiplist, resultChan, hashJobManager, callStartChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Compare error: %v\n", err)
 		}
 	}()
 
-	// Collect results as they stream in (don't wait for hash jobs)
-	var results []*HwangLinResult
+	// Monitor hash jobs
+	var monitorWg sync.WaitGroup
+	monitorWg.Add(1)
+	go func() {
+		defer monitorWg.Done()
+		dc.monitorJobs(callStartChan, callFinishChan, collectionStop)
+	}()
+
+	// Collect HwangLinResults separately
+	go func() {
+		for result := range resultChan {
+			results = append(results, result)
+		}
+	}()
 
 	// Wait for scan to complete
 	scanWg.Wait()
@@ -1028,27 +803,11 @@ func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []strin
 	// Signal that no more hash jobs will be submitted
 	hashJobManager.FinishSubmitting()
 
-	// Collect all results (this doesn't wait for hash completion)
-	for result := range resultChan {
-		results = append(results, result)
-	}
+	// Signal monitoring to stop and wait for all jobs to finish
+	close(collectionStop)
+	monitorWg.Wait()
 
-	// NOW wait for all hash jobs to complete
-	hashJobManager.WaitForCompletion()
-
-	// Update results with hash information for new files
-	for _, result := range results {
-		if result.JobID != 0 && result.IndexEntry == nil {
-			// New file - get hash from result store
-			if hashResult, exists := hashJobManager.GetHashResult(result.JobID); exists {
-				result.Hash = hashResult.Hash
-				result.HashType = hashResult.HashType
-			}
-		}
-	}
-
-	started, completed, pending := hashJobManager.GetStats()
-	fmt.Printf("Hash jobs completed: %d started, %d completed, %d pending\n", started, completed, pending)
+	fmt.Printf("Hash job processing completed\n")
 
 	return results, nil
 }
