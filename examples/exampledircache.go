@@ -55,39 +55,26 @@ func main() {
 	fileCount, totalSize, _ := cache.Stats()
 	fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 
-	// Show some sample entries if there are any
-	entries := cache.GetEntries()
-	if len(entries) > 0 {
-		fmt.Println("\nSample entries (first 5):")
-		maxEntries := 5
-		if len(entries) < maxEntries {
-			maxEntries = len(entries)
-		}
-		for i := 0; i < maxEntries; i++ {
-			entry := entries[i]
-			fmt.Printf("  %s... %s (%d bytes)\n",
-				entry.Hash[:8],
-				entry.RelativePath,
-				entry.Size)
-		}
-		if len(entries) > 5 {
-			fmt.Printf("  ... and %d more files\n", len(entries)-5)
-		}
-	}
+	// Show index length
+	fmt.Printf("Index contains %d entries\n", cache.Length())
 
 	// Check for duplicates
-	duplicates := cache.FindDuplicates()
+	duplicates, err := cache.FindDuplicates()
+	if err != nil {
+		log.Fatalf("Failed to find duplicates: %v", err)
+	}
+	
 	if len(duplicates) > 0 {
 		fmt.Printf("\n⚠ Found %d sets of duplicate files:\n", len(duplicates))
 		count := 0
-		for hash, files := range duplicates {
+		for _, group := range duplicates {
 			if count >= 3 { // Show only first 3 duplicate sets
 				fmt.Printf("  ... and %d more duplicate sets\n", len(duplicates)-3)
 				break
 			}
-			fmt.Printf("  Hash %s... has %d duplicates:\n", hash[:8], len(files))
-			for _, file := range files {
-				fmt.Printf("    %s\n", file.RelativePath)
+			fmt.Printf("  Hash %s... has %d duplicates:\n", group.Hash[:8], group.Count)
+			for _, file := range group.Files {
+				fmt.Printf("    %s\n", file)
 			}
 			count++
 		}

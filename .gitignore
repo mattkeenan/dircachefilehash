@@ -2,3 +2,7 @@
 cmd/dcfh
 examples/exampledircache
 .*.swp
+
+# Binaries built in root directory
+dcfh
+example

@@ -50,10 +50,6 @@ func (dc *DirectoryCache) LoadCacheIndex() (*SkiplistWrapper, error) {
 	return skiplist, nil
 }
 
-// LoadIndex ensures the main index is loaded (moved from util.go)
-func (dc *DirectoryCache) LoadIndex() (*SkiplistWrapper, error) {
-	return dc.LoadMainIndex()
-}
 
 // CreateTmpIndexFromScan scans the directory and creates a temporary index using the new scan workflow
 func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWrapper) (*SkiplistWrapper, error) {

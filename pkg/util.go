@@ -160,10 +160,3 @@ func (dc *DirectoryCache) generateScanFileName() string {
 		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
 }
 
-// generateTmpIndexFileName generates a tmp index filename with PID and goroutine ID
-func (dc *DirectoryCache) generateTmpIndexFileName() string {
-	pid := os.Getpid()
-	tid := getGoroutineID()
-	return filepath.Join(filepath.Dir(dc.IndexFile),
-		fmt.Sprintf("tmp-%d-%d.idx", pid, tid))
-}

@@ -42,7 +42,7 @@ func (dc *DirectoryCache) CleanupTempFilesOnExit() {
 
 // Stats returns statistics about the cache by loading the main index
 func (dc *DirectoryCache) Stats() (int, int64, error) {
-	skiplist, err := dc.LoadIndex()
+	skiplist, err := dc.LoadMainIndex()
 	if err != nil {
 		return 0, 0, err
 	}
@@ -63,7 +63,7 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 
 // Length returns the total number of entries in the index (including deleted)
 func (dc *DirectoryCache) Length() int {
-	skiplist, err := dc.LoadIndex()
+	skiplist, err := dc.LoadMainIndex()
 	if err != nil {
 		return 0
 	}

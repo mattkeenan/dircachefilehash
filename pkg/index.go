@@ -496,25 +496,6 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 	return nil
 }
 
-// WriteSkiplistToTmpIndex writes a skiplist to a temporary index file, then atomically renames it
-func (dc *DirectoryCache) WriteSkiplistToTmpIndex(skiplist *SkiplistWrapper, finalPath string, context string) error {
-	// Generate temporary file name
-	tmpPath := dc.generateTmpIndexFileName()
-	
-	// Write to temporary file using vectorio
-	if err := dc.WriteSkiplistWithVectorIO(skiplist, tmpPath, context); err != nil {
-		os.Remove(tmpPath) // Cleanup on failure
-		return fmt.Errorf("failed to write to temp file: %w", err)
-	}
-
-	// Atomic rename to final location
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		os.Remove(tmpPath) // Cleanup on failure
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
-}
 
 // MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
 func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string) error {

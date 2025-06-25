@@ -8,8 +8,9 @@ import (
 
 // DuplicateGroup represents a group of files with the same hash
 type DuplicateGroup struct {
-	Hash  string
-	Files []string
+	Hash  string   `json:"hash"`
+	Files []string `json:"files"`
+	Count int      `json:"count"`
 }
 
 // FindDuplicates returns groups of files with identical hashes using the new workflow
@@ -61,6 +62,7 @@ func (dc *DirectoryCache) FindDuplicates() ([]DuplicateGroup, error) {
 			result = append(result, DuplicateGroup{
 				Hash:  hash,
 				Files: files,
+				Count: len(files),
 			})
 		}
 	}

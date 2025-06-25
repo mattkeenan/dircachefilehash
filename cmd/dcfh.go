@@ -74,15 +74,9 @@ type DuplicateInfo struct {
 }
 
 type DupesOutput struct {
-	Repository      string           `json:"repository"`
-	DuplicateGroups []DuplicateGroup `json:"duplicate_groups"`
-	Summary         DuplicateSummary `json:"summary"`
-}
-
-type DuplicateGroup struct {
-	Hash  string   `json:"hash"`
-	Files []string `json:"files"`
-	Count int      `json:"count"`
+	Repository      string                `json:"repository"`
+	DuplicateGroups []dcfh.DuplicateGroup `json:"duplicate_groups"`
+	Summary         DuplicateSummary      `json:"summary"`
 }
 
 type DuplicateSummary struct {
@@ -458,7 +452,7 @@ func handleDupes(args []string) {
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
 
-	if err := cache.LoadIndex(); err != nil {
+	if _, err := cache.LoadMainIndex(); err != nil {
 		outputError(fmt.Sprintf("Failed to load index: %v", err))
 		os.Exit(1)
 	}
@@ -474,7 +468,7 @@ func handleDupes(args []string) {
 		if *jsonOutput {
 			output := DupesOutput{
 				Repository:      repoRoot,
-				DuplicateGroups: []DuplicateGroup{},
+				DuplicateGroups: []dcfh.DuplicateGroup{},
 				Summary: DuplicateSummary{
 					GroupCount: 0,
 					FileCount:  0,
@@ -495,7 +489,7 @@ func handleDupes(args []string) {
 	}
 
 	if *jsonOutput {
-		var groups []DuplicateGroup
+		var groups []dcfh.DuplicateGroup
 		totalFiles := 0
 
 		for _, group := range duplicates {
@@ -514,7 +508,7 @@ func handleDupes(args []string) {
 				}
 			}
 
-			groups = append(groups, DuplicateGroup{
+			groups = append(groups, dcfh.DuplicateGroup{
 				Hash:  group.Hash,
 				Files: filePaths,
 				Count: len(filePaths),
