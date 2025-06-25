@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 // DirectoryCache manages the file cache for a directory
@@ -48,24 +46,24 @@ type binaryEntry struct {
 
 // IsDeleted returns true if this entry is marked as deleted
 func (be *binaryEntry) IsDeleted() bool {
-	return be.EntryFlags&EntryFlagDeleted != 0
+	return be.EntryFlags&uint16(EntryFlagDeleted) != 0
 }
 
 // SetDeleted marks this entry as deleted
 func (be *binaryEntry) SetDeleted() {
-	be.EntryFlags |= EntryFlagDeleted
+	be.EntryFlags |= uint16(EntryFlagDeleted)
 }
 
 // ClearDeleted removes the deleted flag from this entry
 func (be *binaryEntry) ClearDeleted() {
-	be.EntryFlags &^= EntryFlagDeleted
+	be.EntryFlags &^= uint16(EntryFlagDeleted)
 }
 
 // RelativePath returns the relative path as string from mmap'd memory (zero-copy)
 func (be *binaryEntry) RelativePath() string {
 	entryStart := uintptr(unsafe.Pointer(be))
 	entryEnd := entryStart + uintptr(be.Size)
-	pathStart := uintptr(unsafe.Pointer(be.Path))
+	pathStart := uintptr(unsafe.Pointer(&be.Path[0]))
 
 	// Scan backwards byte by byte from the end (endian-neutral)
 	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
@@ -116,13 +114,6 @@ func BESizeFromPathLen(pathLen int) int {
 	return totalSize + padding
 }
 
-// fileJob represents a file hashing job
-type fileJob struct {
-	path    string
-	info    os.FileInfo
-	relPath string
-	index   int
-}
 
 
 // timeWall extracts the wall field from time.Time using unsafe operations

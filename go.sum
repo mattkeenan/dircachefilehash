@@ -8,5 +8,7 @@ github.com/mattkeenan/zerocopyskiplist v0.6.1 h1:HXnGtTrp3UjRdj0VQQW+bvf9brSasT7
 github.com/mattkeenan/zerocopyskiplist v0.6.1/go.mod h1:Vy3O1RsFhaPiuWnf7jWX6D2HxiEjtqAqOlhDk1HYFm0=
 github.com/mattkeenan/zerocopyskiplist v0.8.0 h1:auA26PUC8bm1QyJlFsZK5A2MRGyRmV7nvZxGMVn2JYw=
 github.com/mattkeenan/zerocopyskiplist v0.8.0/go.mod h1:sIweagZpieMo/Q1Z1hmkeMlDySKKu2QPIreIK+oe+3g=
+github.com/mattkeenan/zerocopyskiplist v0.9.0 h1:aLF0GfrupuWn4GO0KFOXcAMWiKEd8rYfdzIlySSu/tU=
+github.com/mattkeenan/zerocopyskiplist v0.9.0/go.mod h1:sIweagZpieMo/Q1Z1hmkeMlDySKKu2QPIreIK+oe+3g=
 golang.org/x/sys v0.33.0 h1:q3i8TbbEz+JRD9ywIRlyRAQbM0qF7hu24q3teo2hbuw=
 golang.org/x/sys v0.33.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=

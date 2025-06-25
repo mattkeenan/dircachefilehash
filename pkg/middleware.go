@@ -66,11 +66,6 @@ func (dc *DirectoryCache) CreateTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 	return scanSkiplist, nil
 }
 
-// WriteSkiplistToTmpIndex writes a skiplist to a temporary index file using vectorio
-func (dc *DirectoryCache) WriteSkiplistToTmpIndex(skiplist *SkiplistWrapper, tempPath string, defaultContext string) error {
-	// Use the new vectorio-based writing with atomic rename
-	return dc.WriteSkiplistWithVectorIO(skiplist, tempPath, defaultContext)
-}
 
 // UpdateCacheIndexWithWorkflow implements the cache update workflow as specified
 func (dc *DirectoryCache) UpdateCacheIndexWithWorkflow() error {

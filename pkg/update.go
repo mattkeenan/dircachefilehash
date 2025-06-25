@@ -27,9 +27,9 @@ func (dc *DirectoryCache) updateFullRepository() error {
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
 
-	// Write everything to main index using vectorio
+	// Write everything to main index using vectorio (exclude deleted entries)
 	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.WriteSkiplistWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
+	if err := dc.WriteMainIndexWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
 		os.Remove(tempIndexPath)
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
@@ -67,9 +67,9 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 		return fmt.Errorf("failed to merge scan results with main index: %w", err)
 	}
 
-	// Write new main index using vectorio
+	// Write new main index using vectorio (exclude deleted entries)
 	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.WriteSkiplistWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
+	if err := dc.WriteMainIndexWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
 

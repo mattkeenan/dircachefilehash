@@ -84,7 +84,7 @@ func (ih *IndexHeader) ClearClean() {
 	ih.Flags &^= IndexFlagClean
 }
 
-// writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (unified function)
+// writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (PRIVATE - only for scan index)
 func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) int {
 	// Calculate total entry size first
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
@@ -133,75 +133,6 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 	return entrySize
 }
 
-// writeProcessedEntryToMmap writes a ProcessedEntry to mmap'd memory
-func (dc *DirectoryCache) writeProcessedEntryToMmap(data []byte, entry ProcessedEntry) int {
-	return dc.writeBinaryEntryToMmap(data, entry.RelPath, entry.Hash, entry.HashType, entry.FileInfo, entry.StatInfo, entry.IsDeleted)
-}
-
-// WriteIndex writes entries directly to mmap'd index file (pure file I/O)
-func (dc *DirectoryCache) WriteIndex(jobs []fileJob) error {
-	return dc.writeIndexWithFlags(jobs, 0) // Default: not sparse
-}
-
-// writeIndexWithFlags writes entries directly to mmap'd index file with specified flags (pure file I/O)
-func (dc *DirectoryCache) writeIndexWithFlags(jobs []fileJob, flags uint32) error {
-	// Calculate total file size needed
-	totalSize := HeaderSize + ChecksumSize
-	for _, job := range jobs {
-		totalSize += BESizeFromPathLen(len(job.relPath))
-	}
-
-	// Create the file
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
-	}
-	defer file.Close()
-
-	// Truncate to exact size
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
-	}
-
-	// Memory map the file
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Write header directly to mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, uint32(len(jobs)), flags)
-
-	// Write entries directly to mmap'd memory
-	offset := HeaderSize
-	for _, job := range jobs {
-		// Process file and get hash
-		hashBytes, hashType, stat, err := dc.processFileJob(job)
-		if err != nil {
-			return fmt.Errorf("failed to process file %s: %w", job.path, err)
-		}
-
-		// Write entry directly to mmap'd memory using unified function
-		entrySize := dc.writeBinaryEntryToMmap(data[offset:], job.relPath, hashBytes, hashType, job.info, stat, false)
-		offset += entrySize
-	}
-
-	// Calculate and write checksum
-	checksum := dc.calculateChecksum(data[:offset])
-	copy(data[offset:offset+ChecksumSize], checksum)
-
-	// Mark index as clean (final operation before sync)
-	header.SetClean()
-
-	// Sync to disk
-	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
-		return fmt.Errorf("failed to sync mmap: %w", err)
-	}
-
-	return nil
-}
 
 // LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
 func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, error) {
@@ -318,114 +249,6 @@ func (dc *DirectoryCache) Close() error {
 	return nil
 }
 
-// WriteEntries writes existing binaryEntry pointers directly to index file (pure file I/O)
-func (dc *DirectoryCache) WriteEntries(entries []*binaryEntry, flags uint32) error {
-	// Calculate total file size needed
-	totalSize := HeaderSize + ChecksumSize
-	for _, entry := range entries {
-		totalSize += entry.EntrySize()
-	}
-
-	// Create the file
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
-	}
-	defer file.Close()
-
-	// Truncate to exact size
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
-	}
-
-	// Memory map the file
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Write header directly to mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, uint32(len(entries)), flags)
-
-	// Copy entries directly to mmap'd memory
-	offset := HeaderSize
-	for _, entry := range entries {
-		entrySize := entry.EntrySize()
-
-		// Copy entry data directly
-		copy(data[offset:offset+entrySize],
-			(*[1 << 20]byte)(unsafe.Pointer(entry))[:entrySize:entrySize])
-
-		offset += entrySize
-	}
-
-	// Calculate and write checksum
-	checksum := dc.calculateChecksum(data[:offset])
-	copy(data[offset:offset+ChecksumSize], checksum)
-
-	// Mark index as clean (final operation before sync)
-	header.SetClean()
-
-	// Sync to disk
-	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
-		return fmt.Errorf("failed to sync mmap: %w", err)
-	}
-
-	return nil
-}
-
-// WriteSparseEntries writes existing binaryEntry pointers as a sparse index file
-func (dc *DirectoryCache) WriteSparseEntries(entries []*binaryEntry, filePath string) error {
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = filePath
-	defer func() { dc.IndexFile = oldIndexFile }()
-	return dc.WriteEntries(entries, IndexFlagSparse)
-}
-
-// WriteProcessedEntries writes processed entries using pure file I/O (moved from scan.go)
-func (dc *DirectoryCache) WriteProcessedEntries(entries []ProcessedEntry, flags uint32) error {
-	// Calculate total file size needed
-	totalSize := HeaderSize + ChecksumSize
-	for _, entry := range entries {
-		totalSize += BESizeFromPathLen(len(entry.RelPath))
-	}
-
-	// Create and mmap file
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
-	}
-	defer file.Close()
-
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
-	}
-
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Write header
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, uint32(len(entries)), flags)
-
-	// Write entries
-	offset := HeaderSize
-	for _, entry := range entries {
-		entrySize := dc.writeProcessedEntryToMmap(data[offset:], entry)
-		offset += entrySize
-	}
-
-	// Write checksum and sync
-	checksum := dc.calculateChecksum(data[:offset])
-	copy(data[offset:offset+ChecksumSize], checksum)
-
-	return unix.Msync(data, unix.MS_SYNC)
-}
 
 func (dc *DirectoryCache) createEmptyIndex() error {
 	totalSize := HeaderSize + ChecksumSize
@@ -556,70 +379,118 @@ func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, relPath st
 
 // WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
 func (dc *DirectoryCache) WriteSkiplistWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, false)
+}
+
+// WriteMainIndexWithVectorIO writes a main index file excluding deleted entries using vectorio
+func (dc *DirectoryCache) WriteMainIndexWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, true)
+}
+
+// writeSkiplistWithVectorIOFiltered writes a skiplist to temp index using pure vectorio (no mmap)
+func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
 	// Generate IoVec slices for the specified context
-	var iovecs []syscall.Iovec
-	if context == "" {
-		iovecs = skiplist.ToIovecSlice()
+	var entryIovecs []syscall.Iovec
+	
+	if excludeDeleted {
+		// Use callback to filter out deleted entries for main index
+		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
+			// Include entry if it matches context (or no context filter) and is not deleted
+			contextMatch := (context == "" || entryContext == context)
+			return contextMatch && !entry.IsDeleted()
+		})
 	} else {
-		iovecs = skiplist.ToContextIovecSlice(context)
+		// Include all entries for cache index (including deleted ones)
+		if context == "" {
+			entryIovecs = skiplist.ToIovecSlice()
+		} else {
+			entryIovecs = skiplist.ToContextIovecSlice(context)
+		}
 	}
 
-	if len(iovecs) == 0 {
-		// Create empty index if no entries
-		oldIndexFile := dc.IndexFile
-		dc.IndexFile = outputPath
-		defer func() { dc.IndexFile = oldIndexFile }()
-		return dc.createEmptyIndex()
+	// Calculate entry data size
+	totalEntrySize := 0
+	entryCount := len(entryIovecs)
+	for _, iovec := range entryIovecs {
+		totalEntrySize += int(iovec.Len)
 	}
 
-	// Calculate total size needed
-	totalDataSize := 0
-	entryCount := len(iovecs)
-	for _, iovec := range iovecs {
-		totalDataSize += int(iovec.Len)
-	}
-	totalSize := HeaderSize + totalDataSize + ChecksumSize
-
-	// Create output file
-	file, err := os.Create(outputPath)
+	// Create output file (O_CREAT|O_WRONLY)
+	file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
+		return fmt.Errorf("failed to create temp index file %s: %w", outputPath, err)
 	}
 	defer file.Close()
 
-	// Truncate to exact size
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
-	}
-
-	// Memory map the file
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Write header directly to mmap'd memory
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	// Create header in memory
+	header := IndexHeader{}
 	header.SetHeader(dc.signature, dc.version, uint32(entryCount), 0) // Default flags
 
-	// Use vectorio to write all entries efficiently in one call
-	offset := HeaderSize
-	if err := vectorio.WriteRaw(int(file.Fd()), int64(offset), iovecs); err != nil {
-		return fmt.Errorf("failed to write entries with vectorio: %w", err)
+	// Create header IoVec
+	headerIovec := syscall.Iovec{
+		Base: (*byte)(unsafe.Pointer(&header)),
+		Len:  uint64(HeaderSize),
 	}
 
-	// Calculate and write checksum
-	contentSize := HeaderSize + totalDataSize
-	checksum := dc.calculateChecksum(data[:contentSize])
-	copy(data[contentSize:contentSize+ChecksumSize], checksum)
+	// Write header using vectorio
+	if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
+		return fmt.Errorf("failed to write header with vectorio: %w", err)
+	} else if nw != HeaderSize {
+		return fmt.Errorf("header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
+	}
 
-	// Mark index as clean (final operation before sync)
+	// Write entries using vectorio (if any)
+	if len(entryIovecs) > 0 {
+		if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), entryIovecs); err != nil {
+			return fmt.Errorf("failed to write entries with vectorio: %w", err)
+		} else if nw != totalEntrySize {
+			return fmt.Errorf("entries write incomplete: wrote %d bytes, expected %d", nw, totalEntrySize)
+		}
+	}
+
+	// Calculate checksum by reading back the written data
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek to beginning for checksum: %w", err)
+	}
+
+	contentSize := HeaderSize + totalEntrySize
+	contentData := make([]byte, contentSize)
+	if n, err := file.Read(contentData); err != nil {
+		return fmt.Errorf("failed to read back data for checksum: %w", err)
+	} else if n != contentSize {
+		return fmt.Errorf("read back incomplete: read %d bytes, expected %d", n, contentSize)
+	}
+
+	checksum := dc.calculateChecksum(contentData)
+
+	// Create checksum IoVec
+	checksumIovec := syscall.Iovec{
+		Base: &checksum[0],
+		Len:  uint64(ChecksumSize),
+	}
+
+	// Write checksum using vectorio
+	if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), []syscall.Iovec{checksumIovec}); err != nil {
+		return fmt.Errorf("failed to write checksum with vectorio: %w", err)
+	} else if nw != ChecksumSize {
+		return fmt.Errorf("checksum write incomplete: wrote %d bytes, expected %d", nw, ChecksumSize)
+	}
+
+	// Mark header as clean and rewrite it
 	header.SetClean()
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek to beginning for clean flag: %w", err)
+	}
+
+	if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
+		return fmt.Errorf("failed to write clean header with vectorio: %w", err)
+	} else if nw != HeaderSize {
+		return fmt.Errorf("clean header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
+	}
 
 	// Sync to disk
-	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
-		return fmt.Errorf("failed to sync mmap: %w", err)
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp index: %w", err)
 	}
 
 	return nil
