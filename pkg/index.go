@@ -3,6 +3,8 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -509,4 +511,36 @@ func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistW
 
 	// Write merged result using vectorio
 	return dc.WriteSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
+}
+
+// scanForTempIndices scans the .dcfh directory for temporary index files
+func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
+	var tempFiles []string
+	
+	// Get the .dcfh directory from the IndexFile path
+	dcfhDir := filepath.Dir(dc.IndexFile)
+	
+	// Read the .dcfh directory
+	entries, err := os.ReadDir(dcfhDir)
+	if err != nil {
+		return nil, err
+	}
+	
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		
+		name := entry.Name()
+		
+		// Look for temporary index files with patterns:
+		// - scan-{pid}-{tid}.idx (scan indices)
+		// - tmp-{pid}-{tid}.idx (temp indices)
+		if strings.HasPrefix(name, "scan-") && strings.HasSuffix(name, ".idx") ||
+		   strings.HasPrefix(name, "tmp-") && strings.HasSuffix(name, ".idx") {
+			tempFiles = append(tempFiles, name)
+		}
+	}
+	
+	return tempFiles, nil
 }

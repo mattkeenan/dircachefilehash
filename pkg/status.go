@@ -20,8 +20,10 @@ const (
 
 // CleanStatus represents the clean status of index files
 type CleanStatus struct {
-	MainIndex  bool `json:"main_index"`
-	CacheIndex bool `json:"cache_index"`
+	MainIndex     bool     `json:"main_index"`
+	CacheIndex    bool     `json:"cache_index"`
+	TempIndices   []string `json:"temp_indices,omitempty"`   // List of temporary index files found
+	HasTempFiles  bool     `json:"has_temp_files"`           // True if any temp files exist
 }
 
 // StatusResult represents the result of a status check
@@ -87,6 +89,15 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 				result.CleanStatus.CacheIndex = true
 			} else {
 				result.CleanStatus.CacheIndex = false
+			}
+			
+			// Scan for temporary index files in the .dcfh directory
+			tempFiles, err := dc.scanForTempIndices()
+			if err == nil {
+				result.CleanStatus.TempIndices = tempFiles
+				result.CleanStatus.HasTempFiles = len(tempFiles) > 0
+			} else {
+				result.CleanStatus.HasTempFiles = false
 			}
 		}
 	}
@@ -200,3 +211,4 @@ func (sr *StatusResult) HasChanges() bool {
 func (sr *StatusResult) TotalChanges() int {
 	return len(sr.Modified) + len(sr.Added) + len(sr.Deleted)
 }
+
