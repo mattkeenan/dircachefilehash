@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/google/vectorio"
 	"golang.org/x/sys/unix"
 )
 
@@ -463,4 +464,197 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	}
 
 	return nil
+}
+
+// AppendEntryToScanIndex creates a binaryEntry in a scan index file for concurrent hash processing
+func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, relPath string, scannedPath *ScannedPath) (*binaryEntry, error) {
+	// Calculate entry size
+	baseSize := int(unsafe.Sizeof(binaryEntry{}))
+	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
+	padding := (8 - (totalSize % 8)) % 8
+	entrySize := totalSize + padding
+
+	// Open or create scan index file
+	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open scan file %s: %w", scanFileName, err)
+	}
+	defer file.Close()
+
+	// Get current file size
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat scan file: %w", err)
+	}
+
+	currentSize := int(stat.Size())
+	
+	// For new files, initialize with header
+	if currentSize == 0 {
+		initialSize := HeaderSize + entrySize + ChecksumSize
+		if err := file.Truncate(int64(initialSize)); err != nil {
+			return nil, fmt.Errorf("failed to truncate scan file: %w", err)
+		}
+		
+		// Map and initialize header
+		data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+		if err != nil {
+			return nil, fmt.Errorf("failed to mmap scan file: %w", err)
+		}
+		
+		// Initialize header (unclean state)
+		header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+		header.SetHeader(dc.signature, dc.version, 1, 0) // Start with 1 entry, not clean
+		
+		// Write the entry
+		entryData := data[HeaderSize:]
+		actualSize := dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
+		
+		// Get pointer to the created entry
+		entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
+		
+		// Update checksum placeholder (will be updated when scan is complete)
+		checksum := dc.calculateChecksum(data[:HeaderSize+actualSize])
+		copy(data[HeaderSize+actualSize:], checksum)
+		
+		unix.Munmap(data)
+		return entry, nil
+	}
+	
+	// For existing files, expand and append entry
+	newSize := currentSize + entrySize
+	if err := file.Truncate(int64(newSize)); err != nil {
+		return nil, fmt.Errorf("failed to expand scan file: %w", err)
+	}
+	
+	// Map the file
+	data, err := unix.Mmap(int(file.Fd()), 0, newSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap expanded scan file: %w", err)
+	}
+	defer unix.Munmap(data)
+	
+	// Update entry count in header
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header.EntryCount++
+	
+	// Write new entry at end (before checksum)
+	entryOffset := currentSize - ChecksumSize
+	entryData := data[entryOffset:]
+	actualSize := dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
+	
+	// Get pointer to the created entry
+	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
+	
+	// Update checksum
+	contentSize := entryOffset + actualSize
+	checksum := dc.calculateChecksum(data[:contentSize])
+	copy(data[contentSize:], checksum)
+	
+	return entry, nil
+}
+
+// WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
+func (dc *DirectoryCache) WriteSkiplistWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+	// Generate IoVec slices for the specified context
+	var iovecs []syscall.Iovec
+	if context == "" {
+		iovecs = skiplist.ToIovecSlice()
+	} else {
+		iovecs = skiplist.ToContextIovecSlice(context)
+	}
+
+	if len(iovecs) == 0 {
+		// Create empty index if no entries
+		oldIndexFile := dc.IndexFile
+		dc.IndexFile = outputPath
+		defer func() { dc.IndexFile = oldIndexFile }()
+		return dc.createEmptyIndex()
+	}
+
+	// Calculate total size needed
+	totalDataSize := 0
+	entryCount := len(iovecs)
+	for _, iovec := range iovecs {
+		totalDataSize += int(iovec.Len)
+	}
+	totalSize := HeaderSize + totalDataSize + ChecksumSize
+
+	// Create output file
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
+	}
+	defer file.Close()
+
+	// Truncate to exact size
+	if err := file.Truncate(int64(totalSize)); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
+	}
+
+	// Memory map the file
+	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Write header directly to mmap'd memory
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeader(dc.signature, dc.version, uint32(entryCount), 0) // Default flags
+
+	// Use vectorio to write all entries efficiently in one call
+	offset := HeaderSize
+	if err := vectorio.WriteRaw(int(file.Fd()), int64(offset), iovecs); err != nil {
+		return fmt.Errorf("failed to write entries with vectorio: %w", err)
+	}
+
+	// Calculate and write checksum
+	contentSize := HeaderSize + totalDataSize
+	checksum := dc.calculateChecksum(data[:contentSize])
+	copy(data[contentSize:contentSize+ChecksumSize], checksum)
+
+	// Mark index as clean (final operation before sync)
+	header.SetClean()
+
+	// Sync to disk
+	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
+		return fmt.Errorf("failed to sync mmap: %w", err)
+	}
+
+	return nil
+}
+
+// WriteSkiplistToTmpIndex writes a skiplist to a temporary index file, then atomically renames it
+func (dc *DirectoryCache) WriteSkiplistToTmpIndex(skiplist *SkiplistWrapper, finalPath string, context string) error {
+	// Generate temporary file name
+	tmpPath := dc.generateTmpIndexFileName()
+	
+	// Write to temporary file using vectorio
+	if err := dc.WriteSkiplistWithVectorIO(skiplist, tmpPath, context); err != nil {
+		os.Remove(tmpPath) // Cleanup on failure
+		return fmt.Errorf("failed to write to temp file: %w", err)
+	}
+
+	// Atomic rename to final location
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		os.Remove(tmpPath) // Cleanup on failure
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+// MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
+func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string) error {
+	// Create merged skiplist
+	mergedSkiplist := baseSkiplist.Copy()
+	
+	// Merge scan results into base skiplist
+	if err := mergedSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
+		return fmt.Errorf("failed to merge skiplists: %w", err)
+	}
+
+	// Write merged result using vectorio
+	return dc.WriteSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
 }

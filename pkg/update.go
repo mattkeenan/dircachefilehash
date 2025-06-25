@@ -21,29 +21,18 @@ func (dc *DirectoryCache) updateFullRepository() error {
 	// Create empty skiplist for comparison (full scan)
 	emptySkiplist := NewSkiplistWrapper(16, "empty")
 
-	// Use Hwang-Lin scan to get all files
-	results, err := dc.PerformHwangLinScan([]string{}, emptySkiplist)
+	// Use new scan workflow to get all files
+	scanSkiplist, err := dc.PerformHwangLinScanToSkiplist([]string{}, emptySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
 
-	// Process results into entries for writing
-	processedEntries, err := dc.ProcessHwangLinResults(results)
-	if err != nil {
-		return fmt.Errorf("failed to process scan results: %w", err)
-	}
-
-	// Write everything to main index using ProcessedEntry writing
+	// Write everything to main index using vectorio
 	tempIndexPath := dc.generateTempFileName("index")
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = tempIndexPath
-
-	if err := dc.WriteProcessedEntries(processedEntries, 0); err != nil {
-		dc.IndexFile = oldIndexFile
+	if err := dc.WriteSkiplistWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
 		os.Remove(tempIndexPath)
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
-	dc.IndexFile = oldIndexFile
 
 	// Atomic replace main index
 	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
@@ -66,58 +55,21 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 		return fmt.Errorf("failed to load main index: %w", err)
 	}
 
-	// Use Hwang-Lin scan with main index as comparison to get only changes in specified paths
-	results, err := dc.PerformHwangLinScan(paths, mainSkiplist)
+	// Use new scan workflow with main index as comparison to get only changes in specified paths
+	scanSkiplist, err := dc.PerformHwangLinScanToSkiplist(paths, mainSkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan specified paths: %w", err)
 	}
 
-	// Process results into entries
-	processedEntries, err := dc.ProcessHwangLinResults(results)
-	if err != nil {
-		return fmt.Errorf("failed to process scan results: %w", err)
-	}
-
-	// Create new main index by merging old main with updated entries
-	// First, write processed entries to a temp file to get binaryEntry pointers
-	tempScanPath := dc.generateTempFileName("scan")
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = tempScanPath
-
-	if err := dc.WriteProcessedEntries(processedEntries, 0); err != nil {
-		dc.IndexFile = oldIndexFile
-		os.Remove(tempScanPath)
-		return fmt.Errorf("failed to write temp scan results: %w", err)
-	}
-
-	// Load the temp scan results as binaryEntry pointers
-	scanEntries, err := dc.LoadIndexFromFile(tempScanPath)
-	dc.IndexFile = oldIndexFile
-	os.Remove(tempScanPath)
-
-	if err != nil {
-		return fmt.Errorf("failed to load temp scan results: %w", err)
-	}
-
-	// Create updated main index
+	// Merge scan results with main index (scan results take precedence)
 	updatedMainSkiplist := mainSkiplist.Copy()
-
-	// Remove old entries for the updated paths and add new ones
-	updatedPaths := make(map[string]bool)
-	for _, entry := range scanEntries {
-		path := entry.RelativePath()
-		updatedPaths[path] = true
-
-		// Remove old version if it exists
-		updatedMainSkiplist.Delete(path)
-
-		// Add new version
-		updatedMainSkiplist.Insert(entry, MainContext)
+	if err := updatedMainSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
+		return fmt.Errorf("failed to merge scan results with main index: %w", err)
 	}
 
-	// Write new main index
+	// Write new main index using vectorio
 	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.WriteSkiplistToTmpIndex(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
+	if err := dc.WriteSkiplistWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
 

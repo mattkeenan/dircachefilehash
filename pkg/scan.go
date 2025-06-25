@@ -301,6 +301,151 @@ func (dc *DirectoryCache) insertSorted(existing []string, newPaths []string) []s
 // HWANG-LIN COMPARISON ALGORITHM
 // ============================================================================
 
+// hwangLinCompareToSkiplist performs Hwang-Lin comparison and builds scan index + skiplist
+func (dc *DirectoryCache) hwangLinCompareToSkiplist(
+	scanChan <-chan *ScannedPath,
+	compareSkiplist *SkiplistWrapper,
+	scanSkiplist *SkiplistWrapper,
+	scanFileName string,
+	hashJobManager *SimpleHashManager,
+	callStartChan chan<- uint64,
+) error {
+	var currentScanned *ScannedPath
+	var scanChanOpen bool = true
+	currentIndex := compareSkiplist.skiplist.First()
+	jobIDCounter := uint64(1)
+
+	// Read first scanned path
+	if scanChanOpen {
+		currentScanned, scanChanOpen = <-scanChan
+	}
+
+	for scanChanOpen || currentIndex != nil {
+
+		var cmp int
+		if !scanChanOpen {
+			cmp = 1 // No more scanned files, only index entries remain (deletions)
+		} else if currentIndex == nil {
+			cmp = -1 // No more index entries, only scanned files remain (new files)
+		} else {
+			// Compare paths
+			indexPath := currentIndex.Item().RelativePath()
+			cmp = strings.Compare(currentScanned.RelPath, indexPath)
+		}
+
+		if cmp == 0 {
+			// File exists in both - check if changed
+			indexEntry := currentIndex.Item()
+
+			// Skip deleted entries in the index
+			if indexEntry.IsDeleted() {
+				currentIndex = currentIndex.Next()
+				continue
+			}
+
+			if dc.isFileChangedFromScanned(indexEntry, currentScanned) {
+				// File modified - create scan index entry and submit for hashing
+				scanEntry, err := dc.AppendEntryToScanIndex(scanFileName, currentScanned.RelPath, currentScanned)
+				if err != nil {
+					return fmt.Errorf("failed to create scan index entry: %w", err)
+				}
+
+				// Insert into scan skiplist
+				scanSkiplist.Insert(scanEntry, ScanContext)
+
+				// Submit for async hashing
+				jobID := jobIDCounter
+				jobIDCounter++
+
+				hashJob := &HashJobStart{
+					JobID:       jobID,
+					FilePath:    currentScanned.AbsPath,
+					IndexEntry:  scanEntry, // Hash worker will update this directly
+					ScannedPath: currentScanned,
+				}
+
+				hashJobManager.SubmitHashJob(hashJob, callStartChan)
+
+			} else {
+				// File unchanged - copy existing entry to scan index and skiplist
+				scanEntry, err := dc.AppendEntryToScanIndex(scanFileName, currentScanned.RelPath, currentScanned)
+				if err != nil {
+					return fmt.Errorf("failed to create scan index entry: %w", err)
+				}
+
+				// Copy hash from existing entry
+				copy(scanEntry.Hash[:], indexEntry.Hash[:])
+				scanEntry.HashType = indexEntry.HashType
+
+				// Insert into scan skiplist
+				scanSkiplist.Insert(scanEntry, ScanContext)
+			}
+
+			// Advance both
+			if scanChanOpen {
+				currentScanned, scanChanOpen = <-scanChan
+			}
+			currentIndex = currentIndex.Next()
+
+		} else if cmp < 0 {
+			// File only in scan - new file, create scan index entry and submit for hashing
+			scanEntry, err := dc.AppendEntryToScanIndex(scanFileName, currentScanned.RelPath, currentScanned)
+			if err != nil {
+				return fmt.Errorf("failed to create scan index entry: %w", err)
+			}
+
+			// Insert into scan skiplist
+			scanSkiplist.Insert(scanEntry, ScanContext)
+
+			// Submit for async hashing
+			jobID := jobIDCounter
+			jobIDCounter++
+
+			hashJob := &HashJobStart{
+				JobID:       jobID,
+				FilePath:    currentScanned.AbsPath,
+				IndexEntry:  scanEntry, // Hash worker will update this directly
+				ScannedPath: currentScanned,
+			}
+
+			hashJobManager.SubmitHashJob(hashJob, callStartChan)
+
+			// Advance scan
+			if scanChanOpen {
+				currentScanned, scanChanOpen = <-scanChan
+			}
+
+		} else {
+			// File only in index - deleted file, mark as deleted in scan skiplist
+			indexEntry := currentIndex.Item()
+
+			// Skip already deleted entries
+			if !indexEntry.IsDeleted() {
+				// Create a deleted entry in scan index
+				deletedEntry, err := dc.AppendEntryToScanIndex(scanFileName, indexEntry.RelativePath(), &ScannedPath{
+					RelPath: indexEntry.RelativePath(),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to create deleted scan index entry: %w", err)
+				}
+
+				// Mark as deleted and copy hash
+				deletedEntry.SetDeleted()
+				copy(deletedEntry.Hash[:], indexEntry.Hash[:])
+				deletedEntry.HashType = indexEntry.HashType
+
+				// Insert into scan skiplist
+				scanSkiplist.Insert(deletedEntry, ScanContext)
+			}
+
+			// Advance index
+			currentIndex = currentIndex.Next()
+		}
+	}
+
+	return nil
+}
+
 // hwangLinCompare performs Hwang-Lin algorithm comparison between scanned filesystem and skiplist
 // Now with asynchronous hash job processing - hash jobs don't block the comparison
 func (dc *DirectoryCache) hwangLinCompare(
@@ -501,7 +646,7 @@ func (hjm *SimpleHashManager) FinishSubmitting() {
 	close(hjm.hashJobChan)
 }
 
-// hashWorker processes hash jobs
+// hashWorker processes hash jobs and updates entries directly in scan index mmap
 func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
 
@@ -511,6 +656,8 @@ func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 
 		if err == nil {
 			if hashBytes, hexErr := hex.DecodeString(hashStr); hexErr == nil {
+				// Update the binaryEntry directly in the scan index mmap memory
+				// This provides zero-copy updates to the scan index file
 				dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, HashTypeSHA1)
 			}
 		}
@@ -522,7 +669,6 @@ func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 
 // Shutdown gracefully shuts down the hash manager
 func (hjm *SimpleHashManager) Shutdown() {
-	hjm.cancel()
 	hjm.wg.Wait()
 }
 
@@ -716,4 +862,69 @@ func (dc *DirectoryCache) PerformHwangLinScan(paths []string, skiplist *Skiplist
 	fmt.Printf("Hash job processing completed\n")
 
 	return results, nil
+}
+
+// PerformHwangLinScanToSkiplist performs Hwang-Lin scan and builds a skiplist directly with scan index files
+func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareSkiplist *SkiplistWrapper) (*SkiplistWrapper, error) {
+	// Create result skiplist for scan entries
+	scanSkiplist := NewSkiplistWrapper(16, ScanContext)
+	
+	// Generate scan index filename for this operation
+	scanFileName := dc.generateScanFileName()
+	defer os.Remove(scanFileName) // Cleanup scan file when done
+	
+	// Create channels for streaming data
+	scanChan := make(chan *ScannedPath, 50)
+	callStartChan := make(chan uint64, 100)
+	callFinishChan := make(chan uint64, 100)
+	collectionStop := make(chan struct{})
+
+	// Create hash job manager for concurrent hashing
+	hashJobManager := dc.NewSimpleHashManager(4, callFinishChan)
+	defer hashJobManager.Shutdown()
+
+	// Start filesystem scan
+	var scanWg sync.WaitGroup
+	scanWg.Add(1)
+	go func() {
+		defer scanWg.Done()
+		if err := dc.scanPath(paths, scanChan); err != nil {
+			fmt.Fprintf(os.Stderr, "Scan error: %v\n", err)
+		}
+	}()
+
+	// Start modified Hwang-Lin comparison that builds scan index and skiplist
+	var compareWg sync.WaitGroup
+	compareWg.Add(1)
+	go func() {
+		defer compareWg.Done()
+		if err := dc.hwangLinCompareToSkiplist(scanChan, compareSkiplist, scanSkiplist, scanFileName, hashJobManager, callStartChan); err != nil {
+			fmt.Fprintf(os.Stderr, "Compare error: %v\n", err)
+		}
+	}()
+
+	// Monitor hash jobs
+	var monitorWg sync.WaitGroup
+	monitorWg.Add(1)
+	go func() {
+		defer monitorWg.Done()
+		dc.monitorJobs(callStartChan, callFinishChan, collectionStop)
+	}()
+
+	// Wait for scan to complete
+	scanWg.Wait()
+
+	// Wait for comparison to complete
+	compareWg.Wait()
+
+	// Signal that no more hash jobs will be submitted
+	hashJobManager.FinishSubmitting()
+
+	// Signal monitoring to stop and wait for all jobs to finish
+	close(collectionStop)
+	monitorWg.Wait()
+
+	fmt.Printf("Scan to skiplist completed\n")
+
+	return scanSkiplist, nil
 }
