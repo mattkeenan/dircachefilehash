@@ -1,7 +1,6 @@
 package dircachefilehash
 
 import (
-	"context"
 	"fmt"
 	"os"
 )
@@ -19,14 +18,11 @@ func (dc *DirectoryCache) Update(paths ...string) error {
 
 // updateFullRepository updates the entire repository and puts everything in main index
 func (dc *DirectoryCache) updateFullRepository() error {
-	// Use scan.go to perform full directory scan
-	ctx := context.Background()
-
 	// Create empty skiplist for comparison (full scan)
 	emptySkiplist := NewSkiplistWrapper(16, "empty")
 
 	// Use Hwang-Lin scan to get all files
-	results, err := dc.PerformHwangLinScan(ctx, []string{}, emptySkiplist)
+	results, err := dc.PerformHwangLinScan([]string{}, emptySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
@@ -64,8 +60,6 @@ func (dc *DirectoryCache) updateFullRepository() error {
 
 // updateSpecificPaths updates only specified paths and manages main index vs cache
 func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
-	ctx := context.Background()
-
 	// Load main index to use as comparison base
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -73,7 +67,7 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	}
 
 	// Use Hwang-Lin scan with main index as comparison to get only changes in specified paths
-	results, err := dc.PerformHwangLinScan(ctx, paths, mainSkiplist)
+	results, err := dc.PerformHwangLinScan(paths, mainSkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan specified paths: %w", err)
 	}

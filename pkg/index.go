@@ -59,13 +59,28 @@ func (ih *IndexHeader) ValidateByteOrder() error {
 	return nil
 }
 
-// SetHeader initializes the header fields in mmap'd memory
+// SetHeader initializes the header fields in mmap'd memory (defaults to unclean state)
 func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint32) {
 	ih.Signature = signature
 	ih.ByteOrder = ByteOrderMagic
 	ih.Version = version
 	ih.EntryCount = entryCount
-	ih.Flags = flags
+	ih.Flags = flags // By default, Clean flag is 0 (unclean)
+}
+
+// IsClean returns true if this index file is in a clean/complete state
+func (ih *IndexHeader) IsClean() bool {
+	return ih.Flags&IndexFlagClean != 0
+}
+
+// SetClean marks this index file as clean/complete (final operation)
+func (ih *IndexHeader) SetClean() {
+	ih.Flags |= IndexFlagClean
+}
+
+// ClearClean marks this index file as unclean/incomplete
+func (ih *IndexHeader) ClearClean() {
+	ih.Flags &^= IndexFlagClean
 }
 
 // writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (unified function)
@@ -175,6 +190,9 @@ func (dc *DirectoryCache) writeIndexWithFlags(jobs []fileJob, flags uint32) erro
 	// Calculate and write checksum
 	checksum := dc.calculateChecksum(data[:offset])
 	copy(data[offset:offset+ChecksumSize], checksum)
+
+	// Mark index as clean (final operation before sync)
+	header.SetClean()
 
 	// Sync to disk
 	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
@@ -345,6 +363,9 @@ func (dc *DirectoryCache) WriteEntries(entries []*binaryEntry, flags uint32) err
 	// Calculate and write checksum
 	checksum := dc.calculateChecksum(data[:offset])
 	copy(data[offset:offset+ChecksumSize], checksum)
+
+	// Mark index as clean (final operation before sync)
+	header.SetClean()
 
 	// Sync to disk
 	if err := unix.Msync(data, unix.MS_SYNC); err != nil {

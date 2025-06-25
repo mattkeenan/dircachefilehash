@@ -43,6 +43,7 @@ const (
 // Index header flags
 const (
 	IndexFlagSparse uint32 = 1 << 0 // Sparse index flag
+	IndexFlagClean  uint32 = 1 << 1 // Index file is in clean/complete state
 )
 
 // Entry flags

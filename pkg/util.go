@@ -5,6 +5,9 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -147,4 +150,29 @@ func (dc *DirectoryCache) generateTempFileName(prefix string) string {
 	timestamp := time.Now().UnixNano()
 	return filepath.Join(filepath.Dir(dc.IndexFile),
 		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
+}
+
+// getGoroutineID extracts goroutine ID from runtime stack
+func getGoroutineID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(string(buf[:n]))[1]
+	id, _ := strconv.ParseUint(idField, 10, 64)
+	return id
+}
+
+// generateScanFileName generates a scan index filename with PID and goroutine ID
+func (dc *DirectoryCache) generateScanFileName() string {
+	pid := os.Getpid()
+	tid := getGoroutineID()
+	return filepath.Join(filepath.Dir(dc.IndexFile),
+		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
+}
+
+// generateTmpIndexFileName generates a tmp index filename with PID and goroutine ID
+func (dc *DirectoryCache) generateTmpIndexFileName() string {
+	pid := os.Getpid()
+	tid := getGoroutineID()
+	return filepath.Join(filepath.Dir(dc.IndexFile),
+		fmt.Sprintf("tmp-%d-%d.idx", pid, tid))
 }

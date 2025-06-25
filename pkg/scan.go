@@ -1,7 +1,6 @@
 package dircachefilehash
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -75,8 +74,6 @@ func remove(s []uint64, i int) []uint64 {
 type SimpleHashManager struct {
 	hashJobChan    chan *HashJobStart
 	callFinishChan chan uint64 // job completion notifications
-	ctx            context.Context
-	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 }
 
@@ -85,7 +82,7 @@ type SimpleHashManager struct {
 // ============================================================================
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(ctx context.Context, paths []string, resultChan chan<- *ScannedPath) error {
+func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *ScannedPath) error {
 	defer close(resultChan)
 
 	// If empty paths, scan entire root directory
@@ -113,7 +110,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, paths []string, resultCh
 
 	// Scan each deduplicated path in sorted order, streaming results as found
 	for _, absPath := range dedupedPaths {
-		if err := dc.scanPathRecursive(ctx, absPath, resultChan); err != nil {
+		if err := dc.scanPathRecursive(absPath, resultChan); err != nil {
 			return fmt.Errorf("failed to scan path %s: %w", absPath, err)
 		}
 	}
@@ -180,17 +177,12 @@ func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string, resultChan chan<- *ScannedPath) error {
+func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *ScannedPath) error {
 	// Use a priority queue (sorted slice) to ensure we process paths in alphabetical order
 	// This ensures the output is naturally sorted
 	pathQueue := []string{rootPath}
 
 	for len(pathQueue) > 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 
 		// Always process the first path (lexicographically smallest)
 		currentPath := pathQueue[0]
@@ -257,11 +249,7 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 			}
 
 			// Stream result immediately - this gives us better performance
-			select {
-			case resultChan <- scannedPath:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			resultChan <- scannedPath
 		}
 	}
 
@@ -316,7 +304,6 @@ func (dc *DirectoryCache) insertSorted(existing []string, newPaths []string) []s
 // hwangLinCompare performs Hwang-Lin algorithm comparison between scanned filesystem and skiplist
 // Now with asynchronous hash job processing - hash jobs don't block the comparison
 func (dc *DirectoryCache) hwangLinCompare(
-	ctx context.Context,
 	scanChan <-chan *ScannedPath,
 	skiplist *SkiplistWrapper,
 	resultChan chan<- *HwangLinResult,
@@ -332,19 +319,10 @@ func (dc *DirectoryCache) hwangLinCompare(
 
 	// Read first scanned path
 	if scanChanOpen {
-		select {
-		case currentScanned, scanChanOpen = <-scanChan:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		currentScanned, scanChanOpen = <-scanChan
 	}
 
 	for scanChanOpen || currentIndex != nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 
 		var cmp int
 		if !scanChanOpen {
@@ -390,11 +368,7 @@ func (dc *DirectoryCache) hwangLinCompare(
 					// Hash and HashType will be updated by async worker
 				}
 
-				select {
-				case resultChan <- result:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				resultChan <- result
 			} else {
 				// File unchanged
 				result := &HwangLinResult{
@@ -405,20 +379,12 @@ func (dc *DirectoryCache) hwangLinCompare(
 					// No hash needed for unchanged files
 				}
 
-				select {
-				case resultChan <- result:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				resultChan <- result
 			}
 
 			// Advance both
 			if scanChanOpen {
-				select {
-				case currentScanned, scanChanOpen = <-scanChan:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				currentScanned, scanChanOpen = <-scanChan
 			}
 			currentIndex = currentIndex.Next()
 
@@ -446,19 +412,11 @@ func (dc *DirectoryCache) hwangLinCompare(
 				// Hash will be available from hash job completion tracking
 			}
 
-			select {
-			case resultChan <- result:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			resultChan <- result
 
 			// Advance scan
 			if scanChanOpen {
-				select {
-				case currentScanned, scanChanOpen = <-scanChan:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				currentScanned, scanChanOpen = <-scanChan
 			}
 
 		} else {
@@ -475,11 +433,7 @@ func (dc *DirectoryCache) hwangLinCompare(
 					// No hash needed for deleted files
 				}
 
-				select {
-				case resultChan <- result:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				resultChan <- result
 			}
 
 			// Advance index
@@ -522,13 +476,9 @@ func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scan
 
 // NewSimpleHashManager creates a new simple hash manager
 func (dc *DirectoryCache) NewSimpleHashManager(numWorkers int, callFinishChan chan uint64) *SimpleHashManager {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	manager := &SimpleHashManager{
 		hashJobChan:    make(chan *HashJobStart, 100),
 		callFinishChan: callFinishChan,
-		ctx:            ctx,
-		cancel:         cancel,
 	}
 
 	// Start workers
@@ -700,7 +650,7 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 // ============================================================================
 
 // PerformHwangLinScan performs a complete Hwang-Lin scan with asynchronous hash job coordination
-func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []string, skiplist *SkiplistWrapper) ([]*HwangLinResult, error) {
+func (dc *DirectoryCache) PerformHwangLinScan(paths []string, skiplist *SkiplistWrapper) ([]*HwangLinResult, error) {
 	// Create channels with smaller buffers since we're streaming results
 	// This reduces memory usage while maintaining good performance
 	scanChan := make(chan *ScannedPath, 50)      // Smaller buffer for streaming
@@ -720,7 +670,7 @@ func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []strin
 	scanWg.Add(1)
 	go func() {
 		defer scanWg.Done()
-		if err := dc.scanPath(ctx, paths, scanChan); err != nil {
+		if err := dc.scanPath(paths, scanChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Scan error: %v\n", err)
 		}
 	}()
@@ -730,7 +680,7 @@ func (dc *DirectoryCache) PerformHwangLinScan(ctx context.Context, paths []strin
 	compareWg.Add(1)
 	go func() {
 		defer compareWg.Done()
-		if err := dc.hwangLinCompare(ctx, scanChan, skiplist, resultChan, hashJobManager, callStartChan); err != nil {
+		if err := dc.hwangLinCompare(scanChan, skiplist, resultChan, hashJobManager, callStartChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Compare error: %v\n", err)
 		}
 	}()
