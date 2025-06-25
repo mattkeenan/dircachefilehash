@@ -13,9 +13,10 @@ import (
 
 // Global flags
 var (
-	jsonOutput = flag.Bool("json", false, "output in JSON format")
-	verbose    = flag.Bool("verbose", false, "verbose output")
-	version    = flag.Bool("version", false, "show version information")
+	output    = flag.String("output", "human", "output format: human, json")
+	jsonFlag  = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
+	verbose   = flag.Bool("verbose", false, "verbose output")
+	version   = flag.Bool("version", false, "show version information")
 )
 
 // Command-specific flag sets
@@ -92,7 +93,8 @@ type ErrorOutput struct {
 func showUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: dcfh [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n\n")
 	fmt.Fprintf(os.Stderr, "Global Options:\n")
-	fmt.Fprintf(os.Stderr, "  --json           Output in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  --output=FORMAT  Output format: human (default), json\n")
+	fmt.Fprintf(os.Stderr, "  --json           Output in JSON format (alias for --output=json)\n")
 	fmt.Fprintf(os.Stderr, "  --verbose        Verbose output\n")
 	fmt.Fprintf(os.Stderr, "  --version        Show version information\n")
 	fmt.Fprintf(os.Stderr, "  --help           Show this help message\n")
@@ -105,6 +107,7 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh init .\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --json status\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --output=json status\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update file.txt dir/\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --json dupes\n")
@@ -116,6 +119,9 @@ func main() {
 
 	// Parse global flags first
 	flag.Parse()
+
+	// Validate output format early (after flag parsing)
+	validateOutputFormat()
 
 	// Handle version flag
 	if *version {
@@ -163,8 +169,40 @@ func handleVersion() {
 	fmt.Println("Directory Cache File Hash - A fast file indexing and duplicate detection tool")
 }
 
+// OutputFormat represents the supported output formats
+type OutputFormat string
+
+const (
+	OutputHuman OutputFormat = "human"
+	OutputJSON  OutputFormat = "json"
+)
+
+// validateOutputFormat validates and returns the output format
+func validateOutputFormat() OutputFormat {
+	// Handle --json flag as alias for --output=json
+	if *jsonFlag {
+		if *output != "human" {
+			fmt.Fprintf(os.Stderr, "Error: cannot use both --json and --output flags together\n")
+			os.Exit(1)
+		}
+		return OutputJSON
+	}
+	
+	switch *output {
+	case "human":
+		return OutputHuman
+	case "json":
+		return OutputJSON
+	default:
+		fmt.Fprintf(os.Stderr, "Error: invalid output format '%s'. Supported formats: human, json\n", *output)
+		os.Exit(1)
+		return OutputHuman // unreachable
+	}
+}
+
 func outputError(message string) {
-	if *jsonOutput {
+	format := validateOutputFormat()
+	if format == OutputJSON {
 		errorOut := ErrorOutput{
 			Success: false,
 			Error:   message,
@@ -218,7 +256,8 @@ func handleInit(args []string) {
 	// Create cache - this will automatically create .dcfh directory and index
 	cache := dcfh.NewDirectoryCache(absDir, absDir)
 
-	if !*jsonOutput && *verbose {
+	format := validateOutputFormat()
+	if format == OutputHuman && *verbose {
 		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
 		fmt.Println("Scanning directory and creating initial index...")
 	}
@@ -231,7 +270,7 @@ func handleInit(args []string) {
 	duration := time.Since(start)
 	fileCount, totalSize, _ := cache.Stats()
 
-	if *jsonOutput {
+	if format == OutputJSON {
 		output := InitOutput{
 			Success:     true,
 			Message:     "Successfully initialized dcfh repository",
@@ -243,8 +282,8 @@ func handleInit(args []string) {
 		outputJSON(output)
 	} else {
 		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
-		fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 		if *verbose {
+			fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
 		}
 	}
@@ -260,7 +299,8 @@ func handleStatus(args []string) {
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		outputError(err.Error())
-		if !*jsonOutput {
+		format := validateOutputFormat()
+		if format == OutputHuman {
 			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
 		}
 		os.Exit(1)
@@ -283,7 +323,8 @@ func handleStatus(args []string) {
 		os.Exit(1)
 	}
 
-	if *jsonOutput {
+	format := validateOutputFormat()
+	if format == OutputJSON {
 		fileCount := cache.Length() // Use Length() method
 		output := StatusOutput{
 			Repository: repoRoot,
@@ -360,7 +401,8 @@ func handleUpdate(args []string) {
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		outputError(err.Error())
-		if !*jsonOutput {
+		format := validateOutputFormat()
+		if format == OutputHuman {
 			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
 		}
 		os.Exit(1)
@@ -368,9 +410,10 @@ func handleUpdate(args []string) {
 
 	// Get paths to update (if any)
 	var paths []string
+	format := validateOutputFormat()
 	if len(args) > 0 {
 		paths = args
-		if !*jsonOutput {
+		if format == OutputHuman {
 			fmt.Printf("Updating specified paths in %s\n", repoRoot)
 			if *verbose {
 				for _, path := range paths {
@@ -379,7 +422,7 @@ func handleUpdate(args []string) {
 			}
 		}
 	} else {
-		if !*jsonOutput {
+		if format == OutputHuman {
 			fmt.Printf("Updating entire repository in %s\n", repoRoot)
 		}
 	}
@@ -388,7 +431,7 @@ func handleUpdate(args []string) {
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
 
-	if !*jsonOutput && *verbose {
+	if format == OutputHuman && *verbose {
 		fmt.Println("Scanning directory...")
 	}
 
@@ -421,7 +464,7 @@ func handleUpdate(args []string) {
 		}
 	}
 
-	if *jsonOutput {
+	if format == OutputJSON {
 		output := UpdateOutput{
 			Success:      true,
 			Message:      "Successfully updated index",
@@ -434,11 +477,17 @@ func handleUpdate(args []string) {
 		}
 		outputJSON(output)
 	} else {
-		fmt.Printf("✓ Updated index in %v\n", duration.Round(time.Millisecond))
-		fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
-
-		if duplicateInfo != nil {
-			fmt.Printf("⚠ Found %d duplicate files in %d sets\n", duplicateInfo.FileCount, duplicateInfo.SetCount)
+		if len(paths) > 0 {
+			fmt.Printf("Updated %d specified paths\n", len(paths))
+		} else {
+			fmt.Printf("Updated index\n")
+		}
+		if *verbose {
+			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
+			fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
+			if duplicateInfo != nil {
+				fmt.Printf("⚠ Found %d duplicate files in %d sets\n", duplicateInfo.FileCount, duplicateInfo.SetCount)
+			}
 		}
 	}
 }
@@ -453,7 +502,8 @@ func handleDupes(args []string) {
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {
 		outputError(err.Error())
-		if !*jsonOutput {
+		format := validateOutputFormat()
+		if format == OutputHuman {
 			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialize a repository\n")
 		}
 		os.Exit(1)
@@ -475,8 +525,9 @@ func handleDupes(args []string) {
 		os.Exit(1)
 	}
 
+	format := validateOutputFormat()
 	if len(duplicates) == 0 {
-		if *jsonOutput {
+		if format == OutputJSON {
 			output := DupesOutput{
 				Repository:      repoRoot,
 				DuplicateGroups: []dcfh.DuplicateGroup{},
@@ -499,7 +550,7 @@ func handleDupes(args []string) {
 		}
 	}
 
-	if *jsonOutput {
+	if format == OutputJSON {
 		var groups []dcfh.DuplicateGroup
 		totalFiles := 0
 
