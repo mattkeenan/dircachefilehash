@@ -121,11 +121,6 @@ type fileJob struct {
 	index   int
 }
 
-// sysUnusedOS hints to the OS that this memory region can be written to disk
-func sysUnusedOS(ptr unsafe.Pointer, size int) {
-	// Use madvise to hint that this memory is no longer needed in RAM
-	unix.Madvise((*[1 << 30]byte)(ptr)[:size:size], unix.MADV_DONTNEED)
-}
 
 // timeWall extracts the wall field from time.Time using unsafe operations
 func timeWall(t time.Time) uint64 {

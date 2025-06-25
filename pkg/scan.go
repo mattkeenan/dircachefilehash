@@ -694,50 +694,6 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 	}
 }
 
-// WriteProcessedEntries writes processed entries using pure file I/O
-func (dc *DirectoryCache) WriteProcessedEntries(entries []ProcessedEntry, flags uint32) error {
-	// Calculate total file size needed
-	totalSize := HeaderSize + ChecksumSize
-	for _, entry := range entries {
-		totalSize += BESizeFromPathLen(len(entry.RelPath))
-	}
-
-	// Create and mmap file
-	file, err := os.Create(dc.IndexFile)
-	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
-	}
-	defer file.Close()
-
-	if err := file.Truncate(int64(totalSize)); err != nil {
-		return fmt.Errorf("failed to truncate file: %w", err)
-	}
-
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Write header
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, uint32(len(entries)), flags)
-
-	// Write entries
-	offset := HeaderSize
-	for _, entry := range entries {
-		entrySize := dc.writeProcessedEntryToMmap(data[offset:], entry)
-		offset += entrySize
-	}
-
-	// Write checksum and sync
-	checksum := dc.calculateChecksum(data[:offset])
-	copy(data[offset:offset+ChecksumSize], checksum)
-
-	return unix.Msync(data, unix.MS_SYNC)
-}
-
-// writeProcessedEntryToMmap is now in index.go - this function delegates to the unified implementation
 
 // ============================================================================
 // MAIN SCAN FUNCTION

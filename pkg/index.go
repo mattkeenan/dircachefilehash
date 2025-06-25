@@ -27,20 +27,6 @@ type MmapIndex struct {
 	offset  int    // Current write offset
 }
 
-// IsSparse returns true if this is a sparse index
-func (ih *IndexHeader) IsSparse() bool {
-	return ih.Flags&IndexFlagSparse != 0
-}
-
-// SetSparse marks this index as sparse
-func (ih *IndexHeader) SetSparse() {
-	ih.Flags |= IndexFlagSparse
-}
-
-// ClearSparse removes the sparse flag from this index
-func (ih *IndexHeader) ClearSparse() {
-	ih.Flags &^= IndexFlagSparse
-}
 
 // Header returns a direct pointer to the header in mmap'd memory (zero-copy)
 func (mi *MmapIndex) Header() *IndexHeader {
@@ -80,11 +66,6 @@ func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount u
 	ih.Version = version
 	ih.EntryCount = entryCount
 	ih.Flags = flags
-}
-
-// EntryDataOffset returns the offset where entry data begins
-func (ih *IndexHeader) EntryDataOffset() int {
-	return HeaderSize
 }
 
 // writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (unified function)
@@ -379,14 +360,6 @@ func (dc *DirectoryCache) WriteSparseEntries(entries []*binaryEntry, filePath st
 	dc.IndexFile = filePath
 	defer func() { dc.IndexFile = oldIndexFile }()
 	return dc.WriteEntries(entries, IndexFlagSparse)
-}
-
-// createEmptyIndexAt creates an empty index file at the specified path
-func (dc *DirectoryCache) createEmptyIndexAt(filePath string) error {
-	oldIndexFile := dc.IndexFile
-	dc.IndexFile = filePath
-	defer func() { dc.IndexFile = oldIndexFile }()
-	return dc.createEmptyIndex()
 }
 
 // WriteProcessedEntries writes processed entries using pure file I/O (moved from scan.go)
