@@ -47,7 +47,7 @@ func main() {
 
 	// Scan directory and create index
 	fmt.Println("Scanning directory...")
-	if err := cache.Update(); err != nil {
+	if err := cache.Update(map[string]string{}); err != nil {
 		log.Fatalf("Failed to create index: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func main() {
 	fmt.Printf("Index contains %d entries\n", cache.Length())
 
 	// Check for duplicates
-	duplicates, err := cache.FindDuplicates()
+	duplicates, err := cache.FindDuplicates(map[string]string{})
 	if err != nil {
 		log.Fatalf("Failed to find duplicates: %v", err)
 	}

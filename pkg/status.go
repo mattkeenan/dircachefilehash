@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
@@ -17,15 +18,22 @@ const (
 	StatusDeleted
 )
 
+// CleanStatus represents the clean status of index files
+type CleanStatus struct {
+	MainIndex  bool `json:"main_index"`
+	CacheIndex bool `json:"cache_index"`
+}
+
 // StatusResult represents the result of a status check
 type StatusResult struct {
-	Modified []string
-	Added    []string
-	Deleted  []string
+	Modified    []string     `json:"modified"`
+	Added       []string     `json:"added"`
+	Deleted     []string     `json:"deleted"`
+	CleanStatus *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
 }
 
 // Status compares the current directory state with the loaded index using the new workflow
-func (dc *DirectoryCache) Status() (*StatusResult, error) {
+func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error) {
 	// Use the new cache update workflow which implements steps 1-11 as specified
 	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
@@ -58,6 +66,29 @@ func (dc *DirectoryCache) Status() (*StatusResult, error) {
 		Modified: make([]string, 0),
 		Added:    make([]string, 0),
 		Deleted:  make([]string, 0),
+	}
+
+	// Check for verbose flag and include clean status if requested
+	if verboseLevel, exists := flags["v"]; exists && verboseLevel != "" {
+		if level, err := strconv.Atoi(verboseLevel); err == nil && level > 0 {
+			result.CleanStatus = &CleanStatus{}
+			
+			// Check main index clean status
+			if dc.mmapIndex != nil && dc.mmapIndex.Header() != nil {
+				result.CleanStatus.MainIndex = dc.mmapIndex.Header().isClean()
+			}
+			
+			// Check cache index clean status by loading it
+			cacheSkiplist, err := dc.LoadCacheIndex()
+			if err == nil && cacheSkiplist != nil {
+				// For cache index, we need to access the underlying mmap - this is a bit tricky
+				// For now, we'll assume it's clean if it loaded successfully
+				// TODO: Improve this to actually check the cache index header
+				result.CleanStatus.CacheIndex = true
+			} else {
+				result.CleanStatus.CacheIndex = false
+			}
+		}
 	}
 
 	// Use Hwang-Lin merge algorithm to compare states

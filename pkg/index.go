@@ -69,18 +69,18 @@ func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount u
 	ih.Flags = flags // By default, Clean flag is 0 (unclean)
 }
 
-// IsClean returns true if this index file is in a clean/complete state
-func (ih *IndexHeader) IsClean() bool {
+// isClean returns true if this index file is in a clean/complete state
+func (ih *IndexHeader) isClean() bool {
 	return ih.Flags&IndexFlagClean != 0
 }
 
-// SetClean marks this index file as clean/complete (final operation)
-func (ih *IndexHeader) SetClean() {
+// setClean marks this index file as clean/complete (final operation)
+func (ih *IndexHeader) setClean() {
 	ih.Flags |= IndexFlagClean
 }
 
-// ClearClean marks this index file as unclean/incomplete
-func (ih *IndexHeader) ClearClean() {
+// clearClean marks this index file as unclean/incomplete
+func (ih *IndexHeader) clearClean() {
 	ih.Flags &^= IndexFlagClean
 }
 
@@ -477,7 +477,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 	}
 
 	// Mark header as clean and rewrite it
-	header.SetClean()
+	header.setClean()
 	if _, err := file.Seek(0, 0); err != nil {
 		return fmt.Errorf("failed to seek to beginning for clean flag: %w", err)
 	}

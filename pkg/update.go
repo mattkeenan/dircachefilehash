@@ -6,7 +6,7 @@ import (
 )
 
 // Update scans the directory and updates the index file using the new workflow
-func (dc *DirectoryCache) Update(paths ...string) error {
+func (dc *DirectoryCache) Update(flags map[string]string, paths ...string) error {
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
 		return dc.updateFullRepository()

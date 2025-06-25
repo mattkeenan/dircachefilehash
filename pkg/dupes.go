@@ -14,7 +14,7 @@ type DuplicateGroup struct {
 }
 
 // FindDuplicates returns groups of files with identical hashes using the new workflow
-func (dc *DirectoryCache) FindDuplicates() ([]DuplicateGroup, error) {
+func (dc *DirectoryCache) FindDuplicates(flags map[string]string) ([]DuplicateGroup, error) {
 	// Use the new cache update workflow to ensure we have current data
 	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)

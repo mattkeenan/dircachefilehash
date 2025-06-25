@@ -147,6 +147,17 @@ func main() {
 	}
 }
 
+// buildFlags creates a flags map from global CLI flags
+func buildFlags() map[string]string {
+	flags := make(map[string]string)
+	
+	if *verbose {
+		flags["v"] = "1" // Basic verbose level
+	}
+	
+	return flags
+}
+
 func handleVersion() {
 	fmt.Println("dcfh version 1.0.0")
 	fmt.Println("Directory Cache File Hash - A fast file indexing and duplicate detection tool")
@@ -212,7 +223,7 @@ func handleInit(args []string) {
 		fmt.Println("Scanning directory and creating initial index...")
 	}
 
-	if err := cache.Update(); err != nil {
+	if err := cache.Update(buildFlags()); err != nil {
 		outputError(fmt.Sprintf("Failed to create initial index: %v", err))
 		os.Exit(1)
 	}
@@ -266,7 +277,7 @@ func handleStatus(args []string) {
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
 	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
 
-	status, err := cache.Status()
+	status, err := cache.Status(buildFlags())
 	if err != nil {
 		outputError(err.Error())
 		os.Exit(1)
@@ -383,7 +394,7 @@ func handleUpdate(args []string) {
 
 	start := time.Now()
 
-	if err := cache.Update(paths...); err != nil {
+	if err := cache.Update(buildFlags(), paths...); err != nil {
 		outputError(fmt.Sprintf("Failed to update index: %v", err))
 		os.Exit(1)
 	}
@@ -393,7 +404,7 @@ func handleUpdate(args []string) {
 
 	// Check for duplicates
 	var duplicateInfo *DuplicateInfo
-	duplicates, err := cache.FindDuplicates()
+	duplicates, err := cache.FindDuplicates(buildFlags())
 	if err != nil {
 		outputError(fmt.Sprintf("Failed to find duplicates: %v", err))
 		os.Exit(1)
@@ -458,7 +469,7 @@ func handleDupes(args []string) {
 	}
 
 	// Find duplicates
-	duplicates, err := cache.FindDuplicates()
+	duplicates, err := cache.FindDuplicates(buildFlags())
 	if err != nil {
 		outputError(fmt.Sprintf("Failed to find duplicates: %v", err))
 		os.Exit(1)
