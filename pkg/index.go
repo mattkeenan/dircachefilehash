@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -34,6 +35,39 @@ type MmapIndex struct {
 	entries []byte // Raw entry data after header
 	size    int    // Current mapped size
 	offset  int    // Current write offset
+}
+
+// MmapIndexFile represents a wrapper for index file lifecycle management
+type MmapIndexFile struct {
+	File     *os.File // File descriptor (nil for read-only main/cache indices)
+	Data     []byte   // Memory-mapped data
+	Size     int      // Current size of the mapping
+	Offset   int      // Current write offset for scan indices
+	Type     string   // Index type: "main", "cache", "scan"
+	FilePath string   // File path for debugging/cleanup
+	mutex    sync.RWMutex // Protects Data/Size during mremap operations
+}
+
+// Cleanup safely unmaps and closes the index file
+func (mif *MmapIndexFile) Cleanup() error {
+	mif.mutex.Lock()
+	defer mif.mutex.Unlock()
+	
+	if mif.Data != nil {
+		if err := unix.Munmap(mif.Data); err != nil {
+			return fmt.Errorf("failed to unmap %s index: %w", mif.Type, err)
+		}
+		mif.Data = nil
+	}
+	
+	if mif.File != nil {
+		if err := mif.File.Close(); err != nil {
+			return fmt.Errorf("failed to close %s index file: %w", mif.Type, err)
+		}
+		mif.File = nil
+	}
+	
+	return nil
 }
 
 
@@ -190,7 +224,7 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 
 
 // LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
-func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, error) {
+func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]BinaryEntryRef, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -215,18 +249,17 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, er
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create MmapIndex with direct header access
-	mmapIndex := &MmapIndex{
-		data:    data,
-		file:    file,
-		entries: data[HeaderSize:],
-		size:    int(stat.Size()),
-		offset:  HeaderSize,
+	// Create MmapIndexFile wrapper  
+	indexFile := &MmapIndexFile{
+		File:     file,
+		Data:     data,
+		Size:     int(stat.Size()),
+		Type:     "loaded", // Generic type for loaded indices
+		FilePath: filePath,
 	}
-	dc.mmapIndex = mmapIndex
 
 	// Get direct pointer to header in mmap'd memory (zero-copy)
-	header := mmapIndex.Header()
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
 
 	// Verify header using helper methods in logical order
 	if err := header.ValidateSignature(dc.signature); err != nil {
@@ -244,10 +277,10 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, er
 		return nil, fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Parse entries - create direct pointers to mmap'd binaryEntry structs
-	var entries []*binaryEntry
+	// Parse entries - create BinaryEntryRef instances  
+	var refs []BinaryEntryRef
 	offset := 0
-	entryData := mmapIndex.entries
+	entryData := data[HeaderSize:]
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
@@ -269,7 +302,12 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, er
 			}
 		}
 		
-		entries = append(entries, entry)
+		// Create BinaryEntryRef instead of storing pointer
+		ref := BinaryEntryRef{
+			Offset:    offset, // Offset from start of entry data
+			IndexFile: indexFile,
+		}
+		refs = append(refs, ref)
 
 		// Move to next entry using Size field
 		nextOffset := offset + int(entry.Size)
@@ -292,7 +330,7 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]*binaryEntry, er
 			offset, expectedEndOffset, expectedEndOffset-offset)
 	}
 
-	return entries, nil
+	return refs, nil
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header
@@ -419,50 +457,61 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 
 // AppendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
 // Uses single mmap with mremap for efficient memory usage
-func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, relPath string, scannedPath *ScannedPath) (*binaryEntry, error) {
+func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, scannedPath *ScannedPath) (*binaryEntry, error) {
 	// Verify we have an active scan index
-	if dc.currentScanFile != scanFileName || dc.currentScanMmap == nil || dc.currentScanFd == nil {
+	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
 		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
 	}
 
 	// Calculate entry size
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
+	totalSize := baseSize + len(scannedPath.RelPath) + 1 // +1 for null terminator
 	padding := (8 - (totalSize % 8)) % 8
 	entrySize := totalSize + padding
 
 	// Calculate required new size
-	newSize := dc.currentScanSize + entrySize
+	newSize := dc.currentScan.Offset + entrySize
 
 	// Expand file and mmap if necessary
-	if newSize > dc.currentScanSize {
+	if newSize > dc.currentScan.Size {
+		// Lock for mremap operation (write lock)
+		dc.currentScan.mutex.Lock()
+		
 		// Expand the file using existing file descriptor
-		if err := dc.currentScanFd.Truncate(int64(newSize)); err != nil {
+		if err := dc.currentScan.File.Truncate(int64(newSize)); err != nil {
+			dc.currentScan.mutex.Unlock()
 			return nil, fmt.Errorf("failed to expand scan file: %w", err)
 		}
 
 		// Expand the mmap using mremap
-		newMmap, err := unix.Mremap(dc.currentScanMmap, newSize, unix.MREMAP_MAYMOVE)
+		newMmap, err := unix.Mremap(dc.currentScan.Data, newSize, unix.MREMAP_MAYMOVE)
 		if err != nil {
+			dc.currentScan.mutex.Unlock()
 			return nil, fmt.Errorf("failed to mremap scan file: %w", err)
 		}
 
 		// Update stored mmap info
-		dc.currentScanMmap = newMmap
-		dc.currentScanSize = newSize
+		dc.currentScan.Data = newMmap
+		dc.currentScan.Size = newSize
+		
+		dc.currentScan.mutex.Unlock()
 	}
 
 	// Get header and update entry count
-	header := (*IndexHeader)(unsafe.Pointer(&dc.currentScanMmap[0]))
-	entryOffset := dc.currentScanSize - entrySize  // Write at the end
+	header := (*IndexHeader)(unsafe.Pointer(&dc.currentScan.Data[0]))
+	entryOffset := dc.currentScan.Offset  // Write at current offset
 	header.EntryCount++
 
 	// Write the new entry
-	entryData := dc.currentScanMmap[entryOffset:]
-	dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
+	entryData := dc.currentScan.Data[entryOffset:]
+	dc.writeBinaryEntryToMmap(entryData, scannedPath.RelPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
 
 	// Get pointer to the created entry
 	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
+
+
+	// Update offset for next entry
+	dc.currentScan.Offset += entrySize
 
 	// Note: We don't update checksum here since it's only needed once at the end
 	// when all entries and hashes are complete
@@ -497,11 +546,15 @@ func (dc *DirectoryCache) InitializeScanIndex(scanFileName string) error {
 	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
 	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
 
-	// Store scan index info (keep file open)
-	dc.currentScanFile = scanFileName
-	dc.currentScanFd = file
-	dc.currentScanMmap = data
-	dc.currentScanSize = initialSize
+	// Create scan index wrapper (keep file open)
+	dc.currentScan = &MmapIndexFile{
+		File:     file,
+		Data:     data,
+		Size:     initialSize,
+		Offset:   HeaderSize, // Start writing entries after header
+		Type:     "scan",
+		FilePath: scanFileName,
+	}
 
 	return nil
 }
@@ -514,28 +567,21 @@ func (dc *DirectoryCache) InitializeScanIndex(scanFileName string) error {
 // 2. Munmap the scan index file - done here  
 // 3. Delete the scan index file - done here
 func (dc *DirectoryCache) CleanupCurrentScanFile() error {
-	if dc.currentScanFile == "" {
+	if dc.currentScan == nil {
 		return fmt.Errorf("can't clean up missing scan index file: %w", os.ErrNotExist)
 	}
 	
-	// Step 2 - Unmap scan index memory
-	if dc.currentScanMmap != nil {
-		if err := unix.Munmap(dc.currentScanMmap); err != nil {
-			return fmt.Errorf("failed to unmap scan index: %w", err)
-		}
-		dc.currentScanMmap = nil
-	}
+	// Get file path for deletion
+	filePath := dc.currentScan.FilePath
 	
-	// Close the file descriptor
-	if dc.currentScanFd != nil {
-		dc.currentScanFd.Close()
-		dc.currentScanFd = nil
+	// Step 2 - Cleanup mmap and file descriptor
+	if err := dc.currentScan.Cleanup(); err != nil {
+		return fmt.Errorf("failed to cleanup scan index: %w", err)
 	}
 	
 	// Step 3 - Remove the scan index file
-	err := os.Remove(dc.currentScanFile)
-	dc.currentScanFile = ""
-	dc.currentScanSize = 0
+	err := os.Remove(filePath)
+	dc.currentScan = nil
 	
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove scan file: %w", err)
@@ -606,12 +652,32 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 		return fmt.Errorf("header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
 	}
 
-	// Write entries using vectorio (if any)
+	// Write entries using vectorio (if any) - chunk to respect IOV_MAX limit
 	if len(entryIovecs) > 0 {
-		if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), entryIovecs); err != nil {
-			return fmt.Errorf("failed to write entries with vectorio: %w", err)
-		} else if nw != totalEntrySize {
-			return fmt.Errorf("entries write incomplete: wrote %d bytes, expected %d", nw, totalEntrySize)
+		maxIovecs, err := getSystemIOVMax()
+		if err != nil {
+			return fmt.Errorf("failed to get system IOV_MAX: %w", err)
+		}
+		totalWritten := 0
+		
+		for offset := 0; offset < len(entryIovecs); offset += maxIovecs {
+			end := offset + maxIovecs
+			if end > len(entryIovecs) {
+				end = len(entryIovecs)
+			}
+			
+			// Use slice without copying to avoid allocation
+			chunk := entryIovecs[offset:end]
+			
+			if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), chunk); err != nil {
+				return fmt.Errorf("failed to write entries chunk with vectorio: %w", err)
+			} else {
+				totalWritten += nw
+			}
+		}
+		
+		if totalWritten != totalEntrySize {
+			return fmt.Errorf("entries write incomplete: wrote %d bytes, expected %d", totalWritten, totalEntrySize)
 		}
 	}
 
@@ -653,6 +719,30 @@ func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistW
 
 	// Write merged result using vectorio
 	return dc.WriteSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
+}
+
+// getSystemIOVMax returns the system's IOV_MAX limit using sysconf(_SC_IOV_MAX)
+// Falls back to conservative default if sysconf fails
+func getSystemIOVMax() (int, error) {
+	// _SC_IOV_MAX constant for sysconf() - platform specific
+	const SC_IOV_MAX = 60 // Linux value, may vary on other platforms
+	const fallbackIOVMax = 1024 // Conservative default per golang/go#58623
+	
+	// Call sysconf directly using unix.Syscall (syscall 99 on Linux)
+	r1, _, errno := unix.Syscall(99, uintptr(SC_IOV_MAX), 0, 0)
+	if errno != 0 {
+		// Fall back to conservative default if sysconf fails
+		return fallbackIOVMax, nil
+	}
+	
+	iovMax := int(r1)
+	
+	// Validate the result is reasonable, fall back if not
+	if iovMax <= 0 || iovMax > 1<<20 { // Sanity check: between 1 and 1M
+		return fallbackIOVMax, nil
+	}
+	
+	return iovMax, nil
 }
 
 // scanForTempIndices scans the .dcfh directory for temporary index files

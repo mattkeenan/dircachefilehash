@@ -9,43 +9,48 @@ AddPattern	pkg/ignore.go	138;"	m	access:public	ctype:IgnoreManager	line:138	sign
 Added	cmd/dcfh.go	45;"	w	access:public	ctype:StatusOutput	line:45	type:[]string
 Added	pkg/status.go	32;"	w	access:public	ctype:StatusResult	line:32	type:[]string
 AddedCount	cmd/dcfh.go	53;"	w	access:public	ctype:StatusSummary	line:53	type:int
-AppendEntryToScanIndex	pkg/index.go	422;"	m	access:public	ctype:DirectoryCache	line:422	signature:(scanFileName string, relPath string, scannedPath *ScannedPath)	type:*binaryEntry, error
-BESizeFromPathLen	pkg/util.go	253;"	f	access:public	line:253	signature:(pathLen int)	type:int
+AppendEntryToScanIndex	pkg/index.go	460;"	m	access:public	ctype:DirectoryCache	line:460	signature:(scanFileName string, scannedPath *ScannedPath)	type:*binaryEntry, error
+BESizeFromPathLen	pkg/util.go	250;"	f	access:public	line:250	signature:(pathLen int)	type:int
 BenchmarkConfig	pkg/benchmark_test.go	14;"	t	access:public	line:14	type:struct
 BenchmarkDirectoryScanLarge	pkg/benchmark_test.go	183;"	f	access:public	line:183	signature:(b *testing.B)
 BenchmarkDirectoryScanMedium	pkg/benchmark_test.go	175;"	f	access:public	line:175	signature:(b *testing.B)
 BenchmarkDirectoryScanSmall	pkg/benchmark_test.go	170;"	f	access:public	line:170	signature:(b *testing.B)
-BenchmarkIndexOperationsMedium	pkg/benchmark_test.go	252;"	f	access:public	line:252	signature:(b *testing.B)
-BenchmarkIndexOperationsSmall	pkg/benchmark_test.go	247;"	f	access:public	line:247	signature:(b *testing.B)
-BenchmarkMemoryUsage	pkg/benchmark_test.go	317;"	f	access:public	line:317	signature:(b *testing.B)
-ByteOrder	pkg/index.go	22;"	w	access:public	ctype:IndexHeader	line:22	type:uint64
+BenchmarkFullWorkflowMedium	pkg/benchmark_test.go	330;"	f	access:public	line:330	signature:(b *testing.B)
+BenchmarkIndexOperationsMedium	pkg/benchmark_test.go	265;"	f	access:public	line:265	signature:(b *testing.B)
+BenchmarkIndexOperationsSmall	pkg/benchmark_test.go	260;"	f	access:public	line:260	signature:(b *testing.B)
+BenchmarkMemoryUsage	pkg/benchmark_test.go	467;"	f	access:public	line:467	signature:(b *testing.B)
+BinaryEntryRef	pkg/util.go	259;"	t	access:public	line:259	type:struct
+ByteOrder	pkg/index.go	23;"	w	access:public	ctype:IndexHeader	line:23	type:uint64
 ByteOrderMagic	pkg/constants.go	27;"	c	access:public	line:27	type:uint64
-CTimeWall	pkg/util.go	61;"	w	access:public	ctype:binaryEntry	line:61	type:uint64
+CTimeWall	pkg/util.go	58;"	w	access:public	ctype:binaryEntry	line:58	type:uint64
 CacheContext	pkg/constants.go	8;"	c	access:public	line:8
 CacheFile	pkg/util.go	38;"	w	access:public	ctype:DirectoryCache	line:38	type:string
 CacheIndex	pkg/constants.go	16;"	c	access:public	line:16
 CacheIndex	pkg/status.go	24;"	w	access:public	ctype:CleanStatus	line:24	type:bool
-CallbackToIovecSlice	pkg/skiplist.go	148;"	m	access:public	ctype:SkiplistWrapper	line:148	signature:(callback func(*binaryEntry, string) bool)	type:[]syscall.Iovec
-Checksum	pkg/index.go	27;"	w	access:public	ctype:IndexHeader	line:27	type:[64]byte
+CallbackToIovecSlice	pkg/skiplist.go	203;"	m	access:public	ctype:SkiplistWrapper	line:203	signature:(callback func(*binaryEntry, string) bool)	type:[]syscall.Iovec
+Checksum	pkg/index.go	28;"	w	access:public	ctype:IndexHeader	line:28	type:[64]byte
 ChecksumSize	pkg/constants.go	23;"	c	access:public	line:23
-ChecksumType	pkg/index.go	26;"	w	access:public	ctype:IndexHeader	line:26	type:uint16
+ChecksumType	pkg/index.go	27;"	w	access:public	ctype:IndexHeader	line:27	type:uint16
 CleanStatus	pkg/status.go	22;"	t	access:public	line:22	type:struct
 CleanStatus	pkg/status.go	34;"	w	access:public	ctype:StatusResult	line:34	type:*CleanStatus
-CleanupCurrentScanFile	pkg/index.go	516;"	m	access:public	ctype:DirectoryCache	line:516	signature:()	type:error
+Cleanup	pkg/index.go	52;"	m	access:public	ctype:MmapIndexFile	line:52	signature:()	type:error
+CleanupCurrentScanFile	pkg/index.go	569;"	m	access:public	ctype:DirectoryCache	line:569	signature:()	type:error
 CleanupTempFiles	pkg/dircache.go	12;"	m	access:public	ctype:DirectoryCache	line:12	signature:()	type:error
 CleanupTempFilesOnExit	pkg/dircache.go	38;"	m	access:public	ctype:DirectoryCache	line:38	signature:()
-ClearDeleted	pkg/util.go	86;"	m	access:public	ctype:binaryEntry	line:86	signature:()
-Close	pkg/index.go	368;"	m	access:public	ctype:DirectoryCache	line:368	signature:()	type:error
-Copy	pkg/skiplist.go	107;"	m	access:public	ctype:SkiplistWrapper	line:107	signature:()	type:*SkiplistWrapper
+ClearDeleted	pkg/util.go	83;"	m	access:public	ctype:binaryEntry	line:83	signature:()
+Close	pkg/index.go	406;"	m	access:public	ctype:DirectoryCache	line:406	signature:()	type:error
+Copy	pkg/skiplist.go	151;"	m	access:public	ctype:SkiplistWrapper	line:151	signature:()	type:*SkiplistWrapper
 Count	pkg/dupes.go	13;"	w	access:public	ctype:DuplicateGroup	line:13	type:int
+CreateBinaryEntryRef	pkg/util.go	284;"	f	access:public	ctype:BinaryEntryRef	line:284	signature:(entry *binaryEntry, indexFile *MmapIndexFile)	type:BinaryEntryRef
 CreateEmptyIgnoreFile	pkg/ignore.go	101;"	m	access:public	ctype:IgnoreManager	line:101	signature:()	type:error
 CreateTmpIndexFromScan	pkg/middleware.go	55;"	m	access:public	ctype:DirectoryCache	line:55	signature:(comparisonSkiplist *SkiplistWrapper)	type:*SkiplistWrapper, error
+Data	pkg/index.go	43;"	w	access:public	ctype:MmapIndexFile	line:43	type:[]byte
 DebugFlags	pkg/debug.go	9;"	t	access:public	line:9	type:struct
-Delete	pkg/skiplist.go	63;"	m	access:public	ctype:SkiplistWrapper	line:63	signature:(relativePath string)	type:bool
+Delete	pkg/skiplist.go	103;"	m	access:public	ctype:SkiplistWrapper	line:103	signature:(relativePath string)	type:bool
 Deleted	cmd/dcfh.go	46;"	w	access:public	ctype:StatusOutput	line:46	type:[]string
 Deleted	pkg/status.go	33;"	w	access:public	ctype:StatusResult	line:33	type:[]string
 DeletedCount	cmd/dcfh.go	54;"	w	access:public	ctype:StatusSummary	line:54	type:int
-Dev	pkg/util.go	63;"	w	access:public	ctype:binaryEntry	line:63	type:uint32
+Dev	pkg/util.go	60;"	w	access:public	ctype:binaryEntry	line:60	type:uint32
 DirDepth	pkg/benchmark_test.go	19;"	w	access:public	ctype:BenchmarkConfig	line:19	type:int
 DirectoryCache	pkg/util.go	35;"	t	access:public	line:35	type:struct
 DupesOutput	cmd/dcfh.go	78;"	t	access:public	line:78	type:struct
@@ -54,84 +59,89 @@ DuplicateGroups	cmd/dcfh.go	80;"	w	access:public	ctype:DupesOutput	line:80	type:
 DuplicateInfo	cmd/dcfh.go	73;"	t	access:public	line:73	type:struct
 DuplicateSummary	cmd/dcfh.go	84;"	t	access:public	line:84	type:struct
 Duplicates	cmd/dcfh.go	70;"	w	access:public	ctype:UpdateOutput	line:70	type:*DuplicateInfo
-EntryCount	pkg/index.go	24;"	w	access:public	ctype:IndexHeader	line:24	type:uint32
+EntryCount	pkg/index.go	25;"	w	access:public	ctype:IndexHeader	line:25	type:uint32
 EntryFlagDeleted	pkg/constants.go	51;"	c	access:public	line:51	type:uint16
-EntryFlags	pkg/util.go	69;"	w	access:public	ctype:binaryEntry	line:69	type:uint16
-EntrySize	pkg/util.go	248;"	m	access:public	ctype:binaryEntry	line:248	signature:()	type:int
+EntryFlags	pkg/util.go	66;"	w	access:public	ctype:binaryEntry	line:66	type:uint16
+EntrySize	pkg/util.go	245;"	m	access:public	ctype:binaryEntry	line:245	signature:()	type:int
 Error	cmd/dcfh.go	91;"	w	access:public	ctype:ErrorOutput	line:91	type:string
 ErrorOutput	cmd/dcfh.go	89;"	t	access:public	line:89	type:struct
+File	pkg/index.go	42;"	w	access:public	ctype:MmapIndexFile	line:42	type:*os.File
 FileCount	cmd/dcfh.go	36;"	w	access:public	ctype:InitOutput	line:36	type:int
 FileCount	cmd/dcfh.go	59;"	w	access:public	ctype:IndexInfo	line:59	type:int
 FileCount	cmd/dcfh.go	67;"	w	access:public	ctype:UpdateOutput	line:67	type:int
 FileCount	cmd/dcfh.go	75;"	w	access:public	ctype:DuplicateInfo	line:75	type:int
 FileCount	cmd/dcfh.go	86;"	w	access:public	ctype:DuplicateSummary	line:86	type:int
 FileInfo	pkg/scan.go	52;"	w	access:public	ctype:ProcessedEntry	line:52	type:os.FileInfo
+FilePath	pkg/index.go	47;"	w	access:public	ctype:MmapIndexFile	line:47	type:string
 FilePath	pkg/scan.go	60;"	w	access:public	ctype:HashJobStart	line:60	type:string
 FilePath	pkg/util.go	28;"	w	access:public	ctype:ScanIndexInfo	line:28	type:string
 FileSize	pkg/util.go	30;"	w	access:public	ctype:ScanIndexInfo	line:30	type:int
-FileSize	pkg/util.go	68;"	w	access:public	ctype:binaryEntry	line:68	type:uint64
+FileSize	pkg/util.go	65;"	w	access:public	ctype:binaryEntry	line:65	type:uint64
 FileStatus	pkg/status.go	12;"	t	access:public	line:12	type:int
 Files	pkg/dupes.go	12;"	w	access:public	ctype:DuplicateGroup	line:12	type:[]string
 FilesPerDir	pkg/benchmark_test.go	20;"	w	access:public	ctype:BenchmarkConfig	line:20	type:int
 FilterIgnoredPaths	pkg/ignore.go	213;"	m	access:public	ctype:IgnoreManager	line:213	signature:(paths []string)	type:[]string
-FilterNotByContext	pkg/skiplist.go	175;"	m	access:public	ctype:SkiplistWrapper	line:175	signature:(context string)	type:*SkiplistWrapper
-Find	pkg/skiplist.go	54;"	m	access:public	ctype:SkiplistWrapper	line:54	signature:(relativePath string)	type:*binaryEntry, string
+FilterNotByContext	pkg/skiplist.go	242;"	m	access:public	ctype:SkiplistWrapper	line:242	signature:(context string)	type:*SkiplistWrapper
+Find	pkg/skiplist.go	92;"	m	access:public	ctype:SkiplistWrapper	line:92	signature:(relativePath string)	type:*binaryEntry, string
 FindDuplicates	pkg/dupes.go	17;"	m	access:public	ctype:DirectoryCache	line:17	signature:(flags map[string]string)	type:[]DuplicateGroup, error
-FinishSubmitting	pkg/scan.go	683;"	m	access:public	ctype:SimpleHashManager	line:683	signature:()
-First	pkg/skiplist.go	115;"	m	access:public	ctype:SkiplistWrapper	line:115	signature:()	type:*binaryEntry
-Flags	pkg/index.go	25;"	w	access:public	ctype:IndexHeader	line:25	type:uint16
-ForEach	pkg/skiplist.go	68;"	m	access:public	ctype:SkiplistWrapper	line:68	signature:(callback func(*binaryEntry, string) bool)
-ForEachContext	pkg/skiplist.go	78;"	m	access:public	ctype:SkiplistWrapper	line:78	signature:(context string, callback func(*binaryEntry) bool)
-GID	pkg/util.go	67;"	w	access:public	ctype:binaryEntry	line:67	type:uint32
+FinishSubmitting	pkg/scan.go	563;"	m	access:public	ctype:SimpleHashManager	line:563	signature:()
+First	pkg/skiplist.go	159;"	m	access:public	ctype:SkiplistWrapper	line:159	signature:()	type:*binaryEntry
+Flags	pkg/index.go	26;"	w	access:public	ctype:IndexHeader	line:26	type:uint16
+ForEach	pkg/skiplist.go	108;"	m	access:public	ctype:SkiplistWrapper	line:108	signature:(callback func(*binaryEntry, string) bool)
+ForEachContext	pkg/skiplist.go	122;"	m	access:public	ctype:SkiplistWrapper	line:122	signature:(context string, callback func(*binaryEntry) bool)
+GID	pkg/util.go	64;"	w	access:public	ctype:binaryEntry	line:64	type:uint32
+GetBinaryEntry	pkg/util.go	265;"	m	access:public	ctype:BinaryEntryRef	line:265	signature:()	type:*binaryEntry
 GetIgnoreFilePath	pkg/ignore.go	228;"	m	access:public	ctype:IgnoreManager	line:228	signature:()	type:string
 GetPatterns	pkg/ignore.go	179;"	m	access:public	ctype:IgnoreManager	line:179	signature:()	type:[]*regexp.Regexp
+GetStringCopyStats	pkg/skiplist.go	19;"	f	access:public	line:19	signature:()	type:int64, int64, float64
 GroupCount	cmd/dcfh.go	85;"	w	access:public	ctype:DuplicateSummary	line:85	type:int
 HLDeleted	pkg/scan.go	44;"	c	access:public	line:44
 HLModified	pkg/scan.go	43;"	c	access:public	line:43
 HLNew	pkg/scan.go	42;"	c	access:public	line:42
 HLUnchanged	pkg/scan.go	41;"	c	access:public	line:41	type:HwangLinType
 HasChanges	cmd/dcfh.go	55;"	w	access:public	ctype:StatusSummary	line:55	type:bool
-HasChanges	pkg/status.go	206;"	m	access:public	ctype:StatusResult	line:206	signature:()	type:bool
+HasChanges	pkg/status.go	222;"	m	access:public	ctype:StatusResult	line:222	signature:()	type:bool
 HasPatterns	pkg/ignore.go	205;"	m	access:public	ctype:IgnoreManager	line:205	signature:()	type:bool
 HasTempFiles	pkg/status.go	26;"	w	access:public	ctype:CleanStatus	line:26	type:bool
 Hash	pkg/dupes.go	11;"	w	access:public	ctype:DuplicateGroup	line:11	type:string
 Hash	pkg/scan.go	33;"	w	access:public	ctype:HwangLinResult	line:33	type:[]byte
 Hash	pkg/scan.go	50;"	w	access:public	ctype:ProcessedEntry	line:50	type:[]byte
-Hash	pkg/util.go	71;"	w	access:public	ctype:binaryEntry	line:71	type:[64]byte
+Hash	pkg/util.go	68;"	w	access:public	ctype:binaryEntry	line:68	type:[64]byte
 HashJobStart	pkg/scan.go	58;"	t	access:public	line:58	type:struct
 HashSizeSHA1	pkg/constants.go	38;"	c	access:public	line:38
 HashSizeSHA256	pkg/constants.go	39;"	c	access:public	line:39
 HashSizeSHA512	pkg/constants.go	40;"	c	access:public	line:40
-HashString	pkg/util.go	223;"	m	access:public	ctype:binaryEntry	line:223	signature:()	type:string
+HashString	pkg/util.go	220;"	m	access:public	ctype:binaryEntry	line:220	signature:()	type:string
 HashType	pkg/scan.go	34;"	w	access:public	ctype:HwangLinResult	line:34	type:uint16
 HashType	pkg/scan.go	51;"	w	access:public	ctype:ProcessedEntry	line:51	type:uint16
-HashType	pkg/util.go	70;"	w	access:public	ctype:binaryEntry	line:70	type:uint16
+HashType	pkg/util.go	67;"	w	access:public	ctype:binaryEntry	line:67	type:uint16
 HashTypeSHA1	pkg/constants.go	31;"	c	access:public	line:31	type:uint16
 HashTypeSHA256	pkg/constants.go	32;"	c	access:public	line:32	type:uint16
 HashTypeSHA512	pkg/constants.go	33;"	c	access:public	line:33	type:uint16
-Header	pkg/index.go	41;"	m	access:public	ctype:MmapIndex	line:41	signature:()	type:*IndexHeader
+Header	pkg/index.go	75;"	m	access:public	ctype:MmapIndex	line:75	signature:()	type:*IndexHeader
 HeaderSize	pkg/constants.go	22;"	c	access:public	line:22
 HwangLinResult	pkg/scan.go	28;"	t	access:public	line:28	type:struct
 HwangLinType	pkg/scan.go	38;"	t	access:public	line:38	type:int
 IgnoreManager	pkg/ignore.go	13;"	t	access:public	line:13	type:struct
 IndexEntry	pkg/scan.go	31;"	w	access:public	ctype:HwangLinResult	line:31	type:*binaryEntry
-IndexEntry	pkg/scan.go	61;"	w	access:public	ctype:HashJobStart	line:61	type:*binaryEntry
+IndexEntry	pkg/scan.go	61;"	w	access:public	ctype:HashJobStart	line:61	type:BinaryEntryRef
+IndexFile	pkg/util.go	261;"	w	access:public	ctype:BinaryEntryRef	line:261	type:*MmapIndexFile
 IndexFile	pkg/util.go	37;"	w	access:public	ctype:DirectoryCache	line:37	type:string
 IndexFlagClean	pkg/constants.go	46;"	c	access:public	line:46	type:uint16
 IndexFlagSparse	pkg/constants.go	45;"	c	access:public	line:45	type:uint16
-IndexHeader	pkg/index.go	20;"	t	access:public	line:20	type:struct
+IndexHeader	pkg/index.go	21;"	t	access:public	line:21	type:struct
 IndexInfo	cmd/dcfh.go	48;"	w	access:public	ctype:StatusOutput	line:48	type:IndexInfo
 IndexInfo	cmd/dcfh.go	58;"	t	access:public	line:58	type:struct
 Info	pkg/scan.go	23;"	w	access:public	ctype:ScannedPath	line:23	type:os.FileInfo
 InitDebugFlags	pkg/debug.go	73;"	f	access:public	line:73	signature:(debugStr string)
 InitOutput	cmd/dcfh.go	32;"	t	access:public	line:32	type:struct
-InitializeScanIndex	pkg/index.go	474;"	m	access:public	ctype:DirectoryCache	line:474	signature:(scanFileName string)	type:error
-Ino	pkg/util.go	64;"	w	access:public	ctype:binaryEntry	line:64	type:uint32
-Insert	pkg/skiplist.go	49;"	m	access:public	ctype:SkiplistWrapper	line:49	signature:(entry *binaryEntry, context string)	type:bool
+InitializeScanIndex	pkg/index.go	523;"	m	access:public	ctype:DirectoryCache	line:523	signature:(scanFileName string)	type:error
+Ino	pkg/util.go	61;"	w	access:public	ctype:binaryEntry	line:61	type:uint32
+Insert	pkg/skiplist.go	87;"	m	access:public	ctype:SkiplistWrapper	line:87	signature:(ref BinaryEntryRef, context string)	type:bool
 IsDeleted	pkg/scan.go	54;"	w	access:public	ctype:ProcessedEntry	line:54	type:bool
-IsDeleted	pkg/util.go	76;"	m	access:public	ctype:binaryEntry	line:76	signature:()	type:bool
+IsDeleted	pkg/util.go	73;"	m	access:public	ctype:binaryEntry	line:73	signature:()	type:bool
 IsDir	pkg/scan.go	77;"	m	access:public	ctype:mockFileInfo	line:77	signature:()	type:bool
-IsEmpty	pkg/skiplist.go	102;"	m	access:public	ctype:SkiplistWrapper	line:102	signature:()	type:bool
+IsEmpty	pkg/skiplist.go	146;"	m	access:public	ctype:SkiplistWrapper	line:146	signature:()	type:bool
 IsExtraValidationEnabled	pkg/debug.go	87;"	f	access:public	line:87	signature:()	type:bool
 IsIndexChainingEnabled	pkg/debug.go	97;"	f	access:public	line:97	signature:()	type:bool
 IsLoaded	pkg/ignore.go	187;"	m	access:public	ctype:IgnoreManager	line:187	signature:()	type:bool
@@ -142,58 +152,60 @@ JobID	pkg/scan.go	59;"	w	access:public	ctype:HashJobStart	line:59	type:uint64
 LargeBenchConfig	pkg/benchmark_test.go	46;"	v	access:public	line:46
 LargeFileSize	pkg/benchmark_test.go	17;"	w	access:public	ctype:BenchmarkConfig	line:17	type:int64
 LargeFiles	pkg/benchmark_test.go	16;"	w	access:public	ctype:BenchmarkConfig	line:16	type:int
-Last	pkg/skiplist.go	124;"	m	access:public	ctype:SkiplistWrapper	line:124	signature:()	type:*binaryEntry
+Last	pkg/skiplist.go	169;"	m	access:public	ctype:SkiplistWrapper	line:169	signature:()	type:*binaryEntry
 Length	pkg/dircache.go	65;"	m	access:public	ctype:DirectoryCache	line:65	signature:()	type:int
-Length	pkg/skiplist.go	97;"	m	access:public	ctype:SkiplistWrapper	line:97	signature:()	type:int
+Length	pkg/skiplist.go	141;"	m	access:public	ctype:SkiplistWrapper	line:141	signature:()	type:int
 LoadCacheIndex	pkg/middleware.go	33;"	m	access:public	ctype:DirectoryCache	line:33	signature:()	type:*SkiplistWrapper, error
 LoadIgnorePatterns	pkg/ignore.go	29;"	m	access:public	ctype:IgnoreManager	line:29	signature:()	type:error
-LoadIndexFromFile	pkg/index.go	193;"	m	access:public	ctype:DirectoryCache	line:193	signature:(filePath string)	type:[]*binaryEntry, error
+LoadIndexFromFile	pkg/index.go	227;"	m	access:public	ctype:DirectoryCache	line:227	signature:(filePath string)	type:[]BinaryEntryRef, error
 LoadMainIndex	pkg/middleware.go	9;"	m	access:public	ctype:DirectoryCache	line:9	signature:()	type:*SkiplistWrapper, error
 LogDebugFlags	pkg/debug.go	107;"	f	access:public	line:107	signature:()
-MTimeWall	pkg/util.go	62;"	w	access:public	ctype:binaryEntry	line:62	type:uint64
+MTimeWall	pkg/util.go	59;"	w	access:public	ctype:binaryEntry	line:59	type:uint64
 MainContext	pkg/constants.go	7;"	c	access:public	line:7
 MainIndex	pkg/constants.go	15;"	c	access:public	line:15
 MainIndex	pkg/status.go	23;"	w	access:public	ctype:CleanStatus	line:23	type:bool
 MediumBenchConfig	pkg/benchmark_test.go	36;"	v	access:public	line:36
-Merge	pkg/skiplist.go	88;"	m	access:public	ctype:SkiplistWrapper	line:88	signature:(other *SkiplistWrapper, strategy zcsl.MergeStrategy)	type:error
+Merge	pkg/skiplist.go	132;"	m	access:public	ctype:SkiplistWrapper	line:132	signature:(other *SkiplistWrapper, strategy zcsl.MergeStrategy)	type:error
 MergeError	pkg/constants.go	58;"	c	access:public	line:58
 MergeOurs	pkg/constants.go	57;"	c	access:public	line:57
-MergeScanSkiplistsWithVectorIO	pkg/index.go	645;"	m	access:public	ctype:DirectoryCache	line:645	signature:(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string)	type:error
+MergeScanSkiplistsWithVectorIO	pkg/index.go	711;"	m	access:public	ctype:DirectoryCache	line:711	signature:(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string)	type:error
 MergeTheirs	pkg/constants.go	56;"	c	access:public	line:56
 Message	cmd/dcfh.go	34;"	w	access:public	ctype:InitOutput	line:34	type:string
 Message	cmd/dcfh.go	64;"	w	access:public	ctype:UpdateOutput	line:64	type:string
 MmapData	pkg/util.go	29;"	w	access:public	ctype:ScanIndexInfo	line:29	type:[]byte
-MmapIndex	pkg/index.go	31;"	t	access:public	line:31	type:struct
+MmapIndex	pkg/index.go	32;"	t	access:public	line:32	type:struct
+MmapIndexFile	pkg/index.go	41;"	t	access:public	line:41	type:struct
 ModTime	pkg/scan.go	76;"	m	access:public	ctype:mockFileInfo	line:76	signature:()	type:time.Time
 Mode	pkg/scan.go	75;"	m	access:public	ctype:mockFileInfo	line:75	signature:()	type:os.FileMode
-Mode	pkg/util.go	65;"	w	access:public	ctype:binaryEntry	line:65	type:uint32
+Mode	pkg/util.go	62;"	w	access:public	ctype:binaryEntry	line:62	type:uint32
 Modified	cmd/dcfh.go	44;"	w	access:public	ctype:StatusOutput	line:44	type:[]string
 Modified	pkg/status.go	31;"	w	access:public	ctype:StatusResult	line:31	type:[]string
 ModifiedCount	cmd/dcfh.go	52;"	w	access:public	ctype:StatusSummary	line:52	type:int
 Name	pkg/scan.go	73;"	m	access:public	ctype:mockFileInfo	line:73	signature:()	type:string
 NewDirectoryCache	pkg/dircache.go	77;"	f	access:public	line:77	signature:(rootDir, dcfhDir string)	type:*DirectoryCache
 NewIgnoreManager	pkg/ignore.go	20;"	f	access:public	ctype:IgnoreManager	line:20	signature:(dcfhDir string)	type:*IgnoreManager
-NewSimpleHashManager	pkg/scan.go	661;"	m	access:public	ctype:DirectoryCache	line:661	signature:(numWorkers int, callFinishChan chan uint64)	type:*SimpleHashManager
-NewSkiplistWrapper	pkg/skiplist.go	16;"	f	access:public	ctype:SkiplistWrapper	line:16	signature:(maxLevels int, defaultContext string)	type:*SkiplistWrapper
+NewSimpleHashManager	pkg/scan.go	541;"	m	access:public	ctype:DirectoryCache	line:541	signature:(numWorkers int, callFinishChan chan uint64)	type:*SimpleHashManager
+NewSkiplistWrapper	pkg/skiplist.go	41;"	f	access:public	ctype:SkiplistWrapper	line:41	signature:(maxLevels int, defaultContext string)	type:*SkiplistWrapper
+Offset	pkg/index.go	45;"	w	access:public	ctype:MmapIndexFile	line:45	type:int
+Offset	pkg/util.go	260;"	w	access:public	ctype:BinaryEntryRef	line:260	type:int
 OutputFormat	cmd/dcfh.go	181;"	t	access:public	line:181	type:string
 OutputHuman	cmd/dcfh.go	184;"	c	access:public	line:184	type:OutputFormat
 OutputJSON	cmd/dcfh.go	185;"	c	access:public	line:185	type:OutputFormat
 ParseDebugFlags	pkg/debug.go	26;"	f	access:public	line:26	signature:(debugStr string)
-Path	pkg/util.go	72;"	w	access:public	ctype:binaryEntry	line:72	type:[8]byte
+Path	pkg/util.go	69;"	w	access:public	ctype:binaryEntry	line:69	type:[8]byte
 PathsUpdated	cmd/dcfh.go	66;"	w	access:public	ctype:UpdateOutput	line:66	type:[]string
-PerformHwangLinScan	pkg/scan.go	887;"	m	access:public	ctype:DirectoryCache	line:887	signature:(paths []string, skiplist *SkiplistWrapper)	type:[]*HwangLinResult, error
-PerformHwangLinScanToSkiplist	pkg/scan.go	956;"	m	access:public	ctype:DirectoryCache	line:956	signature:(paths []string, compareSkiplist *SkiplistWrapper)	type:*SkiplistWrapper, error
-ProcessHwangLinResults	pkg/scan.go	814;"	m	access:public	ctype:DirectoryCache	line:814	signature:(results []*HwangLinResult)	type:[]ProcessedEntry, error
+PerformHwangLinScanToSkiplist	pkg/scan.go	721;"	m	access:public	ctype:DirectoryCache	line:721	signature:(paths []string, compareSkiplist *SkiplistWrapper)	type:*SkiplistWrapper, error
 ProcessedEntry	pkg/scan.go	48;"	t	access:public	line:48	type:struct
 RelPath	pkg/scan.go	22;"	w	access:public	ctype:ScannedPath	line:22	type:string
 RelPath	pkg/scan.go	49;"	w	access:public	ctype:ProcessedEntry	line:49	type:string
-RelativePath	pkg/util.go	115;"	m	access:public	ctype:binaryEntry	line:115	signature:()	type:string
-RelativePathModern	pkg/util.go	143;"	m	access:public	ctype:binaryEntry	line:143	signature:()	type:string
+RelativePath	pkg/util.go	112;"	m	access:public	ctype:binaryEntry	line:112	signature:()	type:string
+RelativePathModern	pkg/util.go	140;"	m	access:public	ctype:binaryEntry	line:140	signature:()	type:string
 Reload	pkg/ignore.go	192;"	m	access:public	ctype:IgnoreManager	line:192	signature:()	type:error
 Repository	cmd/dcfh.go	35;"	w	access:public	ctype:InitOutput	line:35	type:string
 Repository	cmd/dcfh.go	42;"	w	access:public	ctype:StatusOutput	line:42	type:string
 Repository	cmd/dcfh.go	65;"	w	access:public	ctype:UpdateOutput	line:65	type:string
 Repository	cmd/dcfh.go	79;"	w	access:public	ctype:DupesOutput	line:79	type:string
+ResetStringCopyStats	pkg/skiplist.go	30;"	f	access:public	line:30	signature:()
 RootDir	pkg/util.go	36;"	w	access:public	ctype:DirectoryCache	line:36	type:string
 SaveIgnorePatterns	pkg/ignore.go	149;"	m	access:public	ctype:IgnoreManager	line:149	signature:()	type:error
 ScanContext	pkg/constants.go	9;"	c	access:public	line:9
@@ -202,22 +214,23 @@ ScannedPath	pkg/scan.go	20;"	t	access:public	line:20	type:struct
 ScannedPath	pkg/scan.go	30;"	w	access:public	ctype:HwangLinResult	line:30	type:*ScannedPath
 ScannedPath	pkg/scan.go	62;"	w	access:public	ctype:HashJobStart	line:62	type:*ScannedPath
 SetCount	cmd/dcfh.go	74;"	w	access:public	ctype:DuplicateInfo	line:74	type:int
-SetDeleted	pkg/util.go	81;"	m	access:public	ctype:binaryEntry	line:81	signature:()
-SetHeader	pkg/index.go	72;"	m	access:public	ctype:IndexHeader	line:72	signature:(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16)
-SetHeaderForWritableIndex	pkg/index.go	83;"	m	access:public	ctype:IndexHeader	line:83	signature:(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16)
+SetDeleted	pkg/util.go	78;"	m	access:public	ctype:binaryEntry	line:78	signature:()
+SetHeader	pkg/index.go	106;"	m	access:public	ctype:IndexHeader	line:106	signature:(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16)
+SetHeaderForWritableIndex	pkg/index.go	117;"	m	access:public	ctype:IndexHeader	line:117	signature:(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16)
 ShouldIgnore	pkg/ignore.go	80;"	m	access:public	ctype:IgnoreManager	line:80	signature:(relativePath string)	type:bool
-Shutdown	pkg/scan.go	721;"	m	access:public	ctype:SimpleHashManager	line:721	signature:()
-Signature	pkg/index.go	21;"	w	access:public	ctype:IndexHeader	line:21	type:[4]byte
+Shutdown	pkg/scan.go	601;"	m	access:public	ctype:SimpleHashManager	line:601	signature:()
+Signature	pkg/index.go	22;"	w	access:public	ctype:IndexHeader	line:22	type:[4]byte
 SimpleHashManager	pkg/scan.go	87;"	t	access:public	line:87	type:struct
+Size	pkg/index.go	44;"	w	access:public	ctype:MmapIndexFile	line:44	type:int
 Size	pkg/scan.go	74;"	m	access:public	ctype:mockFileInfo	line:74	signature:()	type:int64
-Size	pkg/util.go	60;"	w	access:public	ctype:binaryEntry	line:60	type:uint32
-SkiplistWrapper	pkg/skiplist.go	11;"	t	access:public	line:11	type:struct
+Size	pkg/util.go	57;"	w	access:public	ctype:binaryEntry	line:57	type:uint32
+SkiplistWrapper	pkg/skiplist.go	36;"	t	access:public	line:36	type:struct
 SmallBenchConfig	pkg/benchmark_test.go	26;"	v	access:public	line:26
 SmallFileSize	pkg/benchmark_test.go	18;"	w	access:public	ctype:BenchmarkConfig	line:18	type:int64
 StatInfo	pkg/scan.go	24;"	w	access:public	ctype:ScannedPath	line:24	type:*syscall.Stat_t
 StatInfo	pkg/scan.go	53;"	w	access:public	ctype:ProcessedEntry	line:53	type:*syscall.Stat_t
 Stats	pkg/dircache.go	44;"	m	access:public	ctype:DirectoryCache	line:44	signature:()	type:int, int64, error
-Stats	pkg/skiplist.go	156;"	m	access:public	ctype:SkiplistWrapper	line:156	signature:()	type:int, int, int
+Stats	pkg/skiplist.go	223;"	m	access:public	ctype:SkiplistWrapper	line:223	signature:()	type:int, int, int
 Status	pkg/status.go	38;"	m	access:public	ctype:DirectoryCache	line:38	signature:(flags map[string]string)	type:*StatusResult, error
 StatusAdded	pkg/status.go	17;"	c	access:public	line:17
 StatusDeleted	pkg/status.go	18;"	c	access:public	line:18
@@ -226,7 +239,7 @@ StatusOutput	cmd/dcfh.go	41;"	t	access:public	line:41	type:struct
 StatusResult	pkg/status.go	30;"	t	access:public	line:30	type:struct
 StatusSummary	cmd/dcfh.go	51;"	t	access:public	line:51	type:struct
 StatusUnchanged	pkg/status.go	15;"	c	access:public	line:15	type:FileStatus
-SubmitHashJob	pkg/scan.go	677;"	m	access:public	ctype:SimpleHashManager	line:677	signature:(job *HashJobStart, callStartChan chan uint64)
+SubmitHashJob	pkg/scan.go	557;"	m	access:public	ctype:SimpleHashManager	line:557	signature:(job *HashJobStart, callStartChan chan uint64)
 Success	cmd/dcfh.go	33;"	w	access:public	ctype:InitOutput	line:33	type:bool
 Success	cmd/dcfh.go	63;"	w	access:public	ctype:UpdateOutput	line:63	type:bool
 Success	cmd/dcfh.go	90;"	w	access:public	ctype:ErrorOutput	line:90	type:bool
@@ -252,16 +265,16 @@ TestCleanMethodsWithStatusVerbose	pkg/clean_methods_test.go	222;"	f	access:publi
 TestCleanStatusFields	pkg/status_test.go	100;"	f	access:public	line:100	signature:(t *testing.T)
 TestDebugFlagAccessors	pkg/debug_test.go	107;"	f	access:public	line:107	signature:(t *testing.T)
 TestDirectoryCache_FindDuplicates_EmptyIndex	pkg/dupes_test.go	36;"	f	access:public	line:36	signature:(t *testing.T)
-TestDirectoryCache_FindDuplicates_WithFlags	pkg/dupes_test.go	65;"	f	access:public	line:65	signature:(t *testing.T)
+TestDirectoryCache_FindDuplicates_WithFlags	pkg/dupes_test.go	69;"	f	access:public	line:69	signature:(t *testing.T)
 TestDirectoryCache_Status_VerboseFlag	pkg/status_test.go	122;"	f	access:public	line:122	signature:(t *testing.T)
 TestDirectoryCache_generateScanFileName	pkg/util_test.go	179;"	f	access:public	line:179	signature:(t *testing.T)
 TestDirectoryCache_generateTempFileName	pkg/util_test.go	153;"	f	access:public	line:153	signature:(t *testing.T)
 TestDirectoryCache_scanForTempIndices	pkg/index_test.go	110;"	f	access:public	line:110	signature:(t *testing.T)
-TestDuplicateGroup_Consistency	pkg/dupes_test.go	180;"	f	access:public	line:180	signature:(t *testing.T)
-TestDuplicateGroup_CreationAndValidation	pkg/dupes_test.go	106;"	f	access:public	line:106	signature:(t *testing.T)
-TestDuplicateGroup_EmptyGroup	pkg/dupes_test.go	141;"	f	access:public	line:141	signature:(t *testing.T)
+TestDuplicateGroup_Consistency	pkg/dupes_test.go	184;"	f	access:public	line:184	signature:(t *testing.T)
+TestDuplicateGroup_CreationAndValidation	pkg/dupes_test.go	110;"	f	access:public	line:110	signature:(t *testing.T)
+TestDuplicateGroup_EmptyGroup	pkg/dupes_test.go	145;"	f	access:public	line:145	signature:(t *testing.T)
 TestDuplicateGroup_Fields	pkg/dupes_test.go	9;"	f	access:public	line:9	signature:(t *testing.T)
-TestDuplicateGroup_SingleFile	pkg/dupes_test.go	158;"	f	access:public	line:158	signature:(t *testing.T)
+TestDuplicateGroup_SingleFile	pkg/dupes_test.go	162;"	f	access:public	line:162	signature:(t *testing.T)
 TestEncodeWallTime	pkg/util_test.go	113;"	f	access:public	line:113	signature:(t *testing.T)
 TestFileStatus_Constants	pkg/status_test.go	198;"	f	access:public	line:198	signature:(t *testing.T)
 TestFlagDefaults	cmd/dcfh_test.go	329;"	f	access:public	line:329	signature:(t *testing.T)
@@ -293,51 +306,49 @@ TestValidateOutputFormat_InvalidFormat	cmd/dcfh_test.go	72;"	f	access:public	lin
 TestValidateOutputFormat_ValidFormats	cmd/dcfh_test.go	20;"	f	access:public	line:20	signature:(t *testing.T)
 TimeElapsed	cmd/dcfh.go	38;"	w	access:public	ctype:InitOutput	line:38	type:string
 TimeElapsed	cmd/dcfh.go	69;"	w	access:public	ctype:UpdateOutput	line:69	type:string
-ToContextIovecSlice	pkg/skiplist.go	138;"	m	access:public	ctype:SkiplistWrapper	line:138	signature:(context string)	type:[]syscall.Iovec
-ToIovecSlice	pkg/skiplist.go	133;"	m	access:public	ctype:SkiplistWrapper	line:133	signature:()	type:[]syscall.Iovec
-ToNotContextIovecSlice	pkg/skiplist.go	143;"	m	access:public	ctype:SkiplistWrapper	line:143	signature:(context string)	type:[]syscall.Iovec
-TotalChanges	pkg/status.go	211;"	m	access:public	ctype:StatusResult	line:211	signature:()	type:int
+ToContextIovecSlice	pkg/skiplist.go	187;"	m	access:public	ctype:SkiplistWrapper	line:187	signature:(context string)	type:[]syscall.Iovec
+ToIovecSlice	pkg/skiplist.go	179;"	m	access:public	ctype:SkiplistWrapper	line:179	signature:()	type:[]syscall.Iovec
+ToNotContextIovecSlice	pkg/skiplist.go	195;"	m	access:public	ctype:SkiplistWrapper	line:195	signature:(context string)	type:[]syscall.Iovec
+TotalChanges	pkg/status.go	227;"	m	access:public	ctype:StatusResult	line:227	signature:()	type:int
 TotalFiles	pkg/benchmark_test.go	15;"	w	access:public	ctype:BenchmarkConfig	line:15	type:int
 TotalSize	cmd/dcfh.go	37;"	w	access:public	ctype:InitOutput	line:37	type:int64
 TotalSize	cmd/dcfh.go	68;"	w	access:public	ctype:UpdateOutput	line:68	type:int64
+Type	pkg/index.go	46;"	w	access:public	ctype:MmapIndexFile	line:46	type:string
 Type	pkg/scan.go	29;"	w	access:public	ctype:HwangLinResult	line:29	type:HwangLinType
-UID	pkg/util.go	66;"	w	access:public	ctype:binaryEntry	line:66	type:uint32
+UID	pkg/util.go	63;"	w	access:public	ctype:binaryEntry	line:63	type:uint32
 Update	pkg/update.go	9;"	m	access:public	ctype:DirectoryCache	line:9	signature:(flags map[string]string, paths )	type:error
 UpdateCacheIndexWithWorkflow	pkg/middleware.go	67;"	m	access:public	ctype:DirectoryCache	line:67	signature:()	type:error
-UpdateContext	pkg/skiplist.go	170;"	m	access:public	ctype:SkiplistWrapper	line:170	signature:(relativePath string, newContext string)	type:bool
+UpdateContext	pkg/skiplist.go	237;"	m	access:public	ctype:SkiplistWrapper	line:237	signature:(relativePath string, newContext string)	type:bool
 UpdateOutput	cmd/dcfh.go	62;"	t	access:public	line:62	type:struct
-ValidateByteOrder	pkg/index.go	63;"	m	access:public	ctype:IndexHeader	line:63	signature:()	type:error
-ValidateEntry	pkg/util.go	176;"	m	access:public	ctype:binaryEntry	line:176	signature:()	type:error
+ValidateByteOrder	pkg/index.go	97;"	m	access:public	ctype:IndexHeader	line:97	signature:()	type:error
+ValidateEntry	pkg/util.go	173;"	m	access:public	ctype:binaryEntry	line:173	signature:()	type:error
 ValidatePattern	pkg/ignore.go	199;"	m	access:public	ctype:IgnoreManager	line:199	signature:(patternStr string)	type:error
-ValidateSignature	pkg/index.go	46;"	m	access:public	ctype:IndexHeader	line:46	signature:(expected [4]byte)	type:error
-ValidateVersion	pkg/index.go	55;"	m	access:public	ctype:IndexHeader	line:55	signature:(expected uint32)	type:error
-Version	pkg/index.go	23;"	w	access:public	ctype:IndexHeader	line:23	type:uint32
+ValidateSignature	pkg/index.go	80;"	m	access:public	ctype:IndexHeader	line:80	signature:(expected [4]byte)	type:error
+ValidateVersion	pkg/index.go	89;"	m	access:public	ctype:IndexHeader	line:89	signature:(expected uint32)	type:error
+Version	pkg/index.go	24;"	w	access:public	ctype:IndexHeader	line:24	type:uint32
 WorkingDir	cmd/dcfh.go	43;"	w	access:public	ctype:StatusOutput	line:43	type:string
-WriteMainIndexWithVectorIO	pkg/index.go	553;"	m	access:public	ctype:DirectoryCache	line:553	signature:(skiplist *SkiplistWrapper, outputPath string, context string)	type:error
-WriteSkiplistWithVectorIO	pkg/index.go	548;"	m	access:public	ctype:DirectoryCache	line:548	signature:(skiplist *SkiplistWrapper, outputPath string, context string)	type:error
+WriteMainIndexWithVectorIO	pkg/index.go	599;"	m	access:public	ctype:DirectoryCache	line:599	signature:(skiplist *SkiplistWrapper, outputPath string, context string)	type:error
+WriteSkiplistWithVectorIO	pkg/index.go	594;"	m	access:public	ctype:DirectoryCache	line:594	signature:(skiplist *SkiplistWrapper, outputPath string, context string)	type:error
 benchmarkDirectoryScan	pkg/benchmark_test.go	191;"	f	access:private	line:191	signature:(b *testing.B, config BenchmarkConfig)
-benchmarkIndexOperations	pkg/benchmark_test.go	260;"	f	access:private	line:260	signature:(b *testing.B, config BenchmarkConfig)
-binaryEntry	pkg/util.go	59;"	t	access:private	line:59	type:struct
+benchmarkIndexOperations	pkg/benchmark_test.go	273;"	f	access:private	line:273	signature:(b *testing.B, config BenchmarkConfig)
+binaryEntry	pkg/util.go	56;"	t	access:private	line:56	type:struct
 bufio	pkg/ignore.go	4;"	i	line:4
 buildFlags	cmd/dcfh.go	165;"	f	access:private	line:165	signature:()	type:map[string]string
-calculateAndStoreHeaderChecksum	pkg/index.go	90;"	m	access:private	ctype:DirectoryCache	line:90	signature:(header *IndexHeader, entryData []byte, entrySize int)
-calculateAndStoreHeaderChecksumFromIoVecs	pkg/index.go	110;"	m	access:private	ctype:DirectoryCache	line:110	signature:(header *IndexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec)
-calculateChecksum	pkg/index.go	361;"	m	access:private	ctype:DirectoryCache	line:361	signature:(data []byte)	type:[]byte
-calculatePathLength	pkg/util.go	160;"	m	access:private	ctype:binaryEntry	line:160	signature:()	type:int
+calculateAndStoreHeaderChecksum	pkg/index.go	124;"	m	access:private	ctype:DirectoryCache	line:124	signature:(header *IndexHeader, entryData []byte, entrySize int)
+calculateAndStoreHeaderChecksumFromIoVecs	pkg/index.go	144;"	m	access:private	ctype:DirectoryCache	line:144	signature:(header *IndexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec)
+calculateChecksum	pkg/index.go	399;"	m	access:private	ctype:DirectoryCache	line:399	signature:(data []byte)	type:[]byte
+calculatePathLength	pkg/util.go	157;"	m	access:private	ctype:binaryEntry	line:157	signature:()	type:int
 callFinishChan	pkg/scan.go	89;"	w	access:private	ctype:SimpleHashManager	line:89	type:chan uint64
-clearClean	pkg/index.go	140;"	m	access:private	ctype:IndexHeader	line:140	signature:()
+clearClean	pkg/index.go	174;"	m	access:private	ctype:IndexHeader	line:174	signature:()
 createBenchmarkDataset	pkg/benchmark_test.go	71;"	f	access:private	line:71	signature:(rootDir string, config BenchmarkConfig)	type:error
-createEmptyIndex	pkg/index.go	382;"	m	access:private	ctype:DirectoryCache	line:382	signature:()	type:error
+createEmptyIndex	pkg/index.go	420;"	m	access:private	ctype:DirectoryCache	line:420	signature:()	type:error
 crypto/sha1	pkg/dircache.go	4;"	i	line:4
 crypto/sha1	pkg/file.go	4;"	i	line:4
 crypto/sha1	pkg/index.go	4;"	i	line:4
 crypto/sha256	pkg/index.go	5;"	i	line:5
 crypto/sha512	pkg/index.go	6;"	i	line:6
-currentScanFd	pkg/util.go	51;"	w	access:private	ctype:DirectoryCache	line:51	type:*os.File
-currentScanFile	pkg/util.go	50;"	w	access:private	ctype:DirectoryCache	line:50	type:string
-currentScanMmap	pkg/util.go	52;"	w	access:private	ctype:DirectoryCache	line:52	type:[]byte
-currentScanSize	pkg/util.go	53;"	w	access:private	ctype:DirectoryCache	line:53	type:int
-data	pkg/index.go	32;"	w	access:private	ctype:MmapIndex	line:32	type:[]byte
+currentScan	pkg/util.go	50;"	w	access:private	ctype:DirectoryCache	line:50	type:*MmapIndexFile
+data	pkg/index.go	33;"	w	access:private	ctype:MmapIndex	line:33	type:[]byte
 debug	cmd/dcfh.go	20;"	v	access:private	line:20
 debugFlags	pkg/debug.go	17;"	v	access:private	line:17	type:DebugFlags
 deduplicatePaths	pkg/scan.go	141;"	m	access:private	ctype:DirectoryCache	line:141	signature:(paths []string)	type:[]string
@@ -363,13 +374,13 @@ dircachefilehash	pkg/update.go	1;"	p	line:1
 dircachefilehash	pkg/util.go	1;"	p	line:1
 dircachefilehash	pkg/util_test.go	1;"	p	line:1
 dupesFlags	cmd/dcfh.go	28;"	v	access:private	line:28
-encodeWallTime	pkg/util.go	275;"	f	access:private	line:275	signature:(sec int64, nsec int64)	type:uint64
+encodeWallTime	pkg/util.go	323;"	f	access:private	line:323	signature:(sec int64, nsec int64)	type:uint64
 encoding/hex	pkg/file.go	5;"	i	line:5
 encoding/hex	pkg/scan.go	4;"	i	line:4
 encoding/json	cmd/dcfh.go	4;"	i	line:4
-entries	pkg/index.go	34;"	w	access:private	ctype:MmapIndex	line:34	type:[]byte
+entries	pkg/index.go	35;"	w	access:private	ctype:MmapIndex	line:35	type:[]byte
 extraValidation	pkg/debug.go	10;"	w	access:private	ctype:DebugFlags	line:10	type:bool
-file	pkg/index.go	33;"	w	access:private	ctype:MmapIndex	line:33	type:*os.File
+file	pkg/index.go	34;"	w	access:private	ctype:MmapIndex	line:34	type:*os.File
 fileJob	pkg/update.go	104;"	t	access:private	line:104	type:struct
 findDcfhRepo	cmd/dcfh.go	633;"	f	access:private	line:633	signature:()	type:string, string, error
 flag	cmd/dcfh.go	5;"	i	line:5
@@ -388,19 +399,20 @@ fmt	pkg/status.go	4;"	i	line:4
 fmt	pkg/update.go	4;"	i	line:4
 fmt	pkg/util.go	4;"	i	line:4
 generateDeterministicData	pkg/benchmark_test.go	57;"	f	access:private	line:57	signature:(size int64, seed int64)	type:[]byte
-generateScanFileName	pkg/util.go	299;"	m	access:private	ctype:DirectoryCache	line:299	signature:()	type:string
-generateTempFileName	pkg/util.go	282;"	m	access:private	ctype:DirectoryCache	line:282	signature:(prefix string)	type:string
-getGoroutineID	pkg/util.go	290;"	f	access:private	line:290	signature:()	type:uint64
-getHashSize	pkg/scan.go	868;"	m	access:private	ctype:DirectoryCache	line:868	signature:(hashType uint16)	type:int
-github.com/google/vectorio	pkg/index.go	15;"	i	line:15
+generateScanFileName	pkg/util.go	347;"	m	access:private	ctype:DirectoryCache	line:347	signature:()	type:string
+generateTempFileName	pkg/util.go	330;"	m	access:private	ctype:DirectoryCache	line:330	signature:(prefix string)	type:string
+getGoroutineID	pkg/util.go	338;"	f	access:private	line:338	signature:()	type:uint64
+getHashSize	pkg/scan.go	700;"	m	access:private	ctype:DirectoryCache	line:700	signature:(hashType uint16)	type:int
+getSystemIOVMax	pkg/index.go	726;"	f	access:private	line:726	signature:()	type:int, error
+github.com/google/vectorio	pkg/index.go	16;"	i	line:16
 github.com/mattkeenan/dircachefilehash/pkg	cmd/dcfh.go	11;"	i	line:11
 github.com/mattkeenan/dircachefilehash/pkg	cmd/dcfh_test.go	8;"	i	line:8
 github.com/mattkeenan/dircachefilehash/pkg	examples/exampledircache.go	9;"	i	line:9
 github.com/mattkeenan/zerocopyskiplist	pkg/constants.go	3;"	i	line:3
 github.com/mattkeenan/zerocopyskiplist	pkg/dupes.go	6;"	i	line:6
-github.com/mattkeenan/zerocopyskiplist	pkg/skiplist.go	7;"	i	line:7
+github.com/mattkeenan/zerocopyskiplist	pkg/skiplist.go	9;"	i	line:9
 github.com/mattkeenan/zerocopyskiplist	pkg/status.go	8;"	i	line:8
-golang.org/x/sys/unix	pkg/index.go	16;"	i	line:16
+golang.org/x/sys/unix	pkg/index.go	17;"	i	line:17
 handleDupes	cmd/dcfh.go	503;"	f	access:private	line:503	signature:(args []string)
 handleInit	cmd/dcfh.go	230;"	f	access:private	line:230	signature:(args []string)
 handleStatus	cmd/dcfh.go	300;"	f	access:private	line:300	signature:(args []string)
@@ -410,9 +422,8 @@ hash	pkg/index.go	8;"	i	line:8
 hash	pkg/util.go	5;"	i	line:5
 hashFile	pkg/file.go	36;"	m	access:private	ctype:DirectoryCache	line:36	signature:(filePath string)	type:string, error
 hashJobChan	pkg/scan.go	88;"	w	access:private	ctype:SimpleHashManager	line:88	type:chan *HashJobStart
-hashWorker	pkg/scan.go	688;"	m	access:private	ctype:SimpleHashManager	line:688	signature:(dc *DirectoryCache)
+hashWorker	pkg/scan.go	568;"	m	access:private	ctype:SimpleHashManager	line:568	signature:(dc *DirectoryCache)
 hasher	pkg/util.go	41;"	w	access:private	ctype:DirectoryCache	line:41	type:hash.Hash
-hwangLinCompare	pkg/scan.go	489;"	m	access:private	ctype:DirectoryCache	line:489	signature:(scanChan chan *ScannedPath, skiplist *SkiplistWrapper, resultChan chan *HwangLinResult, hashJobManager *SimpleHashManager, callStartChan chan uint64)	type:error
 hwangLinCompareToSkiplist	pkg/scan.go	321;"	m	access:private	ctype:DirectoryCache	line:321	signature:(scanChan chan *ScannedPath, compareSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, scanFileName string, hashJobManager *SimpleHashManager, callStartChan chan uint64)	type:error
 hwangLinStatus	pkg/status.go	121;"	m	access:private	ctype:DirectoryCache	line:121	signature:(indexSkiplist, diskSkiplist *SkiplistWrapper, callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry))
 ignoreManager	pkg/util.go	43;"	w	access:private	ctype:DirectoryCache	line:43	type:*IgnoreManager
@@ -423,9 +434,9 @@ info	pkg/update.go	106;"	w	access:private	ctype:fileJob	line:106	type:os.FileInf
 initFlags	cmd/dcfh.go	25;"	v	access:private	line:25
 insertSorted	pkg/scan.go	276;"	m	access:private	ctype:DirectoryCache	line:276	signature:(existing []string, newPaths []string)	type:[]string
 io	pkg/file.go	7;"	i	line:7
-isClean	pkg/index.go	130;"	m	access:private	ctype:IndexHeader	line:130	signature:()	type:bool
-isFileChangedFromScanned	pkg/scan.go	631;"	m	access:private	ctype:DirectoryCache	line:631	signature:(indexEntry *binaryEntry, scanned *ScannedPath)	type:bool
-isFileModified	pkg/status.go	178;"	m	access:private	ctype:DirectoryCache	line:178	signature:(indexEntry, diskEntry *binaryEntry)	type:bool
+isClean	pkg/index.go	164;"	m	access:private	ctype:IndexHeader	line:164	signature:()	type:bool
+isFileChangedFromScanned	pkg/scan.go	511;"	m	access:private	ctype:DirectoryCache	line:511	signature:(indexEntry *binaryEntry, scanned *ScannedPath)	type:bool
+isFileModified	pkg/status.go	194;"	m	access:private	ctype:DirectoryCache	line:194	signature:(indexEntry, diskEntry *binaryEntry)	type:bool
 isPathUnder	pkg/scan.go	173;"	m	access:private	ctype:DirectoryCache	line:173	signature:(childPath, parentPath string)	type:bool
 jsonFlag	cmd/dcfh.go	17;"	v	access:private	line:17
 lastScanError	pkg/util.go	49;"	w	access:private	ctype:DirectoryCache	line:49	type:error
@@ -439,14 +450,15 @@ main	examples/exampledircache.go	12;"	f	access:private	line:12	signature:()
 main	examples/exampledircache.go	1;"	p	line:1
 math	pkg/benchmark_test.go	5;"	i	line:5
 memoryLayout	pkg/debug.go	11;"	w	access:private	ctype:DebugFlags	line:11	type:bool
-min	pkg/benchmark_test.go	367;"	f	access:private	line:367	signature:(a, b int)	type:int
+min	pkg/benchmark_test.go	517;"	f	access:private	line:517	signature:(a, b int)	type:int
 mmapIndex	pkg/util.go	42;"	w	access:private	ctype:DirectoryCache	line:42	type:*MmapIndex
 mockFileInfo	pkg/scan.go	66;"	t	access:private	line:66	type:struct
 modTime	pkg/scan.go	70;"	w	access:private	ctype:mockFileInfo	line:70	type:time.Time
 mode	pkg/scan.go	69;"	w	access:private	ctype:mockFileInfo	line:69	type:os.FileMode
-monitorJobs	pkg/scan.go	738;"	m	access:private	ctype:DirectoryCache	line:738	signature:(callStartChan chan uint64, callFinishChan chan uint64, collectionStop chan )
+monitorJobs	pkg/scan.go	623;"	m	access:private	ctype:DirectoryCache	line:623	signature:(callStartChan chan uint64, callFinishChan chan uint64, collectionStop chan )
+mutex	pkg/index.go	48;"	w	access:private	ctype:MmapIndexFile	line:48	type:sync.RWMutex
 name	pkg/scan.go	67;"	w	access:private	ctype:mockFileInfo	line:67	type:string
-offset	pkg/index.go	36;"	w	access:private	ctype:MmapIndex	line:36	type:int
+offset	pkg/index.go	37;"	w	access:private	ctype:MmapIndex	line:37	type:int
 os	cmd/dcfh.go	7;"	i	line:7
 os	cmd/dcfh_test.go	5;"	i	line:5
 os	examples/exampledircache.go	6;"	i	line:6
@@ -488,24 +500,26 @@ remove	pkg/scan.go	81;"	f	access:private	line:81	signature:(s []uint64, i int)	t
 resetFlags	cmd/dcfh_test.go	321;"	f	access:private	line:321	signature:()
 runtime	pkg/benchmark_test.go	8;"	i	line:8
 runtime	pkg/util.go	8;"	i	line:8
-scanForTempIndices	pkg/index.go	659;"	m	access:private	ctype:DirectoryCache	line:659	signature:()	type:[]string, error
+scanForTempIndices	pkg/index.go	749;"	m	access:private	ctype:DirectoryCache	line:749	signature:()	type:[]string, error
 scanInProgress	pkg/util.go	47;"	w	access:private	ctype:DirectoryCache	line:47	type:bool
 scanMutex	pkg/util.go	46;"	w	access:private	ctype:DirectoryCache	line:46	type:sync.RWMutex
 scanPath	pkg/scan.go	98;"	m	access:private	ctype:DirectoryCache	line:98	signature:(paths []string, resultChan chan *ScannedPath)	type:error
 scanPathRecursive	pkg/scan.go	193;"	m	access:private	ctype:DirectoryCache	line:193	signature:(rootPath string, resultChan chan *ScannedPath)	type:error
 scanning	pkg/debug.go	13;"	w	access:private	ctype:DebugFlags	line:13	type:bool
-setClean	pkg/index.go	135;"	m	access:private	ctype:IndexHeader	line:135	signature:()
+setClean	pkg/index.go	169;"	m	access:private	ctype:IndexHeader	line:169	signature:()
 showUsage	cmd/dcfh.go	94;"	f	access:private	line:94	signature:()
 signature	pkg/util.go	39;"	w	access:private	ctype:DirectoryCache	line:39	type:[4]byte
-size	pkg/index.go	35;"	w	access:private	ctype:MmapIndex	line:35	type:int
+size	pkg/index.go	36;"	w	access:private	ctype:MmapIndex	line:36	type:int
 size	pkg/scan.go	68;"	w	access:private	ctype:mockFileInfo	line:68	type:int64
-skiplist	pkg/skiplist.go	12;"	w	access:private	ctype:SkiplistWrapper	line:12	type:*
+skiplist	pkg/skiplist.go	37;"	w	access:private	ctype:SkiplistWrapper	line:37	type:*
 sort	pkg/scan.go	8;"	i	line:8
 statusFlags	cmd/dcfh.go	26;"	v	access:private	line:26
 strconv	pkg/flags_test.go	4;"	i	line:4
 strconv	pkg/status.go	5;"	i	line:5
 strconv	pkg/status_test.go	6;"	i	line:6
 strconv	pkg/util.go	9;"	i	line:9
+stringAccessCount	pkg/skiplist.go	15;"	v	access:private	line:15	type:int64
+stringCopyCount	pkg/skiplist.go	14;"	v	access:private	line:14	type:int64
 strings	pkg/debug.go	5;"	i	line:5
 strings	pkg/dircache.go	8;"	i	line:8
 strings	pkg/ignore.go	9;"	i	line:9
@@ -515,12 +529,14 @@ strings	pkg/skiplist.go	4;"	i	line:4
 strings	pkg/status.go	6;"	i	line:6
 strings	pkg/util.go	10;"	i	line:10
 strings	pkg/util_test.go	4;"	i	line:4
+sync	pkg/index.go	12;"	i	line:12
 sync	pkg/scan.go	10;"	i	line:10
 sync	pkg/util.go	11;"	i	line:11
+sync/atomic	pkg/skiplist.go	5;"	i	line:5
 syscall	pkg/file.go	9;"	i	line:9
-syscall	pkg/index.go	12;"	i	line:12
+syscall	pkg/index.go	13;"	i	line:13
 syscall	pkg/scan.go	11;"	i	line:11
-syscall	pkg/skiplist.go	5;"	i	line:5
+syscall	pkg/skiplist.go	6;"	i	line:6
 testing	cmd/dcfh_test.go	6;"	i	line:6
 testing	pkg/benchmark_test.go	9;"	i	line:9
 testing	pkg/clean_methods_test.go	4;"	i	line:4
@@ -535,25 +551,26 @@ time	pkg/benchmark_test.go	10;"	i	line:10
 time	pkg/scan.go	12;"	i	line:12
 time	pkg/util.go	12;"	i	line:12
 time	pkg/util_test.go	6;"	i	line:6
-timeFromWall	pkg/util.go	268;"	f	access:private	line:268	signature:(wall uint64)	type:time.Time
-timeWall	pkg/util.go	263;"	f	access:private	line:263	signature:(t time.Time)	type:uint64
-unsafe	pkg/index.go	13;"	i	line:13
+timeFromWall	pkg/util.go	316;"	f	access:private	line:316	signature:(wall uint64)	type:time.Time
+timeWall	pkg/util.go	311;"	f	access:private	line:311	signature:(t time.Time)	type:uint64
+unsafe	pkg/index.go	14;"	i	line:14
 unsafe	pkg/index_test.go	7;"	i	line:7
+unsafe	pkg/skiplist.go	7;"	i	line:7
 unsafe	pkg/util.go	13;"	i	line:13
 unsafe	pkg/util_test.go	7;"	i	line:7
-updateBinaryEntryHash	pkg/scan.go	726;"	m	access:private	ctype:DirectoryCache	line:726	signature:(entry *binaryEntry, hash []byte, hashType uint16)
+updateBinaryEntryHash	pkg/scan.go	606;"	m	access:private	ctype:DirectoryCache	line:606	signature:(entryRef BinaryEntryRef, hash []byte, hashType uint16)
 updateFlags	cmd/dcfh.go	27;"	v	access:private	line:27
 updateFullRepository	pkg/update.go	20;"	m	access:private	ctype:DirectoryCache	line:20	signature:()	type:error
 updateSpecificPaths	pkg/update.go	57;"	m	access:private	ctype:DirectoryCache	line:57	signature:(paths []string)	type:error
-validateEntryChaining	pkg/index.go	692;"	m	access:private	ctype:DirectoryCache	line:692	signature:(entry *binaryEntry, offset int, entryData []byte)	type:error
+validateEntryChaining	pkg/index.go	782;"	m	access:private	ctype:DirectoryCache	line:782	signature:(entry *binaryEntry, offset int, entryData []byte)	type:error
 validateFlagsConvention	pkg/flags_test.go	161;"	f	access:private	line:161	signature:(flags map[string]string)	type:bool
-validateLayout	pkg/util.go	92;"	m	access:private	ctype:binaryEntry	line:92	signature:()
+validateLayout	pkg/util.go	89;"	m	access:private	ctype:binaryEntry	line:89	signature:()
 validateOutputFormat	cmd/dcfh.go	189;"	f	access:private	line:189	signature:()	type:OutputFormat
 verbose	cmd/dcfh.go	18;"	v	access:private	line:18
-verifyChecksumMmap	pkg/index.go	344;"	m	access:private	ctype:DirectoryCache	line:344	signature:(data []byte, contentSize int)	type:error
-verifyHeaderChecksum	pkg/index.go	299;"	m	access:private	ctype:DirectoryCache	line:299	signature:(data []byte, header *IndexHeader)	type:error
+verifyChecksumMmap	pkg/index.go	382;"	m	access:private	ctype:DirectoryCache	line:382	signature:(data []byte, contentSize int)	type:error
+verifyHeaderChecksum	pkg/index.go	337;"	m	access:private	ctype:DirectoryCache	line:337	signature:(data []byte, header *IndexHeader)	type:error
 version	cmd/dcfh.go	19;"	v	access:private	line:19
 version	pkg/util.go	40;"	w	access:private	ctype:DirectoryCache	line:40	type:uint32
 wg	pkg/scan.go	90;"	w	access:private	ctype:SimpleHashManager	line:90	type:sync.WaitGroup
-writeBinaryEntryToMmap	pkg/index.go	145;"	m	access:private	ctype:DirectoryCache	line:145	signature:(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool)
-writeSkiplistWithVectorIOFiltered	pkg/index.go	558;"	m	access:private	ctype:DirectoryCache	line:558	signature:(skiplist *SkiplistWrapper, outputPath string, context string, excludeDeleted bool)	type:error
+writeBinaryEntryToMmap	pkg/index.go	179;"	m	access:private	ctype:DirectoryCache	line:179	signature:(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool)
+writeSkiplistWithVectorIOFiltered	pkg/index.go	604;"	m	access:private	ctype:DirectoryCache	line:604	signature:(skiplist *SkiplistWrapper, outputPath string, context string, excludeDeleted bool)	type:error

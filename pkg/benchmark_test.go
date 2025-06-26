@@ -219,9 +219,11 @@ func benchmarkDirectoryScan(b *testing.B, config BenchmarkConfig) {
 		cache := NewDirectoryCache(datasetDir, dcfhDir)
 		
 		// Time the full update operation
+		updateStart := time.Now()
 		if err := cache.Update(map[string]string{}); err != nil {
 			b.Fatalf("Update failed: %v", err)
 		}
+		updateDuration := time.Since(updateStart)
 		
 		// Verify results
 		fileCount, totalSize, err := cache.Stats()
@@ -237,10 +239,21 @@ func benchmarkDirectoryScan(b *testing.B, config BenchmarkConfig) {
 			b.Errorf("Expected %d bytes, got %d", expectedSize, totalSize)
 		}
 		
+		// Calculate performance metrics
+		hashingRate := float64(totalSize) / updateDuration.Seconds() / (1024 * 1024) // MB/s
+		fileRate := float64(fileCount) / updateDuration.Seconds() // files/s
+		
+		b.Logf("Performance: %.2f MB/s hashing rate, %.0f files/s, %v total time", 
+			hashingRate, fileRate, updateDuration)
+		
 		// Clean up for next iteration
 		cache.Close()
 		os.RemoveAll(dcfhDir)
 	}
+	
+	// Report string copy statistics
+	copies, accesses, rate := GetStringCopyStats()
+	b.Logf("String copy stats: %d copies out of %d accesses (%.2f%% copy rate)", copies, accesses, rate)
 }
 
 // BenchmarkIndexOperationsSmall benchmarks index file operations
@@ -311,6 +324,143 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			cache.Close()
 		}
 	})
+}
+
+// BenchmarkFullWorkflowMedium tests complete workflow: init, update, modify files, status, update
+func BenchmarkFullWorkflowMedium(b *testing.B) {
+	if testing.Short() {
+		b.Skip("Skipping full workflow benchmark in short mode")
+	}
+	
+	config := MediumBenchConfig
+	tempDir := b.TempDir()
+	datasetDir := filepath.Join(tempDir, "dataset")
+	
+	b.Logf("Creating medium benchmark dataset: %d files (%d large, %d small)",
+		config.TotalFiles, config.LargeFiles, config.TotalFiles-config.LargeFiles)
+	
+	// Create dataset (this is not timed)
+	b.StopTimer()
+	start := time.Now()
+	if err := createBenchmarkDataset(datasetDir, config); err != nil {
+		b.Fatalf("Failed to create benchmark dataset: %v", err)
+	}
+	setupTime := time.Since(start)
+	b.Logf("Dataset creation took: %v", setupTime)
+	
+	// Calculate expected data size
+	expectedSize := int64(config.LargeFiles)*config.LargeFileSize + 
+		int64(config.TotalFiles-config.LargeFiles)*config.SmallFileSize
+	b.Logf("Expected total data size: %.2f MB", float64(expectedSize)/(1024*1024))
+	
+	b.StartTimer()
+	
+	// Run the full workflow benchmark
+	for i := 0; i < b.N; i++ {
+		dcfhDir := filepath.Join(tempDir, fmt.Sprintf("dcfh_%d", i))
+		
+		// Step 1: Initialize repository from scratch
+		initStart := time.Now()
+		cache := NewDirectoryCache(datasetDir, dcfhDir)
+		if err := cache.createEmptyIndex(); err != nil {
+			b.Fatalf("Failed to initialize repository: %v", err)
+		}
+		initDuration := time.Since(initStart)
+		
+		// Step 2: Initial update (index all files)
+		updateStart := time.Now()
+		if err := cache.Update(map[string]string{}); err != nil {
+			b.Fatalf("Initial update failed: %v", err)
+		}
+		initialUpdateDuration := time.Since(updateStart)
+		
+		// Verify initial state
+		fileCount, totalSize, err := cache.Stats()
+		if err != nil {
+			b.Fatalf("Stats failed: %v", err)
+		}
+		if fileCount != config.TotalFiles {
+			b.Errorf("Expected %d files, got %d", config.TotalFiles, fileCount)
+		}
+		
+		// Step 3: Modify some files, add new files, delete some files
+		modifyStart := time.Now()
+		
+		// Modify 10% of existing files
+		modifyCount := config.TotalFiles / 10
+		for j := 0; j < modifyCount; j++ {
+			filePath := filepath.Join(datasetDir, fmt.Sprintf("file_%06d.dat", j))
+			if err := os.WriteFile(filePath, []byte("modified content"), 0644); err != nil {
+				b.Fatalf("Failed to modify file: %v", err)
+			}
+		}
+		
+		// Add 5% new files
+		newCount := config.TotalFiles / 20
+		for j := 0; j < newCount; j++ {
+			fileName := fmt.Sprintf("new_file_%d_%06d.dat", i, j)
+			filePath := filepath.Join(datasetDir, fileName)
+			content := generateDeterministicData(config.SmallFileSize, int64(j+config.TotalFiles))
+			if err := os.WriteFile(filePath, content, 0644); err != nil {
+				b.Fatalf("Failed to create new file: %v", err)
+			}
+		}
+		
+		// Delete 2% of existing files
+		deleteCount := config.TotalFiles / 50
+		for j := config.TotalFiles - deleteCount; j < config.TotalFiles; j++ {
+			filePath := filepath.Join(datasetDir, fmt.Sprintf("file_%06d.dat", j))
+			os.Remove(filePath) // Ignore errors if file doesn't exist
+		}
+		
+		modifyDuration := time.Since(modifyStart)
+		
+		// Step 4: Run status to detect changes
+		statusStart := time.Now()
+		statusResult, err := cache.Status(map[string]string{"v": "1"})
+		if err != nil {
+			b.Fatalf("Status failed: %v", err)
+		}
+		statusDuration := time.Since(statusStart)
+		
+		// Step 5: Update again to incorporate changes
+		finalUpdateStart := time.Now()
+		if err := cache.Update(map[string]string{}); err != nil {
+			b.Fatalf("Final update failed: %v", err)
+		}
+		finalUpdateDuration := time.Since(finalUpdateStart)
+		
+		// Calculate performance metrics
+		totalDuration := initDuration + initialUpdateDuration + modifyDuration + statusDuration + finalUpdateDuration
+		hashingRate := float64(totalSize) / initialUpdateDuration.Seconds() / (1024 * 1024) // MB/s for initial scan
+		fileRate := float64(fileCount) / initialUpdateDuration.Seconds() // files/s for initial scan
+		
+		changesDetected := len(statusResult.Modified) + len(statusResult.Added) + len(statusResult.Deleted)
+		
+		b.Logf("Workflow Performance:")
+		b.Logf("  Init: %v", initDuration)
+		b.Logf("  Initial Update: %v (%.2f MB/s, %.0f files/s)", initialUpdateDuration, hashingRate, fileRate)
+		b.Logf("  File Modifications: %v (%d modified, %d added, %d deleted)", modifyDuration, modifyCount, newCount, deleteCount)
+		b.Logf("  Status Detection: %v (%d changes detected)", statusDuration, changesDetected)
+		b.Logf("  Final Update: %v", finalUpdateDuration)
+		b.Logf("  Total Workflow Time: %v", totalDuration)
+		
+		// Clean up for next iteration
+		cache.Close()
+		
+		// Clean up modified files for next iteration
+		for j := 0; j < newCount; j++ {
+			fileName := fmt.Sprintf("new_file_%d_%06d.dat", i, j)
+			filePath := filepath.Join(datasetDir, fileName)
+			os.Remove(filePath)
+		}
+		
+		os.RemoveAll(dcfhDir)
+	}
+	
+	// Report string copy statistics
+	copies, accesses, rate := GetStringCopyStats()
+	b.Logf("String copy stats: %d copies out of %d accesses (%.2f%% copy rate)", copies, accesses, rate)
 }
 
 // BenchmarkMemoryUsage benchmarks memory usage during operations

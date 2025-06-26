@@ -2,14 +2,39 @@ package dircachefilehash
 
 import (
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"unsafe"
 
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
+// Instrumentation counters for string copy performance analysis
+var (
+	stringCopyCount    int64 // Total string copies performed
+	stringAccessCount  int64 // Total string accesses attempted
+)
+
+// GetStringCopyStats returns instrumentation statistics
+func GetStringCopyStats() (copies, accesses int64, copyRate float64) {
+	c := atomic.LoadInt64(&stringCopyCount)
+	a := atomic.LoadInt64(&stringAccessCount)
+	rate := 0.0
+	if a > 0 {
+		rate = float64(c) / float64(a) * 100
+	}
+	return c, a, rate
+}
+
+// ResetStringCopyStats resets the instrumentation counters
+func ResetStringCopyStats() {
+	atomic.StoreInt64(&stringCopyCount, 0)
+	atomic.StoreInt64(&stringAccessCount, 0)
+}
+
 // SkiplistWrapper wraps the new generic zerocopyskiplist with context support
 type SkiplistWrapper struct {
-	skiplist *zcsl.ZeroCopySkiplist[binaryEntry, string, string]
+	skiplist *zcsl.ZeroCopySkiplist[BinaryEntryRef, string, string]
 }
 
 // NewSkiplistWrapper creates a new skiplist wrapper with context tracking
@@ -19,12 +44,25 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 	}
 
 	// Key extractor function - extracts RelativePath as the key
-	getKeyFromItem := func(entry *binaryEntry) string {
-		return entry.RelativePath()
+	// CRITICAL: Must copy string data out of mmap memory (PIC-style)
+	getKeyFromItem := func(ref *BinaryEntryRef) string {
+		atomic.AddInt64(&stringAccessCount, 1)
+		entry := ref.GetBinaryEntry()
+		if entry == nil {
+			return ""
+		}
+		// Copy the string to avoid mremap invalidation (like PIC/GOT)
+		path := entry.RelativePath()
+		atomic.AddInt64(&stringCopyCount, 1)
+		return string([]byte(path)) // Force copy to heap
 	}
 
 	// Size function for serialization
-	getItemSize := func(entry *binaryEntry) int {
+	getItemSize := func(ref *BinaryEntryRef) int {
+		entry := ref.GetBinaryEntry()
+		if entry == nil {
+			return 0
+		}
 		return int(entry.Size)
 	}
 
@@ -33,7 +71,7 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 		return strings.Compare(a, b)
 	}
 
-	skiplist := zcsl.MakeZeroCopySkiplist[binaryEntry, string, string](
+	skiplist := zcsl.MakeZeroCopySkiplist[BinaryEntryRef, string, string](
 		maxLevels,
 		getKeyFromItem,
 		getItemSize,
@@ -45,16 +83,18 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *SkiplistWrapper {
 	}
 }
 
-// Insert adds a binaryEntry pointer with specific context
-func (sw *SkiplistWrapper) Insert(entry *binaryEntry, context string) bool {
-	return sw.skiplist.Insert(entry, context)
+// Insert adds a BinaryEntryRef with specific context
+func (sw *SkiplistWrapper) Insert(ref BinaryEntryRef, context string) bool {
+	return sw.skiplist.Insert(&ref, context)
 }
 
 // Find searches for an entry by its relative path and returns entry with context
 func (sw *SkiplistWrapper) Find(relativePath string) (*binaryEntry, string) {
 	itemPtr, context := sw.skiplist.Find(relativePath)
 	if itemPtr != nil {
-		return itemPtr.Item(), context
+		ref := itemPtr.Item()
+		entry := ref.GetBinaryEntry()
+		return entry, context
 	}
 	return nil, ""
 }
@@ -68,8 +108,12 @@ func (sw *SkiplistWrapper) Delete(relativePath string) bool {
 func (sw *SkiplistWrapper) ForEach(callback func(*binaryEntry, string) bool) {
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
 		context := current.Context()
-		if !callback(current.Item(), context) {
-			break
+		ref := current.Item()
+		entry := ref.GetBinaryEntry()
+		if entry != nil {
+			if !callback(entry, context) {
+				break
+			}
 		}
 	}
 }
@@ -115,7 +159,8 @@ func (sw *SkiplistWrapper) Copy() *SkiplistWrapper {
 func (sw *SkiplistWrapper) First() *binaryEntry {
 	first := sw.skiplist.First()
 	if first != nil {
-		return first.Item()
+		ref := first.Item()
+		return ref.GetBinaryEntry()
 	}
 	return nil
 }
@@ -124,32 +169,54 @@ func (sw *SkiplistWrapper) First() *binaryEntry {
 func (sw *SkiplistWrapper) Last() *binaryEntry {
 	last := sw.skiplist.Last()
 	if last != nil {
-		return last.Item()
+		ref := last.Item()
+		return ref.GetBinaryEntry()
 	}
 	return nil
 }
 
 // ToIovecSlice generates Iovec slices for all items
 func (sw *SkiplistWrapper) ToIovecSlice() []syscall.Iovec {
-	return sw.skiplist.ToIovecSlice("")
+	// Use CallbackToIovecSlice to ensure proper BinaryEntryRef resolution
+	return sw.CallbackToIovecSlice(func(entry *binaryEntry, context string) bool {
+		return true // Include all entries
+	})
 }
 
 // ToContextIovecSlice generates Iovec slices for items matching the context
 func (sw *SkiplistWrapper) ToContextIovecSlice(context string) []syscall.Iovec {
-	return sw.skiplist.ToContextIovecSlice(context)
+	// Use CallbackToIovecSlice to ensure proper BinaryEntryRef resolution
+	return sw.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
+		return entryContext == context
+	})
 }
 
 // ToNotContextIovecSlice generates Iovec slices for items not matching the context
 func (sw *SkiplistWrapper) ToNotContextIovecSlice(context string) []syscall.Iovec {
-	return sw.skiplist.ToNotContextIovecSlice(context)
+	// Use CallbackToIovecSlice to ensure proper BinaryEntryRef resolution
+	return sw.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
+		return entryContext != context
+	})
 }
 
 // CallbackToIovecSlice generates Iovec slices for items that match the callback filter
 func (sw *SkiplistWrapper) CallbackToIovecSlice(callback func(*binaryEntry, string) bool) []syscall.Iovec {
-	return sw.skiplist.CallbackToIovecSlice(func(item *zcsl.ItemPtr[binaryEntry, string, string]) bool {
-		context := item.Context()
-		return callback(item.Item(), context)
+	var iovecs []syscall.Iovec
+	
+	// Iterate through all items and create IoVec entries for resolved binaryEntry pointers
+	sw.ForEach(func(entry *binaryEntry, context string) bool {
+		if callback(entry, context) {
+			// Create IoVec pointing to the resolved binaryEntry
+			iovec := syscall.Iovec{
+				Base: (*byte)(unsafe.Pointer(entry)),
+				Len:  uint64(entry.Size),
+			}
+			iovecs = append(iovecs, iovec)
+		}
+		return true // Continue iteration
 	})
+	
+	return iovecs
 }
 
 // Stats returns statistics about the skiplist entries
@@ -174,11 +241,12 @@ func (sw *SkiplistWrapper) UpdateContext(relativePath string, newContext string)
 // FilterNotByContext returns a new skiplist with entries not matching the given context
 func (sw *SkiplistWrapper) FilterNotByContext(context string) *SkiplistWrapper {
 	result := NewSkiplistWrapper(16, "")
-	sw.ForEach(func(entry *binaryEntry, entryContext string) bool {
+	for current := sw.skiplist.First(); current != nil; current = current.Next() {
+		entryContext := current.Context()
 		if entryContext != context {
-			result.Insert(entry, entryContext)
+			ref := *current.Item()
+			result.Insert(ref, entryContext)
 		}
-		return true
-	})
+	}
 	return result
 }

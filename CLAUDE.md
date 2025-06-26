@@ -193,3 +193,16 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - **Concurrent hashing**: PID+TID scan files for parallel processing
 - **Atomic updates**: Temp files ensure data integrity
 - **Efficient I/O**: vectorio for bulk writes, mmap for reads
+
+### Discarded Approaches
+
+**Mremap Safety Solutions** (Rejected during offset-based refactor):
+1. **Pre-allocate scan index size** - Would require estimating final size, reduces flexibility and wastes memory
+2. **Delay hash job creation until scan complete** - Eliminates concurrency benefits, reduces performance
+3. **Use entry sequence numbers instead of offsets** - Complex iteration logic, still vulnerable to mremap relocation
+4. **Store entry data directly instead of references** - Memory duplication, defeats zero-copy design
+5. **Rebuild references after mremap** - Complex tracking system, race conditions with concurrent access
+
+**Memory Leak Solutions** (Rejected during initial investigation):
+1. **Multiple separate mmap files per entry** - Created 100K+ mmaps, caused 90GB memory leak
+2. **Immediate munmap after each append** - Broke concurrent hash workers accessing the memory

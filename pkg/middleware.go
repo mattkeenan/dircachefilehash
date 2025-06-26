@@ -14,16 +14,16 @@ func (dc *DirectoryCache) LoadMainIndex() (*SkiplistWrapper, error) {
 		}
 	}
 
-	// Load entries from file using pure file I/O
-	entries, err := dc.LoadIndexFromFile(dc.IndexFile)
+	// Load entries from file as BinaryEntryRef instances
+	refs, err := dc.LoadIndexFromFile(dc.IndexFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
 
 	// Create skiplist and insert all entries with main context
 	skiplist := NewSkiplistWrapper(16, MainContext)
-	for _, entry := range entries {
-		skiplist.Insert(entry, MainContext)
+	for _, ref := range refs {
+		skiplist.Insert(ref, MainContext)
 	}
 
 	return skiplist, nil
@@ -35,16 +35,16 @@ func (dc *DirectoryCache) LoadCacheIndex() (*SkiplistWrapper, error) {
 		return NewSkiplistWrapper(16, CacheContext), nil
 	}
 
-	// Load entries from file using pure file I/O
-	entries, err := dc.LoadIndexFromFile(dc.CacheFile)
+	// Load entries from file as BinaryEntryRef instances
+	refs, err := dc.LoadIndexFromFile(dc.CacheFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
 
 	// Create skiplist and insert all entries with cache context
 	skiplist := NewSkiplistWrapper(16, CacheContext)
-	for _, entry := range entries {
-		skiplist.Insert(entry, CacheContext)
+	for _, ref := range refs {
+		skiplist.Insert(ref, CacheContext)
 	}
 
 	return skiplist, nil

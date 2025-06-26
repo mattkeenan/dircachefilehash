@@ -126,8 +126,20 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 	diskCurrent := diskSkiplist.skiplist.First()
 
 	for indexCurrent != nil && diskCurrent != nil {
-		indexEntry := indexCurrent.Item()
-		diskEntry := diskCurrent.Item()
+		indexRef := indexCurrent.Item()
+		diskRef := diskCurrent.Item()
+		
+		indexEntry := indexRef.GetBinaryEntry()
+		diskEntry := diskRef.GetBinaryEntry()
+		
+		if indexEntry == nil {
+			indexCurrent = indexCurrent.Next()
+			continue
+		}
+		if diskEntry == nil {
+			diskCurrent = diskCurrent.Next()
+			continue
+		}
 
 		// Skip deleted entries from index
 		if indexEntry.IsDeleted() {
@@ -159,8 +171,9 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 
 	// Handle remaining entries from index (all deleted)
 	for indexCurrent != nil {
-		indexEntry := indexCurrent.Item()
-		if !indexEntry.IsDeleted() {
+		indexRef := indexCurrent.Item()
+		indexEntry := indexRef.GetBinaryEntry()
+		if indexEntry != nil && !indexEntry.IsDeleted() {
 			callback(StatusDeleted, indexEntry.RelativePath(), indexEntry, nil)
 		}
 		indexCurrent = indexCurrent.Next()
@@ -168,8 +181,11 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 
 	// Handle remaining entries from disk (all added)
 	for diskCurrent != nil {
-		diskEntry := diskCurrent.Item()
-		callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
+		diskRef := diskCurrent.Item()
+		diskEntry := diskRef.GetBinaryEntry()
+		if diskEntry != nil {
+			callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
+		}
 		diskCurrent = diskCurrent.Next()
 	}
 }

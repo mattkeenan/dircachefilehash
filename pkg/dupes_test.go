@@ -60,6 +60,10 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 	if len(duplicates) != 0 {
 		t.Errorf("Expected no duplicates in empty index, got %d", len(duplicates))
 	}
+	
+	// Report string copy stats
+	copies, accesses, rate := GetStringCopyStats()
+	t.Logf("String copy stats: %d copies out of %d accesses (%.2f%% copy rate)", copies, accesses, rate)
 }
 
 func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {

@@ -1,0 +1,631 @@
+digraph gocallvis {
+    label="command-line-arguments";
+    labeljust="l";
+    fontname="Arial";
+    fontsize="14";
+    rankdir="LR";
+    bgcolor="lightgray";
+    style="solid";
+    penwidth="0.5";
+    pad="0.0";
+    nodesep="0.35";
+
+    node [shape="box" style="filled,rounded" fillcolor="honeydew" fontname="Verdana" penwidth="1.0" margin="0.16,0.0"];
+    edge [minlen="2"]
+
+    subgraph "cluster_focus" {
+        bgcolor="#e6ecfa";
+label="main";
+labelloc="t";
+labeljust="c";
+fontsize="18";
+        
+        "command-line-arguments.showUsage" [ fillcolor="lightblue" label="showUsage" penwidth="0.5" tooltip="command-line-arguments.showUsage | defined in dcfh.go:94\nat dcfh.go:95: calling [fmt.Fprintf]\nat dcfh.go:96: calling [fmt.Fprintf]\nat dcfh.go:97: calling [fmt.Fprintf]\nat dcfh.go:98: calling [fmt.Fprintf]\nat dcfh.go:99: calling [fmt.Fprintf]\nat dcfh.go:100: calling [fmt.Fprintf]\nat dcfh.go:101: calling [fmt.Fprintf]\nat dcfh.go:102: calling [fmt.Fprintf]\nat dcfh.go:103: calling [fmt.Fprintf]\nat dcfh.go:104: calling [fmt.Fprintf]\nat dcfh.go:105: calling [fmt.Fprintf]\nat dcfh.go:106: calling [fmt.Fprintf]\nat dcfh.go:107: calling [fmt.Fprintf]\nat dcfh.go:108: calling [fmt.Fprintf]\nat dcfh.go:109: calling [fmt.Fprintf]\nat dcfh.go:110: calling [fmt.Fprintf]\nat dcfh.go:111: calling [fmt.Fprintf]\nat dcfh.go:112: calling [fmt.Fprintf]\nat dcfh.go:113: calling [fmt.Fprintf]\nat dcfh.go:114: calling [fmt.Fprintf]\nat dcfh.go:115: calling [fmt.Fprintf]" ]
+        "command-line-arguments.validateOutputFormat" [ fillcolor="lightblue" label="validateOutputFormat" penwidth="0.5" tooltip="command-line-arguments.validateOutputFormat | defined in dcfh.go:189\nat dcfh.go:193: calling [fmt.Fprintf]\nat dcfh.go:205: calling [fmt.Fprintf]\nat dcfh.go:194: calling [os.Exit]\nat dcfh.go:206: calling [os.Exit]" ]
+        "command-line-arguments.outputError" [ fillcolor="lightblue" label="outputError" penwidth="0.5" tooltip="command-line-arguments.outputError | defined in dcfh.go:211\nat dcfh.go:218: calling [(*encoding/json.Encoder).Encode]\nat dcfh.go:212: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:218: calling [encoding/json.NewEncoder]\nat dcfh.go:220: calling [fmt.Fprintf]" ]
+        "command-line-arguments.handleVersion" [ fillcolor="lightblue" label="handleVersion" penwidth="0.5" tooltip="command-line-arguments.handleVersion | defined in dcfh.go:175\nat dcfh.go:176: calling [fmt.Println]\nat dcfh.go:177: calling [fmt.Println]" ]
+        "command-line-arguments.handleDupes" [ fillcolor="lightblue" label="handleDupes" penwidth="0.5" tooltip="command-line-arguments.handleDupes | defined in dcfh.go:503\nat dcfh.go:506: calling [os.Exit]\nat dcfh.go:517: calling [os.Exit]\nat dcfh.go:526: calling [os.Exit]\nat dcfh.go:533: calling [os.Exit]\nat dcfh.go:530: calling [command-line-arguments.buildFlags]\nat dcfh.go:547: calling [command-line-arguments.outputJSON]\nat dcfh.go:598: calling [command-line-arguments.outputJSON]\nat dcfh.go:505: calling [command-line-arguments.outputError]\nat dcfh.go:512: calling [command-line-arguments.outputError]\nat dcfh.go:525: calling [command-line-arguments.outputError]\nat dcfh.go:532: calling [command-line-arguments.outputError]\nat dcfh.go:512: calling [(syscall.Errno).Error]\nat dcfh.go:512: calling [(runtime.plainError).Error]\nat dcfh.go:525: calling [fmt.Sprintf]\nat dcfh.go:532: calling [fmt.Sprintf]\nat dcfh.go:512: calling [(*net.timeoutError).Error]\nat dcfh.go:512: calling [(*strconv.NumError).Error]\nat dcfh.go:512: calling [(internal/poll.errNetClosing).Error]\nat dcfh.go:512: calling [(*encoding/json.UnsupportedTypeError).Error]\nat dcfh.go:512: calling [(*reflect.ValueError).Error]\nat dcfh.go:522: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]\nat dcfh.go:512: calling [(context.deadlineExceededError).Error]\nat dcfh.go:512: calling [(*io/fs.PathError).Error]\nat dcfh.go:530: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates]\nat dcfh.go:512: calling [(runtime.errorString).Error]\nat dcfh.go:512: calling [(*encoding/json.SyntaxError).Error]\nat dcfh.go:512: calling [(*internal/reflectlite.ValueError).Error]\nat dcfh.go:619: calling [fmt.Println]\nat dcfh.go:624: calling [fmt.Println]\nat dcfh.go:512: calling [(*os.LinkError).Error]\nat dcfh.go:512: calling [(*time.ParseError).Error]\nat dcfh.go:512: calling [(*internal/bisect.parseError).Error]\nat dcfh.go:512: calling [(*encoding/json.MarshalerError).Error]\nat dcfh.go:512: calling [(*runtime.TypeAssertionError).Error]\nat dcfh.go:512: calling [(encoding/hex.InvalidByteError).Error]\nat dcfh.go:512: calling [(*errors.errorString).Error]\nat dcfh.go:512: calling [(*encoding/json.UnsupportedValueError).Error]\nat dcfh.go:512: calling [(*fmt.wrapErrors).Error]\nat dcfh.go:512: calling [(*regexp/syntax.Error).Error]\nat dcfh.go:512: calling [(*internal/poll.DeadlineExceededError).Error]\nat dcfh.go:524: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).LoadMainIndex]\nat dcfh.go:512: calling [(*os.SyscallError).Error]\nat dcfh.go:512: calling [(*fmt.wrapError).Error]\nat dcfh.go:521: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]\nat dcfh.go:512: calling [(time.fileSizeError).Error]\nat dcfh.go:513: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:536: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:515: calling [fmt.Fprintf]\nat dcfh.go:512: calling [(crypto/internal/fips140/aes.KeySizeError).Error]\nat dcfh.go:510: calling [command-line-arguments.findDcfhRepo]" ]
+        "command-line-arguments.findDcfhRepo" [ penwidth="0.5" tooltip="command-line-arguments.findDcfhRepo | defined in dcfh.go:633\nat dcfh.go:644: calling [os.Stat]\nat dcfh.go:645: calling [os.Stat]\nat dcfh.go:644: calling [(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir]\nat dcfh.go:634: calling [os.Getwd]\nat dcfh.go:644: calling [(*os.fileStat).IsDir]\nat dcfh.go:641: calling [path/filepath.Join]\nat dcfh.go:642: calling [path/filepath.Join]\nat dcfh.go:636: calling [fmt.Errorf]\nat dcfh.go:658: calling [fmt.Errorf]\nat dcfh.go:650: calling [path/filepath.Dir]" fillcolor="lightblue" label="findDcfhRepo" ]
+        "command-line-arguments.buildFlags" [ fillcolor="lightblue" label="buildFlags" penwidth="0.5" tooltip="command-line-arguments.buildFlags | defined in dcfh.go:165" ]
+        "command-line-arguments.outputJSON" [ fillcolor="lightblue" label="outputJSON" penwidth="0.5" tooltip="command-line-arguments.outputJSON | defined in dcfh.go:224\nat dcfh.go:225: calling [encoding/json.NewEncoder]\nat dcfh.go:227: calling [(*encoding/json.Encoder).Encode]\nat dcfh.go:226: calling [(*encoding/json.Encoder).SetIndent]" ]
+        "command-line-arguments.handleStatus" [ tooltip="command-line-arguments.handleStatus | defined in dcfh.go:300\nat dcfh.go:302: calling [command-line-arguments.outputError]\nat dcfh.go:309: calling [command-line-arguments.outputError]\nat dcfh.go:330: calling [command-line-arguments.outputError]\nat dcfh.go:309: calling [(syscall.Errno).Error]\nat dcfh.go:330: calling [(syscall.Errno).Error]\nat dcfh.go:330: calling [(encoding/hex.InvalidByteError).Error]\nat dcfh.go:309: calling [(encoding/hex.InvalidByteError).Error]\nat dcfh.go:328: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Status]\nat dcfh.go:353: calling [command-line-arguments.outputJSON]\nat dcfh.go:363: calling [fmt.Println]\nat dcfh.go:367: calling [fmt.Println]\nat dcfh.go:374: calling [fmt.Println]\nat dcfh.go:375: calling [fmt.Println]\nat dcfh.go:376: calling [fmt.Println]\nat dcfh.go:380: calling [fmt.Println]\nat dcfh.go:384: calling [fmt.Println]\nat dcfh.go:385: calling [fmt.Println]\nat dcfh.go:386: calling [fmt.Println]\nat dcfh.go:390: calling [fmt.Println]\nat dcfh.go:394: calling [fmt.Println]\nat dcfh.go:395: calling [fmt.Println]\nat dcfh.go:396: calling [fmt.Println]\nat dcfh.go:400: calling [fmt.Println]\nat dcfh.go:309: calling [(internal/poll.errNetClosing).Error]\nat dcfh.go:330: calling [(internal/poll.errNetClosing).Error]\nat dcfh.go:309: calling [(runtime.errorString).Error]\nat dcfh.go:330: calling [(runtime.errorString).Error]\nat dcfh.go:310: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:334: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:309: calling [(*internal/bisect.parseError).Error]\nat dcfh.go:330: calling [(*internal/bisect.parseError).Error]\nat dcfh.go:330: calling [(*encoding/json.SyntaxError).Error]\nat dcfh.go:309: calling [(*encoding/json.SyntaxError).Error]\nat dcfh.go:330: calling [(*encoding/json.UnsupportedTypeError).Error]\nat dcfh.go:309: calling [(*encoding/json.UnsupportedTypeError).Error]\nat dcfh.go:309: calling [(*internal/poll.DeadlineExceededError).Error]\nat dcfh.go:330: calling [(*internal/poll.DeadlineExceededError).Error]\nat dcfh.go:347: calling [(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges]\nat dcfh.go:366: calling [(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges]\nat dcfh.go:309: calling [(*io/fs.PathError).Error]\nat dcfh.go:330: calling [(*io/fs.PathError).Error]\nat dcfh.go:309: calling [(*time.ParseError).Error]\nat dcfh.go:330: calling [(*time.ParseError).Error]\nat dcfh.go:325: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]\nat dcfh.go:309: calling [(*encoding/json.UnsupportedValueError).Error]\nat dcfh.go:330: calling [(*encoding/json.UnsupportedValueError).Error]\nat dcfh.go:309: calling [(*os.LinkError).Error]\nat dcfh.go:330: calling [(*os.LinkError).Error]\nat dcfh.go:330: calling [(*internal/reflectlite.ValueError).Error]\nat dcfh.go:309: calling [(*internal/reflectlite.ValueError).Error]\nat dcfh.go:309: calling [(runtime.plainError).Error]\nat dcfh.go:330: calling [(runtime.plainError).Error]\nat dcfh.go:309: calling [(*fmt.wrapError).Error]\nat dcfh.go:330: calling [(*fmt.wrapError).Error]\nat dcfh.go:309: calling [(crypto/internal/fips140/aes.KeySizeError).Error]\nat dcfh.go:330: calling [(crypto/internal/fips140/aes.KeySizeError).Error]\nat dcfh.go:326: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]\nat dcfh.go:319: calling [path/filepath.Rel]\nat dcfh.go:328: calling [command-line-arguments.buildFlags]\nat dcfh.go:330: calling [(*encoding/json.MarshalerError).Error]\nat dcfh.go:309: calling [(*encoding/json.MarshalerError).Error]\nat dcfh.go:309: calling [(*os.SyscallError).Error]\nat dcfh.go:330: calling [(*os.SyscallError).Error]\nat dcfh.go:312: calling [fmt.Fprintf]\nat dcfh.go:309: calling [(*fmt.wrapErrors).Error]\nat dcfh.go:330: calling [(*fmt.wrapErrors).Error]\nat dcfh.go:358: calling [fmt.Printf]\nat dcfh.go:360: calling [fmt.Printf]\nat dcfh.go:362: calling [fmt.Printf]\nat dcfh.go:369: calling [fmt.Printf]\nat dcfh.go:378: calling [fmt.Printf]\nat dcfh.go:388: calling [fmt.Printf]\nat dcfh.go:403: calling [fmt.Printf]\nat dcfh.go:398: calling [fmt.Printf]\nat dcfh.go:336: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length]\nat dcfh.go:368: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length]\nat dcfh.go:309: calling [(*strconv.NumError).Error]\nat dcfh.go:330: calling [(*strconv.NumError).Error]\nat dcfh.go:309: calling [(*net.timeoutError).Error]\nat dcfh.go:330: calling [(*net.timeoutError).Error]\nat dcfh.go:318: calling [os.Getwd]\nat dcfh.go:303: calling [os.Exit]\nat dcfh.go:314: calling [os.Exit]\nat dcfh.go:331: calling [os.Exit]\nat dcfh.go:309: calling [(context.deadlineExceededError).Error]\nat dcfh.go:330: calling [(context.deadlineExceededError).Error]\nat dcfh.go:309: calling [(*reflect.ValueError).Error]\nat dcfh.go:330: calling [(*reflect.ValueError).Error]\nat dcfh.go:330: calling [(time.fileSizeError).Error]\nat dcfh.go:309: calling [(time.fileSizeError).Error]\nat dcfh.go:307: calling [command-line-arguments.findDcfhRepo]\nat dcfh.go:330: calling [(*runtime.TypeAssertionError).Error]\nat dcfh.go:309: calling [(*runtime.TypeAssertionError).Error]\nat dcfh.go:309: calling [(*errors.errorString).Error]\nat dcfh.go:330: calling [(*errors.errorString).Error]\nat dcfh.go:309: calling [(*regexp/syntax.Error).Error]\nat dcfh.go:330: calling [(*regexp/syntax.Error).Error]" fillcolor="lightblue" label="handleStatus" penwidth="0.5" ]
+        "command-line-arguments.handleUpdate" [ fillcolor="lightblue" label="handleUpdate" penwidth="0.5" tooltip="command-line-arguments.handleUpdate | defined in dcfh.go:407\nat dcfh.go:411: calling [(runtime.errorString).Error]\nat dcfh.go:412: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:421: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:448: calling [command-line-arguments.buildFlags]\nat dcfh.go:458: calling [command-line-arguments.buildFlags]\nat dcfh.go:411: calling [(crypto/internal/fips140/aes.KeySizeError).Error]\nat dcfh.go:411: calling [(*regexp/syntax.Error).Error]\nat dcfh.go:416: calling [os.Exit]\nat dcfh.go:450: calling [os.Exit]\nat dcfh.go:461: calling [os.Exit]\nat dcfh.go:440: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]\nat dcfh.go:483: calling [(time.Duration).Round]\nat dcfh.go:494: calling [(time.Duration).Round]\nat dcfh.go:411: calling [(internal/poll.errNetClosing).Error]\nat dcfh.go:448: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update]\nat dcfh.go:411: calling [(*errors.errorString).Error]\nat dcfh.go:439: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]\nat dcfh.go:425: calling [fmt.Printf]\nat dcfh.go:428: calling [fmt.Printf]\nat dcfh.go:434: calling [fmt.Printf]\nat dcfh.go:489: calling [fmt.Printf]\nat dcfh.go:491: calling [fmt.Printf]\nat dcfh.go:494: calling [fmt.Printf]\nat dcfh.go:495: calling [fmt.Printf]\nat dcfh.go:497: calling [fmt.Printf]\nat dcfh.go:414: calling [fmt.Fprintf]\nat dcfh.go:449: calling [fmt.Sprintf]\nat dcfh.go:460: calling [fmt.Sprintf]\nat dcfh.go:453: calling [time.Since]\nat dcfh.go:411: calling [(*reflect.ValueError).Error]\nat dcfh.go:411: calling [(*internal/bisect.parseError).Error]\nat dcfh.go:411: calling [(*fmt.wrapErrors).Error]\nat dcfh.go:409: calling [command-line-arguments.findDcfhRepo]\nat dcfh.go:411: calling [(context.deadlineExceededError).Error]\nat dcfh.go:411: calling [(syscall.Errno).Error]\nat dcfh.go:411: calling [(*encoding/json.UnsupportedValueError).Error]\nat dcfh.go:411: calling [(*internal/poll.DeadlineExceededError).Error]\nat dcfh.go:483: calling [(time.Duration).String]\nat dcfh.go:411: calling [(*os.SyscallError).Error]\nat dcfh.go:454: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats]\nat dcfh.go:411: calling [(*fmt.wrapError).Error]\nat dcfh.go:411: calling [(encoding/hex.InvalidByteError).Error]\nat dcfh.go:411: calling [(time.fileSizeError).Error]\nat dcfh.go:411: calling [(*internal/reflectlite.ValueError).Error]\nat dcfh.go:411: calling [(runtime.plainError).Error]\nat dcfh.go:458: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates]\nat dcfh.go:411: calling [(*os.LinkError).Error]\nat dcfh.go:486: calling [command-line-arguments.outputJSON]\nat dcfh.go:411: calling [(*encoding/json.SyntaxError).Error]\nat dcfh.go:443: calling [fmt.Println]\nat dcfh.go:411: calling [(*io/fs.PathError).Error]\nat dcfh.go:411: calling [command-line-arguments.outputError]\nat dcfh.go:449: calling [command-line-arguments.outputError]\nat dcfh.go:460: calling [command-line-arguments.outputError]\nat dcfh.go:446: calling [time.Now]\nat dcfh.go:411: calling [(*time.ParseError).Error]\nat dcfh.go:411: calling [(*encoding/json.UnsupportedTypeError).Error]\nat dcfh.go:411: calling [(*strconv.NumError).Error]\nat dcfh.go:411: calling [(*runtime.TypeAssertionError).Error]\nat dcfh.go:411: calling [(*net.timeoutError).Error]\nat dcfh.go:411: calling [(*encoding/json.MarshalerError).Error]" ]
+        "command-line-arguments.init" [ fillcolor="lightblue" label="init" penwidth="0.5" tooltip="command-line-arguments.init | defined in .:0\nat dcfh.go:17: calling [flag.Bool]\nat dcfh.go:18: calling [flag.Bool]\nat dcfh.go:19: calling [flag.Bool]\nat dcfh.go:16: calling [flag.String]\nat dcfh.go:20: calling [flag.String]\nat dcfh.go:25: calling [flag.NewFlagSet]\nat dcfh.go:26: calling [flag.NewFlagSet]\nat dcfh.go:27: calling [flag.NewFlagSet]\nat dcfh.go:28: calling [flag.NewFlagSet]" ]
+        "command-line-arguments.main" [ tooltip="command-line-arguments.main | defined in dcfh.go:118\nat dcfh.go:151: calling [command-line-arguments.handleInit]\nat dcfh.go:132: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:144: calling [os.Exit]\nat dcfh.go:160: calling [os.Exit]\nat dcfh.go:143: calling [command-line-arguments.showUsage]\nat dcfh.go:128: calling [github.com/mattkeenan/dircachefilehash/pkg.LogDebugFlags]\nat dcfh.go:153: calling [command-line-arguments.handleStatus]\nat dcfh.go:155: calling [command-line-arguments.handleUpdate]\nat dcfh.go:157: calling [command-line-arguments.handleDupes]\nat dcfh.go:159: calling [fmt.Sprintf]\nat dcfh.go:136: calling [command-line-arguments.handleVersion]\nat dcfh.go:126: calling [github.com/mattkeenan/dircachefilehash/pkg.InitDebugFlags]\nat dcfh.go:159: calling [command-line-arguments.outputError]\nat dcfh.go:123: calling [flag.Parse]\nat dcfh.go:141: calling [flag.Args]" fillcolor="lightblue" label="main" penwidth="0.5" ]
+        "command-line-arguments.handleInit" [ fillcolor="lightblue" label="handleInit" penwidth="0.5" tooltip="command-line-arguments.handleInit | defined in dcfh.go:230\nat dcfh.go:252: calling [(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir]\nat dcfh.go:290: calling [command-line-arguments.outputJSON]\nat dcfh.go:240: calling [path/filepath.Abs]\nat dcfh.go:278: calling [time.Since]\nat dcfh.go:233: calling [os.Exit]\nat dcfh.go:243: calling [os.Exit]\nat dcfh.go:250: calling [os.Exit]\nat dcfh.go:254: calling [os.Exit]\nat dcfh.go:261: calling [os.Exit]\nat dcfh.go:275: calling [os.Exit]\nat dcfh.go:267: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:258: calling [path/filepath.Join]\nat dcfh.go:279: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats]\nat dcfh.go:232: calling [command-line-arguments.outputError]\nat dcfh.go:242: calling [command-line-arguments.outputError]\nat dcfh.go:249: calling [command-line-arguments.outputError]\nat dcfh.go:253: calling [command-line-arguments.outputError]\nat dcfh.go:260: calling [command-line-arguments.outputError]\nat dcfh.go:274: calling [command-line-arguments.outputError]\nat dcfh.go:270: calling [fmt.Println]\nat dcfh.go:288: calling [(time.Duration).Round]\nat dcfh.go:295: calling [(time.Duration).Round]\nat dcfh.go:273: calling [command-line-arguments.buildFlags]\nat dcfh.go:252: calling [(*os.fileStat).IsDir]\nat dcfh.go:237: calling [time.Now]\nat dcfh.go:273: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update]\nat dcfh.go:242: calling [fmt.Sprintf]\nat dcfh.go:249: calling [fmt.Sprintf]\nat dcfh.go:253: calling [fmt.Sprintf]\nat dcfh.go:260: calling [fmt.Sprintf]\nat dcfh.go:274: calling [fmt.Sprintf]\nat dcfh.go:247: calling [os.Stat]\nat dcfh.go:259: calling [os.Stat]\nat dcfh.go:265: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]\nat dcfh.go:269: calling [fmt.Printf]\nat dcfh.go:292: calling [fmt.Printf]\nat dcfh.go:294: calling [fmt.Printf]\nat dcfh.go:295: calling [fmt.Printf]\nat dcfh.go:288: calling [(time.Duration).String]" ]
+        
+        subgraph "cluster_context" {
+        URL="/?f=context";
+penwidth="0.8";
+fontname="Tahoma bold";
+label="context";
+tooltip="package: context";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+rank="sink";
+        
+        "(context.deadlineExceededError).Error" [ fillcolor="#adedad" label="(deadlineExceededError).Error" penwidth="1.5" tooltip="(context.deadlineExceededError).Error | defined in context.go:175" ]
+        
+    }
+
+        subgraph "cluster_crypto/internal/fips140/aes" {
+        penwidth="0.8";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+rank="sink";
+label="crypto/internal/fips140/aes";
+tooltip="package: crypto/internal/fips140/aes";
+fontname="Tahoma bold";
+URL="/?f=crypto/internal/fips140/aes";
+        
+        "(crypto/internal/fips140/aes.KeySizeError).Error" [ fillcolor="#adedad" label="(KeySizeError).Error" penwidth="1.5" tooltip="(crypto/internal/fips140/aes.KeySizeError).Error | defined in aes.go:57" ]
+        
+    }
+
+        subgraph "cluster_encoding/hex" {
+        tooltip="package: encoding/hex";
+fontsize="16";
+URL="/?f=encoding/hex";
+penwidth="0.8";
+style="filled";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+rank="sink";
+label="encoding/hex";
+        
+        "(encoding/hex.InvalidByteError).Error" [ tooltip="(encoding/hex.InvalidByteError).Error | defined in hex.go:72" fillcolor="#adedad" label="(InvalidByteError).Error" penwidth="1.5" ]
+        
+    }
+
+        subgraph "cluster_encoding/json" {
+        fontname="Tahoma bold";
+rank="sink";
+style="filled";
+label="encoding/json";
+URL="/?f=encoding/json";
+tooltip="package: encoding/json";
+penwidth="0.8";
+fontsize="16";
+fillcolor="#E0FFE1";
+        
+        "encoding/json.NewEncoder" [ fillcolor="#adedad" label="NewEncoder" penwidth="1.5" tooltip="encoding/json.NewEncoder | defined in stream.go:192" ]
+        "(*encoding/json.Encoder).Encode" [ penwidth="1.5" tooltip="(*encoding/json.Encoder).Encode | defined in stream.go:202" fillcolor="#adedad" label="(*Encoder).Encode" ]
+        "(*encoding/json.UnsupportedTypeError).Error" [ label="(*UnsupportedTypeError).Error" penwidth="1.5" tooltip="(*encoding/json.UnsupportedTypeError).Error | defined in encode.go:212" fillcolor="#adedad" ]
+        "(*encoding/json.SyntaxError).Error" [ tooltip="(*encoding/json.SyntaxError).Error | defined in scanner.go:52" fillcolor="#adedad" label="(*SyntaxError).Error" penwidth="1.5" ]
+        "(*encoding/json.Encoder).SetIndent" [ fillcolor="#adedad" label="(*Encoder).SetIndent" penwidth="1.5" tooltip="(*encoding/json.Encoder).SetIndent | defined in stream.go:240" ]
+        "(*encoding/json.UnsupportedValueError).Error" [ fillcolor="#adedad" label="(*UnsupportedValueError).Error" penwidth="1.5" tooltip="(*encoding/json.UnsupportedValueError).Error | defined in encode.go:223" ]
+        "(*encoding/json.MarshalerError).Error" [ tooltip="(*encoding/json.MarshalerError).Error | defined in encode.go:249" fillcolor="#adedad" label="(*MarshalerError).Error" penwidth="1.5" ]
+        
+    }
+
+        subgraph "cluster_errors" {
+        penwidth="0.8";
+fontsize="16";
+fontname="Tahoma bold";
+rank="sink";
+URL="/?f=errors";
+style="filled";
+fillcolor="#E0FFE1";
+label="errors";
+tooltip="package: errors";
+        
+        "(*errors.errorString).Error" [ penwidth="1.5" tooltip="(*errors.errorString).Error | defined in errors.go:73" fillcolor="#adedad" label="(*errorString).Error" ]
+        
+    }
+
+        subgraph "cluster_flag" {
+        penwidth="0.8";
+style="filled";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+rank="sink";
+label="flag";
+fontsize="16";
+URL="/?f=flag";
+tooltip="package: flag";
+        
+        "flag.commandLineUsage" [ fillcolor="#adedad" label="commandLineUsage" penwidth="0.5" tooltip="flag.commandLineUsage | defined in flag.go:1216\nat flag.go:1217: calling [command-line-arguments.showUsage]" ]
+        "(*flag.FlagSet).usage" [ label="(*FlagSet).usage" penwidth="0.5" tooltip="(*flag.FlagSet).usage | defined in flag.go:1066\nat flag.go:1070: calling [command-line-arguments.showUsage]" fillcolor="#adedad" ]
+        "flag.String" [ fillcolor="#adedad" label="String" penwidth="1.5" tooltip="flag.String | defined in flag.go:898" ]
+        "flag.Bool" [ label="Bool" penwidth="1.5" tooltip="flag.Bool | defined in flag.go:768" fillcolor="#adedad" ]
+        "flag.NewFlagSet" [ fillcolor="#adedad" label="NewFlagSet" penwidth="1.5" tooltip="flag.NewFlagSet | defined in flag.go:1223" ]
+        "flag.Parse" [ fillcolor="#adedad" label="Parse" penwidth="1.5" tooltip="flag.Parse | defined in flag.go:1186" ]
+        "flag.Args" [ fillcolor="#adedad" label="Args" penwidth="1.5" tooltip="flag.Args | defined in flag.go:744" ]
+        
+    }
+
+        subgraph "cluster_fmt" {
+        URL="/?f=fmt";
+fillcolor="#E0FFE1";
+rank="sink";
+tooltip="package: fmt";
+penwidth="0.8";
+fontsize="16";
+style="filled";
+fontname="Tahoma bold";
+label="fmt";
+        
+        "fmt.Fprintf" [ fillcolor="#adedad" label="Fprintf" penwidth="1.5" tooltip="fmt.Fprintf | defined in print.go:222" ]
+        "fmt.Println" [ fillcolor="#adedad" label="Println" penwidth="1.5" tooltip="fmt.Println | defined in print.go:313" ]
+        "fmt.Errorf" [ fillcolor="#adedad" label="Errorf" penwidth="1.5" tooltip="fmt.Errorf | defined in errors.go:22" ]
+        "fmt.Sprintf" [ tooltip="fmt.Sprintf | defined in print.go:237" fillcolor="#adedad" label="Sprintf" penwidth="1.5" ]
+        "(*fmt.wrapError).Error" [ fillcolor="#adedad" label="(*wrapError).Error" penwidth="1.5" tooltip="(*fmt.wrapError).Error | defined in errors.go:59" ]
+        "(*fmt.wrapErrors).Error" [ fillcolor="#adedad" label="(*wrapErrors).Error" penwidth="1.5" tooltip="(*fmt.wrapErrors).Error | defined in errors.go:72" ]
+        "fmt.Printf" [ fillcolor="#adedad" label="Printf" penwidth="1.5" tooltip="fmt.Printf | defined in print.go:232" ]
+        
+    }
+
+        subgraph "cluster_github.com/mattkeenan/dircachefilehash/pkg" {
+        penwidth="0.8";
+fontsize="16";
+style="filled";
+label="dircachefilehash";
+URL="/?f=github.com/mattkeenan/dircachefilehash/pkg";
+tooltip="package: github.com/mattkeenan/dircachefilehash/pkg";
+fillcolor="lightyellow";
+fontname="Tahoma bold";
+rank="sink";
+        
+        "(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir" [ fillcolor="moccasin" label="(*mockFileInfo).IsDir" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir | defined in scan.go:77" ]
+        "github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache" [ tooltip="github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache | defined in dircache.go:77" fillcolor="moccasin" label="NewDirectoryCache" penwidth="1.5" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit" [ penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit | defined in dircache.go:38" fillcolor="moccasin" label="(*DirectoryCache).CleanupTempFilesOnExit" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).LoadMainIndex" [ fillcolor="moccasin" label="(*DirectoryCache).LoadMainIndex" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).LoadMainIndex | defined in middleware.go:9" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates" [ fillcolor="moccasin" label="(*DirectoryCache).FindDuplicates" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates | defined in dupes.go:17" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Status" [ tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Status | defined in status.go:38" fillcolor="moccasin" label="(*DirectoryCache).Status" penwidth="1.5" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length" [ fillcolor="moccasin" label="(*DirectoryCache).Length" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length | defined in dircache.go:65" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges" [ fillcolor="moccasin" label="(*StatusResult).HasChanges" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges | defined in status.go:206" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update" [ fillcolor="moccasin" label="(*DirectoryCache).Update" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update | defined in update.go:9" ]
+        "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats" [ fillcolor="moccasin" label="(*DirectoryCache).Stats" penwidth="1.5" tooltip="(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats | defined in dircache.go:44" ]
+        "github.com/mattkeenan/dircachefilehash/pkg.InitDebugFlags" [ fillcolor="moccasin" label="InitDebugFlags" penwidth="1.5" tooltip="github.com/mattkeenan/dircachefilehash/pkg.InitDebugFlags | defined in debug.go:73" ]
+        "github.com/mattkeenan/dircachefilehash/pkg.LogDebugFlags" [ fillcolor="moccasin" label="LogDebugFlags" penwidth="1.5" tooltip="github.com/mattkeenan/dircachefilehash/pkg.LogDebugFlags | defined in debug.go:107" ]
+        
+    }
+
+        subgraph "cluster_internal/bisect" {
+        tooltip="package: internal/bisect";
+penwidth="0.8";
+style="filled";
+fillcolor="#E0FFE1";
+URL="/?f=internal/bisect";
+fontsize="16";
+fontname="Tahoma bold";
+rank="sink";
+label="internal/bisect";
+        
+        "(*internal/bisect.parseError).Error" [ fillcolor="#adedad" label="(*parseError).Error" penwidth="1.5" tooltip="(*internal/bisect.parseError).Error | defined in bisect.go:687" ]
+        
+    }
+
+        subgraph "cluster_internal/poll" {
+        penwidth="0.8";
+style="filled";
+fontname="Tahoma bold";
+rank="sink";
+label="internal/poll";
+fontsize="16";
+fillcolor="#E0FFE1";
+URL="/?f=internal/poll";
+tooltip="package: internal/poll";
+        
+        "(internal/poll.errNetClosing).Error" [ tooltip="(internal/poll.errNetClosing).Error | defined in fd.go:24" fillcolor="#adedad" label="(errNetClosing).Error" penwidth="1.5" ]
+        "(*internal/poll.DeadlineExceededError).Error" [ penwidth="1.5" tooltip="(*internal/poll.DeadlineExceededError).Error | defined in fd.go:60" fillcolor="#adedad" label="(*DeadlineExceededError).Error" ]
+        
+    }
+
+        subgraph "cluster_internal/reflectlite" {
+        fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+label="internal/reflectlite";
+URL="/?f=internal/reflectlite";
+penwidth="0.8";
+fontname="Tahoma bold";
+rank="sink";
+tooltip="package: internal/reflectlite";
+        
+        "(*internal/reflectlite.ValueError).Error" [ penwidth="1.5" tooltip="(*internal/reflectlite.ValueError).Error | defined in value.go:170" fillcolor="#adedad" label="(*ValueError).Error" ]
+        
+    }
+
+        subgraph "cluster_io/fs" {
+        style="filled";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+URL="/?f=io/fs";
+penwidth="0.8";
+rank="sink";
+label="io/fs";
+tooltip="package: io/fs";
+fontsize="16";
+        
+        "(*io/fs.PathError).Error" [ tooltip="(*io/fs.PathError).Error | defined in fs.go:257" fillcolor="#adedad" label="(*PathError).Error" penwidth="1.5" ]
+        
+    }
+
+        subgraph "cluster_net" {
+        penwidth="0.8";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+rank="sink";
+label="net";
+URL="/?f=net";
+tooltip="package: net";
+fontname="Tahoma bold";
+        
+        "(*net.timeoutError).Error" [ label="(*timeoutError).Error" penwidth="1.5" tooltip="(*net.timeoutError).Error | defined in net.go:623" fillcolor="#adedad" ]
+        
+    }
+
+        subgraph "cluster_os" {
+        fontsize="16";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+label="os";
+URL="/?f=os";
+tooltip="package: os";
+penwidth="0.8";
+style="filled";
+rank="sink";
+        
+        "os.Exit" [ label="Exit" penwidth="1.5" tooltip="os.Exit | defined in proc.go:62" fillcolor="#adedad" ]
+        "os.Getwd" [ label="Getwd" penwidth="1.5" tooltip="os.Getwd | defined in getwd.go:26" fillcolor="#adedad" ]
+        "os.Stat" [ fillcolor="#adedad" label="Stat" penwidth="1.5" tooltip="os.Stat | defined in stat.go:11" ]
+        "(*os.fileStat).IsDir" [ fillcolor="#adedad" label="(*fileStat).IsDir" penwidth="1.5" tooltip="(*os.fileStat).IsDir | defined in types.go:61" ]
+        "(*os.SyscallError).Error" [ fillcolor="#adedad" label="(*SyscallError).Error" penwidth="1.5" tooltip="(*os.SyscallError).Error | defined in error.go:54" ]
+        "(*os.LinkError).Error" [ fillcolor="#adedad" label="(*LinkError).Error" penwidth="1.5" tooltip="(*os.LinkError).Error | defined in file.go:109" ]
+        
+    }
+
+        subgraph "cluster_path/filepath" {
+        penwidth="0.8";
+rank="sink";
+URL="/?f=path/filepath";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+label="path/filepath";
+tooltip="package: path/filepath";
+        
+        "path/filepath.Join" [ label="Join" penwidth="1.5" tooltip="path/filepath.Join | defined in path.go:130" fillcolor="#adedad" ]
+        "path/filepath.Dir" [ tooltip="path/filepath.Dir | defined in path.go:465" fillcolor="#adedad" label="Dir" penwidth="1.5" ]
+        "path/filepath.Rel" [ penwidth="1.5" tooltip="path/filepath.Rel | defined in path.go:184" fillcolor="#adedad" label="Rel" ]
+        "path/filepath.Abs" [ penwidth="1.5" tooltip="path/filepath.Abs | defined in path.go:161" fillcolor="#adedad" label="Abs" ]
+        
+    }
+
+        subgraph "cluster_reflect" {
+        fillcolor="#E0FFE1";
+rank="sink";
+fontsize="16";
+fontname="Tahoma bold";
+label="reflect";
+URL="/?f=reflect";
+tooltip="package: reflect";
+penwidth="0.8";
+style="filled";
+        
+        "(*reflect.ValueError).Error" [ penwidth="1.5" tooltip="(*reflect.ValueError).Error | defined in value.go:179" fillcolor="#adedad" label="(*ValueError).Error" ]
+        "(reflect.Value).Call" [ tooltip="(reflect.Value).Call | defined in value.go:365\nat .:0: calling [command-line-arguments.showUsage]" fillcolor="#adedad" label="(Value).Call" penwidth="1.5" ]
+        
+    }
+
+        subgraph "cluster_regexp/syntax" {
+        URL="/?f=regexp/syntax";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+rank="sink";
+tooltip="package: regexp/syntax";
+penwidth="0.8";
+label="regexp/syntax";
+        
+        "(*regexp/syntax.Error).Error" [ fillcolor="#adedad" label="(*Error).Error" penwidth="1.5" tooltip="(*regexp/syntax.Error).Error | defined in parse.go:21" ]
+        
+    }
+
+        subgraph "cluster_runtime" {
+        label="runtime";
+tooltip="package: runtime";
+penwidth="0.8";
+fontsize="16";
+style="filled";
+rank="sink";
+URL="/?f=runtime";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+        
+        "runtime.clearpools" [ fillcolor="#adedad" label="clearpools" penwidth="0.5" tooltip="runtime.clearpools | defined in mgc.go:1802\nat mgc.go:1805: calling [command-line-arguments.showUsage]" ]
+        "runtime.tryRecordGoroutineProfile" [ fillcolor="#adedad" label="tryRecordGoroutineProfile" penwidth="0.5" tooltip="runtime.tryRecordGoroutineProfile | defined in mprof.go:1498\nat mprof.go:1522: calling [command-line-arguments.showUsage]" ]
+        "runtime.runfinq" [ fillcolor="#adedad" label="runfinq" penwidth="0.5" tooltip="runtime.runfinq | defined in mfinal.go:179\nat mfinal.go:214: calling [command-line-arguments.showUsage]" ]
+        "runtime.send" [ fillcolor="#adedad" label="send" penwidth="0.5" tooltip="runtime.send | defined in chan.go:318\nat chan.go:320: calling [command-line-arguments.showUsage]\nat chan.go:344: calling [command-line-arguments.showUsage]" ]
+        "(runtime.errorString).Error" [ fillcolor="#adedad" label="(errorString).Error" penwidth="1.5" tooltip="(runtime.errorString).Error | defined in error.go:81" ]
+        "(*runtime.TypeAssertionError).Error" [ label="(*TypeAssertionError).Error" penwidth="1.5" tooltip="(*runtime.TypeAssertionError).Error | defined in error.go:34" fillcolor="#adedad" ]
+        "(runtime.plainError).Error" [ fillcolor="#adedad" label="(plainError).Error" penwidth="1.5" tooltip="(runtime.plainError).Error | defined in error.go:112" ]
+        "runtime.recv" [ fillcolor="#adedad" label="recv" penwidth="0.5" tooltip="runtime.recv | defined in chan.go:699\nat chan.go:701: calling [command-line-arguments.showUsage]\nat chan.go:736: calling [command-line-arguments.showUsage]" ]
+        
+    }
+
+        subgraph "cluster_strconv" {
+        fontsize="16";
+style="filled";
+fontname="Tahoma bold";
+rank="sink";
+label="strconv";
+URL="/?f=strconv";
+tooltip="package: strconv";
+penwidth="0.8";
+fillcolor="#E0FFE1";
+        
+        "(*strconv.NumError).Error" [ fillcolor="#adedad" label="(*NumError).Error" penwidth="1.5" tooltip="(*strconv.NumError).Error | defined in atoi.go:33" ]
+        
+    }
+
+        subgraph "cluster_sync" {
+        label="sync";
+style="filled";
+fontname="Tahoma bold";
+rank="sink";
+URL="/?f=sync";
+tooltip="package: sync";
+penwidth="0.8";
+fontsize="16";
+fillcolor="#E0FFE1";
+        
+        "(*sync.Once).doSlow" [ fillcolor="#adedad" label="(*Once).doSlow" penwidth="0.5" tooltip="(*sync.Once).doSlow | defined in once.go:73\nat once.go:78: calling [command-line-arguments.showUsage]" ]
+        
+    }
+
+        subgraph "cluster_syscall" {
+        tooltip="package: syscall";
+style="filled";
+fontname="Tahoma bold";
+label="syscall";
+URL="/?f=syscall";
+penwidth="0.8";
+fontsize="16";
+fillcolor="#E0FFE1";
+rank="sink";
+        
+        "(syscall.Errno).Error" [ penwidth="1.5" tooltip="(syscall.Errno).Error | defined in syscall_unix.go:110" fillcolor="#adedad" label="(Errno).Error" ]
+        
+    }
+
+        subgraph "cluster_time" {
+        fontsize="16";
+fillcolor="#E0FFE1";
+fontname="Tahoma bold";
+rank="sink";
+tooltip="package: time";
+style="filled";
+label="time";
+URL="/?f=time";
+penwidth="0.8";
+        
+        "time.goFunc" [ fillcolor="#adedad" label="goFunc" penwidth="0.5" tooltip="time.goFunc | defined in sleep.go:214\nat sleep.go:215: calling [command-line-arguments.showUsage]" ]
+        "(*time.ParseError).Error" [ fillcolor="#adedad" label="(*ParseError).Error" penwidth="1.5" tooltip="(*time.ParseError).Error | defined in format.go:902" ]
+        "(time.fileSizeError).Error" [ penwidth="1.5" tooltip="(time.fileSizeError).Error | defined in zoneinfo_read.go:41" fillcolor="#adedad" label="(fileSizeError).Error" ]
+        "time.Now" [ fillcolor="#adedad" label="Now" penwidth="1.5" tooltip="time.Now | defined in time.go:1340" ]
+        "time.Since" [ fillcolor="#adedad" label="Since" penwidth="1.5" tooltip="time.Since | defined in time.go:1223" ]
+        "(time.Duration).Round" [ fillcolor="#adedad" label="(Duration).Round" penwidth="1.5" tooltip="(time.Duration).Round | defined in time.go:1127" ]
+        "(time.Duration).String" [ penwidth="1.5" tooltip="(time.Duration).String | defined in time.go:943" fillcolor="#adedad" label="(Duration).String" ]
+        
+    }
+
+        subgraph "cluster_unique" {
+        penwidth="0.8";
+fontname="Tahoma bold";
+rank="sink";
+label="unique";
+tooltip="package: unique";
+fontsize="16";
+style="filled";
+fillcolor="#E0FFE1";
+URL="/?f=unique";
+        
+        "unique.registerCleanup$1" [ fillcolor="#adedad" label="registerCleanup$1" style="dotted,filled" tooltip="unique.registerCleanup$1 | defined in handle.go:151\nat handle.go:162: calling [command-line-arguments.showUsage]\nat handle.go:167: calling [command-line-arguments.showUsage]" ]
+        
+    }
+
+    }
+
+    "command-line-arguments.handleDupes" -> "os.Exit" [ color="saddlebrown" tooltip="at dcfh.go:506: calling [os.Exit]\nat dcfh.go:517: calling [os.Exit]\nat dcfh.go:526: calling [os.Exit]\nat dcfh.go:533: calling [os.Exit]" ]
+    "command-line-arguments.outputJSON" -> "encoding/json.NewEncoder" [ color="saddlebrown" tooltip="at dcfh.go:225: calling [encoding/json.NewEncoder]" ]
+    "command-line-arguments.handleStatus" -> "command-line-arguments.outputError" [ tooltip="at dcfh.go:302: calling [command-line-arguments.outputError]\nat dcfh.go:309: calling [command-line-arguments.outputError]\nat dcfh.go:330: calling [command-line-arguments.outputError]" ]
+    "command-line-arguments.handleUpdate" -> "(runtime.errorString).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(runtime.errorString).Error]" ]
+    "command-line-arguments.handleUpdate" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:412: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:421: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.handleUpdate" -> "command-line-arguments.buildFlags" [ tooltip="at dcfh.go:448: calling [command-line-arguments.buildFlags]\nat dcfh.go:458: calling [command-line-arguments.buildFlags]" ]
+    "command-line-arguments.handleDupes" -> "command-line-arguments.buildFlags" [ tooltip="at dcfh.go:530: calling [command-line-arguments.buildFlags]" ]
+    "command-line-arguments.handleDupes" -> "command-line-arguments.outputJSON" [ tooltip="at dcfh.go:547: calling [command-line-arguments.outputJSON]\nat dcfh.go:598: calling [command-line-arguments.outputJSON]" ]
+    "command-line-arguments.handleStatus" -> "(syscall.Errno).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(syscall.Errno).Error]\nat dcfh.go:330: calling [(syscall.Errno).Error]" ]
+    "command-line-arguments.handleStatus" -> "(encoding/hex.InvalidByteError).Error" [ tooltip="at dcfh.go:330: calling [(encoding/hex.InvalidByteError).Error]\nat dcfh.go:309: calling [(encoding/hex.InvalidByteError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Status" [ color="saddlebrown" tooltip="at dcfh.go:328: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Status]" ]
+    "command-line-arguments.handleUpdate" -> "(crypto/internal/fips140/aes.KeySizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(crypto/internal/fips140/aes.KeySizeError).Error]" ]
+    "command-line-arguments.handleInit" -> "(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir" [ color="saddlebrown" tooltip="at dcfh.go:252: calling [(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir]" style="dashed" ]
+    "command-line-arguments.handleDupes" -> "command-line-arguments.outputError" [ tooltip="at dcfh.go:505: calling [command-line-arguments.outputError]\nat dcfh.go:512: calling [command-line-arguments.outputError]\nat dcfh.go:525: calling [command-line-arguments.outputError]\nat dcfh.go:532: calling [command-line-arguments.outputError]" ]
+    "command-line-arguments.handleDupes" -> "(syscall.Errno).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(syscall.Errno).Error]" ]
+    "command-line-arguments.handleStatus" -> "command-line-arguments.outputJSON" [ tooltip="at dcfh.go:353: calling [command-line-arguments.outputJSON]" ]
+    "command-line-arguments.handleStatus" -> "fmt.Println" [ tooltip="at dcfh.go:363: calling [fmt.Println]\nat dcfh.go:367: calling [fmt.Println]\nat dcfh.go:374: calling [fmt.Println]\nat dcfh.go:375: calling [fmt.Println]\nat dcfh.go:376: calling [fmt.Println]\nat dcfh.go:380: calling [fmt.Println]\nat dcfh.go:384: calling [fmt.Println]\nat dcfh.go:385: calling [fmt.Println]\nat dcfh.go:386: calling [fmt.Println]\nat dcfh.go:390: calling [fmt.Println]\nat dcfh.go:394: calling [fmt.Println]\nat dcfh.go:395: calling [fmt.Println]\nat dcfh.go:396: calling [fmt.Println]\nat dcfh.go:400: calling [fmt.Println]" color="saddlebrown" ]
+    "command-line-arguments.handleUpdate" -> "(*regexp/syntax.Error).Error" [ color="saddlebrown" tooltip="at dcfh.go:411: calling [(*regexp/syntax.Error).Error]" style="dashed" ]
+    "command-line-arguments.outputJSON" -> "(*encoding/json.Encoder).Encode" [ color="saddlebrown" tooltip="at dcfh.go:227: calling [(*encoding/json.Encoder).Encode]" ]
+    "command-line-arguments.handleStatus" -> "(internal/poll.errNetClosing).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(internal/poll.errNetClosing).Error]\nat dcfh.go:330: calling [(internal/poll.errNetClosing).Error]" ]
+    "command-line-arguments.handleStatus" -> "(runtime.errorString).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(runtime.errorString).Error]\nat dcfh.go:330: calling [(runtime.errorString).Error]" ]
+    "command-line-arguments.handleStatus" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:310: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:334: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.handleStatus" -> "(*internal/bisect.parseError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*internal/bisect.parseError).Error]\nat dcfh.go:330: calling [(*internal/bisect.parseError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(runtime.plainError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(runtime.plainError).Error]" ]
+    "command-line-arguments.handleDupes" -> "fmt.Sprintf" [ color="saddlebrown" tooltip="at dcfh.go:525: calling [fmt.Sprintf]\nat dcfh.go:532: calling [fmt.Sprintf]" ]
+    "command-line-arguments.handleStatus" -> "(*encoding/json.SyntaxError).Error" [ tooltip="at dcfh.go:330: calling [(*encoding/json.SyntaxError).Error]\nat dcfh.go:309: calling [(*encoding/json.SyntaxError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleUpdate" -> "os.Exit" [ color="saddlebrown" tooltip="at dcfh.go:416: calling [os.Exit]\nat dcfh.go:450: calling [os.Exit]\nat dcfh.go:461: calling [os.Exit]" ]
+    "command-line-arguments.handleUpdate" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit" [ arrowhead="normalnoneodiamond" color="saddlebrown" tooltip="at dcfh.go:440: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]" ]
+    "command-line-arguments.handleUpdate" -> "(time.Duration).Round" [ color="saddlebrown" tooltip="at dcfh.go:483: calling [(time.Duration).Round]\nat dcfh.go:494: calling [(time.Duration).Round]" ]
+    "command-line-arguments.handleInit" -> "command-line-arguments.outputJSON" [ tooltip="at dcfh.go:290: calling [command-line-arguments.outputJSON]" ]
+    "command-line-arguments.findDcfhRepo" -> "os.Stat" [ color="saddlebrown" tooltip="at dcfh.go:644: calling [os.Stat]\nat dcfh.go:645: calling [os.Stat]" ]
+    "command-line-arguments.handleDupes" -> "(*net.timeoutError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*net.timeoutError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*strconv.NumError).Error" [ color="saddlebrown" tooltip="at dcfh.go:512: calling [(*strconv.NumError).Error]" style="dashed" ]
+    "command-line-arguments.handleStatus" -> "(*encoding/json.UnsupportedTypeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:330: calling [(*encoding/json.UnsupportedTypeError).Error]\nat dcfh.go:309: calling [(*encoding/json.UnsupportedTypeError).Error]" ]
+    "command-line-arguments.handleStatus" -> "(*internal/poll.DeadlineExceededError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*internal/poll.DeadlineExceededError).Error]\nat dcfh.go:330: calling [(*internal/poll.DeadlineExceededError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(internal/poll.errNetClosing).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(internal/poll.errNetClosing).Error]" ]
+    "command-line-arguments.handleStatus" -> "(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges" [ color="saddlebrown" tooltip="at dcfh.go:347: calling [(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges]\nat dcfh.go:366: calling [(*github.com/mattkeenan/dircachefilehash/pkg.StatusResult).HasChanges]" ]
+    "command-line-arguments.handleStatus" -> "(*io/fs.PathError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*io/fs.PathError).Error]\nat dcfh.go:330: calling [(*io/fs.PathError).Error]" ]
+    "command-line-arguments.handleStatus" -> "(*time.ParseError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*time.ParseError).Error]\nat dcfh.go:330: calling [(*time.ParseError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(internal/poll.errNetClosing).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(internal/poll.errNetClosing).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update" [ color="saddlebrown" tooltip="at dcfh.go:448: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update]" ]
+    "command-line-arguments.handleInit" -> "path/filepath.Abs" [ color="saddlebrown" tooltip="at dcfh.go:240: calling [path/filepath.Abs]" ]
+    "command-line-arguments.main" -> "command-line-arguments.handleInit" [ tooltip="at dcfh.go:151: calling [command-line-arguments.handleInit]" ]
+    "command-line-arguments.handleDupes" -> "(*encoding/json.UnsupportedTypeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*encoding/json.UnsupportedTypeError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*reflect.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*reflect.ValueError).Error]" ]
+    "command-line-arguments.handleStatus" -> "github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache" [ color="saddlebrown" tooltip="at dcfh.go:325: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]" ]
+    "command-line-arguments.handleStatus" -> "(*encoding/json.UnsupportedValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*encoding/json.UnsupportedValueError).Error]\nat dcfh.go:330: calling [(*encoding/json.UnsupportedValueError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*errors.errorString).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*errors.errorString).Error]" ]
+    "(reflect.Value).Call" -> "command-line-arguments.showUsage" [ color="saddlebrown" tooltip="at .:0: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleStatus" -> "(*os.LinkError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*os.LinkError).Error]\nat dcfh.go:330: calling [(*os.LinkError).Error]" ]
+    "command-line-arguments.showUsage" -> "fmt.Fprintf" [ tooltip="at dcfh.go:95: calling [fmt.Fprintf]\nat dcfh.go:96: calling [fmt.Fprintf]\nat dcfh.go:97: calling [fmt.Fprintf]\nat dcfh.go:98: calling [fmt.Fprintf]\nat dcfh.go:99: calling [fmt.Fprintf]\nat dcfh.go:100: calling [fmt.Fprintf]\nat dcfh.go:101: calling [fmt.Fprintf]\nat dcfh.go:102: calling [fmt.Fprintf]\nat dcfh.go:103: calling [fmt.Fprintf]\nat dcfh.go:104: calling [fmt.Fprintf]\nat dcfh.go:105: calling [fmt.Fprintf]\nat dcfh.go:106: calling [fmt.Fprintf]\nat dcfh.go:107: calling [fmt.Fprintf]\nat dcfh.go:108: calling [fmt.Fprintf]\nat dcfh.go:109: calling [fmt.Fprintf]\nat dcfh.go:110: calling [fmt.Fprintf]\nat dcfh.go:111: calling [fmt.Fprintf]\nat dcfh.go:112: calling [fmt.Fprintf]\nat dcfh.go:113: calling [fmt.Fprintf]\nat dcfh.go:114: calling [fmt.Fprintf]\nat dcfh.go:115: calling [fmt.Fprintf]" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit" [ tooltip="at dcfh.go:522: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]" arrowhead="normalnoneodiamond" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "(*internal/reflectlite.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:330: calling [(*internal/reflectlite.ValueError).Error]\nat dcfh.go:309: calling [(*internal/reflectlite.ValueError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache" [ color="saddlebrown" tooltip="at dcfh.go:439: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]" ]
+    "command-line-arguments.handleUpdate" -> "fmt.Printf" [ color="saddlebrown" tooltip="at dcfh.go:425: calling [fmt.Printf]\nat dcfh.go:428: calling [fmt.Printf]\nat dcfh.go:434: calling [fmt.Printf]\nat dcfh.go:489: calling [fmt.Printf]\nat dcfh.go:491: calling [fmt.Printf]\nat dcfh.go:494: calling [fmt.Printf]\nat dcfh.go:495: calling [fmt.Printf]\nat dcfh.go:497: calling [fmt.Printf]" ]
+    "unique.registerCleanup$1" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at handle.go:162: calling [command-line-arguments.showUsage]\nat handle.go:167: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleStatus" -> "(runtime.plainError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(runtime.plainError).Error]\nat dcfh.go:330: calling [(runtime.plainError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "fmt.Fprintf" [ color="saddlebrown" tooltip="at dcfh.go:414: calling [fmt.Fprintf]" ]
+    "command-line-arguments.handleUpdate" -> "fmt.Sprintf" [ color="saddlebrown" tooltip="at dcfh.go:449: calling [fmt.Sprintf]\nat dcfh.go:460: calling [fmt.Sprintf]" ]
+    "command-line-arguments.handleUpdate" -> "time.Since" [ color="saddlebrown" tooltip="at dcfh.go:453: calling [time.Since]" ]
+    "command-line-arguments.handleUpdate" -> "(*reflect.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*reflect.ValueError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*internal/bisect.parseError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*internal/bisect.parseError).Error]" ]
+    "command-line-arguments.init" -> "flag.Bool" [ color="saddlebrown" tooltip="at dcfh.go:17: calling [flag.Bool]\nat dcfh.go:18: calling [flag.Bool]\nat dcfh.go:19: calling [flag.Bool]" ]
+    "runtime.clearpools" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at mgc.go:1805: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleStatus" -> "(*fmt.wrapError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*fmt.wrapError).Error]\nat dcfh.go:330: calling [(*fmt.wrapError).Error]" ]
+    "command-line-arguments.handleStatus" -> "(crypto/internal/fips140/aes.KeySizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(crypto/internal/fips140/aes.KeySizeError).Error]\nat dcfh.go:330: calling [(crypto/internal/fips140/aes.KeySizeError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*fmt.wrapErrors).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*fmt.wrapErrors).Error]" ]
+    "command-line-arguments.main" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:132: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.handleUpdate" -> "command-line-arguments.findDcfhRepo" [ tooltip="at dcfh.go:409: calling [command-line-arguments.findDcfhRepo]" ]
+    "command-line-arguments.handleUpdate" -> "(context.deadlineExceededError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(context.deadlineExceededError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(context.deadlineExceededError).Error" [ tooltip="at dcfh.go:512: calling [(context.deadlineExceededError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "(*io/fs.PathError).Error" [ color="saddlebrown" tooltip="at dcfh.go:512: calling [(*io/fs.PathError).Error]" style="dashed" ]
+    "command-line-arguments.handleStatus" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit" [ arrowhead="normalnoneodiamond" color="saddlebrown" tooltip="at dcfh.go:326: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).CleanupTempFilesOnExit]" ]
+    "command-line-arguments.handleUpdate" -> "(syscall.Errno).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(syscall.Errno).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*encoding/json.UnsupportedValueError).Error" [ color="saddlebrown" tooltip="at dcfh.go:411: calling [(*encoding/json.UnsupportedValueError).Error]" style="dashed" ]
+    "command-line-arguments.handleInit" -> "time.Since" [ color="saddlebrown" tooltip="at dcfh.go:278: calling [time.Since]" ]
+    "command-line-arguments.findDcfhRepo" -> "(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:644: calling [(*github.com/mattkeenan/dircachefilehash/pkg.mockFileInfo).IsDir]" ]
+    "command-line-arguments.handleStatus" -> "path/filepath.Rel" [ color="saddlebrown" tooltip="at dcfh.go:319: calling [path/filepath.Rel]" ]
+    "command-line-arguments.handleStatus" -> "command-line-arguments.buildFlags" [ tooltip="at dcfh.go:328: calling [command-line-arguments.buildFlags]" ]
+    "runtime.runfinq" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at mfinal.go:214: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleDupes" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates" [ color="saddlebrown" tooltip="at dcfh.go:530: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates]" ]
+    "command-line-arguments.handleStatus" -> "(*encoding/json.MarshalerError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:330: calling [(*encoding/json.MarshalerError).Error]\nat dcfh.go:309: calling [(*encoding/json.MarshalerError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*internal/poll.DeadlineExceededError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*internal/poll.DeadlineExceededError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(time.Duration).String" [ color="saddlebrown" tooltip="at dcfh.go:483: calling [(time.Duration).String]" ]
+    "command-line-arguments.handleUpdate" -> "(*os.SyscallError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*os.SyscallError).Error]" ]
+    "command-line-arguments.main" -> "os.Exit" [ tooltip="at dcfh.go:144: calling [os.Exit]\nat dcfh.go:160: calling [os.Exit]" color="saddlebrown" ]
+    "command-line-arguments.handleInit" -> "os.Exit" [ tooltip="at dcfh.go:233: calling [os.Exit]\nat dcfh.go:243: calling [os.Exit]\nat dcfh.go:250: calling [os.Exit]\nat dcfh.go:254: calling [os.Exit]\nat dcfh.go:261: calling [os.Exit]\nat dcfh.go:275: calling [os.Exit]" color="saddlebrown" ]
+    "command-line-arguments.findDcfhRepo" -> "os.Getwd" [ color="saddlebrown" tooltip="at dcfh.go:634: calling [os.Getwd]" ]
+    "command-line-arguments.handleUpdate" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats" [ color="saddlebrown" tooltip="at dcfh.go:454: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats]" ]
+    "command-line-arguments.handleUpdate" -> "(*fmt.wrapError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*fmt.wrapError).Error]" ]
+    "(*sync.Once).doSlow" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at once.go:78: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleDupes" -> "(runtime.errorString).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(runtime.errorString).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*encoding/json.SyntaxError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*encoding/json.SyntaxError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(encoding/hex.InvalidByteError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(encoding/hex.InvalidByteError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*internal/reflectlite.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*internal/reflectlite.ValueError).Error]" ]
+    "runtime.send" -> "command-line-arguments.showUsage" [ tooltip="at chan.go:320: calling [command-line-arguments.showUsage]\nat chan.go:344: calling [command-line-arguments.showUsage]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "fmt.Println" [ color="saddlebrown" tooltip="at dcfh.go:619: calling [fmt.Println]\nat dcfh.go:624: calling [fmt.Println]" ]
+    "command-line-arguments.handleDupes" -> "(*os.LinkError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*os.LinkError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(time.fileSizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(time.fileSizeError).Error]" ]
+    "command-line-arguments.main" -> "command-line-arguments.showUsage" [ tooltip="at dcfh.go:143: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.outputError" -> "(*encoding/json.Encoder).Encode" [ color="saddlebrown" tooltip="at dcfh.go:218: calling [(*encoding/json.Encoder).Encode]" ]
+    "command-line-arguments.handleStatus" -> "(*os.SyscallError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*os.SyscallError).Error]\nat dcfh.go:330: calling [(*os.SyscallError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*internal/reflectlite.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*internal/reflectlite.ValueError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(runtime.plainError).Error" [ tooltip="at dcfh.go:411: calling [(runtime.plainError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.init" -> "flag.String" [ color="saddlebrown" tooltip="at dcfh.go:16: calling [flag.String]\nat dcfh.go:20: calling [flag.String]" ]
+    "command-line-arguments.main" -> "github.com/mattkeenan/dircachefilehash/pkg.LogDebugFlags" [ color="saddlebrown" tooltip="at dcfh.go:128: calling [github.com/mattkeenan/dircachefilehash/pkg.LogDebugFlags]" ]
+    "command-line-arguments.findDcfhRepo" -> "(*os.fileStat).IsDir" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:644: calling [(*os.fileStat).IsDir]" ]
+    "command-line-arguments.outputJSON" -> "(*encoding/json.Encoder).SetIndent" [ color="saddlebrown" tooltip="at dcfh.go:226: calling [(*encoding/json.Encoder).SetIndent]" ]
+    "command-line-arguments.handleDupes" -> "(*time.ParseError).Error" [ color="saddlebrown" tooltip="at dcfh.go:512: calling [(*time.ParseError).Error]" style="dashed" ]
+    "command-line-arguments.handleDupes" -> "(*internal/bisect.parseError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*internal/bisect.parseError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*encoding/json.MarshalerError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*encoding/json.MarshalerError).Error]" ]
+    "command-line-arguments.handleStatus" -> "fmt.Fprintf" [ color="saddlebrown" tooltip="at dcfh.go:312: calling [fmt.Fprintf]" ]
+    "command-line-arguments.handleStatus" -> "(*fmt.wrapErrors).Error" [ tooltip="at dcfh.go:309: calling [(*fmt.wrapErrors).Error]\nat dcfh.go:330: calling [(*fmt.wrapErrors).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleInit" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:267: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.handleStatus" -> "fmt.Printf" [ color="saddlebrown" tooltip="at dcfh.go:358: calling [fmt.Printf]\nat dcfh.go:360: calling [fmt.Printf]\nat dcfh.go:362: calling [fmt.Printf]\nat dcfh.go:369: calling [fmt.Printf]\nat dcfh.go:378: calling [fmt.Printf]\nat dcfh.go:388: calling [fmt.Printf]\nat dcfh.go:403: calling [fmt.Printf]\nat dcfh.go:398: calling [fmt.Printf]" ]
+    "runtime.tryRecordGoroutineProfile" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at mprof.go:1522: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleDupes" -> "(*runtime.TypeAssertionError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*runtime.TypeAssertionError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(encoding/hex.InvalidByteError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(encoding/hex.InvalidByteError).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*errors.errorString).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*errors.errorString).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*encoding/json.UnsupportedValueError).Error" [ tooltip="at dcfh.go:512: calling [(*encoding/json.UnsupportedValueError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "(*fmt.wrapErrors).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*fmt.wrapErrors).Error]" ]
+    "command-line-arguments.handleDupes" -> "(*regexp/syntax.Error).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(*regexp/syntax.Error).Error]" ]
+    "command-line-arguments.outputError" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:212: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.outputError" -> "encoding/json.NewEncoder" [ color="saddlebrown" tooltip="at dcfh.go:218: calling [encoding/json.NewEncoder]" ]
+    "command-line-arguments.handleDupes" -> "(*internal/poll.DeadlineExceededError).Error" [ tooltip="at dcfh.go:512: calling [(*internal/poll.DeadlineExceededError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).LoadMainIndex" [ color="saddlebrown" tooltip="at dcfh.go:524: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).LoadMainIndex]" ]
+    "command-line-arguments.handleDupes" -> "(*os.SyscallError).Error" [ tooltip="at dcfh.go:512: calling [(*os.SyscallError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "(*fmt.wrapError).Error" [ tooltip="at dcfh.go:512: calling [(*fmt.wrapError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length" [ color="saddlebrown" tooltip="at dcfh.go:336: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length]\nat dcfh.go:368: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Length]" ]
+    "command-line-arguments.handleStatus" -> "(*strconv.NumError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*strconv.NumError).Error]\nat dcfh.go:330: calling [(*strconv.NumError).Error]" ]
+    "command-line-arguments.findDcfhRepo" -> "path/filepath.Join" [ tooltip="at dcfh.go:641: calling [path/filepath.Join]\nat dcfh.go:642: calling [path/filepath.Join]" color="saddlebrown" ]
+    "runtime.recv" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at chan.go:701: calling [command-line-arguments.showUsage]\nat chan.go:736: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleStatus" -> "(*net.timeoutError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*net.timeoutError).Error]\nat dcfh.go:330: calling [(*net.timeoutError).Error]" ]
+    "command-line-arguments.handleStatus" -> "os.Getwd" [ color="saddlebrown" tooltip="at dcfh.go:318: calling [os.Getwd]" ]
+    "command-line-arguments.handleUpdate" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates" [ color="saddlebrown" tooltip="at dcfh.go:458: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).FindDuplicates]" ]
+    "command-line-arguments.handleUpdate" -> "(*os.LinkError).Error" [ color="saddlebrown" tooltip="at dcfh.go:411: calling [(*os.LinkError).Error]" style="dashed" ]
+    "command-line-arguments.handleInit" -> "path/filepath.Join" [ color="saddlebrown" tooltip="at dcfh.go:258: calling [path/filepath.Join]" ]
+    "command-line-arguments.handleInit" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats" [ color="saddlebrown" tooltip="at dcfh.go:279: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Stats]" ]
+    "command-line-arguments.handleVersion" -> "fmt.Println" [ color="saddlebrown" tooltip="at dcfh.go:176: calling [fmt.Println]\nat dcfh.go:177: calling [fmt.Println]" ]
+    "command-line-arguments.handleDupes" -> "github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache" [ color="saddlebrown" tooltip="at dcfh.go:521: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]" ]
+    "command-line-arguments.handleDupes" -> "(time.fileSizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(time.fileSizeError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "command-line-arguments.outputJSON" [ tooltip="at dcfh.go:486: calling [command-line-arguments.outputJSON]" ]
+    "command-line-arguments.handleInit" -> "command-line-arguments.outputError" [ tooltip="at dcfh.go:232: calling [command-line-arguments.outputError]\nat dcfh.go:242: calling [command-line-arguments.outputError]\nat dcfh.go:249: calling [command-line-arguments.outputError]\nat dcfh.go:253: calling [command-line-arguments.outputError]\nat dcfh.go:260: calling [command-line-arguments.outputError]\nat dcfh.go:274: calling [command-line-arguments.outputError]" ]
+    "command-line-arguments.handleInit" -> "fmt.Println" [ color="saddlebrown" tooltip="at dcfh.go:270: calling [fmt.Println]" ]
+    "command-line-arguments.handleInit" -> "(time.Duration).Round" [ color="saddlebrown" tooltip="at dcfh.go:288: calling [(time.Duration).Round]\nat dcfh.go:295: calling [(time.Duration).Round]" ]
+    "command-line-arguments.main" -> "command-line-arguments.handleStatus" [ tooltip="at dcfh.go:153: calling [command-line-arguments.handleStatus]" ]
+    "command-line-arguments.findDcfhRepo" -> "fmt.Errorf" [ color="saddlebrown" tooltip="at dcfh.go:636: calling [fmt.Errorf]\nat dcfh.go:658: calling [fmt.Errorf]" ]
+    "command-line-arguments.handleUpdate" -> "(*encoding/json.SyntaxError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*encoding/json.SyntaxError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "fmt.Println" [ color="saddlebrown" tooltip="at dcfh.go:443: calling [fmt.Println]" ]
+    "command-line-arguments.handleInit" -> "command-line-arguments.buildFlags" [ tooltip="at dcfh.go:273: calling [command-line-arguments.buildFlags]" ]
+    "command-line-arguments.handleInit" -> "(*os.fileStat).IsDir" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:252: calling [(*os.fileStat).IsDir]" ]
+    "command-line-arguments.main" -> "command-line-arguments.handleUpdate" [ tooltip="at dcfh.go:155: calling [command-line-arguments.handleUpdate]" ]
+    "command-line-arguments.main" -> "command-line-arguments.handleDupes" [ tooltip="at dcfh.go:157: calling [command-line-arguments.handleDupes]" ]
+    "(*flag.FlagSet).usage" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at flag.go:1070: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.handleInit" -> "time.Now" [ tooltip="at dcfh.go:237: calling [time.Now]" color="saddlebrown" ]
+    "command-line-arguments.handleInit" -> "(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update" [ tooltip="at dcfh.go:273: calling [(*github.com/mattkeenan/dircachefilehash/pkg.DirectoryCache).Update]" color="saddlebrown" ]
+    "command-line-arguments.main" -> "fmt.Sprintf" [ color="saddlebrown" tooltip="at dcfh.go:159: calling [fmt.Sprintf]" ]
+    "command-line-arguments.outputError" -> "fmt.Fprintf" [ color="saddlebrown" tooltip="at dcfh.go:220: calling [fmt.Fprintf]" ]
+    "command-line-arguments.handleDupes" -> "command-line-arguments.validateOutputFormat" [ tooltip="at dcfh.go:513: calling [command-line-arguments.validateOutputFormat]\nat dcfh.go:536: calling [command-line-arguments.validateOutputFormat]" ]
+    "command-line-arguments.handleDupes" -> "fmt.Fprintf" [ tooltip="at dcfh.go:515: calling [fmt.Fprintf]" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "os.Exit" [ tooltip="at dcfh.go:303: calling [os.Exit]\nat dcfh.go:314: calling [os.Exit]\nat dcfh.go:331: calling [os.Exit]" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "(context.deadlineExceededError).Error" [ tooltip="at dcfh.go:309: calling [(context.deadlineExceededError).Error]\nat dcfh.go:330: calling [(context.deadlineExceededError).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleStatus" -> "(*reflect.ValueError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:309: calling [(*reflect.ValueError).Error]\nat dcfh.go:330: calling [(*reflect.ValueError).Error]" ]
+    "command-line-arguments.handleStatus" -> "(time.fileSizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:330: calling [(time.fileSizeError).Error]\nat dcfh.go:309: calling [(time.fileSizeError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*io/fs.PathError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*io/fs.PathError).Error]" ]
+    "command-line-arguments.validateOutputFormat" -> "fmt.Fprintf" [ color="saddlebrown" tooltip="at dcfh.go:193: calling [fmt.Fprintf]\nat dcfh.go:205: calling [fmt.Fprintf]" ]
+    "command-line-arguments.handleStatus" -> "command-line-arguments.findDcfhRepo" [ tooltip="at dcfh.go:307: calling [command-line-arguments.findDcfhRepo]" ]
+    "command-line-arguments.handleStatus" -> "(*runtime.TypeAssertionError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:330: calling [(*runtime.TypeAssertionError).Error]\nat dcfh.go:309: calling [(*runtime.TypeAssertionError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "command-line-arguments.outputError" [ tooltip="at dcfh.go:411: calling [command-line-arguments.outputError]\nat dcfh.go:449: calling [command-line-arguments.outputError]\nat dcfh.go:460: calling [command-line-arguments.outputError]" ]
+    "command-line-arguments.handleUpdate" -> "time.Now" [ color="saddlebrown" tooltip="at dcfh.go:446: calling [time.Now]" ]
+    "command-line-arguments.handleUpdate" -> "(*time.ParseError).Error" [ color="saddlebrown" tooltip="at dcfh.go:411: calling [(*time.ParseError).Error]" style="dashed" ]
+    "command-line-arguments.main" -> "command-line-arguments.handleVersion" [ tooltip="at dcfh.go:136: calling [command-line-arguments.handleVersion]" ]
+    "command-line-arguments.handleInit" -> "fmt.Sprintf" [ color="saddlebrown" tooltip="at dcfh.go:242: calling [fmt.Sprintf]\nat dcfh.go:249: calling [fmt.Sprintf]\nat dcfh.go:253: calling [fmt.Sprintf]\nat dcfh.go:260: calling [fmt.Sprintf]\nat dcfh.go:274: calling [fmt.Sprintf]" ]
+    "command-line-arguments.validateOutputFormat" -> "os.Exit" [ color="saddlebrown" tooltip="at dcfh.go:194: calling [os.Exit]\nat dcfh.go:206: calling [os.Exit]" ]
+    "command-line-arguments.handleDupes" -> "(crypto/internal/fips140/aes.KeySizeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:512: calling [(crypto/internal/fips140/aes.KeySizeError).Error]" ]
+    "command-line-arguments.handleStatus" -> "(*errors.errorString).Error" [ color="saddlebrown" tooltip="at dcfh.go:309: calling [(*errors.errorString).Error]\nat dcfh.go:330: calling [(*errors.errorString).Error]" style="dashed" ]
+    "command-line-arguments.handleStatus" -> "(*regexp/syntax.Error).Error" [ tooltip="at dcfh.go:309: calling [(*regexp/syntax.Error).Error]\nat dcfh.go:330: calling [(*regexp/syntax.Error).Error]" style="dashed" color="saddlebrown" ]
+    "command-line-arguments.handleUpdate" -> "(*encoding/json.UnsupportedTypeError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*encoding/json.UnsupportedTypeError).Error]" ]
+    "command-line-arguments.init" -> "flag.NewFlagSet" [ color="saddlebrown" tooltip="at dcfh.go:25: calling [flag.NewFlagSet]\nat dcfh.go:26: calling [flag.NewFlagSet]\nat dcfh.go:27: calling [flag.NewFlagSet]\nat dcfh.go:28: calling [flag.NewFlagSet]" ]
+    "command-line-arguments.handleInit" -> "os.Stat" [ tooltip="at dcfh.go:247: calling [os.Stat]\nat dcfh.go:259: calling [os.Stat]" color="saddlebrown" ]
+    "command-line-arguments.handleInit" -> "github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache" [ tooltip="at dcfh.go:265: calling [github.com/mattkeenan/dircachefilehash/pkg.NewDirectoryCache]" color="saddlebrown" ]
+    "command-line-arguments.handleDupes" -> "command-line-arguments.findDcfhRepo" [ tooltip="at dcfh.go:510: calling [command-line-arguments.findDcfhRepo]" ]
+    "command-line-arguments.handleUpdate" -> "(*strconv.NumError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*strconv.NumError).Error]" ]
+    "command-line-arguments.main" -> "github.com/mattkeenan/dircachefilehash/pkg.InitDebugFlags" [ color="saddlebrown" tooltip="at dcfh.go:126: calling [github.com/mattkeenan/dircachefilehash/pkg.InitDebugFlags]" ]
+    "command-line-arguments.handleInit" -> "fmt.Printf" [ color="saddlebrown" tooltip="at dcfh.go:269: calling [fmt.Printf]\nat dcfh.go:292: calling [fmt.Printf]\nat dcfh.go:294: calling [fmt.Printf]\nat dcfh.go:295: calling [fmt.Printf]" ]
+    "command-line-arguments.handleInit" -> "(time.Duration).String" [ color="saddlebrown" tooltip="at dcfh.go:288: calling [(time.Duration).String]" ]
+    "command-line-arguments.main" -> "command-line-arguments.outputError" [ tooltip="at dcfh.go:159: calling [command-line-arguments.outputError]" ]
+    "flag.commandLineUsage" -> "command-line-arguments.showUsage" [ style="dashed" color="saddlebrown" tooltip="at flag.go:1217: calling [command-line-arguments.showUsage]" ]
+    "time.goFunc" -> "command-line-arguments.showUsage" [ style="dashed" arrowhead="normalnoneodot" color="saddlebrown" tooltip="at sleep.go:215: calling [command-line-arguments.showUsage]" ]
+    "command-line-arguments.findDcfhRepo" -> "path/filepath.Dir" [ color="saddlebrown" tooltip="at dcfh.go:650: calling [path/filepath.Dir]" ]
+    "command-line-arguments.handleUpdate" -> "(*runtime.TypeAssertionError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*runtime.TypeAssertionError).Error]" ]
+    "command-line-arguments.handleUpdate" -> "(*net.timeoutError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*net.timeoutError).Error]" ]
+    "command-line-arguments.main" -> "flag.Parse" [ color="saddlebrown" tooltip="at dcfh.go:123: calling [flag.Parse]" ]
+    "command-line-arguments.main" -> "flag.Args" [ color="saddlebrown" tooltip="at dcfh.go:141: calling [flag.Args]" ]
+    "command-line-arguments.handleUpdate" -> "(*encoding/json.MarshalerError).Error" [ style="dashed" color="saddlebrown" tooltip="at dcfh.go:411: calling [(*encoding/json.MarshalerError).Error]" ]
+}
