@@ -90,28 +90,37 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 
 ### I/O Design and File Access Patterns
 
-**Three Distinct Index File Types with Optimized Access Patterns**:
+**CRITICAL ARCHITECTURAL PRINCIPLE - Index File Lifecycle**:
 
-**1. Main & Cache Indices** (Read-Only):
+The scan process is how we atomically replace main/cache indices on disk. There are four distinct index file types with different lifecycles:
+
+**1. Main & Cache Indices** (Stable Read-Only):
 - **Access**: Memory-mapped with `PROT_READ` via `LoadIndexFromFile()`
-- **Usage**: Read existing index data into skiplist structures
-- **Constraints**: No direct writing - only loaded for merging operations
+- **Lifecycle**: Persistent files that represent the current stable state
+- **Usage**: Read existing index data into skiplist structures for comparison
 - **Files**: `main.idx`, `cache.idx`
 
-**2. Scan Indices** (Append-Only Growth):
-- **Access**: Memory-mapped with `PROT_READ|PROT_WRITE` 
-- **Growth**: Dynamic expansion with `ftruncate()` and `mremap()` as needed
-- **Writing**: **ONLY** via `AppendEntryToScanIndex()` function
+**2. Scan Indices** (Temporary Read-Write):
+- **Access**: Memory-mapped with `PROT_READ|PROT_WRITE` via `AppendEntryToScanIndex()`
+- **Lifecycle**: Created during scan, **deleted after scan completion**
+- **Purpose**: Collect new binaryEntries during directory scanning
 - **Concurrency**: PID+TID naming scheme (`scan-{pid}-{tid}.idx`)
-- **Updates**: Hash workers write directly to mmap'd memory (zero-copy)
-- **Constraints**: `writeBinaryEntryToMmap()` is private and only called by `AppendEntryToScanIndex()`
+- **Constraints**: Must remain mapped until scan phase completes
 
-**3. Temp Indices** (Pure Vectorio):
-- **Access**: Standard file I/O with `O_CREAT|O_WRONLY` (no mmap)
-- **Writing**: Pure vectorio with `WritevRaw()` for efficient bulk operations
-- **Process**: Header → Entries → Checksum → Clean flag (all via vectorio)
-- **Atomicity**: Temporary file with atomic rename over main/cache indices
-- **Filtering**: Main indices exclude deleted entries, cache indices include them
+**3. Temp Indices** (Temporary Write-Only):
+- **Access**: Pure vectorio with `WriteSkiplistWithVectorIO()` (no mmap)
+- **Lifecycle**: Created at end of scan, **becomes new main/cache via atomic rename**
+- **Purpose**: Filtered copy of selected binaryEntries from main/cache/scan indices
+- **Atomicity**: Ensures replacement of main/cache indices is atomic operation
+- **Selection**: Main indices exclude deleted entries, cache indices include them
+
+**4. Scan Process Workflow**:
+1. **Scan Phase**: Create scan indices (read-write mmap) to collect new entries
+2. **Merge Phase**: Create temp index (write-only vectorio) from main/cache/scan data  
+3. **Replace Phase**: Atomically replace main or cache index via `rename(temp, target)`
+4. **Cleanup Phase**: Delete scan indices, unmap any remaining scan memory
+
+This design ensures that index replacement is atomic and scan indices don't interfere with final index writing.
 
 ### Binary Index Format Details
 

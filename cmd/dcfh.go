@@ -17,6 +17,7 @@ var (
 	jsonFlag  = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
 	verbose   = flag.Bool("verbose", false, "verbose output")
 	version   = flag.Bool("version", false, "show version information")
+	debug     = flag.String("debug", "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining")
 )
 
 // Command-specific flag sets
@@ -96,6 +97,7 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  --output=FORMAT  Output format: human (default), json\n")
 	fmt.Fprintf(os.Stderr, "  --json           Output in JSON format (alias for --output=json)\n")
 	fmt.Fprintf(os.Stderr, "  --verbose        Verbose output\n")
+	fmt.Fprintf(os.Stderr, "  --debug=OPTIONS  Debug options: extravalidation,memorylayout,indexchaining,scanning\n")
 	fmt.Fprintf(os.Stderr, "  --version        Show version information\n")
 	fmt.Fprintf(os.Stderr, "  --help           Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nCommands:\n")
@@ -119,6 +121,12 @@ func main() {
 
 	// Parse global flags first
 	flag.Parse()
+
+	// Initialize debug flags early
+	dcfh.InitDebugFlags(*debug)
+	if *debug != "" {
+		dcfh.LogDebugFlags()
+	}
 
 	// Validate output format early (after flag parsing)
 	validateOutputFormat()

@@ -19,8 +19,8 @@ const (
 
 // Header and file format constants
 const (
-	HeaderSize   = 24 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(4)
-	ChecksumSize = 20 // SHA-1 checksum size
+	HeaderSize   = 88 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(2) + checksum_type(2) + checksum(64)
+	ChecksumSize = 64 // Maximum checksum size (512 bits)
 )
 
 // Byte order magic for file format validation
@@ -42,13 +42,13 @@ const (
 
 // Index header flags
 const (
-	IndexFlagSparse uint32 = 1 << 0 // Sparse index flag
-	IndexFlagClean  uint32 = 1 << 1 // Index file is in clean/complete state
+	IndexFlagSparse uint16 = 1 << 0 // Sparse index flag
+	IndexFlagClean  uint16 = 1 << 1 // Index file is in clean/complete state
 )
 
-// Entry flags
+// Entry flags  
 const (
-	EntryFlagDeleted uint32 = 1 << 0 // Entry marked as deleted
+	EntryFlagDeleted uint16 = 1 << 0 // Entry marked as deleted
 )
 
 // Import merge strategies from zerocopyskiplist

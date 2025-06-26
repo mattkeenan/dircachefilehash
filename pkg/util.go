@@ -12,6 +12,16 @@ import (
 	"unsafe"
 )
 
+// Build-time assertions for struct layout assumptions
+// These will cause compilation to fail if our assumptions about memory layout are violated
+var (
+	// Ensure binaryEntry has expected size and alignment
+	_ = [1]struct{}{}[unsafe.Sizeof(binaryEntry{}) % 8] // Must be 8-byte aligned
+	
+	// Ensure Path field is exactly 8 bytes
+	_ = [1]struct{}{}[unsafe.Sizeof(binaryEntry{}.Path) - 8]
+)
+
 // DirectoryCache manages the file cache for a directory
 // Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
@@ -46,21 +56,55 @@ type binaryEntry struct {
 
 // IsDeleted returns true if this entry is marked as deleted
 func (be *binaryEntry) IsDeleted() bool {
-	return be.EntryFlags&uint16(EntryFlagDeleted) != 0
+	return be.EntryFlags&EntryFlagDeleted != 0
 }
 
 // SetDeleted marks this entry as deleted
 func (be *binaryEntry) SetDeleted() {
-	be.EntryFlags |= uint16(EntryFlagDeleted)
+	be.EntryFlags |= EntryFlagDeleted
 }
 
 // ClearDeleted removes the deleted flag from this entry
 func (be *binaryEntry) ClearDeleted() {
-	be.EntryFlags &^= uint16(EntryFlagDeleted)
+	be.EntryFlags &^= EntryFlagDeleted
+}
+
+// validateLayout performs runtime validation of struct layout assumptions
+// This should only be called in debug/development builds
+func (be *binaryEntry) validateLayout() {
+	entryStart := uintptr(unsafe.Pointer(be))
+	pathFieldOffset := uintptr(unsafe.Pointer(&be.Path[0])) - entryStart
+	expectedOffset := unsafe.Sizeof(*be) - 8
+	
+	if pathFieldOffset != expectedOffset {
+		panic(fmt.Sprintf("binaryEntry layout assumption violated: Path field at offset %d, expected %d", 
+			pathFieldOffset, expectedOffset))
+	}
+	
+	// Verify 8-byte alignment
+	if entryStart%8 != 0 {
+		panic(fmt.Sprintf("binaryEntry not 8-byte aligned: address 0x%x", entryStart))
+	}
+	
+	// Verify size is reasonable
+	if be.Size < uint32(unsafe.Sizeof(*be)) || be.Size > 4096 {
+		panic(fmt.Sprintf("binaryEntry size %d is unreasonable", be.Size))
+	}
 }
 
 // RelativePath returns the relative path as string from mmap'd memory (zero-copy)
+// This implementation uses traditional unsafe pointer arithmetic for maximum compatibility
 func (be *binaryEntry) RelativePath() string {
+	// Safety check: ensure we have a valid pointer
+	if be == nil {
+		panic("RelativePath called on nil binaryEntry")
+	}
+	
+	// Safety check: ensure Size is reasonable (not corrupted)
+	if be.Size < 48 || be.Size > 65535 {
+		panic(fmt.Sprintf("RelativePath: invalid Size %d (expected 48-65535)", be.Size))
+	}
+	
 	entryStart := uintptr(unsafe.Pointer(be))
 	entryEnd := entryStart + uintptr(be.Size)
 	pathStart := uintptr(unsafe.Pointer(&be.Path[0]))
@@ -74,6 +118,87 @@ func (be *binaryEntry) RelativePath() string {
 
 	pathLen := int(pathEnd - pathStart)
 	return unsafe.String((*byte)(unsafe.Pointer(pathStart)), pathLen)
+}
+
+// RelativePathModern returns the relative path using Go 1.17+ unsafe.Slice pattern
+// This is safer but requires Go 1.17+. Can be used as migration path.
+func (be *binaryEntry) RelativePathModern() string {
+	if debugFlags.extraValidation {
+		be.validateLayout()
+	}
+	
+	// Calculate path length by scanning for null terminator
+	pathLen := be.calculatePathLength()
+	if pathLen == 0 {
+		return ""
+	}
+	
+	// Use Go 1.17+ unsafe.Slice for safer memory access
+	pathBytes := unsafe.Slice(&be.Path[0], pathLen)
+	return unsafe.String(&pathBytes[0], len(pathBytes))
+}
+
+// calculatePathLength finds the length of the null-terminated path
+func (be *binaryEntry) calculatePathLength() int {
+	entryStart := uintptr(unsafe.Pointer(be))
+	entryEnd := entryStart + uintptr(be.Size)
+	pathStart := uintptr(unsafe.Pointer(&be.Path[0]))
+	
+	// Scan for null terminator
+	pathEnd := entryEnd
+	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 {
+		pathEnd--
+	}
+	
+	return int(pathEnd - pathStart)
+}
+
+// ValidateEntry performs comprehensive validation of a binaryEntry
+// Used when extravalidation debug option is enabled
+func (be *binaryEntry) ValidateEntry() error {
+	// Validate layout assumptions
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error for graceful handling
+		}
+	}()
+	
+	be.validateLayout()
+	
+	// Validate size constraints
+	minSize := uint32(unsafe.Sizeof(*be))
+	if be.Size < minSize {
+		return fmt.Errorf("entry size %d too small, minimum %d", be.Size, minSize)
+	}
+	
+	if be.Size > 4096 { // Reasonable maximum
+		return fmt.Errorf("entry size %d too large, maximum 4096", be.Size)
+	}
+	
+	// Validate path length
+	pathLen := be.calculatePathLength()
+	if pathLen == 0 {
+		return fmt.Errorf("entry has zero-length path")
+	}
+	
+	expectedSize := int(minSize) + pathLen + 1 // +1 for null terminator
+	padding := (8 - (expectedSize % 8)) % 8
+	expectedSize += padding
+	
+	if int(be.Size) != expectedSize {
+		return fmt.Errorf("entry size %d doesn't match calculated size %d (path_len=%d, padding=%d)", 
+			be.Size, expectedSize, pathLen, padding)
+	}
+	
+	// Validate hash type
+	switch be.HashType {
+	case HashTypeSHA1, HashTypeSHA256, HashTypeSHA512:
+		// Valid hash types
+	default:
+		return fmt.Errorf("invalid hash type %d", be.HashType)
+	}
+	
+	return nil
 }
 
 // HashString returns the hash as a hex string

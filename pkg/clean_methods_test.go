@@ -95,7 +95,7 @@ func TestCleanMethodsMultipleOperations(t *testing.T) {
 func TestCleanMethodsBoundaryValues(t *testing.T) {
 	tests := []struct {
 		name         string
-		initialFlags uint32
+		initialFlags uint16
 		description  string
 	}{
 		{
@@ -105,7 +105,7 @@ func TestCleanMethodsBoundaryValues(t *testing.T) {
 		},
 		{
 			name:         "all flags set",
-			initialFlags: 0xFFFFFFFF,
+			initialFlags: 0xFFFF,
 			description:  "All possible flags set initially",
 		},
 		{
@@ -115,7 +115,7 @@ func TestCleanMethodsBoundaryValues(t *testing.T) {
 		},
 		{
 			name:         "all except clean flag",
-			initialFlags: 0xFFFFFFFF &^ IndexFlagClean,
+			initialFlags: 0xFFFF &^ IndexFlagClean,
 			description:  "All flags except clean set initially",
 		},
 	}
@@ -168,7 +168,7 @@ func TestCleanFlagConstant(t *testing.T) {
 	}
 	
 	// Test bitwise operations work correctly
-	var flags uint32 = 0
+	var flags uint16 = 0
 	
 	// Setting the flag
 	flags |= IndexFlagClean

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // ============================================================================
@@ -60,6 +61,21 @@ type HashJobStart struct {
 	IndexEntry  *binaryEntry // Entry to update with hash
 	ScannedPath *ScannedPath
 }
+
+// mockFileInfo implements os.FileInfo for deleted entries
+type mockFileInfo struct {
+	name    string
+	size    int64
+	mode    os.FileMode
+	modTime time.Time
+}
+
+func (m *mockFileInfo) Name() string       { return m.name }
+func (m *mockFileInfo) Size() int64        { return m.size }
+func (m *mockFileInfo) Mode() os.FileMode  { return m.mode }
+func (m *mockFileInfo) ModTime() time.Time { return m.modTime }
+func (m *mockFileInfo) IsDir() bool        { return m.mode.IsDir() }
+func (m *mockFileInfo) Sys() interface{}   { return nil }
 
 // Helper function for efficient slice removal (order doesn't matter)
 func remove(s []uint64, i int) []uint64 {
@@ -246,6 +262,9 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 			}
 
 			// Stream result immediately - this gives us better performance
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Scanned file: %s\n", relPath)
+			}
 			resultChan <- scannedPath
 		}
 	}
@@ -405,6 +424,9 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				ScannedPath: currentScanned,
 			}
 
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Submitting hash job %d for file: %s\n", jobID, currentScanned.RelPath)
+			}
 			hashJobManager.SubmitHashJob(hashJob, callStartChan)
 
 			// Advance scan
@@ -418,9 +440,28 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 
 			// Skip already deleted entries
 			if !indexEntry.IsDeleted() {
-				// Create a deleted entry in scan index
+				// Create a deleted entry in scan index using metadata from existing entry
+				// We need to reconstruct os.FileInfo and syscall.Stat_t from the index entry
+				mockInfo := &mockFileInfo{
+					name:    filepath.Base(indexEntry.RelativePath()),
+					size:    int64(indexEntry.FileSize),
+					mode:    os.FileMode(indexEntry.Mode),
+					modTime: timeFromWall(indexEntry.MTimeWall),
+				}
+				mockStat := &syscall.Stat_t{
+					Dev:  uint64(indexEntry.Dev),
+					Ino:  uint64(indexEntry.Ino),
+					Mode: indexEntry.Mode,
+					Uid:  indexEntry.UID,
+					Gid:  indexEntry.GID,
+					Ctim: syscall.Timespec{Sec: timeFromWall(indexEntry.CTimeWall).Unix(), Nsec: 0},
+					Mtim: syscall.Timespec{Sec: timeFromWall(indexEntry.MTimeWall).Unix(), Nsec: 0},
+				}
+				
 				deletedEntry, err := dc.AppendEntryToScanIndex(scanFileName, indexEntry.RelativePath(), &ScannedPath{
-					RelPath: indexEntry.RelativePath(),
+					RelPath:  indexEntry.RelativePath(),
+					Info:     mockInfo,
+					StatInfo: mockStat,
 				})
 				if err != nil {
 					return fmt.Errorf("failed to create deleted scan index entry: %w", err)
@@ -648,6 +689,10 @@ func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
 
 	for job := range hjm.hashJobChan {
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Hashing file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
+		}
+		
 		// Hash the file and update binaryEntry directly in mmap memory
 		hashStr, err := dc.hashFile(job.FilePath)
 
@@ -656,6 +701,14 @@ func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 				// Update the binaryEntry directly in the scan index mmap memory
 				// This provides zero-copy updates to the scan index file
 				dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, HashTypeSHA1)
+			}
+		}
+
+		if IsScanningEnabled() {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[SCAN] Hash failed for file: %s (job %d) - %v\n", job.ScannedPath.RelPath, job.JobID, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[SCAN] Hash completed for file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
 			}
 		}
 
@@ -689,27 +742,65 @@ func (dc *DirectoryCache) monitorJobs(
 ) {
 	var jobs []uint64 // Track pending hash jobs
 	stopped := false
+	var stopTimer *time.Timer
 
 	for {
+		var timerChan <-chan time.Time
+		if stopTimer != nil {
+			timerChan = stopTimer.C
+		}
+
 		select {
 		case jobID := <-callStartChan:
 			jobs = append(jobs, jobID)
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Job %d started, pending jobs: %d\n", jobID, len(jobs))
+			}
 
 		case completedJobID := <-callFinishChan:
 			// Remove completed job from jobs slice
+			found := false
 			for i, id := range jobs {
 				if id == completedJobID {
 					jobs = remove(jobs, i)
+					found = true
 					break
+				}
+			}
+			if IsScanningEnabled() {
+				if found {
+					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed, pending jobs: %d\n", completedJobID, len(jobs))
+				} else {
+					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed but not found in pending list, pending jobs: %d\n", completedJobID, len(jobs))
 				}
 			}
 
 		case <-collectionStop:
 			stopped = true
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Monitor received stop signal, pending jobs: %d", len(jobs))
+				if len(jobs) > 0 {
+					fmt.Fprintf(os.Stderr, " - stuck jobs: %v", jobs)
+				}
+				fmt.Fprintf(os.Stderr, "\n")
+			}
+			// Start timeout timer if we have pending jobs and timer not already started
+			if len(jobs) > 0 && stopTimer == nil {
+				stopTimer = time.NewTimer(5 * time.Second)
+			}
+
+		case <-timerChan:
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Timeout waiting for jobs to complete, pending jobs: %d - stuck jobs: %v\n", len(jobs), jobs)
+			}
+			return
 		}
 
 		// If stopped and no pending jobs, we're done
 		if stopped && len(jobs) == 0 {
+			if IsScanningEnabled() {
+				fmt.Fprintf(os.Stderr, "[SCAN] Monitor exiting: stopped=true, pending jobs=0\n")
+			}
 			return
 		}
 	}
@@ -885,8 +976,14 @@ func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareS
 	scanWg.Add(1)
 	go func() {
 		defer scanWg.Done()
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Starting filesystem scan\n")
+		}
 		if err := dc.scanPath(paths, scanChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Scan error: %v\n", err)
+		}
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan completed\n")
 		}
 	}()
 
@@ -895,8 +992,14 @@ func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareS
 	compareWg.Add(1)
 	go func() {
 		defer compareWg.Done()
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Starting Hwang-Lin comparison\n")
+		}
 		if err := dc.hwangLinCompareToSkiplist(scanChan, compareSkiplist, scanSkiplist, scanFileName, hashJobManager, callStartChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Compare error: %v\n", err)
+		}
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Hwang-Lin comparison completed\n")
 		}
 	}()
 
@@ -905,21 +1008,54 @@ func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareS
 	monitorWg.Add(1)
 	go func() {
 		defer monitorWg.Done()
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Starting job monitor\n")
+		}
 		dc.monitorJobs(callStartChan, callFinishChan, collectionStop)
+		if IsScanningEnabled() {
+			fmt.Fprintf(os.Stderr, "[SCAN] Job monitor completed\n")
+		}
 	}()
 
 	// Wait for scan to complete
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Waiting for filesystem scan to complete\n")
+	}
 	scanWg.Wait()
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan wait completed\n")
+	}
 
 	// Wait for comparison to complete
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Waiting for comparison to complete\n")
+	}
 	compareWg.Wait()
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Comparison wait completed\n")
+	}
 
 	// Signal that no more hash jobs will be submitted
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Finishing hash job submission\n")
+	}
 	hashJobManager.FinishSubmitting()
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Hash job submission finished\n")
+	}
 
 	// Signal monitoring to stop and wait for all jobs to finish
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Stopping job monitor\n")
+	}
 	close(collectionStop)
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Waiting for job monitor to complete\n")
+	}
 	monitorWg.Wait()
+	if IsScanningEnabled() {
+		fmt.Fprintf(os.Stderr, "[SCAN] Job monitor wait completed\n")
+	}
 
 	fmt.Printf("Scan to skiplist completed\n")
 

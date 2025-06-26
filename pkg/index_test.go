@@ -12,9 +12,10 @@ func TestIndexHeader_SetHeader(t *testing.T) {
 	signature := [4]byte{'d', 'c', 'f', 'h'}
 	version := uint32(1)
 	entryCount := uint32(10)
-	flags := uint32(0)
+	flags := uint16(0)
+	checksumType := uint16(HashTypeSHA1)
 
-	header.SetHeader(signature, version, entryCount, flags)
+	header.SetHeader(signature, version, entryCount, flags, checksumType)
 
 	if header.Signature != signature {
 		t.Errorf("Expected signature %v, got %v", signature, header.Signature)
@@ -27,6 +28,9 @@ func TestIndexHeader_SetHeader(t *testing.T) {
 	}
 	if header.Flags != flags {
 		t.Errorf("Expected flags %d, got %d", flags, header.Flags)
+	}
+	if header.ChecksumType != checksumType {
+		t.Errorf("Expected checksum type %d, got %d", checksumType, header.ChecksumType)
 	}
 	if header.ByteOrder != ByteOrderMagic {
 		t.Errorf("Expected byte order %x, got %x", ByteOrderMagic, header.ByteOrder)
