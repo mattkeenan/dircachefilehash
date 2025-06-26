@@ -34,6 +34,12 @@ func (dc *DirectoryCache) updateFullRepository() error {
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
 
+	// Cleanup scan index file now that temp index is written
+	if err := dc.CleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
+	}
+
 	// Atomic replace main index
 	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
 		os.Remove(tempIndexPath) // Cleanup on failure
@@ -71,6 +77,12 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	tempIndexPath := dc.generateTempFileName("index")
 	if err := dc.WriteMainIndexWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
 		return fmt.Errorf("failed to write new index: %w", err)
+	}
+
+	// Cleanup scan index file now that temp index is written
+	if err := dc.CleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
 
 	// Atomic replace main index

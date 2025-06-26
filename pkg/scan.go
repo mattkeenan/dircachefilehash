@@ -954,12 +954,38 @@ func (dc *DirectoryCache) PerformHwangLinScan(paths []string, skiplist *Skiplist
 
 // PerformHwangLinScanToSkiplist performs Hwang-Lin scan and builds a skiplist directly with scan index files
 func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareSkiplist *SkiplistWrapper) (*SkiplistWrapper, error) {
+	// Synchronize concurrent scans - only one scan per DirectoryCache at a time
+	dc.scanMutex.Lock()
+	defer dc.scanMutex.Unlock()
+	
+	// If a scan is already in progress, wait for it and return the same results
+	if dc.scanInProgress {
+		// TODO: Handle race condition where files change between when the first scan
+		// started and when this concurrent caller started. Currently we return the
+		// results from the first scan, but ideally we should detect if files changed
+		// and re-run the scan if necessary.
+		if dc.lastScanError != nil {
+			return nil, dc.lastScanError
+		}
+		return dc.lastScanResult, nil
+	}
+	
+	// Mark scan as in progress
+	dc.scanInProgress = true
+	defer func() {
+		dc.scanInProgress = false
+	}()
+	
 	// Create result skiplist for scan entries
 	scanSkiplist := NewSkiplistWrapper(16, ScanContext)
 	
 	// Generate scan index filename for this operation
 	scanFileName := dc.generateScanFileName()
-	defer os.Remove(scanFileName) // Cleanup scan file when done
+	
+	// Initialize scan index with mmap
+	if err := dc.InitializeScanIndex(scanFileName); err != nil {
+		return nil, fmt.Errorf("failed to initialize scan index: %w", err)
+	}
 	
 	// Create channels for streaming data
 	scanChan := make(chan *ScannedPath, 50)
@@ -1058,6 +1084,10 @@ func (dc *DirectoryCache) PerformHwangLinScanToSkiplist(paths []string, compareS
 	}
 
 	fmt.Printf("Scan to skiplist completed\n")
+
+	// Store results for concurrent callers
+	dc.lastScanResult = scanSkiplist
+	dc.lastScanError = nil
 
 	return scanSkiplist, nil
 }

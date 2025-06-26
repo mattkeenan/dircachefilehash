@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -22,6 +23,13 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(binaryEntry{}.Path) - 8]
 )
 
+// ScanIndexInfo tracks memory-mapped scan index files for cleanup
+type ScanIndexInfo struct {
+	FilePath string   // Path to scan index file
+	MmapData []byte   // Memory-mapped data (if currently mapped)
+	FileSize int      // Size of the file
+}
+
 // DirectoryCache manages the file cache for a directory
 // Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
@@ -33,6 +41,16 @@ type DirectoryCache struct {
 	hasher        hash.Hash      // SHA-1 hasher for checksums
 	mmapIndex     *MmapIndex     // Memory-mapped index file
 	ignoreManager *IgnoreManager // Ignore pattern manager
+	
+	// Concurrent scan synchronization
+	scanMutex     sync.RWMutex    // Protects scan operations
+	scanInProgress bool           // True if a scan is currently running
+	lastScanResult *SkiplistWrapper // Result from the last completed scan
+	lastScanError  error          // Error from the last completed scan
+	currentScanFile string        // Current scan index filename (for cleanup)
+	currentScanFd   *os.File       // Current scan index file descriptor (kept open)
+	currentScanMmap []byte         // Current scan index mmap (single mmap, expanded with mremap)
+	currentScanSize int            // Current size of scan index file
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
@@ -284,4 +302,5 @@ func (dc *DirectoryCache) generateScanFileName() string {
 	return filepath.Join(filepath.Dir(dc.IndexFile),
 		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
 }
+
 

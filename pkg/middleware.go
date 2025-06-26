@@ -111,6 +111,12 @@ func (dc *DirectoryCache) UpdateCacheIndexWithWorkflow() error {
 		return fmt.Errorf("failed to write cache index: %w", err)
 	}
 
+	// Cleanup scan index file now that temp index is written
+	if err := dc.CleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
+	}
+
 	// Atomic replace cache file
 	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
 		os.Remove(tempCachePath) // Cleanup on failure

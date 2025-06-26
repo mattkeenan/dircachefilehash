@@ -142,7 +142,7 @@ func (ih *IndexHeader) clearClean() {
 }
 
 // writeBinaryEntryToMmap writes a binaryEntry directly to mmap'd memory (PRIVATE - only for scan index)
-func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) int {
+func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) {
 	// Calculate total entry size first
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
 	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
@@ -186,8 +186,6 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 	for i := 0; i < padding; i++ {
 		data[totalSize+i] = 0
 	}
-
-	return entrySize
 }
 
 
@@ -419,89 +417,131 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	return nil
 }
 
-// AppendEntryToScanIndex creates a binaryEntry in a scan index file for concurrent hash processing
+// AppendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
+// Uses single mmap with mremap for efficient memory usage
 func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, relPath string, scannedPath *ScannedPath) (*binaryEntry, error) {
+	// Verify we have an active scan index
+	if dc.currentScanFile != scanFileName || dc.currentScanMmap == nil || dc.currentScanFd == nil {
+		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
+	}
+
 	// Calculate entry size
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
 	totalSize := baseSize + len(relPath) + 1 // +1 for null terminator
 	padding := (8 - (totalSize % 8)) % 8
 	entrySize := totalSize + padding
 
-	// Open or create scan index file
-	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open scan file %s: %w", scanFileName, err)
-	}
-	defer file.Close()
+	// Calculate required new size
+	newSize := dc.currentScanSize + entrySize
 
-	// Get current file size
-	stat, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat scan file: %w", err)
-	}
-
-	currentSize := int(stat.Size())
-	
-	// For new files, initialize with header
-	if currentSize == 0 {
-		initialSize := HeaderSize + entrySize
-		if err := file.Truncate(int64(initialSize)); err != nil {
-			return nil, fmt.Errorf("failed to truncate scan file: %w", err)
+	// Expand file and mmap if necessary
+	if newSize > dc.currentScanSize {
+		// Expand the file using existing file descriptor
+		if err := dc.currentScanFd.Truncate(int64(newSize)); err != nil {
+			return nil, fmt.Errorf("failed to expand scan file: %w", err)
 		}
-		
-		// Map and initialize header
-		data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+
+		// Expand the mmap using mremap
+		newMmap, err := unix.Mremap(dc.currentScanMmap, newSize, unix.MREMAP_MAYMOVE)
 		if err != nil {
-			return nil, fmt.Errorf("failed to mmap scan file: %w", err)
+			return nil, fmt.Errorf("failed to mremap scan file: %w", err)
 		}
-		
-		// Initialize header for writable index (automatically clears Clean flag)
-		header := (*IndexHeader)(unsafe.Pointer(&data[0]))
-		header.SetHeaderForWritableIndex(dc.signature, dc.version, 1, 0, HashTypeSHA1) // Start with 1 entry, not clean
-		
-		// Write the entry
-		entryData := data[HeaderSize:]
-		actualSize := dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
-		
-		// Get pointer to the created entry
-		entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-		
-		// Calculate and store checksum in header
-		dc.calculateAndStoreHeaderChecksum(header, entryData, actualSize)
-		
-		return entry, nil
+
+		// Update stored mmap info
+		dc.currentScanMmap = newMmap
+		dc.currentScanSize = newSize
 	}
-	
-	// For existing files, expand and append entry
-	newSize := currentSize + entrySize
-	if err := file.Truncate(int64(newSize)); err != nil {
-		return nil, fmt.Errorf("failed to expand scan file: %w", err)
-	}
-	
-	// Map the file
-	data, err := unix.Mmap(int(file.Fd()), 0, newSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mmap expanded scan file: %w", err)
-	}
-	
-	// Update entry count in header
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+
+	// Get header and update entry count
+	header := (*IndexHeader)(unsafe.Pointer(&dc.currentScanMmap[0]))
+	entryOffset := dc.currentScanSize - entrySize  // Write at the end
 	header.EntryCount++
-	
-	// Write new entry at end
-	entryOffset := currentSize
-	entryData := data[entryOffset:]
-	actualSize := dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
-	
+
+	// Write the new entry
+	entryData := dc.currentScanMmap[entryOffset:]
+	dc.writeBinaryEntryToMmap(entryData, relPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
+
 	// Get pointer to the created entry
 	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-	
-	// Recalculate and update checksum in header
-	allEntryData := data[HeaderSize:]
-	totalEntrySize := entryOffset - HeaderSize + actualSize
-	dc.calculateAndStoreHeaderChecksum(header, allEntryData, totalEntrySize)
-	
+
+	// Note: We don't update checksum here since it's only needed once at the end
+	// when all entries and hashes are complete
+
 	return entry, nil
+}
+
+// InitializeScanIndex creates and initializes a new scan index file with mmap
+func (dc *DirectoryCache) InitializeScanIndex(scanFileName string) error {
+	// Create the scan index file (use 0666, let umask control final permissions)
+	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to create scan file %s: %w", scanFileName, err)
+	}
+	// Keep file open throughout scan process
+
+	// Initial size is just the header
+	initialSize := HeaderSize
+	if err := file.Truncate(int64(initialSize)); err != nil {
+		file.Close()
+		return fmt.Errorf("failed to truncate scan file: %w", err)
+	}
+
+	// Create initial mmap
+	data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		file.Close()
+		return fmt.Errorf("failed to mmap scan file: %w", err)
+	}
+
+	// Initialize header for writable index (automatically clears Clean flag)
+	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+
+	// Store scan index info (keep file open)
+	dc.currentScanFile = scanFileName
+	dc.currentScanFd = file
+	dc.currentScanMmap = data
+	dc.currentScanSize = initialSize
+
+	return nil
+}
+
+// CleanupCurrentScanFile cleans up scan index resources after temp index is written
+// This should be called after temp index writing but before rename operations
+// 
+// CRITICAL ORDER to prevent use-after-free:
+// 1. Caller must "forget" scan skiplist (allow GC) - done by caller
+// 2. Munmap the scan index file - done here  
+// 3. Delete the scan index file - done here
+func (dc *DirectoryCache) CleanupCurrentScanFile() error {
+	if dc.currentScanFile == "" {
+		return fmt.Errorf("can't clean up missing scan index file: %w", os.ErrNotExist)
+	}
+	
+	// Step 2 - Unmap scan index memory
+	if dc.currentScanMmap != nil {
+		if err := unix.Munmap(dc.currentScanMmap); err != nil {
+			return fmt.Errorf("failed to unmap scan index: %w", err)
+		}
+		dc.currentScanMmap = nil
+	}
+	
+	// Close the file descriptor
+	if dc.currentScanFd != nil {
+		dc.currentScanFd.Close()
+		dc.currentScanFd = nil
+	}
+	
+	// Step 3 - Remove the scan index file
+	err := os.Remove(dc.currentScanFile)
+	dc.currentScanFile = ""
+	dc.currentScanSize = 0
+	
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove scan file: %w", err)
+	}
+	
+	return nil
 }
 
 // WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
