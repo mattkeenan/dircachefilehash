@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude-code-experiment ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Install gotags
+      run: go install github.com/jstemmer/gotags@latest
+    
+    - name: Generate tags file
+      run: gotags -R -f tags .
+    
+    - name: Check if tags file is up to date
+      run: |
+        if git diff --quiet tags; then
+          echo "✓ Tags file is up to date"
+        else
+          echo "❌ Tags file is not up to date. Please run 'gotags -R -f tags .' and commit the changes."
+          echo "Differences found:"
+          git diff tags
+          exit 1
+        fi
+    
+    - name: Verify Go modules
+      run: go mod verify
+    
+    - name: Run tests
+      run: go test -v ./...
+    
+    - name: Build binary
+      run: go build -o dcfh cmd/dcfh.go
+    
+    - name: Test CLI functionality
+      run: |
+        ./dcfh --version
+        ./dcfh --help
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+        args: --timeout=5m
