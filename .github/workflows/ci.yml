@@ -48,6 +48,11 @@ jobs:
       run: |
         ./dcfh --version
         ./dcfh --help
+    
+    - name: Run performance benchmarks
+      run: |
+        chmod +x ./run_benchmarks.sh
+        ./run_benchmarks.sh -t small
 
   lint:
     runs-on: ubuntu-latest
