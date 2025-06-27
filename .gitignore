@@ -6,3 +6,6 @@ examples/exampledircache
 # Binaries built in root directory
 dcfh
 example
+
+# Generated files
+cmd/version.go

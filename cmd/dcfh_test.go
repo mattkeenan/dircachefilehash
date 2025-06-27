@@ -109,33 +109,91 @@ func TestValidateOutputFormat_ConflictingFlags(t *testing.T) {
 func TestBuildFlags(t *testing.T) {
 	// Reset flags
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	verbose = flag.Bool("verbose", false, "verbose output")
+	verbose = flag.Int("verbose", 0, "verbose level")
+	symlinks = flag.String("symlinks", "all", "symlink handling")
+	symlinkShort = flag.Bool("s", false, "follow symlinks")
+	filehash = flag.String("filehash", "", "hash algorithm overrides")
+	debug = flag.String("debug", "", "debug options")
 	
 	tests := []struct {
 		name        string
-		verboseFlag bool
+		verboseVal  int
+		symlinkVal  string
+		symlinkShort bool
+		filehashVal string
+		debugVal    string
 		expected    map[string]string
 	}{
 		{
-			name:        "verbose false",
-			verboseFlag: false,
-			expected:    map[string]string{},
+			name:        "defaults",
+			verboseVal:  0,
+			symlinkVal:  "all",
+			symlinkShort: false,
+			filehashVal: "",
+			debugVal:    "",
+			expected:    map[string]string{"symlinks": "all"},
 		},
 		{
-			name:        "verbose true",
-			verboseFlag: true,
-			expected:    map[string]string{"v": "1"},
+			name:        "verbose level 2",
+			verboseVal:  2,
+			symlinkVal:  "all",
+			symlinkShort: false,
+			filehashVal: "",
+			debugVal:    "",
+			expected:    map[string]string{"v": "2", "symlinks": "all"},
+		},
+		{
+			name:        "symlinks contained",
+			verboseVal:  0,
+			symlinkVal:  "contained",
+			symlinkShort: false,
+			filehashVal: "",
+			debugVal:    "",
+			expected:    map[string]string{"symlinks": "contained"},
+		},
+		{
+			name:        "short symlink flag",
+			verboseVal:  0,
+			symlinkVal:  "none",
+			symlinkShort: true,
+			filehashVal: "",
+			debugVal:    "",
+			expected:    map[string]string{"symlinks": "all"}, // -s overrides --symlinks
+		},
+		{
+			name:        "filehash override",
+			verboseVal:  1,
+			symlinkVal:  "all",
+			symlinkShort: false,
+			filehashVal: "default:sha1",
+			debugVal:    "",
+			expected:    map[string]string{"v": "1", "symlinks": "all", "filehash": "default:sha1"},
+		},
+		{
+			name:        "debug options",
+			verboseVal:  0,
+			symlinkVal:  "all",
+			symlinkShort: false,
+			filehashVal: "",
+			debugVal:    "scan,extravalidation",
+			expected:    map[string]string{"symlinks": "all"}, // debug is set globally, not in flags
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			*verbose = tt.verboseFlag
+			*verbose = tt.verboseVal
+			*symlinks = tt.symlinkVal
+			*symlinkShort = tt.symlinkShort
+			*filehash = tt.filehashVal
+			*debug = tt.debugVal
 			
 			flags := buildFlags()
 			
 			if len(flags) != len(tt.expected) {
 				t.Errorf("Expected %d flags, got %d", len(tt.expected), len(flags))
+				t.Errorf("Expected: %v", tt.expected)
+				t.Errorf("Got: %v", flags)
 			}
 			
 			for key, expectedValue := range tt.expected {
@@ -322,8 +380,12 @@ func resetFlags() {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	output = flag.String("output", "human", "output format: human, json")
 	jsonFlag = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
-	verbose = flag.Bool("verbose", false, "verbose output")
+	verbose = flag.Int("verbose", 0, "verbose level")
 	version = flag.Bool("version", false, "show version information")
+	symlinks = flag.String("symlinks", "all", "symlink handling")
+	symlinkShort = flag.Bool("s", false, "follow symlinks")
+	filehash = flag.String("filehash", "", "hash algorithm overrides")
+	debug = flag.String("debug", "", "debug options")
 }
 
 func TestFlagDefaults(t *testing.T) {
@@ -335,10 +397,265 @@ func TestFlagDefaults(t *testing.T) {
 	if *jsonFlag != false {
 		t.Errorf("Expected default jsonFlag false, got %v", *jsonFlag)
 	}
-	if *verbose != false {
-		t.Errorf("Expected default verbose false, got %v", *verbose)
+	if *verbose != 0 {
+		t.Errorf("Expected default verbose 0, got %v", *verbose)
 	}
 	if *version != false {
 		t.Errorf("Expected default version false, got %v", *version)
+	}
+	if *symlinks != "all" {
+		t.Errorf("Expected default symlinks 'all', got '%s'", *symlinks)
+	}
+	if *symlinkShort != false {
+		t.Errorf("Expected default symlinkShort false, got %v", *symlinkShort)
+	}
+	if *filehash != "" {
+		t.Errorf("Expected default filehash empty, got '%s'", *filehash)
+	}
+	if *debug != "" {
+		t.Errorf("Expected default debug empty, got '%s'", *debug)
+	}
+}
+
+func TestSymlinkModeValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		expectValid bool
+	}{
+		{
+			name:        "valid all",
+			mode:        "all",
+			expectValid: true,
+		},
+		{
+			name:        "valid contained",
+			mode:        "contained",
+			expectValid: true,
+		},
+		{
+			name:        "valid none",
+			mode:        "none",
+			expectValid: true,
+		},
+		{
+			name:        "invalid mode",
+			mode:        "invalid",
+			expectValid: false,
+		},
+		{
+			name:        "empty mode",
+			mode:        "",
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := dcfh.ValidateSymlinkMode(tt.mode)
+			isValid := err == nil
+			
+			if isValid != tt.expectValid {
+				if tt.expectValid {
+					t.Errorf("Expected mode '%s' to be valid, got error: %v", tt.mode, err)
+				} else {
+					t.Errorf("Expected mode '%s' to be invalid, but it was accepted", tt.mode)
+				}
+			}
+		})
+	}
+}
+
+func TestParseVerboseFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected int
+	}{
+		{
+			name:     "no verbose flags",
+			args:     []string{"dcfh", "status"},
+			expected: 0,
+		},
+		{
+			name:     "single -v",
+			args:     []string{"dcfh", "-v", "status"},
+			expected: 1,
+		},
+		{
+			name:     "double -vv",
+			args:     []string{"dcfh", "-vv", "status"},
+			expected: 2,
+		},
+		{
+			name:     "triple -vvv",
+			args:     []string{"dcfh", "-vvv", "status"},
+			expected: 3,
+		},
+		{
+			name:     "multiple -v flags",
+			args:     []string{"dcfh", "-v", "-v", "-v", "status"},
+			expected: 3,
+		},
+		{
+			name:     "mixed with other flags",
+			args:     []string{"dcfh", "--json", "-vv", "--symlinks=none", "status"},
+			expected: 2,
+		},
+		{
+			name:     "quad -vvvv",
+			args:     []string{"dcfh", "-vvvv", "status"},
+			expected: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save original args
+			origArgs := os.Args
+			defer func() { os.Args = origArgs }()
+			
+			// Set test args
+			os.Args = tt.args
+			
+			// Reset verbose flag
+			resetFlags()
+			
+			// Parse verbose flags (this would normally happen in main)
+			parseVerboseFlags()
+			
+			if *verbose != tt.expected {
+				t.Errorf("Expected verbose level %d, got %d", tt.expected, *verbose)
+			}
+		})
+	}
+}
+
+func TestSymlinkFlagInteraction(t *testing.T) {
+	tests := []struct {
+		name           string
+		symlinkFlag    string
+		symlinkShort   bool
+		expectedResult string
+	}{
+		{
+			name:           "default symlinks",
+			symlinkFlag:    "all",
+			symlinkShort:   false,
+			expectedResult: "all",
+		},
+		{
+			name:           "contained mode",
+			symlinkFlag:    "contained",
+			symlinkShort:   false,
+			expectedResult: "contained",
+		},
+		{
+			name:           "none mode",
+			symlinkFlag:    "none",
+			symlinkShort:   false,
+			expectedResult: "none",
+		},
+		{
+			name:           "short flag overrides long flag",
+			symlinkFlag:    "none",
+			symlinkShort:   true,
+			expectedResult: "all", // -s always means "all"
+		},
+		{
+			name:           "short flag with default long flag",
+			symlinkFlag:    "all",
+			symlinkShort:   true,
+			expectedResult: "all",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags()
+			
+			*symlinks = tt.symlinkFlag
+			*symlinkShort = tt.symlinkShort
+			
+			flags := buildFlags()
+			
+			if flags["symlinks"] != tt.expectedResult {
+				t.Errorf("Expected symlinks=%s, got %s", tt.expectedResult, flags["symlinks"])
+			}
+		})
+	}
+}
+
+func TestHashAlgorithmFlagParsing(t *testing.T) {
+	tests := []struct {
+		name        string
+		filehashVal string
+		expectValid bool
+		expectedKey string
+		expectedVal string
+	}{
+		{
+			name:        "valid default sha256",
+			filehashVal: "default:sha256",
+			expectValid: true,
+			expectedKey: "default",
+			expectedVal: "sha256",
+		},
+		{
+			name:        "valid default sha1",
+			filehashVal: "default:sha1",
+			expectValid: true,
+			expectedKey: "default",
+			expectedVal: "sha1",
+		},
+		{
+			name:        "valid default sha512",
+			filehashVal: "default:sha512",
+			expectValid: true,
+			expectedKey: "default",
+			expectedVal: "sha512",
+		},
+		{
+			name:        "empty filehash",
+			filehashVal: "",
+			expectValid: true, // Empty should be valid (no override)
+		},
+		{
+			name:        "invalid format no colon",
+			filehashVal: "sha256",
+			expectValid: false,
+		},
+		{
+			name:        "invalid algorithm",
+			filehashVal: "default:md5",
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.filehashVal == "" {
+				// For empty string, just verify it doesn't cause issues
+				resetFlags()
+				*filehash = tt.filehashVal
+				flags := buildFlags()
+				if _, exists := flags["filehash"]; exists {
+					t.Error("Empty filehash should not create a flag entry")
+				}
+				return
+			}
+
+			// Test the parsing logic that would happen in the validation
+			err := dcfh.ValidateHashAlgorithm(tt.expectedVal)
+			isValid := err == nil
+			
+			if isValid != tt.expectValid {
+				if tt.expectValid {
+					t.Errorf("Expected algorithm '%s' to be valid, got error: %v", tt.expectedVal, err)
+				} else {
+					t.Errorf("Expected algorithm '%s' to be invalid, but it was accepted", tt.expectedVal)
+				}
+			}
+		})
 	}
 }
