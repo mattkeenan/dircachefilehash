@@ -1,26 +1,55 @@
 package dircachefilehash
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
-	"io"
-	"os"
 )
 
 
-// hashFile calculates SHA-1 hash of a file's contents
+// hashFile calculates hash of a file's contents using the configured algorithm
 func (dc *DirectoryCache) hashFile(filePath string) (string, error) {
-	file, err := os.Open(filePath)
+	return dc.hashFileWithAlgorithm(filePath, nil)
+}
+
+// hashFileWithAlgorithm calculates hash of a file using the specified algorithm or default
+func (dc *DirectoryCache) hashFileWithAlgorithm(filePath string, algorithm *HashAlgorithm) (string, error) {
+	// Use provided algorithm or get default from config
+	if algorithm == nil {
+		var err error
+		algorithm, err = dc.getDefaultHashAlgorithm()
+		if err != nil {
+			return "", fmt.Errorf("failed to get default hash algorithm: %w", err)
+		}
+	}
+	
+	return HashFileToHexString(filePath, algorithm)
+}
+
+// hashFileWithAlgorithmToBytes calculates hash and returns raw bytes with type info
+func (dc *DirectoryCache) hashFileWithAlgorithmToBytes(filePath string, algorithm *HashAlgorithm) ([]byte, uint16, error) {
+	// Use provided algorithm or get default from config
+	if algorithm == nil {
+		var err error
+		algorithm, err = dc.getDefaultHashAlgorithm()
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
+		}
+	}
+	
+	hashBytes, err := HashFile(filePath, algorithm)
 	if err != nil {
-		return "", fmt.Errorf("failed to open file %s: %w", filePath, err)
+		return nil, 0, err
 	}
-	defer file.Close()
+	
+	return hashBytes, algorithm.TypeID, nil
+}
 
-	hasher := sha1.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", fmt.Errorf("failed to hash file %s: %w", filePath, err)
+// getDefaultHashAlgorithm gets the default hash algorithm from config
+func (dc *DirectoryCache) getDefaultHashAlgorithm() (*HashAlgorithm, error) {
+	if dc.config == nil {
+		// Fallback to SHA256 if no config
+		return GetHashAlgorithm("sha256")
 	}
-
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+	
+	hashConfig := dc.config.GetHashConfig()
+	return GetHashAlgorithm(hashConfig.Default)
 }

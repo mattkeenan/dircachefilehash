@@ -894,7 +894,9 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareS
 		fmt.Fprintf(os.Stderr, "[SCAN] Job monitor wait completed\n")
 	}
 
-	fmt.Printf("Scan to skiplist completed\n")
+	if GetVerboseLevel() > 1 {
+		fmt.Printf("Scan to skiplist completed\n")
+	}
 
 	// Store results for concurrent callers
 	dc.lastScanResult = scanSkiplist

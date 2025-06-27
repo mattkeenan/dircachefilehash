@@ -145,6 +145,14 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dcfhPath, err)
 		return dc
 	}
+	
+	// Load configuration
+	config, err := LoadConfig(dcfhPath)
+	if err != nil {
+		// Non-fatal error - log but continue with default config
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
+	}
+	dc.config = config
 
 	// Check if index file exists, create empty one if not
 	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
@@ -162,4 +170,64 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	}
 
 	return dc
+}
+
+// ApplyConfigOverrides applies configuration overrides from the flags map
+func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
+	if dc.config == nil {
+		return fmt.Errorf("no configuration loaded, cannot apply overrides")
+	}
+	
+	var allOverrides []string
+	
+	// Collect hash algorithm override
+	if filehashOverride, exists := flags["filehash"]; exists {
+		allOverrides = append(allOverrides, filehashOverride)
+	}
+	
+	// Apply all overrides
+	if len(allOverrides) > 0 {
+		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
+			return fmt.Errorf("failed to apply configuration overrides: %w", err)
+		}
+		
+		// Validate all configurations
+		if err := dc.validateAllConfigs(); err != nil {
+			return fmt.Errorf("invalid configuration after overrides: %w", err)
+		}
+	}
+	
+	return nil
+}
+
+// validateAllConfigs validates all configuration options
+func (dc *DirectoryCache) validateAllConfigs() error {
+	allConfig := dc.config.GetAllConfig()
+	
+	// Validate hash algorithm
+	if err := ValidateHashAlgorithm(allConfig.Hash.Default); err != nil {
+		return err
+	}
+	
+	// Validate output format
+	if err := ValidateOutputFormat(allConfig.Output.Format); err != nil {
+		return err
+	}
+	
+	// Validate verbose level
+	if err := ValidateVerboseLevel(allConfig.Verbose.Level); err != nil {
+		return err
+	}
+	
+	// Validate debug flags
+	if err := ValidateDebugFlags(allConfig.Verbose.Debug); err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+// GetConfig returns the configuration instance
+func (dc *DirectoryCache) GetConfig() *Config {
+	return dc.config
 }

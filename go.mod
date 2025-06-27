@@ -7,3 +7,5 @@ require (
 	github.com/mattkeenan/zerocopyskiplist v0.9.0
 	golang.org/x/sys v0.33.0
 )
+
+require github.com/go-ini/ini v1.67.0 // indirect

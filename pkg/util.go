@@ -41,6 +41,7 @@ type DirectoryCache struct {
 	hasher        hash.Hash      // SHA-1 hasher for checksums
 	mmapIndex     *mmapIndex     // Memory-mapped index file
 	ignoreManager *IgnoreManager // Ignore pattern manager
+	config        *Config        // Configuration manager
 	
 	// Concurrent scan synchronization
 	scanMutex     sync.RWMutex    // Protects scan operations
