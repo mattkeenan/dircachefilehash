@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 	"testing"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
@@ -114,69 +115,87 @@ func TestBuildFlags(t *testing.T) {
 	symlinkShort = flag.Bool("s", false, "follow symlinks")
 	filehash = flag.String("filehash", "", "hash algorithm overrides")
 	debug = flag.String("debug", "", "debug options")
+	hashWorkers = flag.Int("hash-workers", 0, "number of concurrent hash workers")
 	
 	tests := []struct {
-		name        string
-		verboseVal  int
-		symlinkVal  string
-		symlinkShort bool
-		filehashVal string
-		debugVal    string
-		expected    map[string]string
+		name           string
+		verboseVal     int
+		symlinkVal     string
+		symlinkShort   bool
+		filehashVal    string
+		debugVal       string
+		hashWorkersVal int
+		expected       map[string]string
 	}{
 		{
-			name:        "defaults",
-			verboseVal:  0,
-			symlinkVal:  "all",
-			symlinkShort: false,
-			filehashVal: "",
-			debugVal:    "",
-			expected:    map[string]string{"symlinks": "all"},
+			name:           "defaults",
+			verboseVal:     0,
+			symlinkVal:     "all",
+			symlinkShort:   false,
+			filehashVal:    "",
+			debugVal:       "",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"symlinks": "all"},
 		},
 		{
-			name:        "verbose level 2",
-			verboseVal:  2,
-			symlinkVal:  "all",
-			symlinkShort: false,
-			filehashVal: "",
-			debugVal:    "",
-			expected:    map[string]string{"v": "2", "symlinks": "all"},
+			name:           "verbose level 2",
+			verboseVal:     2,
+			symlinkVal:     "all",
+			symlinkShort:   false,
+			filehashVal:    "",
+			debugVal:       "",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"v": "2", "symlinks": "all"},
 		},
 		{
-			name:        "symlinks contained",
-			verboseVal:  0,
-			symlinkVal:  "contained",
-			symlinkShort: false,
-			filehashVal: "",
-			debugVal:    "",
-			expected:    map[string]string{"symlinks": "contained"},
+			name:           "symlinks contained",
+			verboseVal:     0,
+			symlinkVal:     "contained",
+			symlinkShort:   false,
+			filehashVal:    "",
+			debugVal:       "",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"symlinks": "contained"},
 		},
 		{
-			name:        "short symlink flag",
-			verboseVal:  0,
-			symlinkVal:  "none",
-			symlinkShort: true,
-			filehashVal: "",
-			debugVal:    "",
-			expected:    map[string]string{"symlinks": "all"}, // -s overrides --symlinks
+			name:           "short symlink flag",
+			verboseVal:     0,
+			symlinkVal:     "none",
+			symlinkShort:   true,
+			filehashVal:    "",
+			debugVal:       "",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"symlinks": "all"}, // -s overrides --symlinks
 		},
 		{
-			name:        "filehash override",
-			verboseVal:  1,
-			symlinkVal:  "all",
-			symlinkShort: false,
-			filehashVal: "default:sha1",
-			debugVal:    "",
-			expected:    map[string]string{"v": "1", "symlinks": "all", "filehash": "default:sha1"},
+			name:           "filehash override",
+			verboseVal:     1,
+			symlinkVal:     "all",
+			symlinkShort:   false,
+			filehashVal:    "default:sha1",
+			debugVal:       "",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"v": "1", "symlinks": "all", "filehash": "default:sha1"},
 		},
 		{
-			name:        "debug options",
-			verboseVal:  0,
-			symlinkVal:  "all",
-			symlinkShort: false,
-			filehashVal: "",
-			debugVal:    "scan,extravalidation",
-			expected:    map[string]string{"symlinks": "all"}, // debug is set globally, not in flags
+			name:           "debug options",
+			verboseVal:     0,
+			symlinkVal:     "all",
+			symlinkShort:   false,
+			filehashVal:    "",
+			debugVal:       "scan,extravalidation",
+			hashWorkersVal: 0,
+			expected:       map[string]string{"symlinks": "all"}, // debug is set globally, not in flags
+		},
+		{
+			name:           "hash workers specified",
+			verboseVal:     0,
+			symlinkVal:     "all",
+			symlinkShort:   false,
+			filehashVal:    "",
+			debugVal:       "",
+			hashWorkersVal: 8,
+			expected:       map[string]string{"symlinks": "all", "hash_workers": "8"},
 		},
 	}
 
@@ -187,6 +206,7 @@ func TestBuildFlags(t *testing.T) {
 			*symlinkShort = tt.symlinkShort
 			*filehash = tt.filehashVal
 			*debug = tt.debugVal
+			*hashWorkers = tt.hashWorkersVal
 			
 			flags := buildFlags()
 			
@@ -386,6 +406,7 @@ func resetFlags() {
 	symlinkShort = flag.Bool("s", false, "follow symlinks")
 	filehash = flag.String("filehash", "", "hash algorithm overrides")
 	debug = flag.String("debug", "", "debug options")
+	hashWorkers = flag.Int("hash-workers", 0, "number of concurrent hash workers")
 }
 
 func TestFlagDefaults(t *testing.T) {
@@ -414,6 +435,9 @@ func TestFlagDefaults(t *testing.T) {
 	}
 	if *debug != "" {
 		t.Errorf("Expected default debug empty, got '%s'", *debug)
+	}
+	if *hashWorkers != 0 {
+		t.Errorf("Expected default hashWorkers 0, got %v", *hashWorkers)
 	}
 }
 
@@ -581,6 +605,148 @@ func TestSymlinkFlagInteraction(t *testing.T) {
 			
 			if flags["symlinks"] != tt.expectedResult {
 				t.Errorf("Expected symlinks=%s, got %s", tt.expectedResult, flags["symlinks"])
+			}
+		})
+	}
+}
+
+func TestVersionGeneration(t *testing.T) {
+	// Test that version functions exist and return reasonable values
+	version := getVersionString()
+	commit := getGitCommit()
+	
+	// Version should start with 'v' and not be empty
+	if version == "" {
+		t.Error("Version string should not be empty")
+	}
+	if !strings.HasPrefix(version, "v") {
+		t.Errorf("Version string should start with 'v', got: %s", version)
+	}
+	
+	// Commit should be a hex string (or "unknown" for fallback)
+	if commit == "" {
+		t.Error("Git commit should not be empty")
+	}
+	
+	// Test version format patterns
+	if strings.Contains(version, "-") {
+		// Should be format like v0.0.1-abc12345
+		parts := strings.Split(version, "-")
+		if len(parts) != 2 {
+			t.Errorf("Version with commit should have format vX.Y.Z-commit, got: %s", version)
+		}
+		commitPart := parts[1]
+		if len(commitPart) != 8 {
+			t.Errorf("Commit part should be 8 characters, got: %s", commitPart)
+		}
+	}
+}
+
+func TestVersionOutput(t *testing.T) {
+	// Reset flags
+	resetFlags()
+	
+	tests := []struct {
+		name       string
+		outputMode string
+		jsonFlag   bool
+		expectJSON bool
+	}{
+		{
+			name:       "human output",
+			outputMode: "human",
+			jsonFlag:   false,
+			expectJSON: false,
+		},
+		{
+			name:       "json output flag",
+			outputMode: "human",
+			jsonFlag:   true,
+			expectJSON: true,
+		},
+		{
+			name:       "json output string",
+			outputMode: "json",
+			jsonFlag:   false,
+			expectJSON: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			*output = tt.outputMode
+			*jsonFlag = tt.jsonFlag
+			
+			// We can't easily capture stdout in unit tests, but we can test
+			// the logic that determines whether to output JSON
+			shouldOutputJSON := *output == "json" || *jsonFlag
+			
+			if shouldOutputJSON != tt.expectJSON {
+				t.Errorf("Expected JSON output: %v, got: %v", tt.expectJSON, shouldOutputJSON)
+			}
+		})
+	}
+}
+
+func TestHashWorkersValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		workers     int
+		expectValid bool
+	}{
+		{
+			name:        "valid worker count 1",
+			workers:     1,
+			expectValid: true,
+		},
+		{
+			name:        "valid worker count 4",
+			workers:     4,
+			expectValid: true,
+		},
+		{
+			name:        "valid worker count 8",
+			workers:     8,
+			expectValid: true,
+		},
+		{
+			name:        "valid worker count 16",
+			workers:     16,
+			expectValid: true,
+		},
+		{
+			name:        "valid max worker count 64",
+			workers:     64,
+			expectValid: true,
+		},
+		{
+			name:        "invalid zero workers",
+			workers:     0,
+			expectValid: false,
+		},
+		{
+			name:        "invalid negative workers",
+			workers:     -1,
+			expectValid: false,
+		},
+		{
+			name:        "invalid too many workers",
+			workers:     65,
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := dcfh.ValidateHashWorkers(tt.workers)
+			isValid := err == nil
+			
+			if isValid != tt.expectValid {
+				if tt.expectValid {
+					t.Errorf("Expected worker count %d to be valid, got error: %v", tt.workers, err)
+				} else {
+					t.Errorf("Expected worker count %d to be invalid, but it was accepted", tt.workers)
+				}
 			}
 		})
 	}

@@ -36,12 +36,18 @@ type SymlinkConfig struct {
 	Mode string // Default symlink mode: all, contained, none
 }
 
+// PerformanceConfig represents performance-related configuration
+type PerformanceConfig struct {
+	HashWorkers int // Number of concurrent hash workers (default: 4)
+}
+
 // AllConfig represents all configuration options
 type AllConfig struct {
-	Hash    *HashConfig
-	Output  *OutputConfig
-	Verbose *VerboseConfig
-	Symlink *SymlinkConfig
+	Hash        *HashConfig
+	Output      *OutputConfig
+	Verbose     *VerboseConfig
+	Symlink     *SymlinkConfig
+	Performance *PerformanceConfig
 }
 
 // LoadConfig loads configuration from the .dcfh/config file
@@ -120,6 +126,16 @@ func (c *Config) setDefaults() error {
 		return fmt.Errorf("failed to set default symlink mode: %w", err)
 	}
 	
+	// Set default performance settings
+	performanceSection, err := c.ini.NewSection("performance")
+	if err != nil {
+		return fmt.Errorf("failed to create performance section: %w", err)
+	}
+	_, err = performanceSection.NewKey("hash_workers", "4")
+	if err != nil {
+		return fmt.Errorf("failed to set default hash workers: %w", err)
+	}
+	
 	return nil
 }
 
@@ -193,13 +209,32 @@ func (c *Config) GetSymlinkConfig() *SymlinkConfig {
 	return symlinkConfig
 }
 
+// GetPerformanceConfig returns the performance configuration
+func (c *Config) GetPerformanceConfig() *PerformanceConfig {
+	performanceConfig := &PerformanceConfig{
+		HashWorkers: 4, // fallback default
+	}
+	
+	if c.ini.HasSection("performance") {
+		section := c.ini.Section("performance")
+		if section.HasKey("hash_workers") {
+			if workers, err := section.Key("hash_workers").Int(); err == nil {
+				performanceConfig.HashWorkers = workers
+			}
+		}
+	}
+	
+	return performanceConfig
+}
+
 // GetAllConfig returns all configuration options
 func (c *Config) GetAllConfig() *AllConfig {
 	return &AllConfig{
-		Hash:    c.GetHashConfig(),
-		Output:  c.GetOutputConfig(),
-		Verbose: c.GetVerboseConfig(),
-		Symlink: c.GetSymlinkConfig(),
+		Hash:        c.GetHashConfig(),
+		Output:      c.GetOutputConfig(),
+		Verbose:     c.GetVerboseConfig(),
+		Symlink:     c.GetSymlinkConfig(),
+		Performance: c.GetPerformanceConfig(),
 	}
 }
 
@@ -235,6 +270,13 @@ func (c *Config) SetDebugFlags(debug string) error {
 func (c *Config) SetSymlinkMode(mode string) error {
 	section := c.ini.Section("symlink")
 	section.Key("mode").SetValue(mode)
+	return c.Save()
+}
+
+// SetHashWorkers sets the number of hash workers
+func (c *Config) SetHashWorkers(workers int) error {
+	section := c.ini.Section("performance")
+	section.Key("hash_workers").SetValue(fmt.Sprintf("%d", workers))
 	return c.Save()
 }
 
@@ -276,8 +318,12 @@ func (c *Config) ApplyOverrides(overrides []string) error {
 			// symlink.mode override
 			section := c.ini.Section("symlink")
 			section.Key("mode").SetValue(value)
+		case "hash_workers":
+			// performance.hash_workers override
+			section := c.ini.Section("performance")
+			section.Key("hash_workers").SetValue(value)
 		default:
-			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode)", key)
+			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode, hash_workers)", key)
 		}
 	}
 	
@@ -326,4 +372,15 @@ func ValidateSymlinkMode(mode string) error {
 	default:
 		return fmt.Errorf("unsupported symlink mode: %s (supported: all, contained, none)", mode)
 	}
+}
+
+// ValidateHashWorkers validates that the hash worker count is reasonable
+func ValidateHashWorkers(workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("hash workers must be at least 1, got: %d", workers)
+	}
+	if workers > 64 {
+		return fmt.Errorf("hash workers should not exceed 64, got: %d", workers)
+	}
+	return nil
 }

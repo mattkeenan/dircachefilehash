@@ -26,6 +26,7 @@ var (
 	filehash  = flag.String("filehash", "", "hash algorithm overrides (format: default:sha256)")
 	symlinks  = flag.String("symlinks", "all", "symlink handling: all (follow all), contained (follow only if target within rootDir), none (don't follow)")
 	symlinkShort = flag.Bool("s", false, "follow symlinked directories (alias for --symlinks=all)")
+	hashWorkers = flag.Int("hash-workers", 0, "number of concurrent hash workers (0=use config default, typically 4)")
 )
 
 // Command-specific flag sets
@@ -108,6 +109,7 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  --debug=OPTIONS        Debug options: extravalidation,memorylayout,indexchaining,scanning\n")
 	fmt.Fprintf(os.Stderr, "  --filehash=OPTION      Hash algorithm override (format: default:sha256)\n")
 	fmt.Fprintf(os.Stderr, "  -s, --symlinks=MODE    Symlink handling: all (default), contained, none\n")
+	fmt.Fprintf(os.Stderr, "  --hash-workers=N       Number of concurrent hash workers (default: 4)\n")
 	fmt.Fprintf(os.Stderr, "  --version              Show version information\n")
 	fmt.Fprintf(os.Stderr, "  --help                 Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nCommands:\n")
@@ -250,6 +252,11 @@ func buildFlags() map[string]string {
 	}
 	flags["symlinks"] = symlinkMode
 	
+	// Set hash workers if specified
+	if *hashWorkers > 0 {
+		flags["hash_workers"] = fmt.Sprintf("%d", *hashWorkers)
+	}
+	
 	return flags
 }
 
@@ -265,11 +272,11 @@ func handleVersion() {
 		jsonBytes, _ := json.MarshalIndent(versionJSON, "", "  ")
 		fmt.Println(string(jsonBytes))
 	} else {
-		fmt.Printf("dcfh version %s\n", getVersionString())
+		fmt.Printf("dcfh version: %s\n", getVersionString())
 		fmt.Printf("Git commit: %s\n", getGitCommit())
 		fmt.Printf("Go version: %s\n", runtime.Version())
 		fmt.Printf("Supported index formats: v0\n")
-		fmt.Println("Directory Cache File Hash - A fast file indexing and duplicate detection tool")
+		fmt.Printf("Description: Directory Cache File Hash - A fast file indexing and duplicate detection tool\n")
 	}
 }
 

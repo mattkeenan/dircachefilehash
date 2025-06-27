@@ -153,6 +153,14 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
 	}
 	dc.config = config
+	
+	// Initialize hash workers from config (default to 4 if no config)
+	if config != nil {
+		performanceConfig := config.GetPerformanceConfig()
+		dc.hashWorkers = performanceConfig.HashWorkers
+	} else {
+		dc.hashWorkers = 4 // fallback default
+	}
 
 	// Check if index file exists, create empty one if not
 	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
@@ -193,6 +201,19 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 		dc.symlinkMode = symlinkConfig.Mode
 	} else {
 		dc.symlinkMode = "all" // default fallback
+	}
+	
+	// Set hash workers from flags or keep current config value
+	if hashWorkersStr, exists := flags["hash_workers"]; exists {
+		hashWorkers, err := strconv.Atoi(hashWorkersStr)
+		if err != nil {
+			return fmt.Errorf("invalid hash workers value '%s': %w", hashWorkersStr, err)
+		}
+		if err := ValidateHashWorkers(hashWorkers); err != nil {
+			return fmt.Errorf("invalid hash workers configuration: %w", err)
+		}
+		dc.hashWorkers = hashWorkers
+		allOverrides = append(allOverrides, "hash_workers:"+hashWorkersStr)
 	}
 	
 	// Apply all overrides
@@ -236,6 +257,11 @@ func (dc *DirectoryCache) validateAllConfigs() error {
 	
 	// Validate symlink mode
 	if err := ValidateSymlinkMode(allConfig.Symlink.Mode); err != nil {
+		return err
+	}
+	
+	// Validate hash workers
+	if err := ValidateHashWorkers(allConfig.Performance.HashWorkers); err != nil {
 		return err
 	}
 	

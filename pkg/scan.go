@@ -913,7 +913,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareS
 	collectionStop := make(chan struct{})
 
 	// Create hash job manager for concurrent hashing
-	hashJobManager := dc.newSimpleHashManager(4, callFinishChan)
+	hashJobManager := dc.newSimpleHashManager(dc.hashWorkers, callFinishChan)
 	defer hashJobManager.Shutdown()
 
 	// Start filesystem scan
