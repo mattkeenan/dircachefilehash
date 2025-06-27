@@ -1,7 +1,6 @@
 package dircachefilehash
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -209,6 +208,40 @@ func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
 	return strings.HasPrefix(childPath, parentWithSep)
 }
 
+// isPathContained checks if targetPath is contained within containerPath
+// This is used for symlink containment checking
+func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool {
+	// Clean and make both paths absolute for proper comparison
+	targetPath = filepath.Clean(targetPath)
+	containerPath = filepath.Clean(containerPath)
+	
+	// Make both paths absolute
+	if !filepath.IsAbs(targetPath) {
+		var err error
+		targetPath, err = filepath.Abs(targetPath)
+		if err != nil {
+			return false
+		}
+	}
+	
+	if !filepath.IsAbs(containerPath) {
+		var err error
+		containerPath, err = filepath.Abs(containerPath)
+		if err != nil {
+			return false
+		}
+	}
+	
+	// If paths are identical, target is contained
+	if targetPath == containerPath {
+		return true
+	}
+
+	// Check if targetPath starts with containerPath + separator
+	containerWithSep := containerPath + string(filepath.Separator)
+	return strings.HasPrefix(targetPath, containerWithSep)
+}
+
 // scanPathRecursive recursively scans a path and streams results as they're found
 // This provides significant performance benefits:
 // 1. No memory buildup - results are streamed immediately
@@ -242,6 +275,46 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 		// Check if path should be ignored
 		if dc.ignoreManager.ShouldIgnore(relPath) {
 			continue
+		}
+
+		// Handle symlinks - determine if it's a file or directory symlink
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Get info for the target to determine if it's a file or directory
+			targetInfo, err := os.Stat(currentPath)
+			if err != nil {
+				continue // Skip broken symlinks
+			}
+			
+			if targetInfo.IsDir() {
+				// This is a directory symlink - apply symlink mode logic
+				switch dc.symlinkMode {
+				case "none":
+					// Don't follow directory symlinks - skip them
+					continue
+				case "contained":
+					// Only follow if target directory is within rootDir
+					target, err := filepath.EvalSymlinks(currentPath)
+					if err != nil {
+						continue // Skip broken symlinks
+					}
+					
+					// Check if target is within rootDir
+					if !dc.isPathContained(target, dc.RootDir) {
+						continue // Skip directory symlinks pointing outside rootDir
+					}
+					
+					// Use target info for the directory symlink (traverse into it)
+					info = targetInfo
+				case "all":
+					// Follow all directory symlinks (current behavior)
+					info = targetInfo
+				default:
+					// Default to "all" for unknown modes
+					info = targetInfo
+				}
+			}
+			// For file symlinks, keep the original symlink info (don't replace with targetInfo)
+			// The symlink will be recorded as a symlink, but we'll hash the target content
 		}
 
 		if info.IsDir() {
@@ -294,6 +367,31 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 			}
 			if IsDebugEnabled("scan") {
 				VerboseLog(3, "scanPathRecursive: found file %s", relPath)
+			}
+			resultChan <- scannedPath
+		} else if info.Mode()&os.ModeSymlink != 0 {
+			// Handle file symlinks (directory symlinks were already handled above)
+			// Skip index files
+			if currentPath == dc.IndexFile || currentPath == dc.CacheFile {
+				continue
+			}
+
+			// Get system-specific file information
+			stat := info.Sys().(*syscall.Stat_t)
+
+			scannedPath := &scannedPath{
+				AbsPath:  currentPath,
+				RelPath:  relPath,
+				Info:     info,
+				StatInfo: stat,
+			}
+
+			// Stream result immediately - this gives us better performance
+			if IsDebugEnabled("scanning") {
+				fmt.Fprintf(os.Stderr, "[SCAN] Scanned symlink: %s\n", relPath)
+			}
+			if IsDebugEnabled("scan") {
+				VerboseLog(3, "scanPathRecursive: found symlink %s", relPath)
 			}
 			resultChan <- scannedPath
 		}
@@ -615,15 +713,25 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 		}
 		
 		// Hash the file and update binaryEntry directly in mmap memory
-		hashStr, err := dc.hashFile(job.FilePath)
+		// For symlinks, we hash the target path, not the target file contents
+		var hashBytes []byte
+		var hashType uint16
+		var err error
+		
+		// Check if this is a symlink by examining the file mode
+		if job.ScannedPath.Info.Mode()&os.ModeSymlink != 0 {
+			// This is a symlink - hash the target path
+			hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
+		} else {
+			// Regular file - hash the file contents
+			hashBytes, hashType, err = dc.hashFileWithAlgorithmToBytes(job.FilePath, nil)
+		}
 
 		if err == nil {
-			if hashBytes, hexErr := hex.DecodeString(hashStr); hexErr == nil {
-				// Update the binaryEntry directly in the scan index mmap memory
-				// This provides zero-copy updates to the scan index file
-				if updateErr := dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, HashTypeSHA1); updateErr != nil {
-					fmt.Fprintf(os.Stderr, "[ERROR] Failed to update binary entry hash: %v\n", updateErr)
-				}
+			// Update the binaryEntry directly in the scan index mmap memory
+			// This provides zero-copy updates to the scan index file
+			if updateErr := dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, hashType); updateErr != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] Failed to update binary entry hash: %v\n", updateErr)
 			}
 		}
 

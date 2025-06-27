@@ -17,11 +17,12 @@ import (
 var (
 	output    = flag.String("output", "human", "output format: human, json, fdupes")
 	jsonFlag  = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
-	verbose   = flag.Bool("verbose", false, "verbose output")
-	verboseLevel = flag.Int("v", 0, "verbose level (1=basic, 2=detailed, 3=trace)")
+	verbose   = flag.Int("verbose", 0, "verbose level (1=basic, 2=detailed, 3=trace); can be repeated -v, -vv, -vvv")
 	version   = flag.Bool("version", false, "show version information")
 	debug     = flag.String("debug", "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining,scanning")
 	filehash  = flag.String("filehash", "", "hash algorithm overrides (format: default:sha256)")
+	symlinks  = flag.String("symlinks", "all", "symlink handling: all (follow all), contained (follow only if target within rootDir), none (don't follow)")
+	symlinkShort = flag.Bool("s", false, "follow symlinked directories (alias for --symlinks=all)")
 )
 
 // Command-specific flag sets
@@ -100,9 +101,10 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "Global Options:\n")
 	fmt.Fprintf(os.Stderr, "  --output=FORMAT    Output format: human (default), json, fdupes\n")
 	fmt.Fprintf(os.Stderr, "  --json             Output in JSON format (alias for --output=json)\n")
-	fmt.Fprintf(os.Stderr, "  --verbose              Verbose output\n")
+	fmt.Fprintf(os.Stderr, "  -v, --verbose=LEVEL    Verbose level (1=basic, 2=detailed, 3=trace); can be repeated -v, -vv, -vvv\n")
 	fmt.Fprintf(os.Stderr, "  --debug=OPTIONS        Debug options: extravalidation,memorylayout,indexchaining,scanning\n")
 	fmt.Fprintf(os.Stderr, "  --filehash=OPTION      Hash algorithm override (format: default:sha256)\n")
+	fmt.Fprintf(os.Stderr, "  -s, --symlinks=MODE    Symlink handling: all (default), contained, none\n")
 	fmt.Fprintf(os.Stderr, "  --version              Show version information\n")
 	fmt.Fprintf(os.Stderr, "  --help                 Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nCommands:\n")
@@ -126,11 +128,53 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh config --list\n")
 }
 
+// parseVerboseFlags handles GNU-style verbose flags (-v, -vv, -vvv)
+func parseVerboseFlags() {
+	// Count -v flags and convert to verbose level
+	verboseCount := 0
+	
+	// Process args to count -v occurrences and remove them
+	var newArgs []string
+	for i := 0; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		
+		if arg == "-v" {
+			verboseCount++
+		} else if strings.HasPrefix(arg, "-v") && len(arg) > 2 {
+			// Handle -vv, -vvv, etc.
+			for j := 1; j < len(arg); j++ {
+				if arg[j] == 'v' {
+					verboseCount++
+				} else {
+					// Not a pure -v repetition, keep as is
+					newArgs = append(newArgs, arg)
+					break
+				}
+			}
+			// If we counted all v's, don't add to newArgs
+			if verboseCount > 0 && strings.Trim(arg[1:], "v") == "" {
+				continue
+			}
+		} else {
+			newArgs = append(newArgs, arg)
+		}
+	}
+	
+	// Update os.Args to remove processed -v flags
+	os.Args = newArgs
+	
+	// Set the verbose level if any -v flags were found
+	if verboseCount > 0 {
+		*verbose = verboseCount
+	}
+}
+
 func main() {
 	// Set up global flags
 	flag.Usage = showUsage
 
-	// Parse global flags first
+	// Parse global flags first, but handle -v repetition manually
+	parseVerboseFlags()
 	flag.Parse()
 
 	// Initialize debug flags early
@@ -178,16 +222,11 @@ func main() {
 func buildFlags() map[string]string {
 	flags := make(map[string]string)
 	
-	// Determine verbose level from flags
-	level := *verboseLevel
-	if *verbose && level == 0 {
-		level = 1 // --verbose flag sets level 1
-	}
-	
-	if level > 0 {
-		flags["v"] = fmt.Sprintf("%d", level)
+	// Use verbose level directly
+	if *verbose > 0 {
+		flags["v"] = fmt.Sprintf("%d", *verbose)
 		// Set global verbose level for trace logging
-		dcfh.SetVerboseLevel(level)
+		dcfh.SetVerboseLevel(*verbose)
 	}
 	
 	// Set debug flags  
@@ -199,6 +238,14 @@ func buildFlags() map[string]string {
 	if *filehash != "" {
 		flags["filehash"] = *filehash
 	}
+	
+	// Set symlink handling mode
+	symlinkMode := *symlinks
+	if *symlinkShort {
+		// -s flag overrides --symlinks setting
+		symlinkMode = "all"
+	}
+	flags["symlinks"] = symlinkMode
 	
 	return flags
 }
@@ -310,12 +357,20 @@ func handleInit(args []string) {
 	directory := args[0]
 	start := time.Now()
 
-	// Convert to absolute path
+	// Convert to absolute path and resolve symlinks
 	absDir, err := filepath.Abs(directory)
 	if err != nil {
 		outputError(fmt.Sprintf("Failed to get absolute path for %s: %v", directory, err))
 		os.Exit(1)
 	}
+	
+	// Resolve symlinks to get the real path
+	realDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		// If symlink resolution fails, fall back to absolute path
+		realDir = absDir
+	}
+	absDir = realDir
 
 	// Check if directory exists
 	info, err := os.Stat(absDir)
@@ -347,7 +402,7 @@ func handleInit(args []string) {
 	}
 
 	format := validateOutputFormat()
-	if format == OutputHuman && *verbose {
+	if format == OutputHuman && *verbose > 0 {
 		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
 		fmt.Println("Scanning directory and creating initial index...")
 	}
@@ -372,7 +427,7 @@ func handleInit(args []string) {
 		outputJSON(output)
 	} else {
 		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
-		if *verbose {
+		if *verbose > 0 {
 			fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
 		}
@@ -512,7 +567,7 @@ func handleUpdate(args []string) {
 		paths = args
 		if format == OutputHuman {
 			fmt.Printf("Updating specified paths in %s\n", repoRoot)
-			if *verbose {
+			if *verbose > 0 {
 				for _, path := range paths {
 					fmt.Printf("  %s\n", path)
 				}
@@ -535,7 +590,7 @@ func handleUpdate(args []string) {
 		os.Exit(1)
 	}
 
-	if format == OutputHuman && *verbose {
+	if format == OutputHuman && *verbose > 0 {
 		fmt.Println("Scanning directory...")
 	}
 
@@ -586,7 +641,7 @@ func handleUpdate(args []string) {
 		} else {
 			fmt.Printf("Updated index\n")
 		}
-		if *verbose {
+		if *verbose > 0 {
 			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
 			fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 			if duplicateInfo != nil {
@@ -809,6 +864,7 @@ func showConfigUsage() {
 	fmt.Fprintf(os.Stderr, "  output.format        Default output format (human, json, fdupes)\n")
 	fmt.Fprintf(os.Stderr, "  verbose.level        Default verbose level (0-3)\n")
 	fmt.Fprintf(os.Stderr, "  verbose.debug        Default debug flags (comma-separated)\n")
+	fmt.Fprintf(os.Stderr, "  symlink.mode         Default symlink handling (all, contained, none)\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh config --list\n")
 	fmt.Fprintf(os.Stderr, "  dcfh config filehash.default\n")
@@ -838,6 +894,7 @@ func handleConfigList() {
 	fmt.Printf("output.format=%s\n", allConfig.Output.Format)
 	fmt.Printf("verbose.level=%d\n", allConfig.Verbose.Level)
 	fmt.Printf("verbose.debug=%s\n", allConfig.Verbose.Debug)
+	fmt.Printf("symlink.mode=%s\n", allConfig.Symlink.Mode)
 }
 
 func handleConfigGet(key string) {
@@ -867,6 +924,8 @@ func handleConfigGet(key string) {
 		fmt.Println(allConfig.Verbose.Level)
 	case "verbose.debug":
 		fmt.Println(allConfig.Verbose.Debug)
+	case "symlink.mode":
+		fmt.Println(allConfig.Symlink.Mode)
 	default:
 		outputError(fmt.Sprintf("Unknown configuration key: %s", key))
 		os.Exit(1)
@@ -931,6 +990,15 @@ func handleConfigSet(key, value string) {
 			outputError(fmt.Sprintf("Failed to set verbose.debug: %v", err))
 			os.Exit(1)
 		}
+	case "symlink.mode":
+		if err := dcfh.ValidateSymlinkMode(value); err != nil {
+			outputError(fmt.Sprintf("Invalid symlink mode: %v", err))
+			os.Exit(1)
+		}
+		if err := config.SetSymlinkMode(value); err != nil {
+			outputError(fmt.Sprintf("Failed to set symlink.mode: %v", err))
+			os.Exit(1)
+		}
 	default:
 		outputError(fmt.Sprintf("Unknown configuration key: %s", key))
 		showConfigUsage()
@@ -956,7 +1024,13 @@ func findDcfhRepo() (string, string, error) {
 
 		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
 			if _, err := os.Stat(indexFile); err == nil {
-				return dir, dir, nil // repoRoot and dcfhDir are the same
+				// Resolve symlinks to get the real path
+				realDir, err := filepath.EvalSymlinks(dir)
+				if err != nil {
+					// If symlink resolution fails, fall back to original path
+					realDir = dir
+				}
+				return realDir, realDir, nil // repoRoot and dcfhDir are the same
 			}
 		}
 

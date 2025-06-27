@@ -88,6 +88,13 @@ func HashFileToHexString(filePath string, algorithm *HashAlgorithm) (string, err
 	return hex.EncodeToString(hashBytes), nil
 }
 
+// HashStringToHexString calculates the hash of a string and returns it as a hex string
+func HashStringToHexString(data string, algorithm *HashAlgorithm) (string, error) {
+	hasher := algorithm.NewFunc()
+	hasher.Write([]byte(data))
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
 // GetDefaultHashSize returns the size for a hash type (for backwards compatibility)
 func GetHashSize(hashType uint16) int {
 	switch hashType {

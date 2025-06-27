@@ -31,11 +31,17 @@ type VerboseConfig struct {
 	Debug string // Default debug flags (comma-separated)
 }
 
+// SymlinkConfig represents symlink handling configuration
+type SymlinkConfig struct {
+	Mode string // Default symlink mode: all, contained, none
+}
+
 // AllConfig represents all configuration options
 type AllConfig struct {
 	Hash    *HashConfig
 	Output  *OutputConfig
 	Verbose *VerboseConfig
+	Symlink *SymlinkConfig
 }
 
 // LoadConfig loads configuration from the .dcfh/config file
@@ -104,6 +110,16 @@ func (c *Config) setDefaults() error {
 		return fmt.Errorf("failed to set default debug flags: %w", err)
 	}
 	
+	// Set default symlink settings
+	symlinkSection, err := c.ini.NewSection("symlink")
+	if err != nil {
+		return fmt.Errorf("failed to create symlink section: %w", err)
+	}
+	_, err = symlinkSection.NewKey("mode", "all")
+	if err != nil {
+		return fmt.Errorf("failed to set default symlink mode: %w", err)
+	}
+	
 	return nil
 }
 
@@ -161,12 +177,29 @@ func (c *Config) GetVerboseConfig() *VerboseConfig {
 	return verboseConfig
 }
 
+// GetSymlinkConfig returns the symlink configuration
+func (c *Config) GetSymlinkConfig() *SymlinkConfig {
+	symlinkConfig := &SymlinkConfig{
+		Mode: "all", // fallback default
+	}
+	
+	if c.ini.HasSection("symlink") {
+		section := c.ini.Section("symlink")
+		if section.HasKey("mode") {
+			symlinkConfig.Mode = section.Key("mode").String()
+		}
+	}
+	
+	return symlinkConfig
+}
+
 // GetAllConfig returns all configuration options
 func (c *Config) GetAllConfig() *AllConfig {
 	return &AllConfig{
 		Hash:    c.GetHashConfig(),
 		Output:  c.GetOutputConfig(),
 		Verbose: c.GetVerboseConfig(),
+		Symlink: c.GetSymlinkConfig(),
 	}
 }
 
@@ -195,6 +228,13 @@ func (c *Config) SetVerboseLevel(level int) error {
 func (c *Config) SetDebugFlags(debug string) error {
 	section := c.ini.Section("verbose")
 	section.Key("debug").SetValue(debug)
+	return c.Save()
+}
+
+// SetSymlinkMode sets the default symlink mode
+func (c *Config) SetSymlinkMode(mode string) error {
+	section := c.ini.Section("symlink")
+	section.Key("mode").SetValue(mode)
 	return c.Save()
 }
 
@@ -232,8 +272,12 @@ func (c *Config) ApplyOverrides(overrides []string) error {
 			// verbose.debug override
 			section := c.ini.Section("verbose")
 			section.Key("debug").SetValue(value)
+		case "mode":
+			// symlink.mode override
+			section := c.ini.Section("symlink")
+			section.Key("mode").SetValue(value)
 		default:
-			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug)", key)
+			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode)", key)
 		}
 	}
 	
@@ -272,4 +316,14 @@ func ValidateVerboseLevel(level int) error {
 func ValidateDebugFlags(debug string) error {
 	// For now, allow any debug flags - validation can be enhanced later
 	return nil
+}
+
+// ValidateSymlinkMode validates that a symlink mode is supported
+func ValidateSymlinkMode(mode string) error {
+	switch strings.ToLower(mode) {
+	case "all", "contained", "none":
+		return nil
+	default:
+		return fmt.Errorf("unsupported symlink mode: %s (supported: all, contained, none)", mode)
+	}
 }

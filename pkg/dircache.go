@@ -185,6 +185,16 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 		allOverrides = append(allOverrides, filehashOverride)
 	}
 	
+	// Set symlink mode from flags or config
+	if symlinkMode, exists := flags["symlinks"]; exists {
+		dc.symlinkMode = symlinkMode
+	} else if dc.config != nil {
+		symlinkConfig := dc.config.GetSymlinkConfig()
+		dc.symlinkMode = symlinkConfig.Mode
+	} else {
+		dc.symlinkMode = "all" // default fallback
+	}
+	
 	// Apply all overrides
 	if len(allOverrides) > 0 {
 		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
@@ -221,6 +231,11 @@ func (dc *DirectoryCache) validateAllConfigs() error {
 	
 	// Validate debug flags
 	if err := ValidateDebugFlags(allConfig.Verbose.Debug); err != nil {
+		return err
+	}
+	
+	// Validate symlink mode
+	if err := ValidateSymlinkMode(allConfig.Symlink.Mode); err != nil {
 		return err
 	}
 	

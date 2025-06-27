@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"fmt"
+	"os"
 )
 
 
@@ -9,6 +10,27 @@ import (
 func (dc *DirectoryCache) hashFile(filePath string) (string, error) {
 	return dc.hashFileWithAlgorithm(filePath, nil)
 }
+
+// hashSymlinkTargetToBytes calculates hash of a symlink's target path and returns raw bytes
+func (dc *DirectoryCache) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, uint16, error) {
+	// Get default hash algorithm from config
+	algorithm, err := dc.getDefaultHashAlgorithm()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
+	}
+	
+	// Read the symlink target path (not the target file contents)
+	targetPath, err := os.Readlink(symlinkPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read symlink target: %w", err)
+	}
+	
+	// Hash the target path string
+	hasher := algorithm.NewFunc()
+	hasher.Write([]byte(targetPath))
+	return hasher.Sum(nil), algorithm.TypeID, nil
+}
+
 
 // hashFileWithAlgorithm calculates hash of a file using the specified algorithm or default
 func (dc *DirectoryCache) hashFileWithAlgorithm(filePath string, algorithm *HashAlgorithm) (string, error) {

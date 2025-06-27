@@ -42,6 +42,7 @@ type DirectoryCache struct {
 	mmapIndex     *mmapIndex     // Memory-mapped index file
 	ignoreManager *IgnoreManager // Ignore pattern manager
 	config        *Config        // Configuration manager
+	symlinkMode   string         // Current symlink handling mode
 	
 	// Concurrent scan synchronization
 	scanMutex     sync.RWMutex    // Protects scan operations
