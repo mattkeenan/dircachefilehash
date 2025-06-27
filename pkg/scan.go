@@ -16,36 +16,36 @@ import (
 // TYPE DEFINITIONS
 // ============================================================================
 
-// ScannedPath represents a file found during filesystem scanning
-type ScannedPath struct {
+// scannedPath represents a file found during filesystem scanning
+type scannedPath struct {
 	AbsPath  string
 	RelPath  string
 	Info     os.FileInfo
 	StatInfo *syscall.Stat_t
 }
 
-// HwangLinResult represents the result of Hwang-Lin comparison
-type HwangLinResult struct {
-	Type        HwangLinType
-	ScannedPath *ScannedPath // nil for deletions
+// hwangLinResult represents the result of Hwang-Lin comparison
+type hwangLinResult struct {
+	Type        hwangLinType
+	ScannedPath *scannedPath // nil for deletions
 	IndexEntry  *binaryEntry // nil for new files
 	JobID       uint64       // for tracking hash jobs
 	Hash        []byte       // computed hash (for new/modified files)
 	HashType    uint16       // hash algorithm type
 }
 
-// HwangLinType represents the type of change detected
-type HwangLinType int
+// hwangLinType represents the type of change detected
+type hwangLinType int
 
 const (
-	HLUnchanged HwangLinType = iota // File exists in both and is unchanged
+	HLUnchanged hwangLinType = iota // File exists in both and is unchanged
 	HLNew                           // File only exists in scan (new file)
 	HLModified                      // File exists in both but is modified
 	HLDeleted                       // File only exists in index (deleted file)
 )
 
-// ProcessedEntry represents a processed file ready for index writing
-type ProcessedEntry struct {
+// processedEntry represents a processed file ready for index writing
+type processedEntry struct {
 	RelPath   string
 	Hash      []byte
 	HashType  uint16
@@ -54,12 +54,12 @@ type ProcessedEntry struct {
 	IsDeleted bool
 }
 
-// HashJobStart represents a hash job being started
-type HashJobStart struct {
+// hashJobStart represents a hash job being started
+type hashJobStart struct {
 	JobID       uint64
 	FilePath    string
-	IndexEntry  BinaryEntryRef // Entry to update with hash (mremap-safe)
-	ScannedPath *ScannedPath
+	IndexEntry  binaryEntryRef // Entry to update with hash (mremap-safe)
+	ScannedPath *scannedPath
 }
 
 // mockFileInfo implements os.FileInfo for deleted entries
@@ -83,9 +83,9 @@ func remove(s []uint64, i int) []uint64 {
 	return s[:len(s)-1]
 }
 
-// SimpleHashManager - coordinates hash job completion
-type SimpleHashManager struct {
-	hashJobChan    chan *HashJobStart
+// simpleHashManager - coordinates hash job completion
+type simpleHashManager struct {
+	hashJobChan    chan *hashJobStart
 	callFinishChan chan uint64 // job completion notifications
 	wg             sync.WaitGroup
 }
@@ -95,7 +95,7 @@ type SimpleHashManager struct {
 // ============================================================================
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *ScannedPath) error {
+func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPath) error {
 	defer VerboseEnter()()
 	defer close(resultChan)
 
@@ -214,7 +214,7 @@ func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *ScannedPath) error {
+func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *scannedPath) error {
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
@@ -281,7 +281,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 			// Get system-specific file information
 			stat := info.Sys().(*syscall.Stat_t)
 
-			scannedPath := &ScannedPath{
+			scannedPath := &scannedPath{
 				AbsPath:  currentPath,
 				RelPath:  relPath,
 				Info:     info,
@@ -349,15 +349,15 @@ func (dc *DirectoryCache) insertSorted(existing []string, newPaths []string) []s
 
 // hwangLinCompareToSkiplist performs Hwang-Lin comparison and builds scan index + skiplist
 func (dc *DirectoryCache) hwangLinCompareToSkiplist(
-	scanChan <-chan *ScannedPath,
-	compareSkiplist *SkiplistWrapper,
-	scanSkiplist *SkiplistWrapper,
+	scanChan <-chan *scannedPath,
+	compareSkiplist *skiplistWrapper,
+	scanSkiplist *skiplistWrapper,
 	scanFileName string,
-	hashJobManager *SimpleHashManager,
+	hashJobManager *simpleHashManager,
 	callStartChan chan<- uint64,
 ) error {
 	defer VerboseEnter()()
-	var currentScanned *ScannedPath
+	var currentScanned *scannedPath
 	var scanChanOpen bool = true
 	currentIndex := compareSkiplist.skiplist.First()
 	jobIDCounter := uint64(1)
@@ -417,18 +417,18 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 					return fmt.Errorf("failed to create scan index entry: %w", err)
 				}
 
-				// Insert into scan skiplist using BinaryEntryRef
-				scanRef := CreateBinaryEntryRef(scanEntry, dc.currentScan)
+				// Insert into scan skiplist using binaryEntryRef
+				scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
 				scanSkiplist.Insert(scanRef, ScanContext)
 
 				// Submit for async hashing
 				jobID := jobIDCounter
 				jobIDCounter++
 
-				hashJob := &HashJobStart{
+				hashJob := &hashJobStart{
 					JobID:       jobID,
 					FilePath:    currentScanned.AbsPath,
-					IndexEntry:  CreateBinaryEntryRef(scanEntry, dc.currentScan), // Hash worker will update this safely
+					IndexEntry:  createBinaryEntryRef(scanEntry, dc.currentScan), // Hash worker will update this safely
 					ScannedPath: currentScanned,
 				}
 
@@ -445,8 +445,8 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				copy(scanEntry.Hash[:], indexEntry.Hash[:])
 				scanEntry.HashType = indexEntry.HashType
 
-				// Insert into scan skiplist using BinaryEntryRef, preserving original context
-				scanRef := CreateBinaryEntryRef(scanEntry, dc.currentScan)
+				// Insert into scan skiplist using binaryEntryRef, preserving original context
+				scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
 				originalContext := currentIndex.Context()
 				scanSkiplist.Insert(scanRef, originalContext)
 			}
@@ -464,18 +464,18 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				return fmt.Errorf("failed to create scan index entry: %w", err)
 			}
 
-			// Insert into scan skiplist using BinaryEntryRef
-			scanRef := CreateBinaryEntryRef(scanEntry, dc.currentScan)
+			// Insert into scan skiplist using binaryEntryRef
+			scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
 			scanSkiplist.Insert(scanRef, ScanContext)
 
 			// Submit for async hashing
 			jobID := jobIDCounter
 			jobIDCounter++
 
-			hashJob := &HashJobStart{
+			hashJob := &hashJobStart{
 				JobID:       jobID,
 				FilePath:    currentScanned.AbsPath,
-				IndexEntry:  CreateBinaryEntryRef(scanEntry, dc.currentScan), // Hash worker will update this safely
+				IndexEntry:  createBinaryEntryRef(scanEntry, dc.currentScan), // Hash worker will update this safely
 				ScannedPath: currentScanned,
 			}
 
@@ -518,7 +518,7 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				}
 				
 				// Create string copy to avoid use-after-free when scan memory is unmapped
-				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, &ScannedPath{
+				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, &scannedPath{
 					RelPath:  string([]byte(indexEntry.RelativePath())),
 					Info:     mockInfo,
 					StatInfo: mockStat,
@@ -532,8 +532,8 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				copy(deletedEntry.Hash[:], indexEntry.Hash[:])
 				deletedEntry.HashType = indexEntry.HashType
 
-				// Insert into scan skiplist using BinaryEntryRef
-				deletedRef := CreateBinaryEntryRef(deletedEntry, dc.currentScan)
+				// Insert into scan skiplist using binaryEntryRef
+				deletedRef := createBinaryEntryRef(deletedEntry, dc.currentScan)
 				scanSkiplist.Insert(deletedRef, ScanContext)
 			}
 
@@ -549,7 +549,7 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 // Now with asynchronous hash job processing - hash jobs don't block the comparison
 
 // isFileChangedFromScanned checks if a file has changed by comparing with scanned info
-func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scanned *ScannedPath) bool {
+func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scanned *scannedPath) bool {
 	stat := scanned.StatInfo
 
 	// Quick size check
@@ -579,9 +579,9 @@ func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scan
 // ============================================================================
 
 // NewSimpleHashManager creates a new simple hash manager
-func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan chan uint64) *SimpleHashManager {
-	manager := &SimpleHashManager{
-		hashJobChan:    make(chan *HashJobStart, 100),
+func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan chan uint64) *simpleHashManager {
+	manager := &simpleHashManager{
+		hashJobChan:    make(chan *hashJobStart, 100),
 		callFinishChan: callFinishChan,
 	}
 
@@ -595,18 +595,18 @@ func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan ch
 }
 
 // SubmitHashJob submits a hash job and signals the start
-func (hjm *SimpleHashManager) SubmitHashJob(job *HashJobStart, callStartChan chan<- uint64) {
+func (hjm *simpleHashManager) SubmitHashJob(job *hashJobStart, callStartChan chan<- uint64) {
 	hjm.hashJobChan <- job
 	callStartChan <- job.JobID // Signal job started
 }
 
 // FinishSubmitting signals that no more hash jobs will be submitted
-func (hjm *SimpleHashManager) FinishSubmitting() {
+func (hjm *simpleHashManager) FinishSubmitting() {
 	close(hjm.hashJobChan)
 }
 
 // hashWorker processes hash jobs and updates entries directly in scan index mmap
-func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
+func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
 
 	for job := range hjm.hashJobChan {
@@ -641,12 +641,12 @@ func (hjm *SimpleHashManager) hashWorker(dc *DirectoryCache) {
 }
 
 // Shutdown gracefully shuts down the hash manager
-func (hjm *SimpleHashManager) Shutdown() {
+func (hjm *simpleHashManager) Shutdown() {
 	hjm.wg.Wait()
 }
 
 // updateBinaryEntryHash safely updates the hash in a binaryEntry
-func (dc *DirectoryCache) updateBinaryEntryHash(entryRef BinaryEntryRef, hash []byte, hashType uint16) error {
+func (dc *DirectoryCache) updateBinaryEntryHash(entryRef binaryEntryRef, hash []byte, hashType uint16) error {
 	entry := entryRef.GetBinaryEntry()
 	if entry == nil {
 		return fmt.Errorf("GetBinaryEntry returned nil for hash update - this should never happen")
@@ -763,7 +763,7 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 // PerformHwangLinScan performs a complete Hwang-Lin scan with asynchronous hash job coordination
 
 // PerformHwangLinScanToSkiplist performs Hwang-Lin scan and builds a skiplist directly with scan index files
-func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareSkiplist *SkiplistWrapper) (*SkiplistWrapper, error) {
+func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 	// Synchronize concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
@@ -799,7 +799,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareS
 	}
 	
 	// Create channels for streaming data
-	scanChan := make(chan *ScannedPath, 50)
+	scanChan := make(chan *scannedPath, 50)
 	callStartChan := make(chan uint64, 100)
 	callFinishChan := make(chan uint64, 100)
 	collectionStop := make(chan struct{})

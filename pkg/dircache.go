@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 )
 
-// CleanupTempFiles removes temporary files from the .dcfh directory
-func (dc *DirectoryCache) cleanupTempFiles() error {
+// checkForOrphanedIndexFiles checks for temporary index files from dead processes
+func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {
 	dcfhDir := filepath.Dir(dc.IndexFile)
 
 	entries, err := os.ReadDir(dcfhDir)
@@ -17,27 +19,68 @@ func (dc *DirectoryCache) cleanupTempFiles() error {
 		return fmt.Errorf("failed to read .dcfh directory: %w", err)
 	}
 
-	var errors []string
 	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".tmp") {
-			fullPath := filepath.Join(dcfhDir, entry.Name())
-			if err := os.Remove(fullPath); err != nil {
-				errors = append(errors, fmt.Sprintf("failed to remove %s: %v", fullPath, err))
+		name := entry.Name()
+		
+		// Check for our temporary index file patterns
+		if (strings.HasPrefix(name, "tmp-") || strings.HasPrefix(name, "scan-")) && strings.HasSuffix(name, ".idx") {
+			pid := extractPidFromIndexFileName(name)
+			if pid > 0 && !isProcessRunning(pid) {
+				fmt.Fprintf(os.Stderr, "Warning: found orphaned index file from dead process: %s (PID %d no longer running)\n", name, pid)
 			}
 		}
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf("cleanup errors: %s", strings.Join(errors, "; "))
 	}
 
 	return nil
 }
 
-// CleanupTempFilesOnExit ensures cleanup happens when the program exits
-func (dc *DirectoryCache) CleanupTempFilesOnExit() {
-	// This is called from defer statements to ensure cleanup
-	dc.cleanupTempFiles() // Ignore errors during cleanup
+// extractPidFromIndexFileName extracts the PID from index filenames like "tmp-1234-5678.idx" or "scan-1234-5678.idx"
+func extractPidFromIndexFileName(filename string) int {
+	// Remove .idx suffix
+	if !strings.HasSuffix(filename, ".idx") {
+		return 0
+	}
+	base := strings.TrimSuffix(filename, ".idx")
+	
+	// Split on dashes
+	parts := strings.Split(base, "-")
+	if len(parts) < 3 {
+		return 0
+	}
+	
+	// PID is the second part (index 1)
+	pidStr := parts[1]
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return 0
+	}
+	
+	return pid
+}
+
+// isProcessRunning checks if a process with the given PID is currently running
+func isProcessRunning(pid int) bool {
+	// Use kill(pid, 0) to check if process exists without sending a signal
+	// This is a standard Unix way to check process existence
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true // Process exists and we can signal it
+	}
+	
+	// Check the specific error
+	if errno, ok := err.(syscall.Errno); ok {
+		if errno == syscall.ESRCH {
+			return false // No such process
+		}
+		// EPERM means process exists but we don't have permission to signal it
+		// This still means the process is running
+		if errno == syscall.EPERM {
+			return true
+		}
+	}
+	
+	// For any other error, assume process doesn't exist
+	return false
 }
 
 // Stats returns statistics about the cache by loading the main index

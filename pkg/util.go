@@ -39,15 +39,15 @@ type DirectoryCache struct {
 	signature     [4]byte        // "dcfh" signature
 	version       uint32         // Index version
 	hasher        hash.Hash      // SHA-1 hasher for checksums
-	mmapIndex     *MmapIndex     // Memory-mapped index file
+	mmapIndex     *mmapIndex     // Memory-mapped index file
 	ignoreManager *IgnoreManager // Ignore pattern manager
 	
 	// Concurrent scan synchronization
 	scanMutex     sync.RWMutex    // Protects scan operations
 	scanInProgress bool           // True if a scan is currently running
-	lastScanResult *SkiplistWrapper // Result from the last completed scan
+	lastScanResult *skiplistWrapper // Result from the last completed scan
 	lastScanError  error          // Error from the last completed scan
-	currentScan   *MmapIndexFile  // Current scan index file (single mmap, expanded with mremap)
+	currentScan   *mmapIndexFile  // Current scan index file (single mmap, expanded with mremap)
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
@@ -259,15 +259,15 @@ func BESizeFromPathLen(pathLen int) int {
 	return totalSize + padding
 }
 
-// BinaryEntryRef represents an offset-based reference to a binaryEntry in mmap'd memory
+// binaryEntryRef represents an offset-based reference to a binaryEntry in mmap'd memory
 // This is mremap-safe since it uses offsets instead of raw pointers
-type BinaryEntryRef struct {
+type binaryEntryRef struct {
 	Offset    int              // Offset from start of entry data (after header)
-	IndexFile *MmapIndexFile   // Reference to the mmap'd index file
+	IndexFile *mmapIndexFile   // Reference to the mmap'd index file
 }
 
 // GetBinaryEntry resolves the reference to get the actual binaryEntry pointer
-func (ref *BinaryEntryRef) GetBinaryEntry() *binaryEntry {
+func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 	if ref.IndexFile == nil {
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "GetBinaryEntry: IndexFile is nil")
@@ -295,10 +295,10 @@ func (ref *BinaryEntryRef) GetBinaryEntry() *binaryEntry {
 	return (*binaryEntry)(unsafe.Pointer(entryPtr))
 }
 
-// CreateBinaryEntryRef creates a BinaryEntryRef from a binaryEntry pointer and MmapIndexFile
-func CreateBinaryEntryRef(entry *binaryEntry, indexFile *MmapIndexFile) BinaryEntryRef {
+// createBinaryEntryRef creates a binaryEntryRef from a binaryEntry pointer and mmapIndexFile
+func createBinaryEntryRef(entry *binaryEntry, indexFile *mmapIndexFile) binaryEntryRef {
 	if indexFile == nil {
-		return BinaryEntryRef{}
+		return binaryEntryRef{}
 	}
 	
 	// Read lock to protect against concurrent mremap operations
@@ -306,7 +306,7 @@ func CreateBinaryEntryRef(entry *binaryEntry, indexFile *MmapIndexFile) BinaryEn
 	defer indexFile.mutex.RUnlock()
 	
 	if indexFile.Data == nil {
-		return BinaryEntryRef{}
+		return binaryEntryRef{}
 	}
 	
 	// Calculate offset from base of entry data (after header)
@@ -314,7 +314,7 @@ func CreateBinaryEntryRef(entry *binaryEntry, indexFile *MmapIndexFile) BinaryEn
 	basePtr := uintptr(unsafe.Pointer(&indexFile.Data[0])) + HeaderSize
 	offset := int(entryPtr - basePtr)
 	
-	return BinaryEntryRef{
+	return binaryEntryRef{
 		Offset:    offset,
 		IndexFile: indexFile,
 	}

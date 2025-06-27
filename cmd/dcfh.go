@@ -277,6 +277,7 @@ func handleInit(args []string) {
 
 	// Create cache - this will automatically create .dcfh directory and index
 	cache := dcfh.NewDirectoryCache(absDir, absDir)
+	defer cache.Close()
 
 	format := validateOutputFormat()
 	if format == OutputHuman && *verbose {
@@ -337,7 +338,7 @@ func handleStatus(args []string) {
 
 	// Create cache and get status
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
-	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
+	defer cache.Close()
 
 	status, err := cache.Status(buildFlags())
 	if err != nil {
@@ -451,7 +452,7 @@ func handleUpdate(args []string) {
 
 	// Update the index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
-	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
+	defer cache.Close()
 
 	if format == OutputHuman && *verbose {
 		fmt.Println("Scanning directory...")
@@ -533,7 +534,7 @@ func handleDupes(args []string) {
 
 	// Load existing index
 	cache := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
-	defer cache.CleanupTempFilesOnExit() // Ensure cleanup of any temp files
+	defer cache.Close()
 
 	if _, err := cache.LoadMainIndex(); err != nil {
 		outputError(fmt.Sprintf("Failed to load index: %v", err))

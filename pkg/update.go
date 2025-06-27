@@ -48,7 +48,7 @@ func (dc *DirectoryCache) updateFullRepository() error {
 
 	// Remove cache file since everything is now in main index
 	os.Remove(dc.CacheFile) // Non-fatal if it fails
-	dc.cleanupTempFiles()
+	dc.checkForOrphanedIndexFiles()
 
 	return nil
 }
@@ -102,14 +102,7 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
 
-	dc.cleanupTempFiles()
+	dc.checkForOrphanedIndexFiles()
 	return nil
 }
 
-// fileJob represents a file hashing job (kept for compatibility with index.go)
-type fileJob struct {
-	path    string
-	info    os.FileInfo
-	relPath string
-	index   int
-}

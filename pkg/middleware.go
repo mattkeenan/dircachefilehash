@@ -6,7 +6,7 @@ import (
 )
 
 // LoadMainIndex loads the main index file into a skiplist with "main" context
-func (dc *DirectoryCache) LoadMainIndex() (*SkiplistWrapper, error) {
+func (dc *DirectoryCache) LoadMainIndex() (*skiplistWrapper, error) {
 	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
 		// Create empty main index if it doesn't exist
 		if err := dc.createEmptyIndex(); err != nil {
@@ -14,7 +14,7 @@ func (dc *DirectoryCache) LoadMainIndex() (*SkiplistWrapper, error) {
 		}
 	}
 
-	// Load entries from file as BinaryEntryRef instances
+	// Load entries from file as binaryEntryRef instances
 	refs, err := dc.loadIndexFromFile(dc.IndexFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
@@ -30,12 +30,12 @@ func (dc *DirectoryCache) LoadMainIndex() (*SkiplistWrapper, error) {
 }
 
 // LoadCacheIndex loads the cache index file into a skiplist with "cache" context
-func (dc *DirectoryCache) loadCacheIndex() (*SkiplistWrapper, error) {
+func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
 		return NewSkiplistWrapper(16, CacheContext), nil
 	}
 
-	// Load entries from file as BinaryEntryRef instances
+	// Load entries from file as binaryEntryRef instances
 	refs, err := dc.loadIndexFromFile(dc.CacheFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
@@ -52,7 +52,7 @@ func (dc *DirectoryCache) loadCacheIndex() (*SkiplistWrapper, error) {
 
 
 // CreateTmpIndexFromScan scans the directory and creates a temporary index using the new scan workflow
-func (dc *DirectoryCache) createTmpIndexFromScan(comparisonSkiplist *SkiplistWrapper) (*SkiplistWrapper, error) {
+func (dc *DirectoryCache) createTmpIndexFromScan(comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	// Use the new PerformHwangLinScanToSkiplist workflow
 	scanSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, comparisonSkiplist)
 	if err != nil {
@@ -64,7 +64,7 @@ func (dc *DirectoryCache) createTmpIndexFromScan(comparisonSkiplist *SkiplistWra
 
 
 // UpdateCacheIndexWithWorkflow implements the cache update workflow as specified
-func (dc *DirectoryCache) updateCacheIndexWithWorkflow() (*SkiplistWrapper, error) {
+func (dc *DirectoryCache) updateCacheIndexWithWorkflow() (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 	// Step 1: Load main index
 	mainSkiplist, err := dc.LoadMainIndex()

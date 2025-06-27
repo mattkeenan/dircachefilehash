@@ -6,7 +6,7 @@ import (
 
 // Test that Clean methods are properly privatized and work correctly
 func TestCleanMethodsPrivatization(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Test that methods are private by checking they work internally
 	// but would not be accessible from outside the package
@@ -41,7 +41,7 @@ func TestCleanMethodsPrivatization(t *testing.T) {
 
 // Test clean flag manipulation with other flags present
 func TestCleanMethodsWithOtherFlags(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Set some other flags first
 	header.Flags = IndexFlagSparse // Set sparse flag
@@ -75,7 +75,7 @@ func TestCleanMethodsWithOtherFlags(t *testing.T) {
 
 // Test that clean methods work correctly with multiple flag operations
 func TestCleanMethodsMultipleOperations(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Test multiple set/clear cycles
 	for i := 0; i < 5; i++ {
@@ -122,7 +122,7 @@ func TestCleanMethodsBoundaryValues(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var header IndexHeader
+			var header indexHeader
 			header.Flags = tt.initialFlags
 			
 			initialClean := header.isClean()
@@ -185,7 +185,7 @@ func TestCleanFlagConstant(t *testing.T) {
 
 // Test that clean methods are thread-safe for basic operations
 func TestCleanMethodsBasicConcurrency(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Simple test that multiple operations don't cause data races
 	// (This is a basic test; full concurrency testing would require more complex setup)
@@ -220,7 +220,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 
 // Test integration with the flags system we implemented
 func TestCleanMethodsWithStatusVerbose(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Simulate the verbose status check logic
 	flags := map[string]string{"v": "1"}

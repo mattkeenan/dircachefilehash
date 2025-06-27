@@ -8,7 +8,7 @@ import (
 )
 
 func TestIndexHeader_SetHeader(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	signature := [4]byte{'d', 'c', 'f', 'h'}
 	version := uint32(1)
 	entryCount := uint32(10)
@@ -38,7 +38,7 @@ func TestIndexHeader_SetHeader(t *testing.T) {
 }
 
 func TestIndexHeader_CleanMethods(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	
 	// Test initial state (not clean)
 	if header.isClean() {
@@ -59,7 +59,7 @@ func TestIndexHeader_CleanMethods(t *testing.T) {
 }
 
 func TestIndexHeader_ValidateSignature(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	signature := [4]byte{'d', 'c', 'f', 'h'}
 	header.Signature = signature
 
@@ -76,7 +76,7 @@ func TestIndexHeader_ValidateSignature(t *testing.T) {
 }
 
 func TestIndexHeader_ValidateByteOrder(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	header.ByteOrder = ByteOrderMagic
 
 	// Test valid byte order
@@ -92,7 +92,7 @@ func TestIndexHeader_ValidateByteOrder(t *testing.T) {
 }
 
 func TestIndexHeader_ValidateVersion(t *testing.T) {
-	var header IndexHeader
+	var header indexHeader
 	version := uint32(1)
 	header.Version = version
 

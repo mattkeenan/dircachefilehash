@@ -129,7 +129,7 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 }
 
 // hwangLinStatus implements the Hwang-Lin merge algorithm using direct skiplist iteration (zero-copy)
-func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *SkiplistWrapper,
+func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWrapper,
 	callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) {
 
 	// Use direct iteration instead of creating slices

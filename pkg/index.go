@@ -17,8 +17,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// IndexHeader represents the file header in host byte order (cast directly to mmap'd memory)
-type IndexHeader struct {
+// indexHeader represents the file header in host byte order (cast directly to mmap'd memory)
+type indexHeader struct {
 	Signature    [4]byte  // "dcfh" signature
 	ByteOrder    uint64   // Byte order detection magic (0x0102030405060708) - MUST be checked before other fields
 	Version      uint32   // Index version (host order)
@@ -28,8 +28,8 @@ type IndexHeader struct {
 	Checksum     [64]byte // Checksum of header+entries (up to 512-bit support)
 }
 
-// MmapIndex represents a memory-mapped index file
-type MmapIndex struct {
+// mmapIndex represents a memory-mapped index file
+type mmapIndex struct {
 	data    []byte
 	file    *os.File
 	entries []byte // Raw entry data after header
@@ -37,8 +37,8 @@ type MmapIndex struct {
 	offset  int    // Current write offset
 }
 
-// MmapIndexFile represents a wrapper for index file lifecycle management
-type MmapIndexFile struct {
+// mmapIndexFile represents a wrapper for index file lifecycle management
+type mmapIndexFile struct {
 	File     *os.File // File descriptor (nil for read-only main/cache indices)
 	Data     []byte   // Memory-mapped data
 	Size     int      // Current size of the mapping
@@ -49,7 +49,7 @@ type MmapIndexFile struct {
 }
 
 // Cleanup safely unmaps and closes the index file
-func (mif *MmapIndexFile) Cleanup() error {
+func (mif *mmapIndexFile) Cleanup() error {
 	mif.mutex.Lock()
 	defer mif.mutex.Unlock()
 	
@@ -72,12 +72,12 @@ func (mif *MmapIndexFile) Cleanup() error {
 
 
 // Header returns a direct pointer to the header in mmap'd memory (zero-copy)
-func (mi *MmapIndex) Header() *IndexHeader {
-	return (*IndexHeader)(unsafe.Pointer(&mi.data[0]))
+func (mi *mmapIndex) Header() *indexHeader {
+	return (*indexHeader)(unsafe.Pointer(&mi.data[0]))
 }
 
 // ValidateSignature checks if the signature matches expected value
-func (ih *IndexHeader) ValidateSignature(expected [4]byte) error {
+func (ih *indexHeader) ValidateSignature(expected [4]byte) error {
 	if ih.Signature != expected {
 		return fmt.Errorf("invalid signature: got %q, expected %q",
 			string(ih.Signature[:]), string(expected[:]))
@@ -86,7 +86,7 @@ func (ih *IndexHeader) ValidateSignature(expected [4]byte) error {
 }
 
 // ValidateVersion checks if the version is supported
-func (ih *IndexHeader) ValidateVersion(expected uint32) error {
+func (ih *indexHeader) ValidateVersion(expected uint32) error {
 	if ih.Version != expected {
 		return fmt.Errorf("unsupported version: got %d, expected %d", ih.Version, expected)
 	}
@@ -94,7 +94,7 @@ func (ih *IndexHeader) ValidateVersion(expected uint32) error {
 }
 
 // ValidateByteOrder checks if the byte order matches the host machine
-func (ih *IndexHeader) ValidateByteOrder() error {
+func (ih *indexHeader) ValidateByteOrder() error {
 	if ih.ByteOrder != ByteOrderMagic {
 		return fmt.Errorf("byte order mismatch: index file byte order 0x%016x does not match host byte order 0x%016x",
 			ih.ByteOrder, ByteOrderMagic)
@@ -103,7 +103,7 @@ func (ih *IndexHeader) ValidateByteOrder() error {
 }
 
 // SetHeader initializes the header fields in mmap'd memory
-func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16) {
+func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16) {
 	ih.Signature = signature
 	ih.ByteOrder = ByteOrderMagic
 	ih.Version = version
@@ -114,14 +114,14 @@ func (ih *IndexHeader) SetHeader(signature [4]byte, version uint32, entryCount u
 
 // SetHeaderForWritableIndex initializes the header for write operations (scan/temp indices)
 // Automatically clears the Clean flag since we're opening for write
-func (ih *IndexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16) {
+func (ih *indexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16) {
 	// For writable indices, ensure Clean flag is cleared (not clean during write operations)
 	flags := baseFlags &^ IndexFlagClean
 	ih.SetHeader(signature, version, entryCount, flags, checksumType)
 }
 
 // calculateAndStoreHeaderChecksum calculates checksum and stores it in header
-func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *IndexHeader, entryData []byte, entrySize int) {
+func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, entryData []byte, entrySize int) {
 	hasher := dc.hasher
 	hasher.Reset()
 	
@@ -141,7 +141,7 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *IndexHeader, e
 }
 
 // calculateAndStoreHeaderChecksumFromIoVecs calculates checksum from IoVecs and stores it in header
-func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *IndexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec) {
+func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *indexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec) {
 	hasher := dc.hasher
 	hasher.Reset()
 	
@@ -161,17 +161,17 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *Inde
 }
 
 // isClean returns true if this index file is in a clean/complete state
-func (ih *IndexHeader) isClean() bool {
+func (ih *indexHeader) isClean() bool {
 	return ih.Flags&IndexFlagClean != 0
 }
 
 // setClean marks this index file as clean/complete (final operation)
-func (ih *IndexHeader) setClean() {
+func (ih *indexHeader) setClean() {
 	ih.Flags |= IndexFlagClean
 }
 
 // clearClean marks this index file as unclean/incomplete
-func (ih *IndexHeader) clearClean() {
+func (ih *indexHeader) clearClean() {
 	ih.Flags &^= IndexFlagClean
 }
 
@@ -224,7 +224,7 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 
 
 // LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
-func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, error) {
+func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -249,8 +249,8 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create MmapIndexFile wrapper  
-	indexFile := &MmapIndexFile{
+	// Create mmapIndexFile wrapper  
+	indexFile := &mmapIndexFile{
 		File:     file,
 		Data:     data,
 		Size:     int(stat.Size()),
@@ -259,7 +259,7 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 	}
 
 	// Get direct pointer to header in mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 
 	// Verify header using helper methods in logical order
 	if err := header.ValidateSignature(dc.signature); err != nil {
@@ -277,8 +277,8 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 		return nil, fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Parse entries - create BinaryEntryRef instances  
-	var refs []BinaryEntryRef
+	// Parse entries - create binaryEntryRef instances  
+	var refs []binaryEntryRef
 	offset := 0
 	entryData := data[HeaderSize:]
 
@@ -302,8 +302,8 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 			}
 		}
 		
-		// Create BinaryEntryRef instead of storing pointer
-		ref := BinaryEntryRef{
+		// Create binaryEntryRef instead of storing pointer
+		ref := binaryEntryRef{
 			Offset:    offset, // Offset from start of entry data
 			IndexFile: indexFile,
 		}
@@ -334,7 +334,7 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header
-func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *IndexHeader) error {
+func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader) error {
 	// Get the stored checksum from header
 	storedChecksum := header.Checksum[:]
 	
@@ -402,8 +402,11 @@ func (dc *DirectoryCache) calculateChecksum(data []byte) []byte {
 	return dc.hasher.Sum(nil)
 }
 
-// Close cleans up mmap'd resources
+// Close cleans up mmap'd resources and checks for orphaned index files
 func (dc *DirectoryCache) Close() error {
+	// Check for orphaned index files first (ignore errors during check)
+	dc.checkForOrphanedIndexFiles()
+	
 	if dc.mmapIndex != nil {
 		if err := unix.Munmap(dc.mmapIndex.data); err != nil {
 			return fmt.Errorf("failed to unmap: %w", err)
@@ -442,7 +445,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	}
 
 	// Write header directly to mmap'd memory (zero-copy)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	header.SetHeader(dc.signature, dc.version, 0, 0, HashTypeSHA1) // No flags for empty index
 
 	// Calculate and store checksum (no entries for empty index)
@@ -457,7 +460,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 
 // appendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
 // Uses single mmap with mremap for efficient memory usage
-func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPath *ScannedPath) (*binaryEntry, error) {
+func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPath *scannedPath) (*binaryEntry, error) {
 	// Verify we have an active scan index
 	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
 		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
@@ -498,7 +501,7 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 	}
 
 	// Get header and update entry count
-	header := (*IndexHeader)(unsafe.Pointer(&dc.currentScan.Data[0]))
+	header := (*indexHeader)(unsafe.Pointer(&dc.currentScan.Data[0]))
 	entryOffset := dc.currentScan.Offset  // Write at current offset
 	header.EntryCount++
 
@@ -543,11 +546,11 @@ func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
 	}
 
 	// Initialize header for writable index (automatically clears Clean flag)
-	header := (*IndexHeader)(unsafe.Pointer(&data[0]))
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
 
 	// Create scan index wrapper (keep file open)
-	dc.currentScan = &MmapIndexFile{
+	dc.currentScan = &mmapIndexFile{
 		File:     file,
 		Data:     data,
 		Size:     initialSize,
@@ -591,17 +594,17 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 }
 
 // WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
-func (dc *DirectoryCache) writeSkiplistWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+func (dc *DirectoryCache) writeSkiplistWithVectorIO(skiplist *skiplistWrapper, outputPath string, context string) error {
 	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, false)
 }
 
 // writeMainIndexWithVectorIO writes a main index file excluding deleted entries using vectorio
-func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *skiplistWrapper, outputPath string, context string) error {
 	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, true)
 }
 
 // writeSkiplistWithVectorIOFiltered writes a skiplist to temp index using pure vectorio (no mmap)
-func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
+func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
 	// Generate IoVec slices for the specified context
 	var entryIovecs []syscall.Iovec
 	
@@ -638,7 +641,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 	defer file.Close()
 
 	// Create header in memory for temp index (writable, so Clear flag cleared)
-	header := IndexHeader{}
+	header := indexHeader{}
 	header.SetHeaderForWritableIndex(dc.signature, dc.version, uint32(entryCount), 0, HashTypeSHA1)
 
 	// Create header IoVec
@@ -710,7 +713,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 
 
 // MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
-func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string) error {
+func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *skiplistWrapper, scanSkiplist *skiplistWrapper, outputPath string) error {
 	// Create merged skiplist
 	mergedSkiplist := baseSkiplist.Copy()
 	
