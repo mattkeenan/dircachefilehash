@@ -389,7 +389,8 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			if indexEntry == nil {
 				return fmt.Errorf("GetBinaryEntry returned nil for index entry - this should never happen")
 			}
-			indexPath := indexEntry.RelativePath()
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			indexPath := string([]byte(indexEntry.RelativePath()))
 			cmp = strings.Compare(currentScanned.RelPath, indexPath)
 			
 			
@@ -516,8 +517,9 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 					Mtim: syscall.Timespec{Sec: timeFromWall(indexEntry.MTimeWall).Unix(), Nsec: 0},
 				}
 				
+				// Create string copy to avoid use-after-free when scan memory is unmapped
 				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, &ScannedPath{
-					RelPath:  indexEntry.RelativePath(),
+					RelPath:  string([]byte(indexEntry.RelativePath())),
 					Info:     mockInfo,
 					StatInfo: mockStat,
 				})
