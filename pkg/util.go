@@ -122,7 +122,12 @@ func (be *binaryEntry) RelativePath() string {
 	
 	entryStart := uintptr(unsafe.Pointer(be))
 	entryEnd := entryStart + uintptr(be.Size)
-	pathStart := uintptr(unsafe.Pointer(&be.Path[0]))
+	
+	// Calculate path start portably using struct size
+	// The path data is stored immediately after the binaryEntry struct
+	// This accounts for all compiler padding and is portable across architectures
+	structSize := unsafe.Sizeof(*be)
+	pathStart := entryStart + structSize
 
 	// Scan backwards byte by byte from the end (endian-neutral)
 	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
@@ -138,7 +143,7 @@ func (be *binaryEntry) RelativePath() string {
 // RelativePathModern returns the relative path using Go 1.17+ unsafe.Slice pattern
 // This is safer but requires Go 1.17+. Can be used as migration path.
 func (be *binaryEntry) RelativePathModern() string {
-	if debugFlags.extraValidation {
+	if IsDebugEnabled("extravalidation") {
 		be.validateLayout()
 	}
 	
@@ -264,6 +269,9 @@ type BinaryEntryRef struct {
 // GetBinaryEntry resolves the reference to get the actual binaryEntry pointer
 func (ref *BinaryEntryRef) GetBinaryEntry() *binaryEntry {
 	if ref.IndexFile == nil {
+		if IsDebugEnabled("scan") {
+			VerboseLog(3, "GetBinaryEntry: IndexFile is nil")
+		}
 		return nil
 	}
 	
@@ -272,7 +280,14 @@ func (ref *BinaryEntryRef) GetBinaryEntry() *binaryEntry {
 	defer ref.IndexFile.mutex.RUnlock()
 	
 	if ref.IndexFile.Data == nil {
+		if IsDebugEnabled("scan") {
+			VerboseLog(3, "GetBinaryEntry: IndexFile.Data is nil")
+		}
 		return nil
+	}
+	
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "GetBinaryEntry: offset=%d, data_size=%d", ref.Offset, len(ref.IndexFile.Data))
 	}
 	
 	// Calculate pointer from base + header size + offset

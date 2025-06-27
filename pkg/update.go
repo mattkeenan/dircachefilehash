@@ -22,20 +22,20 @@ func (dc *DirectoryCache) updateFullRepository() error {
 	emptySkiplist := NewSkiplistWrapper(16, "empty")
 
 	// Use new scan workflow to get all files
-	scanSkiplist, err := dc.PerformHwangLinScanToSkiplist([]string{}, emptySkiplist)
+	scanSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, emptySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
 
 	// Write everything to main index using vectorio (exclude deleted entries)
 	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.WriteMainIndexWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
+	if err := dc.writeMainIndexWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
 		os.Remove(tempIndexPath)
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
 
 	// Cleanup scan index file now that temp index is written
-	if err := dc.CleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
 		// Non-fatal, but log the error
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
@@ -48,7 +48,7 @@ func (dc *DirectoryCache) updateFullRepository() error {
 
 	// Remove cache file since everything is now in main index
 	os.Remove(dc.CacheFile) // Non-fatal if it fails
-	dc.CleanupTempFiles()
+	dc.cleanupTempFiles()
 
 	return nil
 }
@@ -62,7 +62,7 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	}
 
 	// Use new scan workflow with main index as comparison to get only changes in specified paths
-	scanSkiplist, err := dc.PerformHwangLinScanToSkiplist(paths, mainSkiplist)
+	scanSkiplist, err := dc.performHwangLinScanToSkiplist(paths, mainSkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan specified paths: %w", err)
 	}
@@ -75,12 +75,12 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 
 	// Write new main index using vectorio (exclude deleted entries)
 	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.WriteMainIndexWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
+	if err := dc.writeMainIndexWithVectorIO(updatedMainSkiplist, tempIndexPath, MainContext); err != nil {
 		return fmt.Errorf("failed to write new index: %w", err)
 	}
 
 	// Cleanup scan index file now that temp index is written
-	if err := dc.CleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
 		// Non-fatal, but log the error
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
@@ -92,11 +92,17 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	}
 
 	// Update cache using the new workflow
-	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
+	if _, err := dc.updateCacheIndexWithWorkflow(); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
 	}
 
-	dc.CleanupTempFiles()
+	// Cleanup scan index file from cache workflow
+	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
+	}
+
+	dc.cleanupTempFiles()
 	return nil
 }
 

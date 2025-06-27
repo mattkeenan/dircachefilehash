@@ -16,8 +16,9 @@ var (
 	output    = flag.String("output", "human", "output format: human, json")
 	jsonFlag  = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
 	verbose   = flag.Bool("verbose", false, "verbose output")
+	verboseLevel = flag.Int("v", 0, "verbose level (1=basic, 2=detailed, 3=trace)")
 	version   = flag.Bool("version", false, "show version information")
-	debug     = flag.String("debug", "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining")
+	debug     = flag.String("debug", "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining,scanning")
 )
 
 // Command-specific flag sets
@@ -165,8 +166,21 @@ func main() {
 func buildFlags() map[string]string {
 	flags := make(map[string]string)
 	
-	if *verbose {
-		flags["v"] = "1" // Basic verbose level
+	// Determine verbose level from flags
+	level := *verboseLevel
+	if *verbose && level == 0 {
+		level = 1 // --verbose flag sets level 1
+	}
+	
+	if level > 0 {
+		flags["v"] = fmt.Sprintf("%d", level)
+		// Set global verbose level for trace logging
+		dcfh.SetVerboseLevel(level)
+	}
+	
+	// Set debug flags  
+	if *debug != "" {
+		dcfh.SetDebugFlags(*debug)
 	}
 	
 	return flags

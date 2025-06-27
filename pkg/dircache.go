@@ -9,7 +9,7 @@ import (
 )
 
 // CleanupTempFiles removes temporary files from the .dcfh directory
-func (dc *DirectoryCache) CleanupTempFiles() error {
+func (dc *DirectoryCache) cleanupTempFiles() error {
 	dcfhDir := filepath.Dir(dc.IndexFile)
 
 	entries, err := os.ReadDir(dcfhDir)
@@ -37,7 +37,7 @@ func (dc *DirectoryCache) CleanupTempFiles() error {
 // CleanupTempFilesOnExit ensures cleanup happens when the program exits
 func (dc *DirectoryCache) CleanupTempFilesOnExit() {
 	// This is called from defer statements to ensure cleanup
-	dc.CleanupTempFiles() // Ignore errors during cleanup
+	dc.cleanupTempFiles() // Ignore errors during cleanup
 }
 
 // Stats returns statistics about the cache by loading the main index

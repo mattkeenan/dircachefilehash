@@ -224,7 +224,7 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 
 
 // LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
-func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]BinaryEntryRef, error) {
+func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]BinaryEntryRef, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -296,7 +296,7 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 		}
 		
 		// Perform extra validation if debug flag is enabled
-		if IsExtraValidationEnabled() {
+		if IsDebugEnabled("extravalidation") {
 			if err := entry.ValidateEntry(); err != nil {
 				return nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
 			}
@@ -313,7 +313,7 @@ func (dc *DirectoryCache) LoadIndexFromFile(filePath string) ([]BinaryEntryRef, 
 		nextOffset := offset + int(entry.Size)
 		
 		// Validate chaining consistency: current entry + Size = next entry
-		if IsIndexChainingEnabled() && i < header.EntryCount-1 {
+		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
 			if nextOffset >= len(entryData) {
 				return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
 					i, entry.Size, offset, nextOffset, len(entryData))
@@ -455,9 +455,9 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	return nil
 }
 
-// AppendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
+// appendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
 // Uses single mmap with mremap for efficient memory usage
-func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, scannedPath *ScannedPath) (*binaryEntry, error) {
+func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPath *ScannedPath) (*binaryEntry, error) {
 	// Verify we have an active scan index
 	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
 		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
@@ -519,8 +519,8 @@ func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, scannedPat
 	return entry, nil
 }
 
-// InitializeScanIndex creates and initializes a new scan index file with mmap
-func (dc *DirectoryCache) InitializeScanIndex(scanFileName string) error {
+// initializeScanIndex creates and initializes a new scan index file with mmap
+func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
 	// Create the scan index file (use 0666, let umask control final permissions)
 	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
@@ -566,7 +566,7 @@ func (dc *DirectoryCache) InitializeScanIndex(scanFileName string) error {
 // 1. Caller must "forget" scan skiplist (allow GC) - done by caller
 // 2. Munmap the scan index file - done here  
 // 3. Delete the scan index file - done here
-func (dc *DirectoryCache) CleanupCurrentScanFile() error {
+func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	if dc.currentScan == nil {
 		return fmt.Errorf("can't clean up missing scan index file: %w", os.ErrNotExist)
 	}
@@ -591,12 +591,12 @@ func (dc *DirectoryCache) CleanupCurrentScanFile() error {
 }
 
 // WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
-func (dc *DirectoryCache) WriteSkiplistWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+func (dc *DirectoryCache) writeSkiplistWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
 	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, false)
 }
 
-// WriteMainIndexWithVectorIO writes a main index file excluding deleted entries using vectorio
-func (dc *DirectoryCache) WriteMainIndexWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
+// writeMainIndexWithVectorIO writes a main index file excluding deleted entries using vectorio
+func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *SkiplistWrapper, outputPath string, context string) error {
 	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, true)
 }
 
@@ -617,7 +617,8 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 		if context == "" {
 			entryIovecs = skiplist.ToIovecSlice()
 		} else {
-			entryIovecs = skiplist.ToContextIovecSlice(context)
+			// For cache index, exclude MainContext entries (keep CacheContext + ScanContext)
+			entryIovecs = skiplist.ToNotContextIovecSlice(MainContext)
 		}
 	}
 
@@ -627,6 +628,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 	for _, iovec := range entryIovecs {
 		totalEntrySize += int(iovec.Len)
 	}
+	
 
 	// Create output file (O_CREAT|O_WRONLY)
 	file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -708,7 +710,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *SkiplistWr
 
 
 // MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
-func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string) error {
+func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistWrapper, scanSkiplist *SkiplistWrapper, outputPath string) error {
 	// Create merged skiplist
 	mergedSkiplist := baseSkiplist.Copy()
 	
@@ -718,7 +720,7 @@ func (dc *DirectoryCache) MergeScanSkiplistsWithVectorIO(baseSkiplist *SkiplistW
 	}
 
 	// Write merged result using vectorio
-	return dc.WriteSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
+	return dc.writeSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
 }
 
 // getSystemIOVMax returns the system's IOV_MAX limit using sysconf(_SC_IOV_MAX)
@@ -815,7 +817,7 @@ func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, 
 	}
 	
 	// If memory layout debugging is enabled, log layout information
-	if IsMemoryLayoutEnabled() {
+	if IsDebugEnabled("memorylayout") {
 		pathFieldOffset := uintptr(unsafe.Pointer(&entry.Path[0])) - entryPtr
 		os.Stderr.WriteString(fmt.Sprintf("Entry %d: size=%d, ptr=0x%x, path_offset=%d\n", 
 			offset/int(minSize), entry.Size, entryPtr, pathFieldOffset))

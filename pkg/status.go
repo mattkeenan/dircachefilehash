@@ -2,10 +2,9 @@ package dircachefilehash
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
-
-	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
 // FileStatus represents the status of a file
@@ -36,8 +35,11 @@ type StatusResult struct {
 
 // Status compares the current directory state with the loaded index using the new workflow
 func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error) {
+	defer VerboseEnter()()
 	// Use the new cache update workflow which implements steps 1-11 as specified
-	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
+	// This returns the scan result which we can reuse to avoid duplicate scans
+	currentSkiplist, err := dc.updateCacheIndexWithWorkflow()
+	if err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 
@@ -46,23 +48,19 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
+	}
 
-	cacheSkiplist, err := dc.LoadCacheIndex()
+	cacheSkiplist, err := dc.loadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
-
-	// Create combined view: main index + cache index for complete indexed state
-	indexedSkiplist := mainSkiplist.Copy()
-	if err := indexedSkiplist.Merge(cacheSkiplist, zcsl.MergeTheirs); err != nil {
-		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "Status: cacheSkiplist length = %d", cacheSkiplist.Length())
 	}
 
-	// Scan current directory state for comparison
-	currentSkiplist, err := dc.CreateTmpIndexFromScan(NewSkiplistWrapper(16, "empty"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan directory: %w", err)
-	}
+	// Status compares main index (committed files) vs scan result (current disk state)
 
 	result := &StatusResult{
 		Modified: make([]string, 0),
@@ -81,7 +79,7 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 			}
 			
 			// Check cache index clean status by loading it
-			cacheSkiplist, err := dc.LoadCacheIndex()
+			cacheSkiplist, err := dc.loadCacheIndex()
 			if err == nil && cacheSkiplist != nil {
 				// For cache index, we need to access the underlying mmap - this is a bit tricky
 				// For now, we'll assume it's clean if it loaded successfully
@@ -103,7 +101,14 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 	}
 
 	// Use Hwang-Lin merge algorithm to compare states
-	dc.hwangLinStatus(indexedSkiplist, currentSkiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
+		VerboseLog(3, "Status: currentSkiplist length = %d", currentSkiplist.Length())
+	}
+	dc.hwangLinStatus(mainSkiplist, currentSkiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
+		if IsDebugEnabled("scan") {
+			VerboseLog(3, "Status callback: %s -> %d", path, int(status))
+		}
 		switch status {
 		case StatusModified:
 			result.Modified = append(result.Modified, path)
@@ -114,16 +119,26 @@ func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error)
 		}
 	})
 
+	// Now that Status comparison is complete, cleanup scan index file
+	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
+	}
+
 	return result, nil
 }
 
 // hwangLinStatus implements the Hwang-Lin merge algorithm using direct skiplist iteration (zero-copy)
-func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWrapper,
+func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *SkiplistWrapper,
 	callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) {
 
 	// Use direct iteration instead of creating slices
-	indexCurrent := indexSkiplist.skiplist.First()
-	diskCurrent := diskSkiplist.skiplist.First()
+	indexCurrent := mainSkiplist.skiplist.First()
+	diskCurrent := scanSkiplist.skiplist.First()
+	
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "hwangLinStatus: starting, indexCurrent=%v, diskCurrent=%v", indexCurrent != nil, diskCurrent != nil)
+	}
 
 	for indexCurrent != nil && diskCurrent != nil {
 		indexRef := indexCurrent.Item()
@@ -133,10 +148,14 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 		diskEntry := diskRef.GetBinaryEntry()
 		
 		if indexEntry == nil {
+			// This should never happen - indicates a serious bug
+			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for index entry - this should never happen\n")
 			indexCurrent = indexCurrent.Next()
 			continue
 		}
 		if diskEntry == nil {
+			// This should never happen - indicates a serious bug  
+			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for disk entry - this should never happen\n")
 			diskCurrent = diskCurrent.Next()
 			continue
 		}
@@ -151,20 +170,26 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 
 		if cmp == 0 {
 			// Same file - check if modified
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			pathCopy := string([]byte(indexEntry.RelativePath()))
 			if dc.isFileModified(indexEntry, diskEntry) {
-				callback(StatusModified, indexEntry.RelativePath(), indexEntry, diskEntry)
+				callback(StatusModified, pathCopy, indexEntry, diskEntry)
 			} else {
-				callback(StatusUnchanged, indexEntry.RelativePath(), indexEntry, diskEntry)
+				callback(StatusUnchanged, pathCopy, indexEntry, diskEntry)
 			}
 			indexCurrent = indexCurrent.Next()
 			diskCurrent = diskCurrent.Next()
 		} else if cmp < 0 {
 			// File exists in index but not on disk - deleted
-			callback(StatusDeleted, indexEntry.RelativePath(), indexEntry, nil)
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			pathCopy := string([]byte(indexEntry.RelativePath()))
+			callback(StatusDeleted, pathCopy, indexEntry, nil)
 			indexCurrent = indexCurrent.Next()
 		} else {
 			// File exists on disk but not in index - added
-			callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			pathCopy := string([]byte(diskEntry.RelativePath()))
+			callback(StatusAdded, pathCopy, nil, diskEntry)
 			diskCurrent = diskCurrent.Next()
 		}
 	}
@@ -174,17 +199,35 @@ func (dc *DirectoryCache) hwangLinStatus(indexSkiplist, diskSkiplist *SkiplistWr
 		indexRef := indexCurrent.Item()
 		indexEntry := indexRef.GetBinaryEntry()
 		if indexEntry != nil && !indexEntry.IsDeleted() {
-			callback(StatusDeleted, indexEntry.RelativePath(), indexEntry, nil)
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			pathCopy := string([]byte(indexEntry.RelativePath()))
+			callback(StatusDeleted, pathCopy, indexEntry, nil)
 		}
 		indexCurrent = indexCurrent.Next()
 	}
 
 	// Handle remaining entries from disk (all added)
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "hwangLinStatus: processing remaining disk entries, diskCurrent=%v", diskCurrent != nil)
+	}
 	for diskCurrent != nil {
 		diskRef := diskCurrent.Item()
 		diskEntry := diskRef.GetBinaryEntry()
+		if IsDebugEnabled("scan") {
+			if diskEntry != nil {
+				// Don't access RelativePath() in debug log - it might be freed memory
+				VerboseLog(3, "hwangLinStatus: processing disk entry")
+			} else {
+				VerboseLog(3, "hwangLinStatus: diskEntry is nil")
+			}
+		}
 		if diskEntry != nil {
-			callback(StatusAdded, diskEntry.RelativePath(), nil, diskEntry)
+			// Create string copy to avoid use-after-free when scan memory is unmapped
+			pathCopy := string([]byte(diskEntry.RelativePath()))
+			callback(StatusAdded, pathCopy, nil, diskEntry)
+		} else {
+			// This should never happen - indicates a serious bug
+			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for remaining disk entry - this should never happen\n")
 		}
 		diskCurrent = diskCurrent.Next()
 	}

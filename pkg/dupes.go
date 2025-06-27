@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"fmt"
+	"os"
 
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
@@ -16,7 +17,8 @@ type DuplicateGroup struct {
 // FindDuplicates returns groups of files with identical hashes using the new workflow
 func (dc *DirectoryCache) FindDuplicates(flags map[string]string) ([]DuplicateGroup, error) {
 	// Use the new cache update workflow to ensure we have current data
-	if err := dc.UpdateCacheIndexWithWorkflow(); err != nil {
+	// We don't need the scan result for duplicates, so we ignore it
+	if _, err := dc.updateCacheIndexWithWorkflow(); err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 
@@ -26,7 +28,7 @@ func (dc *DirectoryCache) FindDuplicates(flags map[string]string) ([]DuplicateGr
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
 
-	cacheSkiplist, err := dc.LoadCacheIndex()
+	cacheSkiplist, err := dc.loadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
@@ -65,6 +67,12 @@ func (dc *DirectoryCache) FindDuplicates(flags map[string]string) ([]DuplicateGr
 				Count: len(files),
 			})
 		}
+	}
+
+	// Cleanup scan index file now that we're done with it
+	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+		// Non-fatal, but log the error
+		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
 
 	return result, nil

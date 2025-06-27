@@ -1,17 +1,17 @@
 package dircachefilehash
 
 import (
-	"os"
 	"testing"
 )
 
-func TestParseDebugFlags(t *testing.T) {
+func TestSetDebugFlags(t *testing.T) {
 	tests := []struct {
 		name                  string
 		input                 string
 		expectedExtraValid    bool
 		expectedMemoryLayout  bool
 		expectedIndexChaining bool
+		expectedScanning      bool
 	}{
 		{
 			name:                  "empty string",
@@ -19,6 +19,7 @@ func TestParseDebugFlags(t *testing.T) {
 			expectedExtraValid:    false,
 			expectedMemoryLayout:  false,
 			expectedIndexChaining: false,
+			expectedScanning:      false,
 		},
 		{
 			name:                  "single option",
@@ -26,20 +27,23 @@ func TestParseDebugFlags(t *testing.T) {
 			expectedExtraValid:    true,
 			expectedMemoryLayout:  false,
 			expectedIndexChaining: false,
+			expectedScanning:      false,
 		},
 		{
 			name:                  "multiple options",
-			input:                 "extravalidation,memorylayout,indexchaining",
+			input:                 "extravalidation,memorylayout,indexchaining,scanning",
 			expectedExtraValid:    true,
 			expectedMemoryLayout:  true,
 			expectedIndexChaining: true,
+			expectedScanning:      true,
 		},
 		{
 			name:                  "options with values",
-			input:                 "extravalidation:true,memorylayout:false,indexchaining:1",
+			input:                 "extravalidation:true,memorylayout:false,indexchaining:1,scanning:0",
 			expectedExtraValid:    true,
 			expectedMemoryLayout:  false,
 			expectedIndexChaining: true,
+			expectedScanning:      false,
 		},
 		{
 			name:                  "mixed format",
@@ -47,6 +51,7 @@ func TestParseDebugFlags(t *testing.T) {
 			expectedExtraValid:    true,
 			expectedMemoryLayout:  false,
 			expectedIndexChaining: true,
+			expectedScanning:      false,
 		},
 		{
 			name:                  "whitespace handling",
@@ -54,109 +59,100 @@ func TestParseDebugFlags(t *testing.T) {
 			expectedExtraValid:    true,
 			expectedMemoryLayout:  true,
 			expectedIndexChaining: true,
+			expectedScanning:      false,
+		},
+		{
+			name:                  "case insensitive",
+			input:                 "ExtraValidation,MEMORYLAYOUT,IndexChaining",
+			expectedExtraValid:    true,
+			expectedMemoryLayout:  true,
+			expectedIndexChaining: true,
+			expectedScanning:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset debug flags
-			debugFlags = DebugFlags{}
+			SetDebugFlags("")
 			
-			ParseDebugFlags(tt.input)
+			SetDebugFlags(tt.input)
 			
-			if debugFlags.extraValidation != tt.expectedExtraValid {
-				t.Errorf("extraValidation: expected %v, got %v", tt.expectedExtraValid, debugFlags.extraValidation)
+			if IsDebugEnabled("extravalidation") != tt.expectedExtraValid {
+				t.Errorf("extravalidation: expected %v, got %v", tt.expectedExtraValid, IsDebugEnabled("extravalidation"))
 			}
-			if debugFlags.memoryLayout != tt.expectedMemoryLayout {
-				t.Errorf("memoryLayout: expected %v, got %v", tt.expectedMemoryLayout, debugFlags.memoryLayout)
+			if IsDebugEnabled("memorylayout") != tt.expectedMemoryLayout {
+				t.Errorf("memorylayout: expected %v, got %v", tt.expectedMemoryLayout, IsDebugEnabled("memorylayout"))
 			}
-			if debugFlags.indexChaining != tt.expectedIndexChaining {
-				t.Errorf("indexChaining: expected %v, got %v", tt.expectedIndexChaining, debugFlags.indexChaining)
+			if IsDebugEnabled("indexchaining") != tt.expectedIndexChaining {
+				t.Errorf("indexchaining: expected %v, got %v", tt.expectedIndexChaining, IsDebugEnabled("indexchaining"))
+			}
+			if IsDebugEnabled("scanning") != tt.expectedScanning {
+				t.Errorf("scanning: expected %v, got %v", tt.expectedScanning, IsDebugEnabled("scanning"))
 			}
 		})
-	}
-}
-
-func TestInitDebugFlags(t *testing.T) {
-	// Test explicit parameter takes precedence over environment
-	os.Setenv("DCFH_DEBUG", "memorylayout")
-	defer os.Unsetenv("DCFH_DEBUG")
-	
-	debugFlags = DebugFlags{}
-	InitDebugFlags("extravalidation")
-	
-	if !debugFlags.extraValidation {
-		t.Error("Expected extraValidation to be true from explicit parameter")
-	}
-	if debugFlags.memoryLayout {
-		t.Error("Expected memoryLayout to be false (env var should be ignored)")
-	}
-	
-	// Test environment variable when no explicit parameter
-	debugFlags = DebugFlags{}
-	InitDebugFlags("")
-	
-	if debugFlags.extraValidation {
-		t.Error("Expected extraValidation to be false")
-	}
-	if !debugFlags.memoryLayout {
-		t.Error("Expected memoryLayout to be true from environment variable")
 	}
 }
 
 func TestDebugFlagAccessors(t *testing.T) {
-	debugFlags = DebugFlags{
-		extraValidation: true,
-		memoryLayout:    false,
-		indexChaining:   true,
-	}
+	SetDebugFlags("extravalidation,indexchaining")
 	
-	if !IsExtraValidationEnabled() {
-		t.Error("Expected IsExtraValidationEnabled to return true")
+	if !IsDebugEnabled("extravalidation") {
+		t.Error("Expected IsDebugEnabled('extravalidation') to return true")
 	}
-	if IsMemoryLayoutEnabled() {
-		t.Error("Expected IsMemoryLayoutEnabled to return false")
+	if IsDebugEnabled("memorylayout") {
+		t.Error("Expected IsDebugEnabled('memorylayout') to return false")
 	}
-	if !IsIndexChainingEnabled() {
-		t.Error("Expected IsIndexChainingEnabled to return true")
+	if !IsDebugEnabled("indexchaining") {
+		t.Error("Expected IsDebugEnabled('indexchaining') to return true")
+	}
+	if IsDebugEnabled("scanning") {
+		t.Error("Expected IsDebugEnabled('scanning') to return false")
 	}
 }
 
-func TestParseBoolOption(t *testing.T) {
+func TestDebugFlagCaseInsensitive(t *testing.T) {
+	SetDebugFlags("ExtraValidation")
+	
+	// Should work with different cases
+	if !IsDebugEnabled("extravalidation") {
+		t.Error("Expected lowercase flag name to work")
+	}
+	if !IsDebugEnabled("ExtraValidation") {
+		t.Error("Expected mixed case flag name to work")
+	}
+	if !IsDebugEnabled("EXTRAVALIDATION") {
+		t.Error("Expected uppercase flag name to work")
+	}
+}
+
+func TestDebugFlagValueParsing(t *testing.T) {
 	tests := []struct {
 		input    string
+		flag     string
 		expected bool
 	}{
-		{"true", true},
-		{"TRUE", true},
-		{"1", true},
-		{"yes", true},
-		{"on", true},
-		{"false", false},
-		{"FALSE", false},
-		{"0", false},
-		{"no", false},
-		{"off", false},
-		{"unknown", true}, // Default to true for unknown values
-		{"", true},        // Default to true for empty values
+		{"flag:true", "flag", true},
+		{"flag:TRUE", "flag", true},
+		{"flag:1", "flag", true},
+		{"flag:yes", "flag", true},
+		{"flag:on", "flag", true},
+		{"flag:false", "flag", false},
+		{"flag:FALSE", "flag", false},
+		{"flag:0", "flag", false},
+		{"flag:no", "flag", false},
+		{"flag:off", "flag", false},
+		{"flag:unknown", "flag", true}, // Default to true for unknown values
+		{"flag", "flag", true},         // Default to true for simple flag names
 	}
 	
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := parseBoolOption(tt.input)
+			SetDebugFlags(tt.input)
+			result := IsDebugEnabled(tt.flag)
 			if result != tt.expected {
-				t.Errorf("parseBoolOption(%q) = %v, expected %v", tt.input, result, tt.expected)
+				t.Errorf("SetDebugFlags(%q) then IsDebugEnabled(%q) = %v, expected %v", tt.input, tt.flag, result, tt.expected)
 			}
 		})
 	}
-}
-
-func TestLogDebugFlags(t *testing.T) {
-	// Test with no flags enabled (should not log)
-	debugFlags = DebugFlags{}
-	LogDebugFlags() // Should not output anything
-	
-	// Test with flags enabled (would log to stderr, but we can't easily capture in test)
-	debugFlags = DebugFlags{extraValidation: true, indexChaining: true}
-	LogDebugFlags() // Should output to stderr
 }
