@@ -429,35 +429,26 @@ func handleInit(args []string) {
 	}
 
 	format := validateOutputFormat()
-	if format == OutputHuman && *verbose > 0 {
-		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
-		fmt.Println("Scanning directory and creating initial index...")
-	}
-
-	if err := cache.Update(flags); err != nil {
-		outputError(fmt.Sprintf("Failed to create initial index: %v", err))
-		os.Exit(1)
-	}
-
 	duration := time.Since(start)
-	fileCount, totalSize, _ := cache.Stats()
+	
+	// Always show the initialization message (git-style)
+	fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
 
 	if format == OutputJSON {
 		output := InitOutput{
 			Success:     true,
 			Message:     "Successfully initialized dcfh repository",
 			Repository:  absDir,
-			FileCount:   fileCount,
-			TotalSize:   totalSize,
+			FileCount:   0,
+			TotalSize:   0,
 			TimeElapsed: duration.Round(time.Millisecond).String(),
 		}
 		outputJSON(output)
-	} else {
-		fmt.Printf("Initialized empty dcfh repository in %s\n", dcfhDir)
-		if *verbose > 0 {
-			fmt.Printf("✓ Successfully indexed %d files, total size: %d bytes\n", fileCount, totalSize)
-			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
-		}
+	} else if *verbose > 0 {
+		fmt.Printf("✓ Repository structure created\n")
+		fmt.Printf("✓ Configuration files initialized\n")
+		fmt.Printf("✓ Run 'dcfh update' to scan and index files\n")
+		fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
 	}
 }
 

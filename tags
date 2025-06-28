@@ -473,7 +473,7 @@ entries	pkg/index.go	35;"	w	access:private	ctype:mmapIndex	line:35	type:[]byte
 extractPidFromIndexFileName	pkg/dircache.go	38;"	f	access:private	line:38	signature:(filename string)	type:int
 file	pkg/index.go	34;"	w	access:private	ctype:mmapIndex	line:34	type:*os.File
 filehash	cmd/dcfh.go	26;"	v	access:private	line:26
-findDcfhRepo	cmd/dcfh.go	1041;"	f	access:private	line:1041	signature:()	type:string, string, error
+findDcfhRepo	cmd/dcfh.go	1032;"	f	access:private	line:1032	signature:()	type:string, string, error
 flag	cmd/dcfh.go	7;"	i	line:7
 flag	cmd/dcfh_test.go	4;"	i	line:4
 fmt	cmd/dcfh.go	8;"	i	line:8
@@ -518,14 +518,14 @@ github.com/mattkeenan/zerocopyskiplist	pkg/dupes.go	7;"	i	line:7
 github.com/mattkeenan/zerocopyskiplist	pkg/skiplist.go	9;"	i	line:9
 globalVerboseLevel	pkg/verbose.go	10;"	v	access:private	line:10	type:int
 golang.org/x/sys/unix	pkg/index.go	17;"	i	line:17
-handleConfig	cmd/dcfh.go	847;"	f	access:private	line:847	signature:(args []string)
-handleConfigGet	cmd/dcfh.go	927;"	f	access:private	line:927	signature:(key string)
-handleConfigList	cmd/dcfh.go	902;"	f	access:private	line:902	signature:()
-handleConfigSet	cmd/dcfh.go	962;"	f	access:private	line:962	signature:(key, value string)
-handleDupes	cmd/dcfh.go	681;"	f	access:private	line:681	signature:(args []string)
+handleConfig	cmd/dcfh.go	838;"	f	access:private	line:838	signature:(args []string)
+handleConfigGet	cmd/dcfh.go	918;"	f	access:private	line:918	signature:(key string)
+handleConfigList	cmd/dcfh.go	893;"	f	access:private	line:893	signature:()
+handleConfigSet	cmd/dcfh.go	953;"	f	access:private	line:953	signature:(key, value string)
+handleDupes	cmd/dcfh.go	672;"	f	access:private	line:672	signature:(args []string)
 handleInit	cmd/dcfh.go	378;"	f	access:private	line:378	signature:(args []string)
-handleStatus	cmd/dcfh.go	464;"	f	access:private	line:464	signature:(args []string)
-handleUpdate	cmd/dcfh.go	578;"	f	access:private	line:578	signature:(args []string)
+handleStatus	cmd/dcfh.go	455;"	f	access:private	line:455	signature:(args []string)
+handleUpdate	cmd/dcfh.go	569;"	f	access:private	line:569	signature:(args []string)
 handleVersion	cmd/dcfh.go	263;"	f	access:private	line:263	signature:()
 hash	pkg/hash.go	9;"	i	line:9
 hash	pkg/index.go	8;"	i	line:8
@@ -663,7 +663,7 @@ scanPathRecursive	pkg/scan.go	250;"	m	access:private	ctype:DirectoryCache	line:2
 scannedPath	pkg/scan.go	19;"	t	access:private	line:19	type:struct
 setClean	pkg/index.go	169;"	m	access:private	ctype:indexHeader	line:169	signature:()
 setDefaults	pkg/config.go	84;"	m	access:private	ctype:Config	line:84	signature:()	type:error
-showConfigUsage	cmd/dcfh.go	884;"	f	access:private	line:884	signature:()
+showConfigUsage	cmd/dcfh.go	875;"	f	access:private	line:875	signature:()
 showUsage	cmd/dcfh.go	103;"	f	access:private	line:103	signature:()
 signature	pkg/util.go	39;"	w	access:private	ctype:DirectoryCache	line:39	type:[4]byte
 simpleHashManager	pkg/scan.go	86;"	t	access:private	line:86	type:struct
