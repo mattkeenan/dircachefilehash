@@ -1,0 +1,193 @@
+# GoReleaser configuration for dcfh (Directory Cache File Hash)
+# See: https://goreleaser.com
+
+version: 2
+
+project_name: dcfh
+
+before:
+  hooks:
+    # Clean up any previous builds
+    - go mod tidy
+    # Generate version info
+    - sh -c "cd cmd && go generate"
+
+builds:
+  - id: dcfh
+    main: ./cmd
+    binary: dcfh
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      # Note: Windows and Darwin builds disabled due to syscall.Iovec dependencies
+      # TODO: Update dependencies for cross-platform compatibility
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      # Note: Version info is generated via go generate, not ldflags
+    tags:
+      - netgo
+
+archives:
+  - id: default
+    # Use zip for Windows, tar.gz for others
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG*
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+# Linux packages via nfpm
+nfpms:
+  - id: dcfh-packages
+    package_name: dcfh
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: Matt Keenan
+    homepage: https://github.com/mattkeenan/dircachefilehash
+    maintainer: Matt Keenan <matt@example.com>  # Replace with your email
+    description: |-
+      Directory Cache File Hash - A fast file indexing and duplicate detection tool.
+      dcfh provides efficient file indexing with SHA-1 hashing for duplicate detection,
+      change tracking, and integrity verification across large directory structures.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    # No dependencies - dcfh is a self-contained static binary
+    recommends:
+      - git
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    meta: true
+    contents:
+      - src: ./dcfh
+        dst: /usr/bin/dcfh
+        file_info:
+          mode: 0755
+      - src: ./README.md
+        dst: /usr/share/doc/dcfh/README.md
+        file_info:
+          mode: 0644
+      - src: ./LICENSE
+        dst: /usr/share/doc/dcfh/LICENSE
+        file_info:
+          mode: 0644
+        packager: deb
+      - src: ./LICENSE
+        dst: /usr/share/licenses/dcfh/LICENSE
+        file_info:
+          mode: 0644
+        packager: rpm
+    # scripts:
+    #   postinstall: |
+    #     #!/bin/sh
+    #     echo "dcfh installed successfully!"
+    #     echo "Run 'dcfh --help' to get started."
+    rpm:
+      summary: Fast file indexing and duplicate detection tool
+      group: Applications/System
+      compression: lzma
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+        - changelog-file-missing-in-native-package
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  # Use our custom SNAPSHOT naming for non-tagged builds
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{.ShortCommit}}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: Refactors
+      regexp: '^.*?refactor(\(.+\))??!?:.+$'
+      order: 3
+    - title: Documentation
+      regexp: '^.*?docs(\(.+\))??!?:.+$'
+      order: 4
+    - title: Others
+      order: 999
+
+# GitHub release configuration
+release:
+  github:
+    owner: mattkeenan  # Replace with your GitHub username
+    name: dircachefilehash
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## dcfh {{.Tag}}
+    
+    A fast file indexing and duplicate detection tool.
+    
+    ### Installation
+    
+    #### Binary Downloads
+    Download the appropriate binary for your platform from the assets below.
+    
+    #### Linux Packages
+    - **Debian/Ubuntu**: Download the `.deb` package and install with `sudo dpkg -i dcfh_*.deb`
+    - **RHEL/CentOS/Fedora**: Download the `.rpm` package and install with `sudo rpm -i dcfh_*.rpm`
+    
+    #### Windows
+    - Download the `.zip` package and extract `dcfh.exe` to your PATH
+    
+    ### What's Changed
+  footer: |
+    **Full Changelog**: https://github.com/mattkeenan/dircachefilehash/compare/{{.PreviousTag}}...{{.Tag}}
+    
+    ---
+    
+    🤖 Release created with [GoReleaser](https://goreleaser.com/)
+
+# Homebrew tap (for macOS users)
+# Note: Disabled until we have proper GitHub releases set up
+# homebrew_taps:
+#   - name: dcfh
+#     repository:
+#       owner: mattkeenan  # Replace with your GitHub username
+#       name: homebrew-tap
+#     url_template: "https://github.com/mattkeenan/dircachefilehash/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+#     homepage: "https://github.com/mattkeenan/dircachefilehash"
+#     description: "Directory Cache File Hash - A fast file indexing and duplicate detection tool"
+#     license: "MIT"
+#     skip_upload: auto
+#     test: |
+#       system "#{bin}/dcfh", "version"
+#     install: |
+#       bin.install "dcfh"
