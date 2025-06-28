@@ -1,7 +1,7 @@
 package dircachefilehash
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -70,7 +70,7 @@ func TestBasicIntegration(t *testing.T) {
 		// Verify each file has correct hash
 		for expectedPath, expectedContent := range testFiles {
 			found := false
-			expectedHash := calculateFileSHA1(expectedContent)
+			expectedHash := calculateFileSHA256(expectedContent)
 			
 			mainSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
 				if entry.RelativePath() == expectedPath {
@@ -109,7 +109,7 @@ func TestBasicIntegration(t *testing.T) {
 			t.Fatalf("Failed to load main index after modification: %v", err)
 		}
 		
-		expectedHash := calculateFileSHA1(modifiedContent)
+		expectedHash := calculateFileSHA256(modifiedContent)
 		found := false
 		
 		mainSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
@@ -154,7 +154,7 @@ func TestBasicIntegration(t *testing.T) {
 			t.Fatalf("Failed to load cache index: %v", err)
 		}
 		
-		expectedHash := calculateFileSHA1(newContent)
+		expectedHash := calculateFileSHA256(newContent)
 		found := false
 		
 		cacheSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
@@ -246,8 +246,8 @@ func TestBasicIntegration(t *testing.T) {
 
 // Helper functions
 
-func calculateFileSHA1(content string) string {
-	hasher := sha1.New()
+func calculateFileSHA256(content string) string {
+	hasher := sha256.New()
 	hasher.Write([]byte(content))
 	return fmt.Sprintf("%x", hasher.Sum(nil))
 }
@@ -259,7 +259,7 @@ func calculateDiskFileHash(filePath string) (string, error) {
 	}
 	defer file.Close()
 	
-	hasher := sha1.New()
+	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
 		return "", err
 	}

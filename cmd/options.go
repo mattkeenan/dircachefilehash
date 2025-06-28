@@ -133,16 +133,11 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 		}
 	case OptionTypeString, OptionTypeInt:
 		if optValue != "" {
-			// --option=value format
+			// --option=value format (bound with =)
 			p.values[optName] = optValue
 		} else {
-			// --option value format (separate arguments)
-			*i++
-			if *i >= len(args) {
-				return fmt.Errorf("option --%s requires a value", optName)
-			}
-			consumed[*i] = true
-			p.values[optName] = args[*i]
+			// --option without value - this is an error for string/int options
+			return fmt.Errorf("option --%s requires a value (use --%s=value)", optName, optName)
 		}
 		
 		// Validate integer type
@@ -153,7 +148,6 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 		}
 	}
 	
-	*i++
 	return nil
 }
 

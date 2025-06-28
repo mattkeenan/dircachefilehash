@@ -2,7 +2,7 @@ package dircachefilehash
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -51,14 +51,14 @@ func TestIntegrationWorkflow(t *testing.T) {
 		validateFinalIndex(t, dc)
 	})
 
-	// Phase 6: Cache behavior validation
-	t.Run("Phase6_CacheValidation", func(t *testing.T) {
-		validateCacheBehavior(t, dc)
+	// Phase 6: Hash integrity validation (before cache behavior modifies files)
+	t.Run("Phase6_HashIntegrity", func(t *testing.T) {
+		validateHashIntegrity(t, dc)
 	})
 
-	// Phase 7: Hash integrity validation
-	t.Run("Phase7_HashIntegrity", func(t *testing.T) {
-		validateHashIntegrity(t, dc)
+	// Phase 7: Cache behavior validation
+	t.Run("Phase7_CacheValidation", func(t *testing.T) {
+		validateCacheBehavior(t, dc)
 	})
 }
 
@@ -143,8 +143,8 @@ func createInitialFiles(t *testing.T, testDir string) map[string]TestFileContent
 	
 	// Calculate expected hashes and create files
 	for key, fileInfo := range files {
-		// Calculate SHA-1 hash
-		hasher := sha1.New()
+		// Calculate SHA-256 hash
+		hasher := sha256.New()
 		hasher.Write(fileInfo.Content)
 		fileInfo.ExpectedHash = fmt.Sprintf("%x", hasher.Sum(nil))
 		files[key] = fileInfo // Update the map with calculated hash
@@ -186,11 +186,11 @@ func performInitialUpdate(t *testing.T, dc *DirectoryCache) {
 func validateInitialIndex(t *testing.T, dc *DirectoryCache) {
 	// Re-create the test files to get expected hashes
 	expectedFiles := map[string]string{
-		"file1.txt":           calculateSHA1("This is file 1 content\n"),
-		"file2.txt":           calculateSHA1("This is file 2 content with more text\n"),
-		"subdir1/nested.txt":  calculateSHA1("Nested file content\n"),
-		"subdir2/data.json":   calculateSHA1(`{"key": "value", "number": 42}` + "\n"),
-		"binary.bin":          calculateSHA1("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD"),
+		"file1.txt":           calculateSHA256("This is file 1 content\n"),
+		"file2.txt":           calculateSHA256("This is file 2 content with more text\n"),
+		"subdir1/nested.txt":  calculateSHA256("Nested file content\n"),
+		"subdir2/data.json":   calculateSHA256(`{"key": "value", "number": 42}` + "\n"),
+		"binary.bin":          calculateSHA256("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD"),
 	}
 	
 	// Load main index and verify contents
@@ -271,8 +271,8 @@ func performFileOperations(t *testing.T, testDir string) {
 	os.Chtimes(modifiedFile, fixedTime, fixedTime)
 	
 	// Store expected hashes for validation
-	t.Logf("New file hash: %s", calculateSHA1(newFileContent))
-	t.Logf("Modified file hash: %s", calculateSHA1(modifiedContent))
+	t.Logf("New file hash: %s", calculateSHA256(newFileContent))
+	t.Logf("Modified file hash: %s", calculateSHA256(modifiedContent))
 }
 
 // validateStatusDetection checks that status correctly identifies changes
@@ -356,13 +356,13 @@ func performFinalUpdate(t *testing.T, dc *DirectoryCache) {
 
 // validateFinalIndex checks the final state matches expected outcome with correct hashes
 func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
-	// Expected final state with known hashes - binary.bin was modified in cache validation phase
+	// Expected final state with known hashes - binary.bin is unchanged at this point
 	expectedFinalFiles := map[string]string{
-		"binary.bin":         calculateSHA1("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD\x42"), // modified in cache test
-		"file1.txt":          calculateSHA1("Modified content for file 1\n"),             // modified
-		"new_file.txt":       calculateSHA1("This is a new file\n"),                     // added
-		"subdir1/nested.txt": calculateSHA1("Nested file content\n"),                    // unchanged
-		"subdir2/data.json":  calculateSHA1(`{"key": "value", "number": 42}` + "\n"),    // unchanged
+		"binary.bin":         calculateSHA256("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD"), // unchanged
+		"file1.txt":          calculateSHA256("Modified content for file 1\n"),             // modified
+		"new_file.txt":       calculateSHA256("This is a new file\n"),                     // added
+		"subdir1/nested.txt": calculateSHA256("Nested file content\n"),                    // unchanged
+		"subdir2/data.json":  calculateSHA256(`{"key": "value", "number": 42}` + "\n"),    // unchanged
 		// file2.txt should be gone (deleted)
 	}
 	
@@ -419,7 +419,7 @@ func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
 func validateCacheBehavior(t *testing.T, dc *DirectoryCache) {
 	// Create a small modification with known hash
 	newContent := []byte("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD\x42")
-	expectedHash := calculateSHA1(string(newContent))
+	expectedHash := calculateSHA256(string(newContent))
 	
 	testFile := filepath.Join(dc.RootDir, "binary.bin")
 	if err := os.WriteFile(testFile, newContent, 0644); err != nil {
@@ -526,9 +526,9 @@ func validateHashIntegrity(t *testing.T, dc *DirectoryCache) {
 
 // Helper functions
 
-// calculateSHA1 calculates SHA-1 hash of string content
-func calculateSHA1(content string) string {
-	hasher := sha1.New()
+// calculateSHA256 calculates SHA-256 hash of string content
+func calculateSHA256(content string) string {
+	hasher := sha256.New()
 	hasher.Write([]byte(content))
 	return fmt.Sprintf("%x", hasher.Sum(nil))
 }
@@ -541,7 +541,7 @@ func calculateFileHash(filePath string) (string, error) {
 	}
 	defer file.Close()
 	
-	hasher := sha1.New()
+	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
 		return "", err
 	}

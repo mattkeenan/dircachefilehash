@@ -223,8 +223,24 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 }
 
 
-// LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
-func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, error) {
+// EntryProcessor defines a callback function for processing entries during index loading
+// Parameters: entry (the binaryEntry), entryIndex (0-based), filePath (source file)
+// Returns: shouldInclude (whether to include in result), error (if processing failed)
+type EntryProcessor func(entry *binaryEntry, entryIndex uint32, filePath string) (shouldInclude bool, err error)
+
+// LoadIndexFromFileForValidation is a public wrapper for loadIndexFromFile used by dcfh index commands
+func (dc *DirectoryCache) LoadIndexFromFileForValidation(filePath string) ([]binaryEntryRef, error) {
+	// Use verbose processor for validation operations to maintain existing behavior
+	return dc.loadIndexFromFileWithProcessor(filePath, VerboseEntryProcessor())
+}
+
+// LoadIndexFromFileWithProcessor loads an index file with custom entry processing
+func (dc *DirectoryCache) LoadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	return dc.loadIndexFromFileWithProcessor(filePath, processor)
+}
+
+// loadIndexFromFileWithProcessor is the internal implementation with callback support
+func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -277,7 +293,7 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, 
 		return nil, fmt.Errorf("checksum verification failed: %w", err)
 	}
 
-	// Parse entries - create binaryEntryRef instances  
+	// Parse entries with callback processing
 	var refs []binaryEntryRef
 	offset := 0
 	entryData := data[HeaderSize:]
@@ -302,12 +318,25 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, 
 			}
 		}
 		
-		// Create binaryEntryRef instead of storing pointer
-		ref := binaryEntryRef{
-			Offset:    offset, // Offset from start of entry data
-			IndexFile: indexFile,
+		// Call the processor callback
+		shouldInclude := true
+		if processor != nil {
+			include, err := processor(entry, i, filePath)
+			if err != nil {
+				return nil, fmt.Errorf("entry processor failed at entry %d: %w", i, err)
+			}
+			shouldInclude = include
 		}
-		refs = append(refs, ref)
+		
+		// Only include entry if processor says so
+		if shouldInclude {
+			// Create binaryEntryRef instead of storing pointer
+			ref := binaryEntryRef{
+				Offset:    offset, // Offset from start of entry data
+				IndexFile: indexFile,
+			}
+			refs = append(refs, ref)
+		}
 
 		// Move to next entry using Size field
 		nextOffset := offset + int(entry.Size)
@@ -324,13 +353,158 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, 
 	}
 	
 	// Final validation: ensure we consumed exactly the expected amount of data
-	expectedEndOffset := len(entryData)
-	if offset != expectedEndOffset {
-		return nil, fmt.Errorf("entry chaining inconsistent: final offset %d, expected %d (gap of %d bytes)",
-			offset, expectedEndOffset, expectedEndOffset-offset)
+	if offset != len(entryData) {
+		return nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
 	}
 
 	return refs, nil
+}
+
+// Processor factory functions for different use cases
+
+// DefaultEntryProcessor returns a processor that includes all entries (normal loading behavior)
+func DefaultEntryProcessor() EntryProcessor {
+	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
+		return true, nil
+	}
+}
+
+// VerboseEntryProcessor returns a processor that outputs verbose information based on global verbose level
+func VerboseEntryProcessor() EntryProcessor {
+	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
+		entryPath := entry.RelativePath()
+		
+		if GetVerboseLevel() >= 1 {
+			VerboseLog(1, "%s", entryPath) // Level 1: filename only (like 'ls')
+		}
+		if GetVerboseLevel() >= 2 {
+			// Level 2: ls -l style output (mode, index filename, mtime, path)
+			mtime := timeFromWall(entry.MTimeWall)
+			VerboseLog(2, "  %04o %8d %s %s (%s)", entry.Mode&0o7777, entry.FileSize, 
+				mtime.Format("2006-01-02 15:04:05"), entryPath, filepath.Base(filePath))
+		}
+		if GetVerboseLevel() >= 3 {
+			// Level 3: complete breakdown of each field in binaryEntry
+			VerboseLog(3, "  Entry %d details:", entryIndex)
+			VerboseLog(3, "    Size: %d bytes", entry.Size)
+			VerboseLog(3, "    CTimeWall: %d (%s)", entry.CTimeWall, timeFromWall(entry.CTimeWall))
+			VerboseLog(3, "    MTimeWall: %d (%s)", entry.MTimeWall, timeFromWall(entry.MTimeWall))
+			VerboseLog(3, "    Dev: %d", entry.Dev)
+			VerboseLog(3, "    Ino: %d", entry.Ino)
+			VerboseLog(3, "    Mode: 0o%o", entry.Mode)
+			VerboseLog(3, "    UID: %d", entry.UID)
+			VerboseLog(3, "    GID: %d", entry.GID)
+			VerboseLog(3, "    FileSize: %d", entry.FileSize)
+			VerboseLog(3, "    EntryFlags: 0x%04x%s", entry.EntryFlags, 
+				func() string { if entry.IsDeleted() { return " (DELETED)" } else { return "" } }())
+			VerboseLog(3, "    HashType: %d (%s)", entry.HashType, HashTypeName(entry.HashType))
+			VerboseLog(3, "    Hash: %s", entry.HashString())
+			VerboseLog(3, "    Path: %s", entryPath)
+		}
+		
+		return true, nil
+	}
+}
+
+// SearchEntryProcessor returns a processor that searches for matching entries
+type SearchOptions struct {
+	Pattern      string  // Filename pattern (glob)
+	PathPrefix   string  // Path prefix filter
+	HashPrefix   string  // Hash prefix filter
+	ExactSize    *uint64 // Exact file size filter
+	ShowDeleted  bool    // Show only deleted entries
+	SearchCount  *int    // Pointer to counter for matches
+}
+
+func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
+	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
+		// Skip deleted entries unless specifically requested
+		if entry.IsDeleted() && !opts.ShowDeleted {
+			return false, nil
+		}
+		
+		// Skip non-deleted entries if only deleted requested
+		if !entry.IsDeleted() && opts.ShowDeleted {
+			return false, nil
+		}
+
+		entryPath := entry.RelativePath()
+
+		// Apply filters
+		if opts.Pattern != "" {
+			matched, err := filepath.Match(opts.Pattern, filepath.Base(entryPath))
+			if err != nil {
+				return false, fmt.Errorf("invalid pattern %s: %w", opts.Pattern, err)
+			}
+			if !matched {
+				return false, nil
+			}
+		}
+
+		if opts.PathPrefix != "" && !strings.HasPrefix(entryPath, opts.PathPrefix) {
+			return false, nil
+		}
+
+		if opts.HashPrefix != "" {
+			hashStr := entry.HashString()
+			if !strings.HasPrefix(strings.ToLower(hashStr), strings.ToLower(opts.HashPrefix)) {
+				return false, nil
+			}
+		}
+
+		if opts.ExactSize != nil && entry.FileSize != *opts.ExactSize {
+			return false, nil
+		}
+
+		// Entry matches - output it
+		if opts.SearchCount != nil {
+			*opts.SearchCount++
+		}
+		
+		// Output the match based on verbose level
+		VerboseLog(0, "%s", entryPath)
+		if GetVerboseLevel() >= 1 {
+			mtime := timeFromWall(entry.MTimeWall)
+			deletedFlag := ""
+			if entry.IsDeleted() {
+				deletedFlag = " (DELETED)"
+			}
+			VerboseLog(1, "  %04o %8d %s %s%s", 
+				entry.Mode&0o7777, entry.FileSize, 
+				mtime.Format("2006-01-02 15:04:05"), 
+				filepath.Base(filePath), deletedFlag)
+		}
+		if GetVerboseLevel() >= 2 {
+			VerboseLog(2, "  Hash: %s (%s)", entry.HashString(), HashTypeName(entry.HashType))
+		}
+
+		return false, nil // Don't include in skiplist, just process for output
+	}
+}
+
+// CompositeEntryProcessor combines multiple processors (all must return true to include entry)
+func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
+	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
+		for _, processor := range processors {
+			if processor != nil {
+				shouldInclude, err := processor(entry, entryIndex, filePath)
+				if err != nil {
+					return false, err
+				}
+				if !shouldInclude {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
+	}
+}
+
+// LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
+// loadIndexFromFile loads an index file and returns binaryEntryRef instances (backward compatibility wrapper)
+func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, error) {
+	// Use default processor for normal loading operations (no verbose output)
+	return dc.loadIndexFromFileWithProcessor(filePath, DefaultEntryProcessor())
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header

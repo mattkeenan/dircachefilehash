@@ -169,10 +169,14 @@ func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWra
 		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
 
 		if cmp == 0 {
-			// Same file - check if modified
+			// Same file - check if deleted or modified
 			// Create string copy to avoid use-after-free when scan memory is unmapped
 			pathCopy := string([]byte(indexEntry.RelativePath()))
-			if dc.isFileModified(indexEntry, diskEntry) {
+			
+			// Check if the disk/cache entry is marked as deleted
+			if diskEntry.IsDeleted() {
+				callback(StatusDeleted, pathCopy, indexEntry, diskEntry)
+			} else if dc.isFileModified(indexEntry, diskEntry) {
 				callback(StatusModified, pathCopy, indexEntry, diskEntry)
 			} else {
 				callback(StatusUnchanged, pathCopy, indexEntry, diskEntry)

@@ -1,6 +1,10 @@
 package dircachefilehash
 
-import zcsl "github.com/mattkeenan/zerocopyskiplist"
+import (
+	"strings"
+	
+	zcsl "github.com/mattkeenan/zerocopyskiplist"
+)
 
 // Context constants for skiplist operations
 const (
@@ -32,6 +36,34 @@ const (
 	HashTypeSHA256 uint16 = 2 // SHA-256 (32 bytes)
 	HashTypeSHA512 uint16 = 3 // SHA-512 (64 bytes)
 )
+
+// HashTypeName returns the human-readable name for a hash type
+func HashTypeName(hashType uint16) string {
+	switch hashType {
+	case HashTypeSHA1:
+		return "sha1"
+	case HashTypeSHA256:
+		return "sha256"
+	case HashTypeSHA512:
+		return "sha512"
+	default:
+		return "unknown"
+	}
+}
+
+// HashTypeFromName returns the hash type constant from a name (case-insensitive)
+func HashTypeFromName(name string) (uint16, bool) {
+	switch strings.ToLower(name) {
+	case "sha1":
+		return HashTypeSHA1, true
+	case "sha256":
+		return HashTypeSHA256, true
+	case "sha512":
+		return HashTypeSHA512, true
+	default:
+		return 0, false
+	}
+}
 
 // Hash size constants
 const (
