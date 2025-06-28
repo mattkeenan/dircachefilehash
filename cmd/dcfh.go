@@ -118,6 +118,7 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  update [paths...] Update the index with current file states\n")
 	fmt.Fprintf(os.Stderr, "  dupes            Find and display duplicate files\n")
 	fmt.Fprintf(os.Stderr, "  config           Get and set repository configuration options\n")
+	fmt.Fprintf(os.Stderr, "  version          Show version information\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init .\n")
 	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents\n")
@@ -217,6 +218,8 @@ func main() {
 		handleDupes(args[1:])
 	case "config":
 		handleConfig(args[1:])
+	case "version":
+		handleVersionCommand(args[1:])
 	default:
 		outputError(fmt.Sprintf("Unknown command: %s", command))
 		os.Exit(1)
@@ -260,23 +263,46 @@ func buildFlags() map[string]string {
 	return flags
 }
 
+// handleVersion handles --version flag (alias for handleVersionCommand with no args)
 func handleVersion() {
-	if *output == "json" || *jsonFlag {
+	handleVersionCommand([]string{})
+}
+
+// handleVersionCommand handles the "dcfh version" command
+func handleVersionCommand(args []string) {
+	if len(args) != 0 {
+		outputError("Usage: dcfh version")
+		os.Exit(1)
+	}
+
+	format := validateOutputFormat()
+	
+	if format == OutputJSON {
 		versionJSON := map[string]interface{}{
-			"version":    getVersionString(),
-			"git_commit": getGitCommit(),
-			"go_version": runtime.Version(),
-			"supported_index_formats": []string{"v0"},
-			"description": "Directory Cache File Hash - A fast file indexing and duplicate detection tool",
+			"version": getVersionString(),
 		}
+		
+		// Include detailed info if verbose
+		if *verbose > 0 {
+			versionJSON["git_commit"] = getGitCommit()
+			versionJSON["go_version"] = runtime.Version()
+			versionJSON["supported_index_formats"] = []string{"v0"}
+			versionJSON["description"] = "Directory Cache File Hash - A fast file indexing and duplicate detection tool"
+		}
+		
 		jsonBytes, _ := json.MarshalIndent(versionJSON, "", "  ")
 		fmt.Println(string(jsonBytes))
 	} else {
-		fmt.Printf("dcfh version: %s\n", getVersionString())
-		fmt.Printf("Git commit: %s\n", getGitCommit())
-		fmt.Printf("Go version: %s\n", runtime.Version())
-		fmt.Printf("Supported index formats: v0\n")
-		fmt.Printf("Description: Directory Cache File Hash - A fast file indexing and duplicate detection tool\n")
+		// Simple output by default: just the version
+		fmt.Println(getVersionString())
+		
+		// Detailed output if verbose
+		if *verbose > 0 {
+			fmt.Printf("Git commit: %s\n", getGitCommit())
+			fmt.Printf("Go version: %s\n", runtime.Version())
+			fmt.Printf("Supported index formats: v0\n")
+			fmt.Printf("Description: Directory Cache File Hash - A fast file indexing and duplicate detection tool\n")
+		}
 	}
 }
 

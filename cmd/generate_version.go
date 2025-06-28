@@ -54,12 +54,22 @@ func getVersionInfo() (version, commit string, err error) {
 		shortCommit = commit[:8]
 	}
 
+	// Check if git repo is dirty (has uncommitted changes)
+	isDirty := isGitDirty()
+
 	// Get the latest tag
 	tagCmd := exec.Command("git", "describe", "--tags", "--exact-match", "HEAD")
 	tagOutput, err := tagCmd.Output()
 	if err == nil {
 		// We're exactly on a tag
-		version = strings.TrimSpace(string(tagOutput))
+		baseVersion := strings.TrimSpace(string(tagOutput))
+		if isDirty {
+			// Uncommitted changes on a tag: v1.2.3-UNCOMMITTED-abcd1234
+			version = fmt.Sprintf("%s-UNCOMMITTED-%s", baseVersion, shortCommit)
+		} else {
+			// Clean tag: v1.2.3
+			version = baseVersion
+		}
 		return version, commit, nil
 	}
 
@@ -68,11 +78,37 @@ func getVersionInfo() (version, commit string, err error) {
 	latestTagOutput, err := latestTagCmd.Output()
 	if err != nil {
 		// No tags found
-		version = fmt.Sprintf("v0.0.0-%s", shortCommit)
+		if isDirty {
+			// No tags + uncommitted: v0.0.0-UNCOMMITTED-abcd1234
+			version = fmt.Sprintf("v0.0.0-UNCOMMITTED-%s", shortCommit)
+		} else {
+			// No tags + clean: v0.0.0-abcd1234
+			version = fmt.Sprintf("v0.0.0-%s", shortCommit)
+		}
 		return version, commit, nil
 	}
 
 	latestTag := strings.TrimSpace(string(latestTagOutput))
-	version = fmt.Sprintf("%s-%s", latestTag, shortCommit)
+	if isDirty {
+		// Post-tag with uncommitted changes: v1.2.3-UNCOMMITTED-abcd1234
+		version = fmt.Sprintf("%s-UNCOMMITTED-%s", latestTag, shortCommit)
+	} else {
+		// Post-tag clean (goreleaser snapshot): v1.2.3-SNAPSHOT-abcd1234
+		version = fmt.Sprintf("%s-SNAPSHOT-%s", latestTag, shortCommit)
+	}
 	return version, commit, nil
+}
+
+// isGitDirty checks if the git repository has uncommitted changes
+func isGitDirty() bool {
+	// Check for staged and unstaged changes
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		// If we can't check git status, assume clean
+		return false
+	}
+	
+	// If there's any output from git status --porcelain, the repo is dirty
+	return len(strings.TrimSpace(string(statusOutput))) > 0
 }

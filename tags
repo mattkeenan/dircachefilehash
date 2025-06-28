@@ -204,10 +204,10 @@ Offset	pkg/index.go	45;"	w	access:public	ctype:mmapIndexFile	line:45	type:int
 Offset	pkg/util.go	268;"	w	access:public	ctype:binaryEntryRef	line:268	type:int
 Output	pkg/config.go	47;"	w	access:public	ctype:AllConfig	line:47	type:*OutputConfig
 OutputConfig	pkg/config.go	24;"	t	access:public	line:24	type:struct
-OutputFdupes	cmd/dcfh.go	291;"	c	access:public	line:291	type:OutputFormat
-OutputFormat	cmd/dcfh.go	286;"	t	access:public	line:286	type:string
-OutputHuman	cmd/dcfh.go	289;"	c	access:public	line:289	type:OutputFormat
-OutputJSON	cmd/dcfh.go	290;"	c	access:public	line:290	type:OutputFormat
+OutputFdupes	cmd/dcfh.go	317;"	c	access:public	line:317	type:OutputFormat
+OutputFormat	cmd/dcfh.go	312;"	t	access:public	line:312	type:string
+OutputHuman	cmd/dcfh.go	315;"	c	access:public	line:315	type:OutputFormat
+OutputJSON	cmd/dcfh.go	316;"	c	access:public	line:316	type:OutputFormat
 Path	pkg/hwang_lin_test.go	421;"	w	access:public	ctype:StatusCall	line:421	type:string
 Path	pkg/util.go	72;"	w	access:public	ctype:binaryEntry	line:72	type:[8]byte
 PathsUpdated	cmd/dcfh.go	75;"	w	access:public	ctype:UpdateOutput	line:75	type:[]string
@@ -323,9 +323,9 @@ TestFlagsExtensibility	pkg/flags_test.go	221;"	f	access:public	line:221	signatur
 TestFlagsSystemIntegration	pkg/flags_test.go	9;"	f	access:public	line:9	signature:(t *testing.T)
 TestGetGoroutineID	pkg/util_test.go	199;"	f	access:public	line:199	signature:(t *testing.T)
 TestGetHashAlgorithm	pkg/config_test.go	107;"	f	access:public	line:107	signature:(t *testing.T)
-TestHashAlgorithmFlagParsing	cmd/dcfh_test.go	755;"	f	access:public	line:755	signature:(t *testing.T)
+TestHashAlgorithmFlagParsing	cmd/dcfh_test.go	809;"	f	access:public	line:809	signature:(t *testing.T)
 TestHashAlgorithmValidation	pkg/config_test.go	81;"	f	access:public	line:81	signature:(t *testing.T)
-TestHashWorkersValidation	cmd/dcfh_test.go	691;"	f	access:public	line:691	signature:(t *testing.T)
+TestHashWorkersValidation	cmd/dcfh_test.go	745;"	f	access:public	line:745	signature:(t *testing.T)
 TestHwangLinCore	pkg/hwang_lin_test.go	306;"	f	access:public	line:306	signature:(t *testing.T)
 TestHwangLinScanFunction	pkg/hwang_lin_test.go	349;"	f	access:public	line:349	signature:(t *testing.T)
 TestHwangLinStatus	pkg/hwang_lin_test.go	10;"	f	access:public	line:10	signature:(t *testing.T)
@@ -354,6 +354,7 @@ TestTimeConversion	pkg/util_test.go	98;"	f	access:public	line:98	signature:(t *t
 TestValidateOutputFormat_ConflictingFlags	cmd/dcfh_test.go	92;"	f	access:public	line:92	signature:(t *testing.T)
 TestValidateOutputFormat_InvalidFormat	cmd/dcfh_test.go	73;"	f	access:public	line:73	signature:(t *testing.T)
 TestValidateOutputFormat_ValidFormats	cmd/dcfh_test.go	21;"	f	access:public	line:21	signature:(t *testing.T)
+TestVersionCommand	cmd/dcfh_test.go	691;"	f	access:public	line:691	signature:(t *testing.T)
 TestVersionGeneration	cmd/dcfh_test.go	613;"	f	access:public	line:613	signature:(t *testing.T)
 TestVersionOutput	cmd/dcfh_test.go	645;"	f	access:public	line:645	signature:(t *testing.T)
 TimeElapsed	cmd/dcfh.go	47;"	w	access:public	ctype:InitOutput	line:47	type:string
@@ -395,7 +396,7 @@ benchmarkIndexOperations	pkg/benchmark_test.go	273;"	f	access:private	line:273	s
 binaryEntry	pkg/util.go	59;"	t	access:private	line:59	type:struct
 binaryEntryRef	pkg/util.go	267;"	t	access:private	line:267	type:struct
 bufio	pkg/ignore.go	4;"	i	line:4
-buildFlags	cmd/dcfh.go	227;"	f	access:private	line:227	signature:()	type:map[string]string
+buildFlags	cmd/dcfh.go	230;"	f	access:private	line:230	signature:()	type:map[string]string
 bytes	pkg/integration_test.go	4;"	i	line:4
 calculateAndStoreHeaderChecksum	pkg/index.go	124;"	m	access:private	ctype:DirectoryCache	line:124	signature:(header *indexHeader, entryData []byte, entrySize int)
 calculateAndStoreHeaderChecksumFromIoVecs	pkg/index.go	144;"	m	access:private	ctype:DirectoryCache	line:144	signature:(header *indexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec)
@@ -473,7 +474,7 @@ entries	pkg/index.go	35;"	w	access:private	ctype:mmapIndex	line:35	type:[]byte
 extractPidFromIndexFileName	pkg/dircache.go	38;"	f	access:private	line:38	signature:(filename string)	type:int
 file	pkg/index.go	34;"	w	access:private	ctype:mmapIndex	line:34	type:*os.File
 filehash	cmd/dcfh.go	26;"	v	access:private	line:26
-findDcfhRepo	cmd/dcfh.go	1032;"	f	access:private	line:1032	signature:()	type:string, string, error
+findDcfhRepo	cmd/dcfh.go	1058;"	f	access:private	line:1058	signature:()	type:string, string, error
 flag	cmd/dcfh.go	7;"	i	line:7
 flag	cmd/dcfh_test.go	4;"	i	line:4
 fmt	cmd/dcfh.go	8;"	i	line:8
@@ -500,7 +501,7 @@ generateDeterministicData	pkg/benchmark_test.go	57;"	f	access:private	line:57	si
 generateScanFileName	pkg/util.go	365;"	m	access:private	ctype:DirectoryCache	line:365	signature:()	type:string
 generateTempFileName	pkg/util.go	348;"	m	access:private	ctype:DirectoryCache	line:348	signature:(prefix string)	type:string
 getDefaultHashAlgorithm	pkg/file.go	69;"	m	access:private	ctype:DirectoryCache	line:69	signature:()	type:*HashAlgorithm, error
-getEffectiveOutputFormat	cmd/dcfh.go	320;"	f	access:private	line:320	signature:(cache *dcfh.DirectoryCache)	type:OutputFormat
+getEffectiveOutputFormat	cmd/dcfh.go	346;"	f	access:private	line:346	signature:(cache *dcfh.DirectoryCache)	type:OutputFormat
 getGitCommit	cmd/version.go	11;"	f	access:private	line:11	signature:()	type:string
 getGoroutineID	pkg/util.go	356;"	f	access:private	line:356	signature:()	type:uint64
 getHashSize	pkg/scan.go	853;"	m	access:private	ctype:DirectoryCache	line:853	signature:(hashType uint16)	type:int
@@ -518,15 +519,16 @@ github.com/mattkeenan/zerocopyskiplist	pkg/dupes.go	7;"	i	line:7
 github.com/mattkeenan/zerocopyskiplist	pkg/skiplist.go	9;"	i	line:9
 globalVerboseLevel	pkg/verbose.go	10;"	v	access:private	line:10	type:int
 golang.org/x/sys/unix	pkg/index.go	17;"	i	line:17
-handleConfig	cmd/dcfh.go	838;"	f	access:private	line:838	signature:(args []string)
-handleConfigGet	cmd/dcfh.go	918;"	f	access:private	line:918	signature:(key string)
-handleConfigList	cmd/dcfh.go	893;"	f	access:private	line:893	signature:()
-handleConfigSet	cmd/dcfh.go	953;"	f	access:private	line:953	signature:(key, value string)
-handleDupes	cmd/dcfh.go	672;"	f	access:private	line:672	signature:(args []string)
-handleInit	cmd/dcfh.go	378;"	f	access:private	line:378	signature:(args []string)
-handleStatus	cmd/dcfh.go	455;"	f	access:private	line:455	signature:(args []string)
-handleUpdate	cmd/dcfh.go	569;"	f	access:private	line:569	signature:(args []string)
-handleVersion	cmd/dcfh.go	263;"	f	access:private	line:263	signature:()
+handleConfig	cmd/dcfh.go	864;"	f	access:private	line:864	signature:(args []string)
+handleConfigGet	cmd/dcfh.go	944;"	f	access:private	line:944	signature:(key string)
+handleConfigList	cmd/dcfh.go	919;"	f	access:private	line:919	signature:()
+handleConfigSet	cmd/dcfh.go	979;"	f	access:private	line:979	signature:(key, value string)
+handleDupes	cmd/dcfh.go	698;"	f	access:private	line:698	signature:(args []string)
+handleInit	cmd/dcfh.go	404;"	f	access:private	line:404	signature:(args []string)
+handleStatus	cmd/dcfh.go	481;"	f	access:private	line:481	signature:(args []string)
+handleUpdate	cmd/dcfh.go	595;"	f	access:private	line:595	signature:(args []string)
+handleVersion	cmd/dcfh.go	267;"	f	access:private	line:267	signature:()
+handleVersionCommand	cmd/dcfh.go	272;"	f	access:private	line:272	signature:(args []string)
 hash	pkg/hash.go	9;"	i	line:9
 hash	pkg/index.go	8;"	i	line:8
 hash	pkg/util.go	5;"	i	line:5
@@ -557,6 +559,7 @@ io	pkg/integration_test.go	7;"	i	line:7
 isClean	pkg/index.go	164;"	m	access:private	ctype:indexHeader	line:164	signature:()	type:bool
 isFileChangedFromScanned	pkg/scan.go	650;"	m	access:private	ctype:DirectoryCache	line:650	signature:(indexEntry *binaryEntry, scanned *scannedPath)	type:bool
 isFileModified	pkg/status.go	237;"	m	access:private	ctype:DirectoryCache	line:237	signature:(indexEntry, diskEntry *binaryEntry)	type:bool
+isGitDirty	cmd/generate_version.go	103;"	f	access:private	line:103	signature:()	type:bool
 isPathContained	pkg/scan.go	213;"	m	access:private	ctype:DirectoryCache	line:213	signature:(targetPath, containerPath string)	type:bool
 isPathUnder	pkg/scan.go	196;"	m	access:private	ctype:DirectoryCache	line:196	signature:(childPath, parentPath string)	type:bool
 isProcessRunning	pkg/dircache.go	62;"	f	access:private	line:62	signature:(pid int)	type:bool
@@ -567,7 +570,7 @@ loadCacheIndex	pkg/middleware.go	33;"	m	access:private	ctype:DirectoryCache	line
 loadIndexFromFile	pkg/index.go	227;"	m	access:private	ctype:DirectoryCache	line:227	signature:(filePath string)	type:[]binaryEntryRef, error
 loaded	pkg/ignore.go	16;"	w	access:private	ctype:IgnoreManager	line:16	type:bool
 log	examples/exampledircache.go	5;"	i	line:5
-main	cmd/dcfh.go	177;"	f	access:private	line:177	signature:()
+main	cmd/dcfh.go	178;"	f	access:private	line:178	signature:()
 main	cmd/dcfh.go	3;"	p	line:3
 main	cmd/dcfh_test.go	1;"	p	line:1
 main	cmd/generate_version.go	12;"	f	access:private	line:12	signature:()
@@ -620,9 +623,9 @@ os	pkg/util.go	6;"	i	line:6
 os	pkg/verbose.go	5;"	i	line:5
 os/exec	cmd/generate_version.go	8;"	i	line:8
 output	cmd/dcfh.go	21;"	v	access:private	line:21
-outputError	cmd/dcfh.go	359;"	f	access:private	line:359	signature:(message string)
-outputJSON	cmd/dcfh.go	372;"	f	access:private	line:372	signature:(data interface{})
-parseVerboseFlags	cmd/dcfh.go	137;"	f	access:private	line:137	signature:()
+outputError	cmd/dcfh.go	385;"	f	access:private	line:385	signature:(message string)
+outputJSON	cmd/dcfh.go	398;"	f	access:private	line:398	signature:(data interface{})
+parseVerboseFlags	cmd/dcfh.go	138;"	f	access:private	line:138	signature:()
 path/filepath	cmd/dcfh.go	10;"	i	line:10
 path/filepath	debug.go	6;"	i	line:6
 path/filepath	examples/exampledircache.go	7;"	i	line:7
@@ -663,7 +666,7 @@ scanPathRecursive	pkg/scan.go	250;"	m	access:private	ctype:DirectoryCache	line:2
 scannedPath	pkg/scan.go	19;"	t	access:private	line:19	type:struct
 setClean	pkg/index.go	169;"	m	access:private	ctype:indexHeader	line:169	signature:()
 setDefaults	pkg/config.go	84;"	m	access:private	ctype:Config	line:84	signature:()	type:error
-showConfigUsage	cmd/dcfh.go	875;"	f	access:private	line:875	signature:()
+showConfigUsage	cmd/dcfh.go	901;"	f	access:private	line:901	signature:()
 showUsage	cmd/dcfh.go	103;"	f	access:private	line:103	signature:()
 signature	pkg/util.go	39;"	w	access:private	ctype:DirectoryCache	line:39	type:[4]byte
 simpleHashManager	pkg/scan.go	86;"	t	access:private	line:86	type:struct
@@ -755,7 +758,7 @@ validateHashIntegrity	pkg/integration_test.go	482;"	f	access:private	line:482	si
 validateInitialIndex	pkg/integration_test.go	186;"	f	access:private	line:186	signature:(t *testing.T, dc *DirectoryCache)
 validateInitialState	pkg/integration_test.go	90;"	f	access:private	line:90	signature:(t *testing.T, dc *DirectoryCache)
 validateLayout	pkg/util.go	92;"	m	access:private	ctype:binaryEntry	line:92	signature:()
-validateOutputFormat	cmd/dcfh.go	295;"	f	access:private	line:295	signature:()	type:OutputFormat
+validateOutputFormat	cmd/dcfh.go	321;"	f	access:private	line:321	signature:()	type:OutputFormat
 validateStatusDetection	pkg/integration_test.go	279;"	f	access:private	line:279	signature:(t *testing.T, dc *DirectoryCache)
 verbose	cmd/dcfh.go	23;"	v	access:private	line:23
 verifyChecksumMmap	pkg/index.go	382;"	m	access:private	ctype:DirectoryCache	line:382	signature:(data []byte, contentSize int)	type:error
