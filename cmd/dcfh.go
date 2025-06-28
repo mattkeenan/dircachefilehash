@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,26 +15,25 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// Global flags
-var (
-	output    = flag.String("output", "human", "output format: human, json, fdupes")
-	jsonFlag  = flag.Bool("json", false, "output in JSON format (alias for --output=json)")
-	verbose   = flag.Int("verbose", 0, "verbose level (1=basic, 2=detailed, 3=trace); can be repeated -v, -vv, -vvv")
-	version   = flag.Bool("version", false, "show version information")
-	debug     = flag.String("debug", "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining,scanning")
-	filehash  = flag.String("filehash", "", "hash algorithm overrides (format: default:sha256)")
-	symlinks  = flag.String("symlinks", "all", "symlink handling: all (follow all), contained (follow only if target within rootDir), none (don't follow)")
-	symlinkShort = flag.Bool("s", false, "follow symlinked directories (alias for --symlinks=all)")
-	hashWorkers = flag.Int("hash-workers", 0, "number of concurrent hash workers (0=use config default, typically 4)")
-)
+// Global options parser
+var options *ParsedOptions
 
-// Command-specific flag sets
-var (
-	initFlags   = flag.NewFlagSet("init", flag.ExitOnError)
-	statusFlags = flag.NewFlagSet("status", flag.ExitOnError)
-	updateFlags = flag.NewFlagSet("update", flag.ExitOnError)
-	dupesFlags  = flag.NewFlagSet("dupes", flag.ExitOnError)
-)
+// initializeOptions sets up the global options definitions
+func initializeOptions() {
+	options = NewParsedOptions()
+	
+	// Define all global options
+	options.DefineOption("output", "o", OptionTypeString, "human", "output format: human, json, fdupes")
+	options.DefineOption("json", "j", OptionTypeBool, "", "output in JSON format (alias for --output=json)")
+	options.DefineOption("verbose", "v", OptionTypeInt, "0", "verbose level (1=basic, 2=detailed, 3=trace)")
+	options.DefineOption("version", "", OptionTypeBool, "", "show version information")
+	options.DefineOption("debug", "d", OptionTypeString, "", "debug options (comma-separated): extravalidation,memorylayout,indexchaining,scanning")
+	options.DefineOption("filehash", "f", OptionTypeString, "", "hash algorithm overrides (format: default:sha256)")
+	options.DefineOption("symlinks", "", OptionTypeString, "all", "symlink handling: all, contained, none")
+	options.DefineOption("s", "", OptionTypeBool, "", "follow symlinked directories (alias for --symlinks=all)")
+	options.DefineOption("hash-workers", "w", OptionTypeInt, "0", "number of concurrent hash workers (0=use config default)")
+	options.DefineOption("help", "h", OptionTypeBool, "", "show this help message")
+}
 
 // Output structures for JSON
 type InitOutput struct {
@@ -101,17 +99,16 @@ type ErrorOutput struct {
 }
 
 func showUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n\n")
-	fmt.Fprintf(os.Stderr, "Global Options:\n")
-	fmt.Fprintf(os.Stderr, "  --output=FORMAT    Output format: human (default), json, fdupes\n")
-	fmt.Fprintf(os.Stderr, "  --json             Output in JSON format (alias for --output=json)\n")
-	fmt.Fprintf(os.Stderr, "  -v, --verbose=LEVEL    Verbose level (1=basic, 2=detailed, 3=trace); can be repeated -v, -vv, -vvv\n")
-	fmt.Fprintf(os.Stderr, "  --debug=OPTIONS        Debug options: extravalidation,memorylayout,indexchaining,scanning\n")
-	fmt.Fprintf(os.Stderr, "  --filehash=OPTION      Hash algorithm override (format: default:sha256)\n")
-	fmt.Fprintf(os.Stderr, "  -s, --symlinks=MODE    Symlink handling: all (default), contained, none\n")
-	fmt.Fprintf(os.Stderr, "  --hash-workers=N       Number of concurrent hash workers (default: 4)\n")
-	fmt.Fprintf(os.Stderr, "  --version              Show version information\n")
-	fmt.Fprintf(os.Stderr, "  --help                 Show this help message\n")
+	if options != nil {
+		// Use the new options system to show usage
+		options.ShowUsage("dcfh")
+	} else {
+		// Fallback for early errors before options are initialized
+		fmt.Fprintf(os.Stderr, "Usage: dcfh [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n")
+		fmt.Fprintf(os.Stderr, "Run 'dcfh --help' for detailed usage information.\n")
+		return
+	}
+	
 	fmt.Fprintf(os.Stderr, "\nCommands:\n")
 	fmt.Fprintf(os.Stderr, "  init <dir>       Initialize a new dcfh repository in the specified directory\n")
 	fmt.Fprintf(os.Stderr, "  status           Show the status of files in the current dcfh repository\n")
@@ -124,9 +121,12 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --json status\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --output=json status\n")
-	fmt.Fprintf(os.Stderr, "  dcfh update\n")
+	fmt.Fprintf(os.Stderr, "  dcfh -vv update\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --verbose=2 update\n")
 	fmt.Fprintf(os.Stderr, "  dcfh update file.txt dir/\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --filehash=default:sha1 update\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --hash-workers=8 update\n")
+	fmt.Fprintf(os.Stderr, "  dcfh -w 8 update\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --json dupes\n")
 	fmt.Fprintf(os.Stderr, "  dcfh --output=fdupes dupes\n")
 	fmt.Fprintf(os.Stderr, "  dcfh config filehash.default sha1\n")
@@ -134,72 +134,56 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh config --list\n")
 }
 
-// parseVerboseFlags handles GNU-style verbose flags (-v, -vv, -vvv)
-func parseVerboseFlags() {
-	// Count -v flags and convert to verbose level
-	verboseCount := 0
+// handleVerboseRepetition handles GNU-style verbose flags (-v, -vv, -vvv)
+// This is called after options parsing to handle special case of repeated -v flags
+func handleVerboseRepetition() {
+	// The new options parser already handles -vvv properly
+	// This function exists for future extensions if needed
+	verboseLevel := options.GetInt("verbose")
 	
-	// Process args to count -v occurrences and remove them
-	var newArgs []string
-	for i := 0; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		
-		if arg == "-v" {
-			verboseCount++
-		} else if strings.HasPrefix(arg, "-v") && len(arg) > 2 {
-			// Handle -vv, -vvv, etc.
-			for j := 1; j < len(arg); j++ {
-				if arg[j] == 'v' {
-					verboseCount++
-				} else {
-					// Not a pure -v repetition, keep as is
-					newArgs = append(newArgs, arg)
-					break
-				}
-			}
-			// If we counted all v's, don't add to newArgs
-			if verboseCount > 0 && strings.Trim(arg[1:], "v") == "" {
-				continue
-			}
-		} else {
-			newArgs = append(newArgs, arg)
-		}
-	}
-	
-	// Update os.Args to remove processed -v flags
-	os.Args = newArgs
-	
-	// Set the verbose level if any -v flags were found
-	if verboseCount > 0 {
-		*verbose = verboseCount
+	// Set global verbose level for trace logging
+	if verboseLevel > 0 {
+		dcfh.SetVerboseLevel(verboseLevel)
 	}
 }
 
 func main() {
-	// Set up global flags
-	flag.Usage = showUsage
+	// Initialize options definitions
+	initializeOptions()
 
-	// Parse global flags first, but handle -v repetition manually
-	parseVerboseFlags()
-	flag.Parse()
+	// Parse command-line arguments
+	if err := options.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle help flag
+	if options.GetBool("help") {
+		showUsage()
+		return
+	}
+
+	// Handle version flag
+	if options.GetBool("version") {
+		handleVersion()
+		return
+	}
 
 	// Initialize debug flags early
-	dcfh.InitDebugFlags(*debug)
-	if *debug != "" {
+	debugStr := options.GetString("debug")
+	dcfh.InitDebugFlags(debugStr)
+	if debugStr != "" {
 		dcfh.LogDebugFlags()
 	}
 
 	// Validate output format early (after flag parsing)
 	validateOutputFormat()
 
-	// Handle version flag
-	if *version {
-		handleVersion()
-		return
-	}
+	// Handle special verbose option repetition (-vvv)
+	handleVerboseRepetition()
 
-	// Get remaining arguments after global flags
-	args := flag.Args()
+	// Get remaining arguments after options
+	args := options.GetArgs()
 	if len(args) < 1 {
 		showUsage()
 		os.Exit(1)
@@ -231,33 +215,35 @@ func buildFlags() map[string]string {
 	flags := make(map[string]string)
 	
 	// Use verbose level directly
-	if *verbose > 0 {
-		flags["v"] = fmt.Sprintf("%d", *verbose)
-		// Set global verbose level for trace logging
-		dcfh.SetVerboseLevel(*verbose)
+	verboseLevel := options.GetInt("verbose")
+	if verboseLevel > 0 {
+		flags["v"] = fmt.Sprintf("%d", verboseLevel)
 	}
 	
 	// Set debug flags  
-	if *debug != "" {
-		dcfh.SetDebugFlags(*debug)
+	debugStr := options.GetString("debug")
+	if debugStr != "" {
+		dcfh.SetDebugFlags(debugStr)
 	}
 	
 	// Set hash algorithm override
-	if *filehash != "" {
-		flags["filehash"] = *filehash
+	filehashStr := options.GetString("filehash")
+	if filehashStr != "" {
+		flags["filehash"] = filehashStr
 	}
 	
 	// Set symlink handling mode
-	symlinkMode := *symlinks
-	if *symlinkShort {
+	symlinkMode := options.GetString("symlinks")
+	if options.GetBool("s") {
 		// -s flag overrides --symlinks setting
 		symlinkMode = "all"
 	}
 	flags["symlinks"] = symlinkMode
 	
 	// Set hash workers if specified
-	if *hashWorkers > 0 {
-		flags["hash_workers"] = fmt.Sprintf("%d", *hashWorkers)
+	hashWorkers := options.GetInt("hash-workers")
+	if hashWorkers > 0 {
+		flags["hash_workers"] = fmt.Sprintf("%d", hashWorkers)
 	}
 	
 	return flags
@@ -283,7 +269,7 @@ func handleVersionCommand(args []string) {
 		}
 		
 		// Include detailed info if verbose
-		if *verbose > 0 {
+		if options.GetInt("verbose") > 0 {
 			versionJSON["git_commit"] = getGitCommit()
 			versionJSON["go_version"] = runtime.Version()
 			versionJSON["supported_index_formats"] = []string{"v0"}
@@ -297,7 +283,7 @@ func handleVersionCommand(args []string) {
 		fmt.Println(getVersionString())
 		
 		// Detailed output if verbose
-		if *verbose > 0 {
+		if options.GetInt("verbose") > 0 {
 			fmt.Printf("Git commit: %s\n", getGitCommit())
 			fmt.Printf("Go version: %s\n", runtime.Version())
 			fmt.Printf("Supported index formats: v0\n")
@@ -320,15 +306,18 @@ const (
 // validateOutputFormat validates and returns the output format
 func validateOutputFormat() OutputFormat {
 	// Handle --json flag as alias for --output=json
-	if *jsonFlag {
-		if *output != "human" {
+	jsonFlag := options.GetBool("json")
+	outputFormat := options.GetString("output")
+	
+	if jsonFlag {
+		if outputFormat != "human" {
 			fmt.Fprintf(os.Stderr, "Error: cannot use both --json and --output flags together\n")
 			os.Exit(1)
 		}
 		return OutputJSON
 	}
 	
-	switch *output {
+	switch outputFormat {
 	case "human":
 		return OutputHuman
 	case "json":
@@ -336,7 +325,7 @@ func validateOutputFormat() OutputFormat {
 	case "fdupes":
 		return OutputFdupes
 	default:
-		fmt.Fprintf(os.Stderr, "Error: invalid output format '%s'. Supported formats: human, json, fdupes\n", *output)
+		fmt.Fprintf(os.Stderr, "Error: invalid output format '%s'. Supported formats: human, json, fdupes\n", outputFormat)
 		os.Exit(1)
 		return OutputHuman // unreachable
 	}
@@ -345,7 +334,7 @@ func validateOutputFormat() OutputFormat {
 // getEffectiveOutputFormat determines the output format based on config and CLI flags
 func getEffectiveOutputFormat(cache *dcfh.DirectoryCache) OutputFormat {
 	// CLI flags take precedence
-	if *jsonFlag {
+	if options.GetBool("json") {
 		return OutputJSON
 	}
 	
@@ -470,7 +459,7 @@ func handleInit(args []string) {
 			TimeElapsed: duration.Round(time.Millisecond).String(),
 		}
 		outputJSON(output)
-	} else if *verbose > 0 {
+	} else if options.GetInt("verbose") > 0 {
 		fmt.Printf("✓ Repository structure created\n")
 		fmt.Printf("✓ Configuration files initialized\n")
 		fmt.Printf("✓ Run 'dcfh update' to scan and index files\n")
@@ -611,7 +600,7 @@ func handleUpdate(args []string) {
 		paths = args
 		if format == OutputHuman {
 			fmt.Printf("Updating specified paths in %s\n", repoRoot)
-			if *verbose > 0 {
+			if options.GetInt("verbose") > 0 {
 				for _, path := range paths {
 					fmt.Printf("  %s\n", path)
 				}
@@ -634,7 +623,7 @@ func handleUpdate(args []string) {
 		os.Exit(1)
 	}
 
-	if format == OutputHuman && *verbose > 0 {
+	if format == OutputHuman && options.GetInt("verbose") > 0 {
 		fmt.Println("Scanning directory...")
 	}
 
@@ -685,7 +674,7 @@ func handleUpdate(args []string) {
 		} else {
 			fmt.Printf("Updated index\n")
 		}
-		if *verbose > 0 {
+		if options.GetInt("verbose") > 0 {
 			fmt.Printf("✓ Completed in %v\n", duration.Round(time.Millisecond))
 			fmt.Printf("✓ Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
 			if duplicateInfo != nil {
@@ -862,16 +851,21 @@ func handleDupes(args []string) {
 }
 
 func handleConfig(args []string) {
-	// Parse flags for config command
-	configFlags := flag.NewFlagSet("config", flag.ExitOnError)
-	listFlag := configFlags.Bool("list", false, "list all configuration variables")
-	_ = configFlags.Bool("global", false, "use global configuration (not implemented)")
-	configFlags.Parse(args)
+	// Create options parser for config subcommand
+	configOptions := NewParsedOptions()
+	configOptions.DefineOption("list", "", OptionTypeBool, "", "list all configuration variables")
+	configOptions.DefineOption("global", "", OptionTypeBool, "", "use global configuration (not implemented)")
 	
-	configArgs := configFlags.Args()
+	// Parse config-specific options
+	if err := configOptions.Parse(args); err != nil {
+		outputError(fmt.Sprintf("Error parsing config options: %v", err))
+		os.Exit(1)
+	}
+	
+	configArgs := configOptions.GetArgs()
 	
 	// Handle --list flag
-	if *listFlag {
+	if configOptions.GetBool("list") {
 		if len(configArgs) > 0 {
 			outputError("Cannot specify configuration keys with --list flag")
 			os.Exit(1)
