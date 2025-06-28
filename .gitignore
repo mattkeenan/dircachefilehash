@@ -6,6 +6,7 @@ dcfh
 dircachefilehash
 cmd/dcfh
 pkg.test
+dist/
 
 # Generated files
 cmd/version.go
