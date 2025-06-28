@@ -1,11 +1,23 @@
 .dcfh
-cmd/dcfh
-examples/exampledircache
 .*.swp
 
-# Binaries built in root directory
+# Build artifacts and binaries
 dcfh
-example
+dircachefilehash
+cmd/dcfh
+pkg.test
 
 # Generated files
 cmd/version.go
+
+# Profile data
+*.prof
+
+# Editor files
+tags
+
+# Callgraph analysis files
+*.svg.gv
+*.svg.svg
+callgraph.*
+all_calls.*
