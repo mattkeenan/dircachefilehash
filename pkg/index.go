@@ -482,6 +482,7 @@ func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
 	}
 }
 
+
 // CompositeEntryProcessor combines multiple processors (all must return true to include entry)
 func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
 	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {

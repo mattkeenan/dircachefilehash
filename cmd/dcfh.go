@@ -390,6 +390,24 @@ func outputError(message string) {
 	}
 }
 
+func outputMessage(message string) {
+	format := validateOutputFormat()
+	if format == OutputJSON {
+		// For info messages in JSON mode, we could output to a different structure
+		// For now, just output as a simple success message
+		successOut := struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+		}{
+			Success: true,
+			Message: message,
+		}
+		json.NewEncoder(os.Stdout).Encode(successOut)
+	} else {
+		fmt.Println(message)
+	}
+}
+
 func outputJSON(data interface{}) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -438,7 +456,7 @@ func handleInit(args []string) {
 		os.Exit(1)
 	}
 
-	// Create cache - this will automatically create .dcfh directory and index
+	// Create cache - this will automatically create .dcfh directory structure
 	cache := dcfh.NewDirectoryCache(absDir, absDir)
 	defer cache.Close()
 	
@@ -446,6 +464,12 @@ func handleInit(args []string) {
 	flags := buildFlags()
 	if err := cache.ApplyConfigOverrides(flags); err != nil {
 		outputError(fmt.Sprintf("Failed to apply configuration overrides: %v", err))
+		os.Exit(1)
+	}
+	
+	// Create empty main index
+	if err := cache.CreateEmptyMainIndex(); err != nil {
+		outputError(fmt.Sprintf("Failed to create empty index: %v", err))
 		os.Exit(1)
 	}
 
@@ -1070,6 +1094,8 @@ func handleIndex(args []string) {
 		handleIndexExplore(args[1:])
 	case "reset", "restart":
 		handleIndexReset(args[1:])
+	case "recover", "recovery":
+		handleIndexRecover(args[1:])
 	case "search", "find":
 		handleIndexSearch(args[1:])
 	case "merge":
@@ -1100,6 +1126,8 @@ func showIndexUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=manual      # Check and prompt for each fix\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=auto        # Check and auto-fix issues\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index explore                 # Show index overview\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover                 # Auto-recover from corrupted indices\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover cache.idx       # Recover from specific index file\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index search \"*.txt\"           # Search for text files\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index search --hash abc123     # Search by hash prefix\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index reset                   # Reset index from filesystem\n")
@@ -1332,6 +1360,7 @@ type IndexCheckResult struct {
 	FileName     string   `json:"file_name"`
 	Type         string   `json:"type"`
 	IsValid      bool     `json:"is_valid"`
+	EntryCount   int      `json:"entry_count,omitempty"`
 	Issues       []string `json:"issues,omitempty"`
 	FixesApplied []string `json:"fixes_applied,omitempty"`
 	BackupPath   string   `json:"backup_path,omitempty"`
@@ -1354,6 +1383,27 @@ type IndexCheckOutput struct {
 
 // handleIndexCheck implements unified index checking/repair (idxck command)
 func handleIndexCheck(args []string) {
+	// Parse validation mode from arguments
+	var validationMode dcfh.ValidationMode = dcfh.ValidationStrict // Default to strict
+	var checkExtract bool = false
+	
+	// Process arguments
+	filteredArgs := []string{}
+	for _, arg := range args {
+		switch arg {
+		case "--mode=strict", "-strict":
+			validationMode = dcfh.ValidationStrict
+		case "--mode=lenient", "-lenient":
+			validationMode = dcfh.ValidationLenient
+		case "--mode=diagnostic", "-diagnostic":
+			validationMode = dcfh.ValidationDiagnostic
+		case "--extract", "-extract":
+			checkExtract = true
+		default:
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	
 	// Get fix mode from global options
 	fixModeStr := options.GetString("fix")
 	var fixMode FixMode
@@ -1365,8 +1415,11 @@ func handleIndexCheck(args []string) {
 		fixMode = FixModeManual
 	case "auto", "autofix":
 		fixMode = FixModeAuto
+	case "extract":
+		fixMode = FixModeNone // Extract mode is read-only
+		checkExtract = true
 	default:
-		outputError(fmt.Sprintf("Invalid fix mode: %s. Valid modes: none, manual, auto", fixModeStr))
+		outputError(fmt.Sprintf("Invalid fix mode: %s. Valid modes: none, manual, auto, extract", fixModeStr))
 		showIndexCheckUsage()
 		os.Exit(1)
 	}
@@ -1399,10 +1452,36 @@ func handleIndexCheck(args []string) {
 		FilesChecked: len(indexFiles),
 	}
 	
-	fmt.Printf("Checking %d index files in %s (mode: %s)\n\n", len(indexFiles), dcfhDir, fixMode)
+	var modeDesc string
+	switch validationMode {
+	case dcfh.ValidationStrict:
+		modeDesc = "strict"
+	case dcfh.ValidationLenient:
+		modeDesc = "lenient"
+	case dcfh.ValidationDiagnostic:
+		modeDesc = "diagnostic"
+	}
+	
+	fmt.Printf("Checking %d index files in %s (validation: %s, fix: %s)\n\n", len(indexFiles), dcfhDir, modeDesc, fixMode)
+	
+	// Create pre-recovery snapshot if any operation might modify index files
+	if fixMode == FixModeManual || fixMode == FixModeAuto || checkExtract {
+		// Create a DirectoryCache instance for snapshot creation
+		dc := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+		if dc != nil {
+			verbosity := options.GetInt("verbose")
+			if err := dc.CreatePreRecoverySnapshotForIdxck(verbosity); err != nil {
+				if verbosity >= 1 {
+					fmt.Printf("Warning: failed to create pre-operation snapshot: %v\n", err)
+				}
+			} else if verbosity >= 1 {
+				fmt.Printf("Created pre-operation snapshot in .dcfh/recovery/\n")
+			}
+		}
+	}
 	
 	for _, fileInfo := range indexFiles {
-		result := checkIndexFile(fileInfo, fixMode)
+		result := checkIndexFileWithMode(fileInfo, fixMode, validationMode, checkExtract)
 		output.Results = append(output.Results, result)
 		
 		if result.IsValid {
@@ -1471,20 +1550,28 @@ func handleIndexCheck(args []string) {
 
 // showIndexCheckUsage shows usage for the idxck subcommand
 func showIndexCheckUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh index idxck [--fix=MODE]\n\n")
-	fmt.Fprintf(os.Stderr, "Fix modes:\n")
-	fmt.Fprintf(os.Stderr, "  --fix=none     Read-only validation (default)\n")
-	fmt.Fprintf(os.Stderr, "  --fix=manual   Prompt user for each fix\n")
-	fmt.Fprintf(os.Stderr, "  --fix=auto     Automatically apply all fixes\n")
+	fmt.Fprintf(os.Stderr, "Usage: dcfh index idxck [OPTIONS] [--fix=MODE]\n\n")
+	fmt.Fprintf(os.Stderr, "Validation modes:\n")
+	fmt.Fprintf(os.Stderr, "  --mode=strict     Strict validation - fail on any error (default)\n")
+	fmt.Fprintf(os.Stderr, "  --mode=lenient    Lenient validation - skip invalid entries\n")
+	fmt.Fprintf(os.Stderr, "  --mode=diagnostic Report all issues but include all entries\n")
+	fmt.Fprintf(os.Stderr, "\nFix modes:\n")
+	fmt.Fprintf(os.Stderr, "  --fix=none        Read-only validation (default)\n")
+	fmt.Fprintf(os.Stderr, "  --fix=manual      Prompt user for each fix\n")
+	fmt.Fprintf(os.Stderr, "  --fix=auto        Automatically apply all fixes\n")
+	fmt.Fprintf(os.Stderr, "  --fix=extract     Extract valid entries to new index file\n")
+	fmt.Fprintf(os.Stderr, "\nOther options:\n")
+	fmt.Fprintf(os.Stderr, "  --extract         Extract valid entries (same as --fix=extract)\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck                   # Check only, no fixes\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=manual      # Check and prompt for fixes\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=auto        # Check and auto-fix\n")
-	fmt.Fprintf(os.Stderr, "  dcfh --json index idxck --fix=auto # JSON output with auto-fix\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck                          # Strict validation, no fixes\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=diagnostic        # Report all issues\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=extract             # Extract valid entries\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=lenient --fix=auto # Lenient validation with auto-fix\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json index idxck --fix=auto         # JSON output with auto-fix\n")
 }
 
-// checkIndexFile performs validation and optional repair of a single index file using real pkg functions
-func checkIndexFile(fileInfo IndexFileInfo, fixMode FixMode) IndexCheckResult {
+// checkIndexFileWithMode performs validation and optional repair using unified validation framework
+func checkIndexFileWithMode(fileInfo IndexFileInfo, fixMode FixMode, validationMode dcfh.ValidationMode, extract bool) IndexCheckResult {
 	result := IndexCheckResult{
 		FilePath: fileInfo.Path,
 		FileName: fileInfo.Name,
@@ -1493,7 +1580,6 @@ func checkIndexFile(fileInfo IndexFileInfo, fixMode FixMode) IndexCheckResult {
 	}
 	
 	// Create a temporary DirectoryCache to use existing validation functions
-	// Get repository root by walking up from the index file
 	indexDir := filepath.Dir(fileInfo.Path)
 	repoRoot := filepath.Dir(indexDir)
 	
@@ -1504,8 +1590,13 @@ func checkIndexFile(fileInfo IndexFileInfo, fixMode FixMode) IndexCheckResult {
 		return result
 	}
 	
-	// Use the real loadIndexFromFile function - this will trigger all the VerboseLog output
-	refs, err := dc.LoadIndexFromFileForValidation(fileInfo.Path)
+	// Create unified validation processor
+	verbosity := options.GetInt("verbose")
+	config := dcfh.DefaultValidationConfig(validationMode, verbosity)
+	processor := dcfh.UnifiedValidationProcessor(config)
+	
+	// Load and validate index with unified processor
+	refs, err := dc.LoadIndexFromFileWithProcessor(fileInfo.Path, processor)
 	if err != nil {
 		result.IsValid = false
 		result.Issues = append(result.Issues, err.Error())
@@ -1527,8 +1618,13 @@ func checkIndexFile(fileInfo IndexFileInfo, fixMode FixMode) IndexCheckResult {
 	} else {
 		// Validation passed - update entry count
 		result.IsValid = true
-		// Note: refs contains the loaded entries, could be used for further analysis
-		_ = refs // Suppress unused variable warning
+		result.EntryCount = len(refs)
+		
+		// Handle extract mode if requested (simplified for now)
+		if extract && len(refs) > 0 {
+			extractPath := fileInfo.Path + ".extracted"
+			result.FixesApplied = append(result.FixesApplied, fmt.Sprintf("Would extract %d valid entries to %s (extract functionality coming soon)", len(refs), extractPath))
+		}
 	}
 	
 	// Apply fixes if requested and issues found
@@ -1563,6 +1659,9 @@ func checkIndexFile(fileInfo IndexFileInfo, fixMode FixMode) IndexCheckResult {
 	
 	return result
 }
+
+// TODO: Implement extractValidEntries once binaryEntryRef type is properly exported
+// This would create a new index file containing only the validated entries
 
 // createBackup creates a backup of the index file before repair
 func createBackup(indexPath string) (string, error) {
@@ -1634,9 +1733,186 @@ func handleIndexExplore(args []string) {
 
 // handleIndexReset implements index reset/restart operations
 func handleIndexReset(args []string) {
-	// TODO: Implement index reset
-	outputError("Index reset not yet implemented")
-	os.Exit(1)
+	if len(args) != 0 {
+		outputError("Usage: dcfh index reset")
+		os.Exit(1)
+	}
+	
+	// Find dcfh repository - allow missing main.idx for reset operation
+	repoRoot, dcfhDir, err := findDcfhRepoAllowMissingIndex()
+	if err != nil {
+		outputError(err.Error())
+		os.Exit(1)
+	}
+	
+	// Create DirectoryCache instance
+	dc := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	
+	// Get verbosity level
+	verbosity := options.GetInt("verbose")
+	
+	// Check output format
+	outputFormat := validateOutputFormat()
+	
+	if verbosity >= 1 {
+		outputMessage("Resetting index to empty state...")
+	}
+	
+	// Create empty main index
+	err = dc.CreateEmptyMainIndex()
+	if err != nil {
+		if outputFormat == OutputJSON {
+			resetResult := map[string]interface{}{
+				"success":    false,
+				"error":      err.Error(),
+				"repository": repoRoot,
+			}
+			outputJSON(resetResult)
+		} else {
+			outputError(fmt.Sprintf("Failed to reset index: %v", err))
+		}
+		os.Exit(1)
+	}
+	
+	if outputFormat == OutputJSON {
+		resetResult := map[string]interface{}{
+			"success":    true,
+			"message":    "Index successfully reset to empty state",
+			"repository": repoRoot,
+		}
+		outputJSON(resetResult)
+	} else {
+		outputMessage("Index successfully reset to empty state")
+		if verbosity >= 1 {
+			outputMessage("Run 'dcfh update' to rebuild the index from current files")
+		}
+	}
+}
+
+// handleIndexRecover implements index recovery operations
+func handleIndexRecover(args []string) {
+	// Find dcfh repository
+	repoRoot, dcfhDir, err := findDcfhRepo()
+	if err != nil {
+		outputError(err.Error())
+		os.Exit(1)
+	}
+	
+	// Create DirectoryCache instance
+	dc := dcfh.NewDirectoryCache(repoRoot, dcfhDir)
+	
+	// Get verbosity level
+	verbosity := options.GetInt("verbose")
+	
+	// Check output format
+	outputFormat := validateOutputFormat()
+	
+	var recoveryResult RecoveryResult
+	
+	if len(args) == 0 {
+		// Auto-recovery mode - try multiple strategies
+		if verbosity >= 1 {
+			outputMessage("Starting automatic index recovery...")
+		}
+		
+		err = dc.AutoRecover(verbosity)
+		if err != nil {
+			recoveryResult = RecoveryResult{
+				Success:    false,
+				Error:      err.Error(),
+				Repository: repoRoot,
+			}
+		} else {
+			recoveryResult = RecoveryResult{
+				Success:     true,
+				Message:     "Index recovery completed successfully",
+				Repository:  repoRoot,
+				Method:      "automatic",
+				TimeElapsed: "0s", // TODO: Add timing
+			}
+		}
+	} else if len(args) == 1 && (args[0] == "preserve" || args[0] == "--preserve") {
+		// Explicit comprehensive recovery with state preservation
+		if verbosity >= 1 {
+			outputMessage("Starting comprehensive recovery with state preservation...")
+		}
+		
+		err = dc.RecoverWithStatePreservation(verbosity)
+		if err != nil {
+			recoveryResult = RecoveryResult{
+				Success:    false,
+				Error:      err.Error(),
+				Repository: repoRoot,
+			}
+		} else {
+			recoveryResult = RecoveryResult{
+				Success:     true,
+				Message:     "Comprehensive recovery with state preservation completed successfully",
+				Repository:  repoRoot,
+				Method:      "comprehensive-preserve",
+				TimeElapsed: "0s", // TODO: Add timing
+			}
+		}
+	} else {
+		// Specific file recovery
+		sourceIndexPath := args[0]
+		
+		// If relative path, make it relative to dcfh directory
+		if !filepath.IsAbs(sourceIndexPath) {
+			sourceIndexPath = filepath.Join(dcfhDir, sourceIndexPath)
+		}
+		
+		if verbosity >= 1 {
+			outputMessage(fmt.Sprintf("Starting recovery from: %s", sourceIndexPath))
+		}
+		
+		err = dc.RecoverFromIndex(sourceIndexPath, verbosity)
+		if err != nil {
+			recoveryResult = RecoveryResult{
+				Success:    false,
+				Error:      err.Error(),
+				Repository: repoRoot,
+				SourceFile: sourceIndexPath,
+			}
+		} else {
+			recoveryResult = RecoveryResult{
+				Success:     true,
+				Message:     "Index recovery completed successfully",
+				Repository:  repoRoot,
+				SourceFile:  sourceIndexPath,
+				Method:      "specific",
+				TimeElapsed: "0s", // TODO: Add timing
+			}
+		}
+	}
+	
+	// Output results
+	if outputFormat == OutputJSON {
+		data, err := json.Marshal(recoveryResult)
+		if err != nil {
+			outputError(fmt.Sprintf("Failed to marshal JSON output: %v", err))
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+	} else {
+		if recoveryResult.Success {
+			outputMessage(recoveryResult.Message)
+		} else {
+			outputError(recoveryResult.Error)
+			os.Exit(1)
+		}
+	}
+}
+
+// RecoveryResult represents the result of an index recovery operation
+type RecoveryResult struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Repository  string `json:"repository"`
+	SourceFile  string `json:"source_file,omitempty"`
+	Method      string `json:"method,omitempty"`      // automatic, specific
+	TimeElapsed string `json:"time_elapsed,omitempty"`
 }
 
 // handleIndexSearch implements index search operations
@@ -1809,4 +2085,37 @@ func findDcfhRepo() (string, string, error) {
 	}
 
 	return "", "", fmt.Errorf("not a dcfh repository (or any of the parent directories)")
+}
+
+// findDcfhRepoAllowMissingIndex finds a dcfh repository without requiring main.idx to exist
+// This is useful for recovery operations where the main index may be missing or corrupt
+func findDcfhRepoAllowMissingIndex() (string, string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	dir := cwd
+	for {
+		dcfhPath := filepath.Join(dir, ".dcfh")
+
+		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
+			// Resolve symlinks to get the real path
+			realDir, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				// If symlink resolution fails, fall back to original path
+				realDir = dir
+			}
+			return realDir, realDir, nil // repoRoot and dcfhDir are the same
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
+	return "", "", fmt.Errorf("not a dcfh repository (or any of the parent directories): .dcfh directory not found")
 }
