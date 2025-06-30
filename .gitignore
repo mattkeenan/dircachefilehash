@@ -9,7 +9,7 @@ pkg.test
 dist/
 
 # Generated files
-cmd/version.go
+cmd/constants_version.go
 
 # Profile data
 *.prof
