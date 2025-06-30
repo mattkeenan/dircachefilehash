@@ -189,3 +189,118 @@ func TestConfigValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestSnapshotConfigDefaults(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-config-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Load config (should create default)
+	config, err := LoadConfig(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Check snapshot configuration defaults
+	snapshotConfig := config.GetSnapshotConfig()
+	if snapshotConfig.KeepHourly != 0 {
+		t.Errorf("Expected default keep_hourly 0, got %d", snapshotConfig.KeepHourly)
+	}
+	if snapshotConfig.KeepDaily != 7 {
+		t.Errorf("Expected default keep_daily 7, got %d", snapshotConfig.KeepDaily)
+	}
+	if snapshotConfig.KeepWeekly != 4 {
+		t.Errorf("Expected default keep_weekly 4, got %d", snapshotConfig.KeepWeekly)
+	}
+	if snapshotConfig.KeepMonthly != 12 {
+		t.Errorf("Expected default keep_monthly 12, got %d", snapshotConfig.KeepMonthly)
+	}
+	if snapshotConfig.KeepYearly != 3 {
+		t.Errorf("Expected default keep_yearly 3, got %d", snapshotConfig.KeepYearly)
+	}
+	if snapshotConfig.DryRun != false {
+		t.Errorf("Expected default dry_run false, got %t", snapshotConfig.DryRun)
+	}
+}
+
+func TestSnapshotConfigModification(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-config-modify-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Load config
+	config, err := LoadConfig(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Modify snapshot configuration
+	section := config.ini.Section("snapshot")
+	section.Key("keep_daily").SetValue("14")
+	section.Key("keep_weekly").SetValue("8")
+	section.Key("dry_run").SetValue("true")
+
+	// Save and reload
+	if err := config.Save(); err != nil {
+		t.Fatalf("Failed to save modified config: %v", err)
+	}
+
+	config2, err := LoadConfig(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to reload config: %v", err)
+	}
+
+	// Verify modifications
+	snapshotConfig := config2.GetSnapshotConfig()
+	if snapshotConfig.KeepDaily != 14 {
+		t.Errorf("Expected modified keep_daily 14, got %d", snapshotConfig.KeepDaily)
+	}
+	if snapshotConfig.KeepWeekly != 8 {
+		t.Errorf("Expected modified keep_weekly 8, got %d", snapshotConfig.KeepWeekly)
+	}
+	if snapshotConfig.DryRun != true {
+		t.Errorf("Expected modified dry_run true, got %t", snapshotConfig.DryRun)
+	}
+
+	// Verify other values remained at defaults
+	if snapshotConfig.KeepHourly != 0 {
+		t.Errorf("Expected unmodified keep_hourly 0, got %d", snapshotConfig.KeepHourly)
+	}
+	if snapshotConfig.KeepMonthly != 12 {
+		t.Errorf("Expected unmodified keep_monthly 12, got %d", snapshotConfig.KeepMonthly)
+	}
+}
+
+func TestAllConfigIncludesSnapshot(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "dcfh-all-config-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Load config
+	config, err := LoadConfig(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Get all configuration
+	allConfig := config.GetAllConfig()
+
+	// Verify snapshot config is included
+	if allConfig.Snapshot == nil {
+		t.Error("AllConfig should include snapshot configuration")
+	}
+
+	// Verify snapshot config content
+	if allConfig.Snapshot.KeepDaily != 7 {
+		t.Errorf("Expected snapshot keep_daily 7, got %d", allConfig.Snapshot.KeepDaily)
+	}
+}

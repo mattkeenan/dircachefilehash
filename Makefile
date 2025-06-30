@@ -38,7 +38,7 @@ test-pkg: generate
 .PHONY: clean
 clean:
 	rm -f dcfh
-	rm -f cmd/version.go
+	rm -f cmd/constants_version.go
 
 # Install the binary to GOBIN
 .PHONY: install

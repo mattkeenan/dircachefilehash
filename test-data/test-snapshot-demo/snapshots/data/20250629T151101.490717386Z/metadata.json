@@ -1,0 +1,13 @@
+{
+  "id": "20250629T151101.490717386Z",
+  "time": "2025-06-29T15:11:01.490717386Z",
+  "hostname": "bazbox",
+  "username": "matt",
+  "tree": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "files": {},
+  "summary": {
+    "files_count": 0,
+    "total_size": 0
+  },
+  "repository": "/home/matt/repo/dircachefilehash/test-data/test-snapshot-demo"
+}

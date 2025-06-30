@@ -272,3 +272,43 @@ func (dc *DirectoryCache) validateAllConfigs() error {
 func (dc *DirectoryCache) GetConfig() *Config {
 	return dc.config
 }
+
+// repoDir returns the repository root directory by searching upward for .dcfh
+func repoDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	dir := cwd
+	for {
+		dcfhPath := filepath.Join(dir, ".dcfh")
+		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
+			// Resolve symlinks to get the real path
+			realDir, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				// If symlink resolution fails, fall back to original path
+				realDir = dir
+			}
+			return realDir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
+	return "", fmt.Errorf("not a dcfh repository (or any of the parent directories): .dcfh directory not found")
+}
+
+// dcfhDir returns the .dcfh directory path
+func dcfhDir() (string, error) {
+	repoRoot, err := repoDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(repoRoot, ".dcfh"), nil
+}

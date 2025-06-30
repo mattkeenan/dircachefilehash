@@ -41,6 +41,16 @@ type PerformanceConfig struct {
 	HashWorkers int // Number of concurrent hash workers (default: 4)
 }
 
+// SnapshotConfig represents snapshot retention policy configuration
+type SnapshotConfig struct {
+	KeepHourly  int  `ini:"keep_hourly"`  // Number of hourly snapshots to keep (default: 0)
+	KeepDaily   int  `ini:"keep_daily"`   // Number of daily snapshots to keep (default: 7)
+	KeepWeekly  int  `ini:"keep_weekly"`  // Number of weekly snapshots to keep (default: 4)
+	KeepMonthly int  `ini:"keep_monthly"` // Number of monthly snapshots to keep (default: 12)
+	KeepYearly  int  `ini:"keep_yearly"`  // Number of yearly snapshots to keep (default: 3)
+	DryRun      bool `ini:"dry_run"`      // Default dry-run mode (default: false)
+}
+
 // AllConfig represents all configuration options
 type AllConfig struct {
 	Hash        *HashConfig
@@ -48,6 +58,7 @@ type AllConfig struct {
 	Verbose     *VerboseConfig
 	Symlink     *SymlinkConfig
 	Performance *PerformanceConfig
+	Snapshot    *SnapshotConfig
 }
 
 // LoadConfig loads configuration from the .dcfh/config file
@@ -134,6 +145,36 @@ func (c *Config) setDefaults() error {
 	_, err = performanceSection.NewKey("hash_workers", "4")
 	if err != nil {
 		return fmt.Errorf("failed to set default hash workers: %w", err)
+	}
+	
+	// Set default snapshot retention policy settings
+	snapshotSection, err := c.ini.NewSection("snapshot")
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot section: %w", err)
+	}
+	_, err = snapshotSection.NewKey("keep_hourly", "0")
+	if err != nil {
+		return fmt.Errorf("failed to set default keep_hourly: %w", err)
+	}
+	_, err = snapshotSection.NewKey("keep_daily", "7")
+	if err != nil {
+		return fmt.Errorf("failed to set default keep_daily: %w", err)
+	}
+	_, err = snapshotSection.NewKey("keep_weekly", "4")
+	if err != nil {
+		return fmt.Errorf("failed to set default keep_weekly: %w", err)
+	}
+	_, err = snapshotSection.NewKey("keep_monthly", "12")
+	if err != nil {
+		return fmt.Errorf("failed to set default keep_monthly: %w", err)
+	}
+	_, err = snapshotSection.NewKey("keep_yearly", "3")
+	if err != nil {
+		return fmt.Errorf("failed to set default keep_yearly: %w", err)
+	}
+	_, err = snapshotSection.NewKey("dry_run", "false")
+	if err != nil {
+		return fmt.Errorf("failed to set default dry_run: %w", err)
 	}
 	
 	return nil
@@ -227,6 +268,54 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 	return performanceConfig
 }
 
+// GetSnapshotConfig returns snapshot retention policy configuration
+func (c *Config) GetSnapshotConfig() *SnapshotConfig {
+	snapshotConfig := &SnapshotConfig{
+		KeepHourly:  0,     // fallback default
+		KeepDaily:   7,     // fallback default
+		KeepWeekly:  4,     // fallback default
+		KeepMonthly: 12,    // fallback default
+		KeepYearly:  3,     // fallback default
+		DryRun:      false, // fallback default
+	}
+	
+	if c.ini.HasSection("snapshot") {
+		section := c.ini.Section("snapshot")
+		if section.HasKey("keep_hourly") {
+			if hourly, err := section.Key("keep_hourly").Int(); err == nil {
+				snapshotConfig.KeepHourly = hourly
+			}
+		}
+		if section.HasKey("keep_daily") {
+			if daily, err := section.Key("keep_daily").Int(); err == nil {
+				snapshotConfig.KeepDaily = daily
+			}
+		}
+		if section.HasKey("keep_weekly") {
+			if weekly, err := section.Key("keep_weekly").Int(); err == nil {
+				snapshotConfig.KeepWeekly = weekly
+			}
+		}
+		if section.HasKey("keep_monthly") {
+			if monthly, err := section.Key("keep_monthly").Int(); err == nil {
+				snapshotConfig.KeepMonthly = monthly
+			}
+		}
+		if section.HasKey("keep_yearly") {
+			if yearly, err := section.Key("keep_yearly").Int(); err == nil {
+				snapshotConfig.KeepYearly = yearly
+			}
+		}
+		if section.HasKey("dry_run") {
+			if dryRun, err := section.Key("dry_run").Bool(); err == nil {
+				snapshotConfig.DryRun = dryRun
+			}
+		}
+	}
+	
+	return snapshotConfig
+}
+
 // GetAllConfig returns all configuration options
 func (c *Config) GetAllConfig() *AllConfig {
 	return &AllConfig{
@@ -235,6 +324,7 @@ func (c *Config) GetAllConfig() *AllConfig {
 		Verbose:     c.GetVerboseConfig(),
 		Symlink:     c.GetSymlinkConfig(),
 		Performance: c.GetPerformanceConfig(),
+		Snapshot:    c.GetSnapshotConfig(),
 	}
 }
 

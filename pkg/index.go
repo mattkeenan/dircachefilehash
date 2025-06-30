@@ -102,6 +102,54 @@ func (ih *indexHeader) ValidateByteOrder() error {
 	return nil
 }
 
+// ValidateIndexHeader validates an index file header and returns a copy of the header struct
+// This is a shared utility function that can be used across the codebase for header validation
+func ValidateIndexHeader(indexPath string, validateVersion bool, expectedVersion uint32) (*indexHeader, error) {
+	file, err := os.Open(indexPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+	
+	if stat.Size() < HeaderSize {
+		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+	}
+	
+	// Memory map just the header for reading
+	data, err := unix.Mmap(int(file.Fd()), 0, HeaderSize, unix.PROT_READ, unix.MAP_PRIVATE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap file header: %w", err)
+	}
+	defer unix.Munmap(data)
+	
+	// Get direct pointer to header in mmap'd memory (zero-copy)
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	
+	// Verify header using the standard validation methods
+	signature := [4]byte{'d', 'c', 'f', 'h'}
+	if err := header.ValidateSignature(signature); err != nil {
+		return nil, err
+	}
+	if err := header.ValidateByteOrder(); err != nil {
+		return nil, err
+	}
+	if validateVersion {
+		if err := header.ValidateVersion(expectedVersion); err != nil {
+			return nil, err
+		}
+	}
+	
+	// Create a copy of the header since we're unmapping the memory
+	headerCopy := *header
+	return &headerCopy, nil
+}
+
 // SetHeader initializes the header fields in mmap'd memory
 func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16) {
 	ih.Signature = signature

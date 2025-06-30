@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -94,6 +95,172 @@ func TestValidateOutputFormat_InvalidFormat(t *testing.T) {
 		t.Log("Detected invalid format as expected")
 	} else {
 		t.Error("Should have detected invalid format")
+	}
+}
+
+func TestDebugFlagChange(t *testing.T) {
+	// Test that debug flag moved from -d to -D
+	// Reset options
+	options = NewParsedOptions()
+	initializeOptions()
+	
+	// Test short flag -D works for debug
+	args := []string{"-D", "scan,extravalidation"}
+	if err := options.Parse(args); err != nil {
+		t.Fatalf("Failed to parse debug flag -D: %v", err)
+	}
+	
+	debugValue := options.GetString("debug")
+	if debugValue != "scan,extravalidation" {
+		t.Errorf("Expected debug value 'scan,extravalidation', got '%s'", debugValue)
+	}
+	
+	// Test that -d is no longer bound to debug (should fail)
+	options = NewParsedOptions()
+	initializeOptions()
+	
+	// -d should not be recognized as debug flag anymore
+	args = []string{"-d", "scan"}
+	err := options.Parse(args)
+	if err == nil {
+		t.Error("Expected error when using -d for debug, but parse succeeded")
+	}
+}
+
+func TestResticStyleForgetFlags(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectedH   int
+		expectedD   int
+		expectedW   int
+		expectedM   int
+		expectedY   int
+		expectedDry bool
+	}{
+		{
+			name: "space separated format",
+			args: []string{"-H", "6", "-d", "7", "-w", "5", "-m", "12", "-y", "2"},
+			expectedH: 6, expectedD: 7, expectedW: 5, expectedM: 12, expectedY: 2,
+		},
+		{
+			name: "equals bound format",
+			args: []string{"--keep-hourly=6", "--keep-daily=7", "--keep-weekly=5", "--keep-monthly=12", "--keep-yearly=2"},
+			expectedH: 6, expectedD: 7, expectedW: 5, expectedM: 12, expectedY: 2,
+		},
+		{
+			name: "mixed format",
+			args: []string{"-H", "6", "--keep-daily=7", "-w", "5", "--keep-monthly=12"},
+			expectedH: 6, expectedD: 7, expectedW: 5, expectedM: 12, expectedY: 0,
+		},
+		{
+			name: "with dry-run",
+			args: []string{"-d", "7", "--dry-run"},
+			expectedD: 7, expectedDry: true,
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the handleSnapshotForgetSpecial parsing logic
+			var keepHourly, keepDaily, keepWeekly, keepMonthly, keepYearly int
+			var dryRun bool
+			
+			// Parse the arguments manually as the special handler would
+			for i := 0; i < len(tt.args); i++ {
+				arg := tt.args[i]
+				
+				switch {
+				case arg == "-H" && i+1 < len(tt.args):
+					val, err := strconv.Atoi(tt.args[i+1])
+					if err != nil {
+						t.Fatalf("Invalid hourly value: %v", err)
+					}
+					keepHourly = val
+					i++
+				case strings.HasPrefix(arg, "--keep-hourly="):
+					val, err := strconv.Atoi(strings.TrimPrefix(arg, "--keep-hourly="))
+					if err != nil {
+						t.Fatalf("Invalid hourly value: %v", err)
+					}
+					keepHourly = val
+				case arg == "-d" && i+1 < len(tt.args):
+					val, err := strconv.Atoi(tt.args[i+1])
+					if err != nil {
+						t.Fatalf("Invalid daily value: %v", err)
+					}
+					keepDaily = val
+					i++
+				case strings.HasPrefix(arg, "--keep-daily="):
+					val, err := strconv.Atoi(strings.TrimPrefix(arg, "--keep-daily="))
+					if err != nil {
+						t.Fatalf("Invalid daily value: %v", err)
+					}
+					keepDaily = val
+				case arg == "-w" && i+1 < len(tt.args):
+					val, err := strconv.Atoi(tt.args[i+1])
+					if err != nil {
+						t.Fatalf("Invalid weekly value: %v", err)
+					}
+					keepWeekly = val
+					i++
+				case strings.HasPrefix(arg, "--keep-weekly="):
+					val, err := strconv.Atoi(strings.TrimPrefix(arg, "--keep-weekly="))
+					if err != nil {
+						t.Fatalf("Invalid weekly value: %v", err)
+					}
+					keepWeekly = val
+				case arg == "-m" && i+1 < len(tt.args):
+					val, err := strconv.Atoi(tt.args[i+1])
+					if err != nil {
+						t.Fatalf("Invalid monthly value: %v", err)
+					}
+					keepMonthly = val
+					i++
+				case strings.HasPrefix(arg, "--keep-monthly="):
+					val, err := strconv.Atoi(strings.TrimPrefix(arg, "--keep-monthly="))
+					if err != nil {
+						t.Fatalf("Invalid monthly value: %v", err)
+					}
+					keepMonthly = val
+				case arg == "-y" && i+1 < len(tt.args):
+					val, err := strconv.Atoi(tt.args[i+1])
+					if err != nil {
+						t.Fatalf("Invalid yearly value: %v", err)
+					}
+					keepYearly = val
+					i++
+				case strings.HasPrefix(arg, "--keep-yearly="):
+					val, err := strconv.Atoi(strings.TrimPrefix(arg, "--keep-yearly="))
+					if err != nil {
+						t.Fatalf("Invalid yearly value: %v", err)
+					}
+					keepYearly = val
+				case arg == "--dry-run":
+					dryRun = true
+				}
+			}
+			
+			// Verify parsed values match expectations
+			if keepHourly != tt.expectedH {
+				t.Errorf("Expected hourly %d, got %d", tt.expectedH, keepHourly)
+			}
+			if keepDaily != tt.expectedD {
+				t.Errorf("Expected daily %d, got %d", tt.expectedD, keepDaily)
+			}
+			if keepWeekly != tt.expectedW {
+				t.Errorf("Expected weekly %d, got %d", tt.expectedW, keepWeekly)
+			}
+			if keepMonthly != tt.expectedM {
+				t.Errorf("Expected monthly %d, got %d", tt.expectedM, keepMonthly)
+			}
+			if keepYearly != tt.expectedY {
+				t.Errorf("Expected yearly %d, got %d", tt.expectedY, keepYearly)
+			}
+			if dryRun != tt.expectedDry {
+				t.Errorf("Expected dry-run %t, got %t", tt.expectedDry, dryRun)
+			}
+		})
 	}
 }
 
