@@ -24,8 +24,10 @@ func handleSnapshot(args []string) {
 		handleSnapshotCreate(args[1:])
 	case "list", "ls":
 		handleSnapshotList(args[1:])
-	case "forget", "rm":
+	case "forget":
 		handleSnapshotForget(args[1:])
+	case "remove":
+		handleSnapshotRemove(args[1:])
 	case "status":
 		handleSnapshotStatus(args[1:])
 	case "help", "-h", "--help":
@@ -43,13 +45,15 @@ func showSnapshotUsage() {
 	fmt.Fprintf(os.Stderr, "Snapshot management subcommands:\n")
 	fmt.Fprintf(os.Stderr, "  create           Create a new snapshot of the current index state\n")
 	fmt.Fprintf(os.Stderr, "  list, ls         List all available snapshots\n")
-	fmt.Fprintf(os.Stderr, "  forget, rm       Remove snapshots based on retention policies\n")
+	fmt.Fprintf(os.Stderr, "  forget           Remove snapshots based on retention policies\n")
+	fmt.Fprintf(os.Stderr, "  remove           Remove specific snapshots by ID\n")
 	fmt.Fprintf(os.Stderr, "  status           Compare current state with snapshots\n")
 	fmt.Fprintf(os.Stderr, "  help             Show this help message\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh snapshot create\n")
 	fmt.Fprintf(os.Stderr, "  dcfh snapshot list\n")
 	fmt.Fprintf(os.Stderr, "  dcfh snapshot forget --keep-daily=7\n")
+	fmt.Fprintf(os.Stderr, "  dcfh snapshot remove <snapshot-id>\n")
 	fmt.Fprintf(os.Stderr, "  dcfh snapshot status\n")
 }
 
@@ -136,6 +140,9 @@ func handleSnapshotList(args []string) {
 		os.Exit(1)
 	}
 	
+	// Get verbosity level
+	verbosity := options.GetInt("verbose")
+	
 	// Output results
 	outputFormat := validateOutputFormat()
 	if outputFormat == OutputJSON {
@@ -155,22 +162,42 @@ func handleSnapshotList(args []string) {
 			return
 		}
 		
-		fmt.Printf("Found %d snapshot(s):\n\n", len(snapshots))
-		for _, snapshot := range snapshots {
-			fmt.Printf("ID: %s\n", snapshot.ID)
-			fmt.Printf("Time: %s\n", snapshot.Time.Format("2006-01-02 15:04:05 UTC"))
-			fmt.Printf("Files: %d (%s)\n", snapshot.Summary.FilesCount, formatFileSize(snapshot.Summary.TotalSize))
-			if len(snapshot.Tags) > 0 {
-				fmt.Printf("Tags: %s\n", strings.Join(snapshot.Tags, ", "))
+		if verbosity == 0 {
+			// Single-line format for normal output
+			for _, snapshot := range snapshots {
+				// Format: ID  Hash  Tags
+				hashStr := snapshot.Tree
+				if len(hashStr) > 8 {
+					hashStr = hashStr[:8] // Show first 8 chars like git
+				}
+				
+				tagsStr := ""
+				if len(snapshot.Tags) > 0 {
+					tagsStr = fmt.Sprintf(" [%s]", strings.Join(snapshot.Tags, ","))
+				}
+				
+				fmt.Printf("%-27s %s%s\n", snapshot.ID, hashStr, tagsStr)
 			}
-			if snapshot.Hostname != "" {
-				fmt.Printf("Host: %s", snapshot.Hostname)
-				if snapshot.Username != "" {
-					fmt.Printf(" (%s)", snapshot.Username)
+		} else {
+			// Multi-line detailed format for verbose output
+			fmt.Printf("Found %d snapshot(s):\n\n", len(snapshots))
+			for _, snapshot := range snapshots {
+				fmt.Printf("ID: %s\n", snapshot.ID)
+				fmt.Printf("Time: %s\n", snapshot.Time.Format("2006-01-02 15:04:05 UTC"))
+				fmt.Printf("Files: %d (%s)\n", snapshot.Summary.FilesCount, formatFileSize(snapshot.Summary.TotalSize))
+				fmt.Printf("Hash: %s\n", snapshot.Tree)
+				if len(snapshot.Tags) > 0 {
+					fmt.Printf("Tags: %s\n", strings.Join(snapshot.Tags, ", "))
+				}
+				if snapshot.Hostname != "" {
+					fmt.Printf("Host: %s", snapshot.Hostname)
+					if snapshot.Username != "" {
+						fmt.Printf(" (%s)", snapshot.Username)
+					}
+					fmt.Println()
 				}
 				fmt.Println()
 			}
-			fmt.Println()
 		}
 	}
 }
@@ -628,6 +655,103 @@ func handleSnapshotForgetSpecial(globalArgs []string, subcommandArgs []string) {
 			}
 			for _, id := range removed {
 				fmt.Printf("  %s\n", id)
+			}
+		}
+	}
+}
+
+// handleSnapshotRemove removes specific snapshots by ID
+func handleSnapshotRemove(args []string) {
+	if len(args) == 0 {
+		outputError("Usage: dcfh snapshot remove <snapshot-id> [snapshot-id...]")
+		outputError("Use 'dcfh snapshot list' to see available snapshots")
+		os.Exit(1)
+	}
+
+	// Find dcfh repository
+	_, dcfhDir, err := findDcfhRepo()
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to find dcfh repository: %v", err))
+		os.Exit(1)
+	}
+
+	// Create snapshot repository
+	repo := dcfh.NewSnapshotRepository(dcfhDir)
+	
+	// Get verbosity and dry-run from global options
+	verbosity := options.GetInt("verbose")
+	dryRun := options.GetBool("dry-run")
+	outputFormat := validateOutputFormat()
+
+	var results []map[string]interface{}
+	var successCount, errorCount int
+
+	for _, snapshotID := range args {
+		if dryRun {
+			if verbosity >= 1 {
+				outputMessage(fmt.Sprintf("Would remove snapshot: %s", snapshotID))
+			}
+			if outputFormat == OutputJSON {
+				results = append(results, map[string]interface{}{
+					"snapshot_id": snapshotID,
+					"action":      "would_remove",
+					"success":     true,
+				})
+			}
+			successCount++
+		} else {
+			if verbosity >= 1 {
+				outputMessage(fmt.Sprintf("Removing snapshot: %s", snapshotID))
+			}
+			
+			err := repo.RemoveSnapshot(snapshotID)
+			if err != nil {
+				if outputFormat == OutputJSON {
+					results = append(results, map[string]interface{}{
+						"snapshot_id": snapshotID,
+						"action":      "remove",
+						"success":     false,
+						"error":       err.Error(),
+					})
+				} else {
+					outputError(fmt.Sprintf("Failed to remove snapshot %s: %v", snapshotID, err))
+				}
+				errorCount++
+			} else {
+				if outputFormat == OutputJSON {
+					results = append(results, map[string]interface{}{
+						"snapshot_id": snapshotID,
+						"action":      "remove",
+						"success":     true,
+					})
+				}
+				successCount++
+			}
+		}
+	}
+
+	// Output summary
+	if outputFormat == OutputJSON {
+		output := map[string]interface{}{
+			"operation":     "remove",
+			"dry_run":       dryRun,
+			"total_count":   len(args),
+			"success_count": successCount,
+			"error_count":   errorCount,
+			"results":       results,
+		}
+		outputJSON(output)
+	} else {
+		if dryRun {
+			outputMessage(fmt.Sprintf("Would remove %d snapshot(s)", successCount))
+		} else {
+			if errorCount == 0 {
+				outputMessage(fmt.Sprintf("Successfully removed %d snapshot(s)", successCount))
+			} else {
+				outputMessage(fmt.Sprintf("Removed %d snapshot(s), %d errors", successCount, errorCount))
+				if errorCount > 0 {
+					os.Exit(1)
+				}
 			}
 		}
 	}

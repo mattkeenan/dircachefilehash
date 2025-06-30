@@ -529,3 +529,75 @@ func TestSelectFromGroups_Ordering(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotRepository_RemoveSnapshot(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create snapshot repository
+	repo := NewSnapshotRepository(tempDir)
+	err = repo.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize repository: %v", err)
+	}
+
+	// Create a test snapshot directory manually
+	testSnapshotID := "20231201T120000.000000000Z"
+	snapshotDir := filepath.Join(repo.SnapshotsDir, testSnapshotID)
+	err = os.MkdirAll(snapshotDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create test snapshot directory: %v", err)
+	}
+
+	// Add some test files to the snapshot
+	testFile := filepath.Join(snapshotDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("test content"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Verify snapshot directory exists before removal
+	if _, err := os.Stat(snapshotDir); os.IsNotExist(err) {
+		t.Fatalf("Test snapshot directory should exist before removal")
+	}
+
+	// Remove the snapshot
+	err = repo.RemoveSnapshot(testSnapshotID)
+	if err != nil {
+		t.Fatalf("Failed to remove snapshot: %v", err)
+	}
+
+	// Verify snapshot directory is gone after removal
+	if _, err := os.Stat(snapshotDir); !os.IsNotExist(err) {
+		t.Errorf("Snapshot directory should be removed after RemoveSnapshot")
+	}
+}
+
+func TestSnapshotRepository_RemoveNonexistentSnapshot(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create snapshot repository
+	repo := NewSnapshotRepository(tempDir)
+	err = repo.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize repository: %v", err)
+	}
+
+	// Try to remove a nonexistent snapshot
+	nonexistentID := "nonexistent-snapshot-id"
+	err = repo.RemoveSnapshot(nonexistentID)
+	
+	// Should not return an error (os.RemoveAll doesn't fail on nonexistent paths)
+	if err != nil {
+		t.Errorf("RemoveSnapshot should not fail on nonexistent snapshot, got: %v", err)
+	}
+}

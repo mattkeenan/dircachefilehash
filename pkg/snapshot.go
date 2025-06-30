@@ -262,7 +262,7 @@ func (sr *SnapshotRepository) ForgetSnapshots(policy RetentionPolicy, dryRun boo
 			VerboseLog(1, "Would remove snapshot: %s", snapshot.ID)
 		} else {
 			VerboseLog(1, "Removing snapshot: %s", snapshot.ID)
-			if err := sr.removeSnapshot(snapshot.ID); err != nil {
+			if err := sr.RemoveSnapshot(snapshot.ID); err != nil {
 				VerboseLog(1, "Warning: failed to remove snapshot %s: %v", snapshot.ID, err)
 				continue
 			}
@@ -306,7 +306,7 @@ func (sr *SnapshotRepository) findSnapshotsToRemove(all []*SnapshotMetadata, toK
 }
 
 // removeSnapshot removes a snapshot directory and all its contents
-func (sr *SnapshotRepository) removeSnapshot(snapshotID string) error {
+func (sr *SnapshotRepository) RemoveSnapshot(snapshotID string) error {
 	snapshotDir := filepath.Join(sr.SnapshotsDir, snapshotID)
 	return os.RemoveAll(snapshotDir)
 }
