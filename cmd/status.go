@@ -8,10 +8,44 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+// showStatusUsage displays usage information for the status command
+func showStatusUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: dcfh status\n\n")
+	fmt.Fprintf(os.Stderr, "Show the status of files in the current dcfh repository.\n\n")
+	fmt.Fprintf(os.Stderr, "Description:\n")
+	fmt.Fprintf(os.Stderr, "  Compares the current state of files with the last recorded state\n")
+	fmt.Fprintf(os.Stderr, "  in the index. Shows files that have been modified, added, or deleted\n")
+	fmt.Fprintf(os.Stderr, "  since the last update operation.\n\n")
+	fmt.Fprintf(os.Stderr, "Output categories:\n")
+	fmt.Fprintf(os.Stderr, "  Modified             Files that exist in index but have changed\n")
+	fmt.Fprintf(os.Stderr, "  Added                New files not present in index\n")
+	fmt.Fprintf(os.Stderr, "  Deleted              Files in index but no longer exist on disk\n\n")
+	fmt.Fprintf(os.Stderr, "Global options:\n")
+	fmt.Fprintf(os.Stderr, "  --verbose, -v        Show additional information and progress\n")
+	fmt.Fprintf(os.Stderr, "  --json               Output result in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  --symlinks=MODE      Handle symlinks: all, contained, none\n")
+	fmt.Fprintf(os.Stderr, "  --hash-workers=N     Number of concurrent hash workers\n\n")
+	fmt.Fprintf(os.Stderr, "Examples:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh status                          # Show status in current repository\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json status                   # Show status in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --verbose status                # Show verbose status information\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --symlinks=none status          # Ignore symlinks during status check\n\n")
+	fmt.Fprintf(os.Stderr, "Tips:\n")
+	fmt.Fprintf(os.Stderr, "  Use 'dcfh update' to synchronize the index with current file state\n")
+	fmt.Fprintf(os.Stderr, "  Status check is read-only and does not modify the index\n")
+}
+
 // handleStatus handles the "dcfh status" command
 func handleStatus(args []string) {
+	// Check for help request
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showStatusUsage()
+		return
+	}
+	
 	if len(args) != 0 {
 		outputError("Usage: dcfh status")
+		outputError("Use 'dcfh status --help' for detailed usage information")
 		os.Exit(1)
 	}
 

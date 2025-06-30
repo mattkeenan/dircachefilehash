@@ -9,10 +9,39 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+// showInitUsage displays usage information for the init command
+func showInitUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: dcfh init <directory>\n\n")
+	fmt.Fprintf(os.Stderr, "Initialize a new dcfh repository in the specified directory.\n\n")
+	fmt.Fprintf(os.Stderr, "Description:\n")
+	fmt.Fprintf(os.Stderr, "  Creates a new .dcfh directory structure with configuration files\n")
+	fmt.Fprintf(os.Stderr, "  and an empty main index. The directory must exist and not already\n")
+	fmt.Fprintf(os.Stderr, "  contain a .dcfh repository.\n\n")
+	fmt.Fprintf(os.Stderr, "Arguments:\n")
+	fmt.Fprintf(os.Stderr, "  <directory>          Path to directory to initialize (required)\n\n")
+	fmt.Fprintf(os.Stderr, "Global options:\n")
+	fmt.Fprintf(os.Stderr, "  --verbose, -v        Show verbose output during initialization\n")
+	fmt.Fprintf(os.Stderr, "  --json               Output result in JSON format\n\n")
+	fmt.Fprintf(os.Stderr, "Examples:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh init .                          # Initialize in current directory\n")
+	fmt.Fprintf(os.Stderr, "  dcfh init /home/user/documents       # Initialize in specific directory\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --verbose init .                # Initialize with verbose output\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json init /path/to/dir        # Initialize with JSON output\n\n")
+	fmt.Fprintf(os.Stderr, "After initialization:\n")
+	fmt.Fprintf(os.Stderr, "  Run 'dcfh update' to scan and index files in the repository\n")
+}
+
 // handleInit handles the "dcfh init <directory>" command
 func handleInit(args []string) {
+	// Check for help request
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showInitUsage()
+		return
+	}
+	
 	if len(args) != 1 {
 		outputError("Usage: dcfh init <directory>")
+		outputError("Use 'dcfh init --help' for detailed usage information")
 		os.Exit(1)
 	}
 

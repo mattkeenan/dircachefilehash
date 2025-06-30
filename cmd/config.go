@@ -10,6 +10,12 @@ import (
 
 // handleConfig handles the "dcfh config" command and its subcommands
 func handleConfig(args []string) {
+	// Check for help request first (before parsing options)
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showConfigUsage()
+		return
+	}
+	
 	// Create options parser for config subcommand
 	configOptions := NewParsedOptions()
 	configOptions.DefineOption("list", "", OptionTypeBool, "", "list all configuration variables")

@@ -8,8 +8,44 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+// showUpdateUsage displays usage information for the update command
+func showUpdateUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: dcfh update [paths...]\n\n")
+	fmt.Fprintf(os.Stderr, "Update the index with current file states.\n\n")
+	fmt.Fprintf(os.Stderr, "Description:\n")
+	fmt.Fprintf(os.Stderr, "  Scans the repository (or specified paths) and updates the index\n")
+	fmt.Fprintf(os.Stderr, "  with current file information including hashes, sizes, and timestamps.\n")
+	fmt.Fprintf(os.Stderr, "  This operation synchronizes the index with the actual file system state.\n\n")
+	fmt.Fprintf(os.Stderr, "Arguments:\n")
+	fmt.Fprintf(os.Stderr, "  [paths...]           Specific paths to update (optional)\n")
+	fmt.Fprintf(os.Stderr, "                      If no paths specified, updates entire repository\n\n")
+	fmt.Fprintf(os.Stderr, "Global options:\n")
+	fmt.Fprintf(os.Stderr, "  --verbose, -v        Show verbose progress information\n")
+	fmt.Fprintf(os.Stderr, "  --json               Output result in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  --symlinks=MODE      Handle symlinks: all, contained, none\n")
+	fmt.Fprintf(os.Stderr, "  --hash-workers=N     Number of concurrent hash workers\n")
+	fmt.Fprintf(os.Stderr, "  --filehash=ALG       Override hash algorithm (format: default:sha256)\n")
+	fmt.Fprintf(os.Stderr, "  --dry-run            Show what would be done without updating\n\n")
+	fmt.Fprintf(os.Stderr, "Examples:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh update                          # Update entire repository\n")
+	fmt.Fprintf(os.Stderr, "  dcfh update file.txt dir/            # Update specific files/directories\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --verbose update                # Update with progress information\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --hash-workers=8 update         # Use 8 parallel hash workers\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --filehash=default:sha1 update  # Use SHA-1 instead of default hash\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json update                   # Output results in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --dry-run update               # Preview changes without updating\n\n")
+	fmt.Fprintf(os.Stderr, "Performance:\n")
+	fmt.Fprintf(os.Stderr, "  Use --hash-workers to control parallelism for large repositories\n")
+	fmt.Fprintf(os.Stderr, "  Partial updates (specific paths) are faster than full repository scans\n")
+}
+
 // handleUpdate handles the "dcfh update [paths...]" command
 func handleUpdate(args []string) {
+	// Check for help request
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showUpdateUsage()
+		return
+	}
 	// Find the dcfh repository root
 	repoRoot, _, err := findDcfhRepo()
 	if err != nil {

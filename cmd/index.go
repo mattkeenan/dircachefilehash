@@ -141,6 +141,8 @@ func showIndexUsage() {
 	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=auto\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index explore main.idx\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index search filename.txt\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover cache.idx\n")
 }
 
 // handleIndexList implements index file listing
@@ -471,8 +473,44 @@ func handleIndexReset(args []string) {
 	}
 }
 
+// showIndexRecoverUsage displays usage information for the index recover command
+func showIndexRecoverUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: dcfh index recover [options] [source-index]\n\n")
+	fmt.Fprintf(os.Stderr, "Recovery modes:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover                    Auto-recovery using multiple strategies\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover preserve           Comprehensive recovery with state preservation\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover <index-file>       Recover from specific index file\n")
+	fmt.Fprintf(os.Stderr, "\nRecovery strategies (auto-recovery tries these in order):\n")
+	fmt.Fprintf(os.Stderr, "  1. Comprehensive state preservation   Merge all available index data\n")
+	fmt.Fprintf(os.Stderr, "  2. Cache index recovery              Recover from cache.idx only\n")
+	fmt.Fprintf(os.Stderr, "  3. Scan file recovery                Recover from scan-*.idx files\n")
+	fmt.Fprintf(os.Stderr, "  4. Main index recovery               Recover from main.idx only\n")
+	fmt.Fprintf(os.Stderr, "\nDescription:\n")
+	fmt.Fprintf(os.Stderr, "  The recovery system validates entries and filters out corrupted data\n")
+	fmt.Fprintf(os.Stderr, "  while preserving as much valid information as possible. All recovery\n")
+	fmt.Fprintf(os.Stderr, "  operations create pre-recovery snapshots in .dcfh/recovery/ for safety.\n")
+	fmt.Fprintf(os.Stderr, "\nSource index files:\n")
+	fmt.Fprintf(os.Stderr, "  main.idx                             Main index file\n")
+	fmt.Fprintf(os.Stderr, "  cache.idx                            Cache index file\n")
+	fmt.Fprintf(os.Stderr, "  scan-<pid>-<tid>.idx                 Scan index files from interrupted operations\n")
+	fmt.Fprintf(os.Stderr, "  /path/to/backup.idx                  Absolute path to backup index file\n")
+	fmt.Fprintf(os.Stderr, "\nExamples:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover                   # Auto-recovery using best strategy\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover preserve          # Comprehensive recovery with state preservation\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover cache.idx         # Recover from cache index only\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index recover scan-1234-1.idx   # Recover from specific scan file\n")
+	fmt.Fprintf(os.Stderr, "  dcfh -v index recover                # Verbose recovery with progress output\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json index recover            # JSON output for automated scripts\n")
+}
+
 // handleIndexRecover implements index recovery operations
 func handleIndexRecover(args []string) {
+	// Check for help request
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showIndexRecoverUsage()
+		return
+	}
+	
 	// Find dcfh repository
 	repoRoot, dcfhDir, err := findDcfhRepo()
 	if err != nil {

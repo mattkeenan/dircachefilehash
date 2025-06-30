@@ -8,10 +8,46 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+// showDupesUsage displays usage information for the dupes command
+func showDupesUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: dcfh dupes\n\n")
+	fmt.Fprintf(os.Stderr, "Find and display duplicate files in the repository.\n\n")
+	fmt.Fprintf(os.Stderr, "Description:\n")
+	fmt.Fprintf(os.Stderr, "  Analyzes the index to identify files with identical content (same hash)\n")
+	fmt.Fprintf(os.Stderr, "  but different paths. Groups duplicate files and shows file counts and\n")
+	fmt.Fprintf(os.Stderr, "  total duplicate space that could be reclaimed.\n\n")
+	fmt.Fprintf(os.Stderr, "Output formats:\n")
+	fmt.Fprintf(os.Stderr, "  --output=human       Human-readable grouped format (default)\n")
+	fmt.Fprintf(os.Stderr, "  --output=json        JSON format with detailed group information\n")
+	fmt.Fprintf(os.Stderr, "  --output=fdupes      fdupes-compatible format for scripting\n\n")
+	fmt.Fprintf(os.Stderr, "Global options:\n")
+	fmt.Fprintf(os.Stderr, "  --verbose, -v        Show additional information about duplicate groups\n")
+	fmt.Fprintf(os.Stderr, "  --json               Output result in JSON format (alias for --output=json)\n\n")
+	fmt.Fprintf(os.Stderr, "Examples:\n")
+	fmt.Fprintf(os.Stderr, "  dcfh dupes                           # Find duplicates in human format\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json dupes                    # Find duplicates in JSON format\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --output=fdupes dupes           # fdupes-compatible output\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --verbose dupes                 # Show detailed duplicate information\n\n")
+	fmt.Fprintf(os.Stderr, "Output information:\n")
+	fmt.Fprintf(os.Stderr, "  Each group shows files with identical content\n")
+	fmt.Fprintf(os.Stderr, "  Group size indicates number of duplicate copies\n")
+	fmt.Fprintf(os.Stderr, "  Summary shows total groups and potential space savings\n\n")
+	fmt.Fprintf(os.Stderr, "Notes:\n")
+	fmt.Fprintf(os.Stderr, "  Requires up-to-date index - run 'dcfh update' if files have changed\n")
+	fmt.Fprintf(os.Stderr, "  Only finds duplicates of indexed files (ignores .dcfhignore patterns)\n")
+}
+
 // handleDupes handles the "dcfh dupes" command
 func handleDupes(args []string) {
+	// Check for help request
+	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+		showDupesUsage()
+		return
+	}
+	
 	if len(args) != 0 {
 		outputError("Usage: dcfh dupes")
+		outputError("Use 'dcfh dupes --help' for detailed usage information")
 		os.Exit(1)
 	}
 
