@@ -14,6 +14,16 @@ After finishing responding to my request or running a command, run this command 
 ogg123 /usr/share/sounds/ubuntu/notifications/Slick.ogg
 ```
 
+## IMPORTANT: Running dcfh Commands
+
+When you need to run `dcfh` commands from anywhere in the repository, always use:
+
+```bash
+$(git rev-parse --show-toplevel)/dcfh
+```
+
+This ensures you're always using the correct dcfh executable regardless of your current working directory.
+
 ## Commands
 
 ### Build and Run

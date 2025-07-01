@@ -128,7 +128,8 @@ func showHelp() {
 	fmt.Printf("  %%t - Modification time  %%g - GID\n")
 	fmt.Printf("  %%c - Change time        %%H - Hash value\n")
 	fmt.Printf("  %%i - Index source       %%Y - Hash type\n")
-	fmt.Printf("  %%d - Device number      %%%% - Literal %%\n\n")
+	fmt.Printf("  %%d - Device number      %%%% - Literal %%\n")
+	fmt.Printf("  Escape sequences: \\n (newline), \\t (tab), \\r (carriage return)\n\n")
 	
 	fmt.Printf("PERFORMANCE NOTES:\n")
 	fmt.Printf("  The --checksum action reads file contents to compute hashes, which can be\n")
