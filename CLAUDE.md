@@ -6,11 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **dircachefilehash** is a Go CLI tool and library for directory scanning, file hashing, and duplicate detection. It maintains a git-compatible binary index format with SHA-1 hashes for efficient file integrity checking and change detection.
 
+## IMPORTANT: Sound Notification
+
+After finishing responding to my request or running a command, run this command to notify me by sound:
+
+```bash
+ogg123 /usr/share/sounds/ubuntu/notifications/Slick.ogg
+```
+
 ## Commands
 
 ### Build and Run
 ```bash
-go build -o dcfh cmd/dcfh.go
+make build
 ./dcfh --help
 ```
 

@@ -84,4 +84,46 @@ This session focuses on creating a comprehensive `dcfhtool` command-line utility
 
 ---
 
+### Update - 2025-07-01T08:16:41Z
+
+**Summary**: Completed all remaining session tasks - implemented size parsing and time-based tests
+
+**Git Changes**:
+- Modified: cmd/dcfhfind/main.go, pkg/dcfhfind_support.go
+- Current branch: binaryentry-offset-refactor (commit: 2fe9031)
+
+**Todo Progress**: 13 completed, 0 in progress, 0 pending
+- ✓ Completed: Implement dcfhfind size parsing (+100M, -1k, etc)
+- ✓ Completed: Implement dcfhfind time-based tests (--mtime, --ctime, --mmin, --cmin)
+
+**Details**: Successfully implemented the final outstanding tasks for dcfhfind:
+
+**Size Parsing Features**:
+- Full Unix find(1) compatibility with prefixes (+, -, exact)
+- Size units: c (bytes), w (words), b (blocks), k, M, G
+- Decimal support: 1.5M, 0.5G for precise sizes
+- Comprehensive error handling for invalid formats
+
+**Time-Based Test Features**:
+- Four time tests: --mtime, --mmin, --ctime, --cmin (days vs minutes)
+- Modification time and change time filtering
+- Age comparison modes: +7 (older), -1 (newer), 7 (exactly)
+- Integration with existing TimeFromWall function via exported API
+
+**Code Architecture**:
+- Added comprehensive parseTimeTest() and enhanced parseSizeTest() functions
+- Created four new test expression types: MTimeTest, MMinTest, CTimeTest, CMinTest
+- Extended ExpressionParser to recognize all new test types
+- Added TimeFromWall export to pkg/dcfhfind_support.go for time conversion
+
+**Examples Now Supported**:
+- `dcfhfind main --size +100M --mtime -7` (large recent files)
+- `dcfhfind all --size -1k --mmin +30` (small old files)
+- Complex expressions with size and time combinations
+
+**Session Status**: ALL TASKS COMPLETED (100% - 13/13 tasks done)
+The dcfhfind tool now provides complete Unix find(1)-style functionality with advanced size parsing, time-based filtering, complex expression support, and robust error handling.
+
+---
+
 *Session started at 2025-06-30T18:45:19Z*

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
@@ -105,7 +106,7 @@ func showHelp() {
 	fmt.Printf("  --ls              Detailed listing\n")
 	fmt.Printf("  --printf FORMAT   Custom format output\n")
 	fmt.Printf("  --validate        Validate entry\n")
-	fmt.Printf("  --checksum        Verify hash against file\n")
+	fmt.Printf("  --checksum        Verify hash against file (WARNING: slow on many/large files)\n")
 	fmt.Printf("  --fix {auto|manual|none}  Apply fixes (required argument)\n\n")
 	
 	fmt.Printf("OPERATORS:\n")
@@ -129,12 +130,18 @@ func showHelp() {
 	fmt.Printf("  %%i - Index source       %%Y - Hash type\n")
 	fmt.Printf("  %%d - Device number      %%%% - Literal %%\n\n")
 	
+	fmt.Printf("PERFORMANCE NOTES:\n")
+	fmt.Printf("  The --checksum action reads file contents to compute hashes, which can be\n")
+	fmt.Printf("  very slow when processing many files or large files. Consider using --valid\n")
+	fmt.Printf("  for faster validation that doesn't require reading file contents.\n\n")
+	
 	fmt.Printf("EXAMPLES:\n")
 	fmt.Printf("  dcfhfind main --name \"*.go\"                    # Find Go files\n")
 	fmt.Printf("  dcfhfind all --size +100M --ls                # Large files\n")
 	fmt.Printf("  dcfhfind scan --corrupt --print               # Corrupted entries\n")
 	fmt.Printf("  dcfhfind cache --deleted --printf \"%%p\\n\"       # Deleted files\n")
-	fmt.Printf("  dcfhfind all --fix none --validate            # Validate all\n\n")
+	fmt.Printf("  dcfhfind all --valid --print                  # Fast validation check\n")
+	fmt.Printf("  dcfhfind main --name \"*.txt\" --checksum       # Slow but thorough hash check\n\n")
 }
 
 // Arguments represents parsed command line arguments
@@ -401,7 +408,8 @@ func (p *ExpressionParser) parsePrimaryExpression() (Expression, error) {
 func (p *ExpressionParser) isTestExpression(token string) bool {
 	tests := []string{
 		"--name", "--iname", "--path", "--ipath", "--size", "--empty", "--deleted",
-		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type", "--not", "!", "(",
+		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type", 
+		"--mtime", "--mmin", "--ctime", "--cmin", "--not", "!", "(",
 	}
 	for _, test := range tests {
 		if token == test {
@@ -506,6 +514,34 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		hash := p.next()
 		return &HashTest{Hash: hash}, nil
 		
+	case "--mtime":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--mtime requires a time specification")
+		}
+		timeSpec := p.next()
+		return parseTimeTest(timeSpec, "mtime")
+		
+	case "--mmin":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--mmin requires a time specification")
+		}
+		timeSpec := p.next()
+		return parseTimeTest(timeSpec, "mmin")
+		
+	case "--ctime":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--ctime requires a time specification")
+		}
+		timeSpec := p.next()
+		return parseTimeTest(timeSpec, "ctime")
+		
+	case "--cmin":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--cmin requires a time specification")
+		}
+		timeSpec := p.next()
+		return parseTimeTest(timeSpec, "cmin")
+		
 	case "--hash-prefix":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--hash-prefix requires a prefix")
@@ -573,8 +609,147 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 }
 
 func parseSizeTest(sizeSpec string) (Expression, int, error) {
-	// TODO: Implement size parsing (+100M, -1k, etc)
-	return &SizeTest{Size: 0, Mode: "="}, 2, nil
+	if len(sizeSpec) == 0 {
+		return nil, 0, fmt.Errorf("empty size specification")
+	}
+	
+	var mode string
+	var sizeStr string
+	
+	// Parse prefix (+, -, or exact)
+	switch sizeSpec[0] {
+	case '+':
+		mode = "+"
+		sizeStr = sizeSpec[1:]
+	case '-':
+		mode = "-" 
+		sizeStr = sizeSpec[1:]
+	default:
+		mode = "="
+		sizeStr = sizeSpec
+	}
+	
+	if len(sizeStr) == 0 {
+		return nil, 0, fmt.Errorf("size specification missing numeric value")
+	}
+	
+	// Parse unit suffix
+	var multiplier int64 = 1
+	var numStr string
+	
+	if len(sizeStr) > 0 {
+		lastChar := sizeStr[len(sizeStr)-1]
+		switch lastChar {
+		case 'c':
+			// bytes (default)
+			multiplier = 1
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'w':
+			// 2-byte words
+			multiplier = 2
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'b':
+			// 512-byte blocks
+			multiplier = 512
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'k':
+			// kilobytes
+			multiplier = 1024
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'M':
+			// megabytes
+			multiplier = 1024 * 1024
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'G':
+			// gigabytes
+			multiplier = 1024 * 1024 * 1024
+			numStr = sizeStr[:len(sizeStr)-1]
+		default:
+			// No unit, assume bytes
+			numStr = sizeStr
+		}
+	}
+	
+	if len(numStr) == 0 {
+		return nil, 0, fmt.Errorf("size specification missing numeric value")
+	}
+	
+	// Parse the numeric part
+	var size int64
+	var err error
+	
+	// Handle decimal numbers for units
+	if strings.Contains(numStr, ".") {
+		var floatSize float64
+		floatSize, err = strconv.ParseFloat(numStr, 64)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid size number: %s", numStr)
+		}
+		size = int64(floatSize * float64(multiplier))
+	} else {
+		var intSize int64
+		intSize, err = strconv.ParseInt(numStr, 10, 64)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid size number: %s", numStr)
+		}
+		size = intSize * multiplier
+	}
+	
+	if size < 0 {
+		return nil, 0, fmt.Errorf("size cannot be negative")
+	}
+	
+	return &SizeTest{Size: size, Mode: mode}, 2, nil
+}
+
+func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
+	if len(timeSpec) == 0 {
+		return nil, fmt.Errorf("empty time specification")
+	}
+	
+	var mode string
+	var timeStr string
+	
+	// Parse prefix (+, -, or exact)
+	switch timeSpec[0] {
+	case '+':
+		mode = "+"
+		timeStr = timeSpec[1:]
+	case '-':
+		mode = "-"
+		timeStr = timeSpec[1:]
+	default:
+		mode = "="
+		timeStr = timeSpec
+	}
+	
+	if len(timeStr) == 0 {
+		return nil, fmt.Errorf("time specification missing numeric value")
+	}
+	
+	// Parse the numeric part
+	value, err := strconv.Atoi(timeStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid time number: %s", timeStr)
+	}
+	
+	if value < 0 {
+		return nil, fmt.Errorf("time value cannot be negative")
+	}
+	
+	// Create appropriate test based on type
+	switch timeType {
+	case "mtime":
+		return &MTimeTest{Days: value, Mode: mode}, nil
+	case "mmin":
+		return &MMinTest{Minutes: value, Mode: mode}, nil
+	case "ctime":
+		return &CTimeTest{Days: value, Mode: mode}, nil
+	case "cmin":
+		return &CMinTest{Minutes: value, Mode: mode}, nil
+	default:
+		return nil, fmt.Errorf("unknown time test type: %s", timeType)
+	}
 }
 
 func discoverRepository(repoPath string) (string, error) {

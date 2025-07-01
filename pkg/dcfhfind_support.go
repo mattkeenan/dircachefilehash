@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // EntryInfo provides read-only access to index entry information for external tools
@@ -101,4 +102,119 @@ func FindRepositoryRootFrom(startDir string) (string, error) {
 		realDir = startDir
 	}
 	return realDir, nil
+}
+
+// TimeFromWall converts wall time format back to time.Time
+// This is an exported wrapper around the internal timeFromWall() function
+func TimeFromWall(wall uint64) time.Time {
+	return timeFromWall(wall)
+}
+
+// ValidateEntryInfo performs comprehensive validation of an entry
+// Returns true if the entry is valid, false if invalid, and error if validation fails
+func ValidateEntryInfo(entry *EntryInfo, repoPath string) (bool, error) {
+	// Basic structural validation
+	if entry.Path == "" {
+		return false, nil
+	}
+	
+	if entry.HashStr == "" {
+		return false, nil
+	}
+	
+	// Validate hash type
+	if entry.HashType == 0 || entry.HashType > 3 {
+		return false, nil
+	}
+	
+	// Check hash string length based on type
+	expectedLength := map[uint16]int{
+		1: 40, // SHA1 - 20 bytes * 2 hex chars
+		2: 64, // SHA256 - 32 bytes * 2 hex chars  
+		3: 128, // SHA512 - 64 bytes * 2 hex chars
+	}
+	
+	if expected, ok := expectedLength[entry.HashType]; ok {
+		if len(entry.HashStr) != expected {
+			return false, nil
+		}
+	}
+	
+	// Validate file size is reasonable (less than 4 exabytes)
+	if entry.FileSize > (1 << 62) {
+		return false, nil
+	}
+	
+	return true, nil
+}
+
+// VerifyEntryChecksum calculates and compares file hash against stored value
+// Returns true if hashes match, false if they don't, and error if verification fails
+func VerifyEntryChecksum(entry *EntryInfo, repoPath string) (bool, error) {
+	filePath := filepath.Join(repoPath, entry.Path)
+	
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("file does not exist")
+	} else if err != nil {
+		return false, fmt.Errorf("stat error: %w", err)
+	}
+	
+	// Get hash algorithm
+	algorithm, err := GetHashAlgorithmByType(entry.HashType)
+	if err != nil {
+		return false, fmt.Errorf("invalid hash type %d: %w", entry.HashType, err)
+	}
+	
+	// Calculate current file hash
+	currentHash, err := HashFileToHexString(filePath, algorithm)
+	if err != nil {
+		return false, fmt.Errorf("failed to calculate hash: %w", err)
+	}
+	
+	// Compare hashes (case-insensitive)
+	return strings.EqualFold(currentHash, entry.HashStr), nil
+}
+
+// DetectEntryCorruption checks for corruption indicators in an entry
+// Returns true if corruption is detected, and a list of corruption issues found
+func DetectEntryCorruption(entry *EntryInfo) (bool, []string) {
+	var issues []string
+	
+	// Check for all-zero hash (common corruption indicator)
+	if entry.HashStr == strings.Repeat("0", len(entry.HashStr)) {
+		issues = append(issues, "all-zero hash")
+	}
+	
+	// Check for invalid hash type
+	if entry.HashType == 0 || entry.HashType > 3 {
+		issues = append(issues, fmt.Sprintf("invalid hash type: %d", entry.HashType))
+	}
+	
+	// Check for unreasonable file size (>4 exabytes)
+	if entry.FileSize > (1 << 62) {
+		issues = append(issues, fmt.Sprintf("unreasonable file size: %d bytes", entry.FileSize))
+	}
+	
+	// Check for empty path
+	if entry.Path == "" {
+		issues = append(issues, "empty file path")
+	}
+	
+	// Check for empty hash
+	if entry.HashStr == "" {
+		issues = append(issues, "empty hash")
+	}
+	
+	// Check hash string contains only hex characters
+	if entry.HashStr != "" {
+		for _, r := range entry.HashStr {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				issues = append(issues, "hash contains non-hex characters")
+				break
+			}
+		}
+	}
+	
+	return len(issues) > 0, issues
 }
