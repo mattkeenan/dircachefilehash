@@ -6,13 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **dircachefilehash** is a Go CLI tool and library for directory scanning, file hashing, and duplicate detection. It maintains a git-compatible binary index format with SHA-1 hashes for efficient file integrity checking and change detection.
 
-## IMPORTANT: Sound Notification
+## IMPORTANT: Notification
 
-After finishing responding to my request or running a command, run this command to notify me by sound:
+After finishing responding to my request or running a command, run this command to notify me:
 
 ```bash
-ogg123 /usr/share/sounds/ubuntu/notifications/Slick.ogg
+/home/matt/bin/cc-notification <message>
 ```
+
+Where `<message>` is a brief description of what was completed or what permission is being requested.
 
 ## IMPORTANT: Running dcfh Commands
 
@@ -56,15 +58,34 @@ dcfhfind [starting-points...] [expressions]
 
 # Starting points: main, cache, scan, all, /path/to/index.idx
 # Tests: --name, --path, --size, --mtime, --hash, --valid, --corrupt
-# Actions: --print, --ls, --printf, --fix, --export
+# Actions: --print, --ls, --printf, --validate, --checksum
 # Operators: --and, --or, --not, \( \)
 ```
 
 Examples:
 ```bash
 dcfhfind main --name "*.go" --print
-dcfhfind all --corrupt --fix auto
-dcfhfind cache --not --in-index main --ls
+dcfhfind all --corrupt --validate
+dcfhfind cache --size +100M --ls
+```
+
+**Index Repair (`dcfhfix`)**:
+```bash
+dcfhfix <index-file> [options]
+
+# Commands:
+# header - Fix index header issues
+# entry - Fix specific entry issues
+# scan - Scan and fix all issues
+
+# Options: --dry-run, --backup, --verbose
+```
+
+Examples:
+```bash
+dcfhfix .dcfh/main.idx header --dry-run
+dcfhfix .dcfh/cache.idx entry --offset 1024
+dcfhfix .dcfh/scan-123.idx scan --backup
 ```
 
 ### Help System
@@ -84,7 +105,7 @@ Examples:
 
 ### Command Separation (v0.0.14+)
 
-Starting with v0.0.14, the CLI interface has been separated into two distinct tools:
+Starting with v0.0.14, the CLI interface has been separated into distinct tools:
 
 **`dcfh` - Daily Operations**:
 - `init` - Initialize repository
@@ -95,16 +116,23 @@ Starting with v0.0.14, the CLI interface has been separated into two distinct to
 - `config` - Configuration management
 - `version` - Version information
 
-**`dcfhfind` - Specialized Tooling**:
-- Unix `find(1)`-style interface for dcfh repositories
-- Advanced index management and diagnostics
-- Recovery operations and validation
-- Complex queries with boolean logic
-- Repository exploration and analysis
+**`dcfhfind` - Find-Style Search Tool**:
+- Unix find(1)-style interface for searching index files
+- Pattern matching, size/time filtering, validation checks
+- Complex expressions with AND/OR/NOT operators
+- Multiple output formats and actions
+
+**`dcfhfix` - Index Repair Tool**:
+- Targeted repair for corrupted index files
+- Fix index headers (signatures, versions, flags, checksums)
+- Repair individual binaryEntry structures
+- Backup creation and dry-run modes
+- Integration with validation tools
 
 This separation provides:
 - **Focused daily workflow** with `dcfh` for common operations
-- **Powerful diagnostic tools** with `dcfhfind` for repository management
+- **Powerful search capabilities** with `dcfhfind` for finding files
+- **Specialized repair tools** with `dcfhfix` for fixing corruption
 - **Familiar Unix interface** for advanced users
 - **Reduced complexity** in the main `dcfh` command
 
