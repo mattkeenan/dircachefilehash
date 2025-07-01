@@ -204,58 +204,30 @@ func parseArguments(args []string) (*Arguments, error) {
 		result.StartingPoints = []string{"all"}
 	}
 
-	// Parse expressions and actions
-	for i < len(args) {
-		arg := args[i]
-		
-		switch arg {
+	// Parse expressions and actions using complex expression parser
+	remainingArgs := args[i:]
+	expressions, actions, globalArgs, err := parseComplexExpressions(remainingArgs)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Apply global arguments
+	for option, value := range globalArgs {
+		switch option {
 		case "--repo":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--repo requires an argument")
-			}
-			result.GlobalOptions.RepoDir = args[i+1]
-			result.RepoPath = args[i+1]
-			i += 2
+			result.GlobalOptions.RepoDir = value
+			result.RepoPath = value
 		case "--maxdepth":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--maxdepth requires an argument")
-			}
 			// TODO: Parse integer
-			i += 2
 		case "--warn":
 			result.GlobalOptions.Warn = true
-			i++
 		case "--nowarn":
 			result.GlobalOptions.Warn = false
-			i++
-		case "--fix":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--fix requires an argument (auto|manual|none)")
-			}
-			fixMode := args[i+1]
-			if fixMode != "auto" && fixMode != "manual" && fixMode != "none" {
-				return nil, fmt.Errorf("--fix argument must be auto, manual, or none")
-			}
-			action := &FixAction{Mode: fixMode}
-			result.Actions = append(result.Actions, action)
-			i += 2
-		default:
-			// Try to parse as expression or action
-			expr, consumed, err := parseExpression(args[i:])
-			if err != nil {
-				return nil, fmt.Errorf("unknown option or invalid expression: %s", arg)
-			}
-			
-			if action, ok := expr.(Action); ok {
-				result.Actions = append(result.Actions, action)
-			} else if expression, ok := expr.(Expression); ok {
-				result.Expressions = append(result.Expressions, expression)
-			} else {
-				return nil, fmt.Errorf("unknown expression type returned for: %s", arg)
-			}
-			i += consumed
 		}
 	}
+	
+	result.Expressions = expressions
+	result.Actions = actions
 
 	// If no actions specified, default to --print
 	if len(result.Actions) == 0 {
@@ -265,79 +237,338 @@ func parseArguments(args []string) (*Arguments, error) {
 	return result, nil
 }
 
-func parseExpression(args []string) (interface{}, int, error) {
-	if len(args) == 0 {
-		return nil, 0, fmt.Errorf("empty expression")
+// parseComplexExpressions parses expressions with operator support (--and, --or, --not, grouping)
+func parseComplexExpressions(args []string) ([]Expression, []Action, map[string]string, error) {
+	parser := &ExpressionParser{
+		tokens:     args,
+		pos:        0,
+		globalArgs: make(map[string]string),
+		actions:    []Action{},
 	}
-
-	arg := args[0]
 	
-	switch arg {
+	expressions, err := parser.parseExpressionList()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	
+	// If we have multiple expressions, combine them with implicit AND
+	var finalExpression Expression
+	if len(expressions) == 0 {
+		finalExpression = nil
+	} else if len(expressions) == 1 {
+		finalExpression = expressions[0]
+	} else {
+		// Combine multiple expressions with AND
+		finalExpression = expressions[0]
+		for i := 1; i < len(expressions); i++ {
+			finalExpression = &AndExpression{
+				Left:  finalExpression,
+				Right: expressions[i],
+			}
+		}
+	}
+	
+	var result []Expression
+	if finalExpression != nil {
+		result = []Expression{finalExpression}
+	}
+	
+	return result, parser.actions, parser.globalArgs, nil
+}
+
+// ExpressionParser handles complex expression parsing with operators
+type ExpressionParser struct {
+	tokens     []string
+	pos        int
+	globalArgs map[string]string
+	actions    []Action
+}
+
+func (p *ExpressionParser) peek() string {
+	if p.pos >= len(p.tokens) {
+		return ""
+	}
+	return p.tokens[p.pos]
+}
+
+func (p *ExpressionParser) next() string {
+	if p.pos >= len(p.tokens) {
+		return ""
+	}
+	token := p.tokens[p.pos]
+	p.pos++
+	return token
+}
+
+func (p *ExpressionParser) parseExpressionList() ([]Expression, error) {
+	var expressions []Expression
+	
+	for p.pos < len(p.tokens) {
+		expr, err := p.parseOrExpression()
+		if err != nil {
+			return nil, err
+		}
+		if expr != nil {
+			expressions = append(expressions, expr)
+		}
+	}
+	
+	return expressions, nil
+}
+
+func (p *ExpressionParser) parseOrExpression() (Expression, error) {
+	left, err := p.parseAndExpression()
+	if err != nil {
+		return nil, err
+	}
+	
+	for p.peek() == "--or" {
+		p.next() // consume --or
+		right, err := p.parseAndExpression()
+		if err != nil {
+			return nil, err
+		}
+		left = &OrExpression{Left: left, Right: right}
+	}
+	
+	return left, nil
+}
+
+func (p *ExpressionParser) parseAndExpression() (Expression, error) {
+	left, err := p.parseNotExpression()
+	if err != nil {
+		return nil, err
+	}
+	
+	for p.peek() == "--and" || (p.peek() != "" && p.peek() != "--or" && p.peek() != ")" && p.isTestExpression(p.peek())) {
+		if p.peek() == "--and" {
+			p.next() // consume --and
+		}
+		// implicit AND for adjacent expressions
+		right, err := p.parseNotExpression()
+		if err != nil {
+			return nil, err
+		}
+		if right != nil {
+			left = &AndExpression{Left: left, Right: right}
+		}
+	}
+	
+	return left, nil
+}
+
+func (p *ExpressionParser) parseNotExpression() (Expression, error) {
+	if p.peek() == "--not" || p.peek() == "!" {
+		p.next() // consume --not or !
+		expr, err := p.parsePrimaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Expr: expr}, nil
+	}
+	
+	return p.parsePrimaryExpression()
+}
+
+func (p *ExpressionParser) parsePrimaryExpression() (Expression, error) {
+	token := p.peek()
+	if token == "" {
+		return nil, nil
+	}
+	
+	if token == "(" {
+		p.next() // consume (
+		expr, err := p.parseOrExpression()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek() != ")" {
+			return nil, fmt.Errorf("expected ')' but found '%s'", p.peek())
+		}
+		p.next() // consume )
+		return expr, nil
+	}
+	
+	// Handle global options
+	if p.isGlobalOption(token) {
+		return p.parseGlobalOption()
+	}
+	
+	// Parse basic expression or action
+	return p.parseBasicExpression()
+}
+
+func (p *ExpressionParser) isTestExpression(token string) bool {
+	tests := []string{
+		"--name", "--iname", "--path", "--ipath", "--size", "--empty", "--deleted",
+		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type", "--not", "!", "(",
+	}
+	for _, test := range tests {
+		if token == test {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *ExpressionParser) isGlobalOption(token string) bool {
+	globals := []string{"--repo", "--maxdepth", "--warn", "--nowarn"}
+	for _, global := range globals {
+		if token == global {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *ExpressionParser) parseGlobalOption() (Expression, error) {
+	token := p.next()
+	
+	switch token {
+	case "--repo":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--repo requires an argument")
+		}
+		value := p.next()
+		p.globalArgs["--repo"] = value
+	case "--maxdepth":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--maxdepth requires an argument")
+		}
+		value := p.next()
+		p.globalArgs["--maxdepth"] = value
+	case "--warn":
+		p.globalArgs["--warn"] = "true"
+	case "--nowarn":
+		p.globalArgs["--nowarn"] = "true"
+	}
+	
+	return nil, nil // Global options don't produce expressions
+}
+
+func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
+	if p.pos >= len(p.tokens) {
+		return nil, fmt.Errorf("unexpected end of expression")
+	}
+	
+	token := p.next()
+	
+	switch token {
 	case "--name":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--name requires a pattern")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--name requires a pattern")
 		}
-		return &NameTest{Pattern: args[1], CaseSensitive: true}, 2, nil
+		pattern := p.next()
+		return &NameTest{Pattern: pattern, CaseSensitive: true}, nil
+		
 	case "--iname":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--iname requires a pattern")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--iname requires a pattern")
 		}
-		return &NameTest{Pattern: args[1], CaseSensitive: false}, 2, nil
+		pattern := p.next()
+		return &NameTest{Pattern: pattern, CaseSensitive: false}, nil
+		
 	case "--path":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--path requires a pattern")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--path requires a pattern")
 		}
-		return &PathTest{Pattern: args[1], CaseSensitive: true}, 2, nil
+		pattern := p.next()
+		return &PathTest{Pattern: pattern, CaseSensitive: true}, nil
+		
 	case "--ipath":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--ipath requires a pattern")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--ipath requires a pattern")
 		}
-		return &PathTest{Pattern: args[1], CaseSensitive: false}, 2, nil
+		pattern := p.next()
+		return &PathTest{Pattern: pattern, CaseSensitive: false}, nil
+		
 	case "--size":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--size requires a size specification")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--size requires a size specification")
 		}
-		return parseSizeTest(args[1])
+		sizeSpec := p.next()
+		expr, _, err := parseSizeTest(sizeSpec)
+		return expr, err
+		
 	case "--empty":
-		return &EmptyTest{}, 1, nil
+		return &EmptyTest{}, nil
 	case "--deleted":
-		return &DeletedTest{}, 1, nil
+		return &DeletedTest{}, nil
 	case "--valid":
-		return &ValidTest{}, 1, nil
+		return &ValidTest{}, nil
 	case "--corrupt":
-		return &CorruptTest{}, 1, nil
+		return &CorruptTest{}, nil
+		
 	case "--hash":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--hash requires a hash value")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--hash requires a hash value")
 		}
-		return &HashTest{Hash: args[1]}, 2, nil
+		hash := p.next()
+		return &HashTest{Hash: hash}, nil
+		
 	case "--hash-prefix":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--hash-prefix requires a prefix")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--hash-prefix requires a prefix")
 		}
-		return &HashPrefixTest{Prefix: args[1]}, 2, nil
+		prefix := p.next()
+		return &HashPrefixTest{Prefix: prefix}, nil
+		
 	case "--hash-type":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--hash-type requires a type")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--hash-type requires a type")
 		}
-		return &HashTypeTest{Type: args[1]}, 2, nil
+		hashType := p.next()
+		return &HashTypeTest{Type: hashType}, nil
+		
+	// Actions
 	case "--print":
-		return &PrintAction{}, 1, nil
+		action := &PrintAction{}
+		p.actions = append(p.actions, action)
+		return nil, nil // Actions don't produce expressions
+		
 	case "--print0":
-		return &Print0Action{}, 1, nil
+		action := &Print0Action{}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
 	case "--ls":
-		return &LsAction{}, 1, nil
+		action := &LsAction{}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
 	case "--printf":
-		if len(args) < 2 {
-			return nil, 0, fmt.Errorf("--printf requires a format string")
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--printf requires a format string")
 		}
-		return &PrintfAction{Format: args[1]}, 2, nil
+		format := p.next()
+		action := &PrintfAction{Format: format}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
 	case "--validate":
-		return &ValidateAction{}, 1, nil
+		action := &ValidateAction{}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
 	case "--checksum":
-		return &ChecksumAction{}, 1, nil
+		action := &ChecksumAction{}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
+	case "--fix":
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--fix requires an argument (auto|manual|none)")
+		}
+		fixMode := p.next()
+		if fixMode != "auto" && fixMode != "manual" && fixMode != "none" {
+			return nil, fmt.Errorf("--fix argument must be auto, manual, or none")
+		}
+		action := &FixAction{Mode: fixMode}
+		p.actions = append(p.actions, action)
+		return nil, nil
+		
 	default:
-		return nil, 0, fmt.Errorf("unknown expression: %s", arg)
+		return nil, fmt.Errorf("unknown expression: %s", token)
 	}
 }
 
