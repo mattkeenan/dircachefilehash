@@ -21,7 +21,7 @@ func TestBasicIntegration(t *testing.T) {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
 	
-	// Initialize dcfh repository
+	// Initialise dcfh repository
 	dc := NewDirectoryCache(testDir, testDir)
 	
 	t.Run("EmptyRepository", func(t *testing.T) {

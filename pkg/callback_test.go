@@ -28,7 +28,7 @@ func TestCallbackArchitecture(t *testing.T) {
 		}
 	}
 
-	// Initialize DirectoryCache
+	// Initialise DirectoryCache
 	cache := NewDirectoryCache(testDir, testDir)
 	defer cache.Close()
 

@@ -241,6 +241,18 @@ This design ensures that index replacement is atomic and scan indices don't inte
 
 ## Development Notes
 
+### Code Style and Language
+
+**British English**: All documentation, comments, and user-facing text should use British spelling conventions:
+- colour (not color)
+- realise (not realize)
+- centre (not center)
+- optimise (not optimize)
+- initialise (not initialize)
+- recognise (not recognize)
+- behaviour (not behavior)
+- organised (not organized)
+
 ### Dependencies
 - **Go 1.24.3** with minimal external dependencies
 - **github.com/mattkeenan/zerocopyskiplist v0.9.0** - Zero-copy skiplist with vectorio integration

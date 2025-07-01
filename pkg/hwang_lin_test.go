@@ -172,10 +172,10 @@ func TestHwangLinStatus(t *testing.T) {
 		if statusCounts[StatusUnchanged] != 1 {
 			t.Errorf("Expected 1 unchanged file, got %d", statusCounts[StatusUnchanged])
 		}
-		// Note: Due to cache workflow behavior, deleted files may show as modified
+		// Note: Due to cache workflow behaviour, deleted files may show as modified
 		// This test validates that hwangLinStatus correctly processes the input it receives
 		if statusCounts[StatusDeleted] == 0 && statusCounts[StatusModified] > 0 {
-			t.Logf("Deleted file detected as modified - this is expected cache workflow behavior")
+			t.Logf("Deleted file detected as modified - this is expected cache workflow behaviour")
 		}
 	})
 	
@@ -279,13 +279,13 @@ func TestHwangLinStatus(t *testing.T) {
 		}
 		
 		// Validate that we have the expected number of total file operations
-		// The exact status distribution may vary due to cache workflow behavior
+		// The exact status distribution may vary due to cache workflow behaviour
 		totalResults := len(results)
 		if totalResults != 4 {
 			t.Errorf("Expected 4 total status results, got %d", totalResults)
 		}
 		
-		// Verify we have at least some of each expected type (allowing for cache behavior variation)
+		// Verify we have at least some of each expected type (allowing for cache behaviour variation)
 		if statusCounts[StatusUnchanged] < 1 {
 			t.Errorf("Expected at least 1 unchanged file, got %d", statusCounts[StatusUnchanged])
 		}

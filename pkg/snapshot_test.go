@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestSnapshotRepository_Initialize(t *testing.T) {
+func TestSnapshotRepository_Initialise(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-init-test")
 	if err != nil {
@@ -22,9 +22,9 @@ func TestSnapshotRepository_Initialize(t *testing.T) {
 	sr := NewSnapshotRepository(tempDir)
 
 	// Test initialization
-	err = sr.Initialize()
+	err = sr.Initialise()
 	if err != nil {
-		t.Fatalf("Failed to initialize snapshot repository: %v", err)
+		t.Fatalf("Failed to initialise snapshot repository: %v", err)
 	}
 
 	// Verify snapshots directory was created
@@ -540,9 +540,9 @@ func TestSnapshotRepository_RemoveSnapshot(t *testing.T) {
 
 	// Create snapshot repository
 	repo := NewSnapshotRepository(tempDir)
-	err = repo.Initialize()
+	err = repo.Initialise()
 	if err != nil {
-		t.Fatalf("Failed to initialize repository: %v", err)
+		t.Fatalf("Failed to initialise repository: %v", err)
 	}
 
 	// Create a test snapshot directory manually
@@ -587,9 +587,9 @@ func TestSnapshotRepository_RemoveNonexistentSnapshot(t *testing.T) {
 
 	// Create snapshot repository
 	repo := NewSnapshotRepository(tempDir)
-	err = repo.Initialize()
+	err = repo.Initialise()
 	if err != nil {
-		t.Fatalf("Failed to initialize repository: %v", err)
+		t.Fatalf("Failed to initialise repository: %v", err)
 	}
 
 	// Try to remove a nonexistent snapshot

@@ -200,7 +200,7 @@ func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) 
 	return nil
 }
 
-// SetHeader initializes the header fields in mmap'd memory
+// SetHeader initialises the header fields in mmap'd memory
 func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16) {
 	ih.Signature = signature
 	ih.ByteOrder = ByteOrderMagic
@@ -210,7 +210,7 @@ func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount u
 	ih.ChecksumType = checksumType
 }
 
-// SetHeaderForWritableIndex initializes the header for write operations (scan/temp indices)
+// SetHeaderForWritableIndex initialises the header for write operations (scan/temp indices)
 // Automatically clears the Clean flag since we're opening for write
 func (ih *indexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16) {
 	// For writable indices, ensure Clean flag is cleared (not clean during write operations)
@@ -328,7 +328,7 @@ type EntryProcessor func(entry *binaryEntry, entryIndex uint32, filePath string)
 
 // LoadIndexFromFileForValidation is a public wrapper for loadIndexFromFile used by dcfh index commands
 func (dc *DirectoryCache) LoadIndexFromFileForValidation(filePath string) ([]binaryEntryRef, error) {
-	// Use verbose processor for validation operations to maintain existing behavior
+	// Use verbose processor for validation operations to maintain existing behaviour
 	return dc.loadIndexFromFileWithProcessor(filePath, VerboseEntryProcessor())
 }
 
@@ -469,7 +469,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 
 // Processor factory functions for different use cases
 
-// DefaultEntryProcessor returns a processor that includes all entries (normal loading behavior)
+// DefaultEntryProcessor returns a processor that includes all entries (normal loading behaviour)
 func DefaultEntryProcessor() EntryProcessor {
 	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
 		return true, nil
@@ -745,7 +745,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPath *scannedPath) (*binaryEntry, error) {
 	// Verify we have an active scan index
 	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
-		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
+		return nil, fmt.Errorf("scan index not initialised for file %s", scanFileName)
 	}
 
 	// Calculate entry size
@@ -806,8 +806,8 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 	return entry, nil
 }
 
-// initializeScanIndex creates and initializes a new scan index file with mmap
-func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
+// initialiseScanIndex creates and initialises a new scan index file with mmap
+func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 	// Create the scan index file (use 0666, let umask control final permissions)
 	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
@@ -829,7 +829,7 @@ func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
 		return fmt.Errorf("failed to mmap scan file: %w", err)
 	}
 
-	// Initialize header for writable index (automatically clears Clean flag)
+	// Initialise header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
 
@@ -847,7 +847,7 @@ func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
 }
 
 // createEmptyScanIndex creates an empty scan index file for recovery operations
-// Unlike initializeScanIndex, this creates a standalone file without setting dc.currentScan
+// Unlike initialiseScanIndex, this creates a standalone file without setting dc.currentScan
 func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 	// Create the scan index file (use 0666, let umask control final permissions)
 	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
@@ -869,7 +869,7 @@ func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 	}
 	defer unix.Munmap(data)
 
-	// Initialize header for writable index (automatically clears Clean flag)
+	// Initialise header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
 

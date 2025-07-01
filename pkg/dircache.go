@@ -154,7 +154,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	}
 	dc.config = config
 	
-	// Initialize hash workers from config (default to 4 if no config)
+	// Initialise hash workers from config (default to 4 if no config)
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
 		dc.hashWorkers = performanceConfig.HashWorkers
@@ -171,7 +171,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		}
 	}
 
-	// Initialize ignore patterns
+	// Initialise ignore patterns
 	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
 		// Non-fatal error - log but continue
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load ignore patterns: %v\n", err)

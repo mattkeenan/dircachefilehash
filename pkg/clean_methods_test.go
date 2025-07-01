@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// Test that Clean methods are properly privatized and work correctly
+// Test that Clean methods are properly privatised and work correctly
 func TestCleanMethodsPrivatization(t *testing.T) {
 	var header indexHeader
 	

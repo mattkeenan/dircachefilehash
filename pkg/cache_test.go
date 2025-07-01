@@ -53,7 +53,7 @@ func TestCacheSystem(t *testing.T) {
 		}
 	}
 	
-	// Initialize dcfh repository
+	// Initialise dcfh repository
 	dc := NewDirectoryCache(testDir, "")
 	
 	// Enable debug logging for this test
@@ -148,7 +148,7 @@ func TestCacheSystem(t *testing.T) {
 		t.Logf("Status after update: clean repository in %v", duration)
 	})
 	
-	// Test 5: Modify a file and test cache behavior
+	// Test 5: Modify a file and test cache behaviour
 	t.Run("ModifyFile", func(t *testing.T) {
 		// Modify one file
 		modifiedFile := filepath.Join(testDir, "file1.txt")

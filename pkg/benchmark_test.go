@@ -359,11 +359,11 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		dcfhDir := filepath.Join(tempDir, fmt.Sprintf("dcfh_%d", i))
 		
-		// Step 1: Initialize repository from scratch
+		// Step 1: Initialise repository from scratch
 		initStart := time.Now()
 		cache := NewDirectoryCache(datasetDir, dcfhDir)
 		if err := cache.createEmptyIndex(); err != nil {
-			b.Fatalf("Failed to initialize repository: %v", err)
+			b.Fatalf("Failed to initialise repository: %v", err)
 		}
 		initDuration := time.Since(initStart)
 		

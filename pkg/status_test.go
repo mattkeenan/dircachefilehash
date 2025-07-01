@@ -172,7 +172,7 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 			dc := NewDirectoryCache(tempDir, dcfhDir)
 			defer dc.Close()
 
-			// Initialize with empty index to avoid complex setup
+			// Initialise with empty index to avoid complex setup
 			if err := dc.createEmptyIndex(); err != nil {
 				t.Fatalf("Failed to create empty index: %v", err)
 			}

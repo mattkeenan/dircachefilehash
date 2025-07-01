@@ -73,8 +73,8 @@ func NewSnapshotRepository(dcfhDir string) *SnapshotRepository {
 	}
 }
 
-// Initialize creates the snapshot repository structure
-func (sr *SnapshotRepository) Initialize() error {
+// Initialise creates the snapshot repository structure
+func (sr *SnapshotRepository) Initialise() error {
 	// Create snapshots directory
 	if err := os.MkdirAll(sr.SnapshotsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", sr.SnapshotsDir, err)
@@ -104,8 +104,8 @@ func (sr *SnapshotRepository) Initialize() error {
 
 // CreateSnapshot creates a new snapshot by copying all .idx files
 func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []string) (*SnapshotMetadata, error) {
-	if err := sr.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize snapshot repository: %w", err)
+	if err := sr.Initialise(); err != nil {
+		return nil, fmt.Errorf("failed to initialise snapshot repository: %w", err)
 	}
 	
 	// Generate snapshot ID using ISO 8601 datetime

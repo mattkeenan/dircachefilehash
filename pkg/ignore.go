@@ -85,11 +85,11 @@ func (im *IgnoreManager) ShouldIgnore(relativePath string) bool {
 		}
 	}
 
-	// Normalize path separators to forward slashes for consistent pattern matching
-	normalizedPath := filepath.ToSlash(relativePath)
+	// Normalise path separators to forward slashes for consistent pattern matching
+	normalisedPath := filepath.ToSlash(relativePath)
 
 	for _, pattern := range im.patterns {
-		if pattern.MatchString(normalizedPath) {
+		if pattern.MatchString(normalisedPath) {
 			return true
 		}
 	}

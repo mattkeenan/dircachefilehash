@@ -20,7 +20,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	testDir := createDeterministicSandbox(t)
 	defer os.RemoveAll(testDir)
 
-	// Initialize dcfh repository
+	// Initialise dcfh repository
 	dc := NewDirectoryCache(testDir, testDir)
 
 	// Phase 1: Initial state - empty repository
@@ -51,14 +51,14 @@ func TestIntegrationWorkflow(t *testing.T) {
 		validateFinalIndex(t, dc)
 	})
 
-	// Phase 6: Hash integrity validation (before cache behavior modifies files)
+	// Phase 6: Hash integrity validation (before cache behaviour modifies files)
 	t.Run("Phase6_HashIntegrity", func(t *testing.T) {
 		validateHashIntegrity(t, dc)
 	})
 
-	// Phase 7: Cache behavior validation
+	// Phase 7: Cache behaviour validation
 	t.Run("Phase7_CacheValidation", func(t *testing.T) {
-		validateCacheBehavior(t, dc)
+		validateCacheBehaviour(t, dc)
 	})
 }
 
@@ -74,7 +74,7 @@ func createDeterministicSandbox(t *testing.T) string {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
 	
-	// Create subdirectories for organized testing
+	// Create subdirectories for organised testing
 	dirs := []string{"subdir1", "subdir2", "empty_dir"}
 	for _, dir := range dirs {
 		dirPath := filepath.Join(testDir, dir)
@@ -415,8 +415,8 @@ func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
 	t.Logf("Final index validation passed: %d files with correct hashes", len(expectedFinalFiles))
 }
 
-// validateCacheBehavior tests cache system behavior with hash consistency
-func validateCacheBehavior(t *testing.T, dc *DirectoryCache) {
+// validateCacheBehaviour tests cache system behaviour with hash consistency
+func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	// Create a small modification with known hash
 	newContent := []byte("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD\x42")
 	expectedHash := calculateSHA256(string(newContent))
@@ -471,11 +471,11 @@ func validateCacheBehavior(t *testing.T, dc *DirectoryCache) {
 	
 	// Results should be identical
 	if !stringSlicesEqual(result1.Modified, result2.Modified) {
-		t.Errorf("Cache behavior inconsistent. First: %v, Second: %v", 
+		t.Errorf("Cache behaviour inconsistent. First: %v, Second: %v", 
 			result1.Modified, result2.Modified)
 	}
 	
-	t.Logf("Cache behavior validated with correct hash: %s", expectedHash)
+	t.Logf("Cache behaviour validated with correct hash: %s", expectedHash)
 }
 
 // validateHashIntegrity performs comprehensive hash validation across all index operations

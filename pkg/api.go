@@ -2,7 +2,7 @@ package dircachefilehash
 
 // This file defines the public API and documents usage patterns
 
-// InitDebugFlags initializes debug flags - for CLI compatibility
+// InitDebugFlags initialises debug flags - for CLI compatibility
 func InitDebugFlags(flagsStr string) {
 	if flagsStr != "" {
 		SetDebugFlags(flagsStr)
@@ -13,7 +13,7 @@ func InitDebugFlags(flagsStr string) {
 func LogDebugFlags() {
 	// Log current debug state if verbose
 	if globalVerboseLevel > 0 {
-		VerboseLog(1, "Debug flags initialized")
+		VerboseLog(1, "Debug flags initialised")
 	}
 }
 

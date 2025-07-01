@@ -16,8 +16,8 @@ import (
 type ValidationMode int
 
 const (
-	ValidationStrict     ValidationMode = iota // idxck behavior - fail on any error
-	ValidationLenient                          // recovery behavior - skip invalid entries
+	ValidationStrict     ValidationMode = iota // idxck behaviour - fail on any error
+	ValidationLenient                          // recovery behaviour - skip invalid entries
 	ValidationDiagnostic                       // report all issues but continue
 	ValidationRecovery                         // recovery with fixing - allow fixable issues
 )

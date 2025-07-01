@@ -227,7 +227,7 @@ func TestFlagsExtensibility(t *testing.T) {
 	// Add new hypothetical flags
 	extendedFlags := map[string]string{
 		"v":        "1",
-		"color":    "t",
+		"colour":    "t",
 		"format":   "json",
 		"timeout":  "30",
 		"parallel": "4",
@@ -239,7 +239,7 @@ func TestFlagsExtensibility(t *testing.T) {
 	}
 	
 	// Verify extended flags work (assuming they follow conventions)
-	extendedFlags["color"] = "t"     // Boolean
+	extendedFlags["colour"] = "t"     // Boolean
 	extendedFlags["timeout"] = "30"  // Numeric
 	
 	if !validateFlagsConvention(extendedFlags) {

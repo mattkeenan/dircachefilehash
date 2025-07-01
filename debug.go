@@ -24,7 +24,7 @@ func main() {
 	fmt.Printf("Test directory: %s\n", testDir)
 	fmt.Printf("Created test file: %s\n", testFile)
 	
-	// Initialize dcfh
+	// Initialise dcfh
 	dc := dcfh.NewDirectoryCache(testDir, "")
 	
 	// Set verbose level 3 for trace logging

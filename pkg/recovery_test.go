@@ -19,7 +19,7 @@ func TestRecoveryValidationProcessor(t *testing.T) {
 	data := make([]byte, totalSize)
 	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
 	
-	// Initialize the entry
+	// Initialise the entry
 	*entry = binaryEntry{
 		Size:      uint32(totalSize),
 		CTimeWall: timeWall(time.Now()),

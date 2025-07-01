@@ -159,7 +159,7 @@ func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPat
 //
 //	-> ["/home/user/docs", "/home/user/photos"]
 //
-// This optimization reduces redundant scanning since "/home/user/docs/file.txt"
+// This optimisation reduces redundant scanning since "/home/user/docs/file.txt"
 // will be found when we scan "/home/user/docs" anyway.
 func (dc *DirectoryCache) deduplicatePaths(paths []string) []string {
 	if len(paths) <= 1 {
@@ -306,7 +306,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 					// Use target info for the directory symlink (traverse into it)
 					info = targetInfo
 				case "all":
-					// Follow all directory symlinks (current behavior)
+					// Follow all directory symlinks (current behaviour)
 					info = targetInfo
 				default:
 					// Default to "all" for unknown modes
@@ -873,7 +873,7 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 // PerformHwangLinScanToSkiplist performs Hwang-Lin scan and builds a skiplist directly with scan index files
 func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
-	// Synchronize concurrent scans - only one scan per DirectoryCache at a time
+	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
 	defer dc.scanMutex.Unlock()
 	
@@ -901,9 +901,9 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareS
 	// Generate scan index filename for this operation
 	scanFileName := dc.generateScanFileName()
 	
-	// Initialize scan index with mmap
-	if err := dc.initializeScanIndex(scanFileName); err != nil {
-		return nil, fmt.Errorf("failed to initialize scan index: %w", err)
+	// Initialise scan index with mmap
+	if err := dc.initialiseScanIndex(scanFileName); err != nil {
+		return nil, fmt.Errorf("failed to initialise scan index: %w", err)
 	}
 	
 	// Create channels for streaming data

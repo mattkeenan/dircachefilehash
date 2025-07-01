@@ -232,9 +232,9 @@ func TestNewDirectoryCache(t *testing.T) {
 		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
 	}
 	
-	// Check that hasher is initialized
+	// Check that hasher is initialised
 	if dc.hasher == nil {
-		t.Error("Hasher should be initialized")
+		t.Error("Hasher should be initialised")
 	}
 	
 	// Check signature
