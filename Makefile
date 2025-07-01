@@ -4,15 +4,33 @@
 .PHONY: all
 all: build
 
-# Build the dcfh binary
+# Build all binaries
 .PHONY: build
-build: generate
-	go build -o dcfh ./cmd
+build: dcfh dcfhfind
 
-# Generate version information
+# Build the dcfh binary
+.PHONY: dcfh
+dcfh: generate-dcfh
+	go build -o dcfh ./cmd/dcfh
+
+# Build the dcfhfind binary
+.PHONY: dcfhfind
+dcfhfind: generate-dcfhfind
+	go build -o dcfhfind ./cmd/dcfhfind
+
+# Generate version information for dcfh
+.PHONY: generate-dcfh
+generate-dcfh:
+	cd cmd/dcfh && go generate
+
+# Generate version information for dcfhfind
+.PHONY: generate-dcfhfind
+generate-dcfhfind:
+	cd cmd/dcfhfind && go generate
+
+# Generate version information for all binaries
 .PHONY: generate
-generate:
-	cd cmd && go generate
+generate: generate-dcfh generate-dcfhfind
 
 # Run all tests
 .PHONY: test
@@ -37,13 +55,25 @@ test-pkg: generate
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f dcfh
-	rm -f cmd/constants_version.go
+	rm -f dcfh dcfhfind
+	rm -f cmd/dcfh/constants_version.go
+	rm -f cmd/dcfhfind/constants_version.go
 
-# Install the binary to GOBIN
+# Install all binaries to GOBIN
 .PHONY: install
 install: build
 	cp dcfh $(shell go env GOBIN)/dcfh
+	cp dcfhfind $(shell go env GOBIN)/dcfhfind
+
+# Install dcfh only
+.PHONY: install-dcfh
+install-dcfh: dcfh
+	cp dcfh $(shell go env GOBIN)/dcfh
+
+# Install dcfhfind only
+.PHONY: install-dcfhfind
+install-dcfhfind: dcfhfind
+	cp dcfhfind $(shell go env GOBIN)/dcfhfind
 
 # Run linting (requires golangci-lint)
 .PHONY: lint
@@ -68,15 +98,19 @@ dev: fmt tidy test
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  all         - Build the dcfh binary (default)"
-	@echo "  build       - Build the dcfh binary"
+	@echo "  all         - Build all binaries (default)"
+	@echo "  build       - Build all binaries (dcfh and dcfhfind)"
+	@echo "  dcfh        - Build only the dcfh binary"
+	@echo "  dcfhfind    - Build only the dcfhfind binary"
 	@echo "  generate    - Generate version information"
 	@echo "  test        - Run all tests"
 	@echo "  test-verbose- Run all tests with verbose output"
 	@echo "  test-cmd    - Run CLI tests only"
 	@echo "  test-pkg    - Run package tests only"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  install     - Install binary to GOBIN"
+	@echo "  clean       - Clean all build artifacts"
+	@echo "  install     - Install all binaries to GOBIN"
+	@echo "  install-dcfh - Install only dcfh to GOBIN"
+	@echo "  install-dcfhfind - Install only dcfhfind to GOBIN"
 	@echo "  lint        - Run linting (requires golangci-lint)"
 	@echo "  fmt         - Format code"
 	@echo "  tidy        - Run go mod tidy"

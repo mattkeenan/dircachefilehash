@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -105,6 +106,11 @@ func (ih *indexHeader) ValidateByteOrder() error {
 // ValidateIndexHeader validates an index file header and returns a copy of the header struct
 // This is a shared utility function that can be used across the codebase for header validation
 func ValidateIndexHeader(indexPath string, validateVersion bool, expectedVersion uint32) (*indexHeader, error) {
+	return ValidateIndexHeaderWithOptions(indexPath, validateVersion, expectedVersion, true)
+}
+
+// ValidateIndexHeaderWithOptions validates index header with configurable checksum validation
+func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expectedVersion uint32, validateChecksum bool) (*indexHeader, error) {
 	file, err := os.Open(indexPath)
 	if err != nil {
 		return nil, err
@@ -145,9 +151,53 @@ func ValidateIndexHeader(indexPath string, validateVersion bool, expectedVersion
 		}
 	}
 	
+	// Check Clean flag to determine if we should trust the header checksum
+	isClean := (header.Flags & IndexFlagClean) != 0
+	
+	if validateChecksum && !isClean {
+		// File wasn't closed cleanly - header checksum is likely incorrect
+		// Skip checksum validation for recovery purposes
+		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", indexPath)
+	} else if validateChecksum && isClean {
+		// File was closed cleanly - validate the header checksum
+		if err := validateHeaderChecksum(file, header, stat.Size()); err != nil {
+			return nil, fmt.Errorf("header checksum validation failed: %w", err)
+		}
+	}
+	
 	// Create a copy of the header since we're unmapping the memory
 	headerCopy := *header
 	return &headerCopy, nil
+}
+
+// validateHeaderChecksum validates the header checksum against the file contents
+func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) error {
+	// Calculate expected checksum
+	hasher := sha1.New()
+	
+	// Hash header up to checksum field
+	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
+	
+	// If file has entry data, hash it too
+	entryDataSize := fileSize - HeaderSize - ChecksumSize
+	if entryDataSize > 0 {
+		// Read entry data
+		entryData := make([]byte, entryDataSize)
+		if _, err := file.ReadAt(entryData, HeaderSize); err != nil {
+			return fmt.Errorf("failed to read entry data for checksum validation: %w", err)
+		}
+		hasher.Write(entryData)
+	}
+	
+	// Compare with stored checksum
+	expectedChecksum := hasher.Sum(nil)
+	if !bytes.Equal(expectedChecksum, header.Checksum[:len(expectedChecksum)]) {
+		return fmt.Errorf("checksum mismatch: expected %x, got %x", expectedChecksum, header.Checksum[:len(expectedChecksum)])
+	}
+	
+	return nil
 }
 
 // SetHeader initializes the header fields in mmap'd memory
@@ -336,9 +386,18 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 		return nil, err
 	}
 
-	// Verify checksum from header
-	if err := dc.verifyHeaderChecksum(data, header); err != nil {
-		return nil, fmt.Errorf("checksum verification failed: %w", err)
+	// Check Clean flag to determine if we should trust the header checksum
+	isClean := (header.Flags & IndexFlagClean) != 0
+	
+	if !isClean {
+		// File wasn't closed cleanly - header checksum is likely incorrect
+		// Skip checksum validation for recovery purposes
+		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
+	} else {
+		// File was closed cleanly - verify checksum from header
+		if err := dc.verifyHeaderChecksum(data, header); err != nil {
+			return nil, fmt.Errorf("checksum verification failed: %w", err)
+		}
 	}
 
 	// Parse entries with callback processing
@@ -730,7 +789,9 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 
 	// Write the new entry
 	entryData := dc.currentScan.Data[entryOffset:]
-	dc.writeBinaryEntryToMmap(entryData, scannedPath.RelPath, make([]byte, HashSizeSHA1), HashTypeSHA1, scannedPath.Info, scannedPath.StatInfo, false)
+	currentHashType := dc.GetCurrentHashType()
+	currentHashSize := GetHashSize(currentHashType)
+	dc.writeBinaryEntryToMmap(entryData, scannedPath.RelPath, make([]byte, currentHashSize), currentHashType, scannedPath.Info, scannedPath.StatInfo, false)
 
 	// Get pointer to the created entry
 	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
@@ -780,6 +841,41 @@ func (dc *DirectoryCache) initializeScanIndex(scanFileName string) error {
 		Offset:   HeaderSize, // Start writing entries after header
 		Type:     "scan",
 		FilePath: scanFileName,
+	}
+
+	return nil
+}
+
+// createEmptyScanIndex creates an empty scan index file for recovery operations
+// Unlike initializeScanIndex, this creates a standalone file without setting dc.currentScan
+func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
+	// Create the scan index file (use 0666, let umask control final permissions)
+	file, err := os.OpenFile(scanFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to create scan file %s: %w", scanFileName, err)
+	}
+	defer file.Close() // Close immediately after setup since recovery doesn't need persistent handle
+
+	// Initial size is just the header
+	initialSize := HeaderSize
+	if err := file.Truncate(int64(initialSize)); err != nil {
+		return fmt.Errorf("failed to truncate scan file: %w", err)
+	}
+
+	// Create initial mmap for header initialization
+	data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("failed to mmap scan file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Initialize header for writable index (automatically clears Clean flag)
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+
+	// Sync to disk
+	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
+		return fmt.Errorf("failed to sync mmap: %w", err)
 	}
 
 	return nil

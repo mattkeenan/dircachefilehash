@@ -108,3 +108,30 @@ func GetHashSize(hashType uint16) int {
 		return HashSizeSHA1 // fallback
 	}
 }
+
+// GetCurrentHashType returns the current hash type to use based on command line options,
+// config file settings, and defaults (in that order of precedence)
+func (dc *DirectoryCache) GetCurrentHashType() uint16 {
+	// 1. Check command line options first (via overrides)
+	// Command line overrides are already applied to the config during initialization
+	
+	// 2. Check config file settings (which may include command line overrides)
+	if dc.config != nil {
+		hashConfig := dc.config.GetHashConfig()
+		if hashConfig != nil && hashConfig.Default != "" {
+			// Get the hash algorithm configuration
+			if algorithm, err := GetHashAlgorithm(hashConfig.Default); err == nil {
+				return algorithm.TypeID
+			}
+		}
+	}
+	
+	// 3. Default to SHA256 (as specified in requirements)
+	return HashTypeSHA256
+}
+
+// GetCurrentHashAlgorithm returns the current hash algorithm configuration
+func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
+	hashType := dc.GetCurrentHashType()
+	return GetHashAlgorithmByType(hashType)
+}

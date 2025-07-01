@@ -5,22 +5,46 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
+	
+	"golang.org/x/sys/unix"
 )
 
 // ValidationMode defines the strictness level for index validation
 type ValidationMode int
 
 const (
-	ValidationStrict  ValidationMode = iota // idxck behavior - fail on any error
-	ValidationLenient                       // recovery behavior - skip invalid entries
-	ValidationDiagnostic                    // report all issues but continue
+	ValidationStrict     ValidationMode = iota // idxck behavior - fail on any error
+	ValidationLenient                          // recovery behavior - skip invalid entries
+	ValidationDiagnostic                       // report all issues but continue
+	ValidationRecovery                         // recovery with fixing - allow fixable issues
 )
+
+// FixMode defines how fixes should be applied
+type FixMode int
+
+const (
+	FixModeNone   FixMode = iota // No fixes applied
+	FixModeAuto                  // Apply all safe fixes automatically
+	FixModeManual                // Prompt user for each fix
+)
+
+// FixableIssue represents a validation issue that can potentially be fixed
+type FixableIssue struct {
+	Type        string      // Type of issue (e.g., "hash_type", "mtime", "missing_file")
+	Description string      // Human-readable description
+	FixAction   string      // Description of proposed fix
+	CurrentPath string      // File path for file-based issues
+	EntryIndex  uint32      // Entry index in the scan
+	FixFunc     func() error // Function to apply the fix
+}
 
 // ValidationConfig configures the unified validation system
 type ValidationConfig struct {
 	Mode             ValidationMode
+	FixMode          FixMode // How to handle fixable issues
 	StructuralChecks bool // Binary format validation (alignment, sizes, etc.)
 	LogicalChecks    bool // Data reasonableness (timestamps, file sizes, etc.)
 	ChecksumValidation bool // Full file checksum verification
@@ -30,12 +54,19 @@ type ValidationConfig struct {
 	MaxFileSize      uint64
 	MinYear          int
 	MaxYearOffset    int // Years from now
+	RootDir          string // Root directory for file path resolution
 }
 
 // DefaultValidationConfig returns a standard validation configuration
 func DefaultValidationConfig(mode ValidationMode, verbosity int) ValidationConfig {
+	return ValidationConfigWithFixes(mode, FixModeNone, verbosity, "")
+}
+
+// ValidationConfigWithFixes returns a validation configuration with fix mode support
+func ValidationConfigWithFixes(mode ValidationMode, fixMode FixMode, verbosity int, rootDir string) ValidationConfig {
 	return ValidationConfig{
 		Mode:             mode,
+		FixMode:          fixMode,
 		StructuralChecks: true,
 		LogicalChecks:    true,
 		ChecksumValidation: mode == ValidationStrict,
@@ -45,6 +76,7 @@ func DefaultValidationConfig(mode ValidationMode, verbosity int) ValidationConfi
 		MaxFileSize:      1 << 62, // 4 exabytes
 		MinYear:          1970,
 		MaxYearOffset:    1, // 1 year in future
+		RootDir:          rootDir,
 	}
 }
 
@@ -112,6 +144,37 @@ func UnifiedValidationProcessor(config ValidationConfig) EntryProcessor {
 				}
 			}
 			return true, nil // Include entry regardless of validation results
+			
+		case ValidationRecovery:
+			// Include entries for recovery, but in auto mode skip entries with unfixable time issues
+			if hasErrors {
+				var path string
+				if entry != nil {
+					path = entry.RelativePath()
+				}
+				if path == "" {
+					path = fmt.Sprintf("<entry-%d>", entryIndex)
+				}
+				
+				// In auto mode, skip entries with time validation errors (unfixable)
+				if config.FixMode == FixModeAuto {
+					for _, errMsg := range validationErrors {
+						if strings.Contains(errMsg, "invalid ctime") || strings.Contains(errMsg, "invalid mtime") {
+							if config.Verbosity >= 2 {
+								VerboseLog(2, "Auto mode: skipping entry %d (%s) with unfixable time issue: %s", entryIndex, path, errMsg)
+							}
+							return false, nil // Skip entry with unfixable time issues
+						}
+					}
+				}
+				
+				if config.Verbosity >= 2 {
+					for _, errMsg := range validationErrors {
+						VerboseLog(2, "Recovery: including entry %d (%s) despite issues: %s", entryIndex, path, errMsg)
+					}
+				}
+			}
+			return true, nil // Include entry for potential fixing
 			
 		default:
 			return !hasErrors, nil
@@ -191,7 +254,13 @@ func validateEntryLogical(entry *binaryEntry, config ValidationConfig) error {
 	case HashTypeSHA512:
 		hashLen = HashSizeSHA512
 	default:
-		return fmt.Errorf("invalid hash type %d", entry.HashType)
+		// In recovery mode, allow fixable hash type issues (like HashType=0)
+		if config.Mode == ValidationRecovery && (entry.HashType == 0 || !isValidHashType(entry.HashType)) {
+			// Use a reasonable default for hash length validation
+			hashLen = HashSizeSHA256 // Default hash size for validation purposes
+		} else {
+			return fmt.Errorf("invalid hash type %d", entry.HashType)
+		}
 	}
 	
 	allZero := true
@@ -404,8 +473,13 @@ func (dc *DirectoryCache) CreatePreRecoverySnapshotForIdxck(verbosity int) error
 }
 
 // RecoverFromIndex recovers a clean cache index from a potentially corrupted index file
-// using validation filtering and the Hwang-Lin comparison workflow
+// using validation filtering and the Hwang-Lin comparison workflow with clean entry copying
 func (dc *DirectoryCache) RecoverFromIndex(indexPath string, verbosity int) error {
+	return dc.RecoverFromIndexWithFixes(indexPath, FixModeNone, verbosity)
+}
+
+// RecoverFromIndexWithFixes recovers a clean cache index with optional interactive fixing
+func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode FixMode, verbosity int) error {
 	defer VerboseEnter()()
 	
 	if verbosity >= 1 {
@@ -422,8 +496,15 @@ func (dc *DirectoryCache) RecoverFromIndex(indexPath string, verbosity int) erro
 		return fmt.Errorf("source index file does not exist: %s", indexPath)
 	}
 	
-	// Load faulty index with validation filtering
-	recoverySkiplist, err := dc.loadIndexWithProcessor(indexPath, RecoveryValidationProcessor(verbosity))
+	// Create recovery index for clean entry copies
+	recoveryIndexPath := dc.generateTempFileName("recovery")
+	if err := dc.createEmptyScanIndex(recoveryIndexPath); err != nil {
+		return fmt.Errorf("failed to create recovery index: %w", err)
+	}
+	defer os.Remove(recoveryIndexPath) // Always cleanup recovery index
+	
+	// Load corrupted index with clean entry copying and fixing
+	recoverySkiplist, err := dc.loadIndexWithCleanCopyingAndFixes(indexPath, recoveryIndexPath, fixMode, verbosity)
 	if err != nil {
 		return fmt.Errorf("failed to load source index for recovery: %w", err)
 	}
@@ -448,14 +529,24 @@ func (dc *DirectoryCache) RecoverFromIndex(indexPath string, verbosity int) erro
 		VerboseLog(1, "Merged with current disk state, result has %d entries", currentSkiplist.Length())
 	}
 	
-	// Write to cache index using vectorio (include deleted entries for cache)
+	// Write to both main and cache indices for complete recovery
+	
+	// 1. Write main index using vectorio (exclude deleted entries for main)
+	tempMainPath := dc.generateTempFileName("main")
+	if err := dc.writeMainIndexWithVectorIO(currentSkiplist, tempMainPath, MainContext); err != nil {
+		os.Remove(tempMainPath)
+		return fmt.Errorf("failed to write recovery main index: %w", err)
+	}
+	
+	// 2. Write cache index using vectorio (include deleted entries for cache)
 	tempCachePath := dc.generateTempFileName("cache")
 	if err := dc.writeSkiplistWithVectorIO(currentSkiplist, tempCachePath, CacheContext); err != nil {
+		os.Remove(tempMainPath)  // Cleanup main on failure
 		os.Remove(tempCachePath)
 		return fmt.Errorf("failed to write recovery cache index: %w", err)
 	}
 	
-	// Cleanup scan index file now that temp index is written
+	// Cleanup scan index file now that temp indices are written
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
 		// Non-fatal, but warn
 		if verbosity >= 2 {
@@ -463,17 +554,640 @@ func (dc *DirectoryCache) RecoverFromIndex(indexPath string, verbosity int) erro
 		}
 	}
 	
-	// Atomic replace cache index
+	// 3. Atomic replace main index first
+	if err := os.Rename(tempMainPath, dc.IndexFile); err != nil {
+		os.Remove(tempMainPath)  // Cleanup on failure
+		os.Remove(tempCachePath)
+		return fmt.Errorf("failed to replace main index: %w", err)
+	}
+	
+	// 4. Atomic replace cache index
 	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
 		os.Remove(tempCachePath) // Cleanup on failure
 		return fmt.Errorf("failed to replace cache index: %w", err)
 	}
 	
 	if verbosity >= 1 {
-		VerboseLog(1, "Successfully recovered cache index from %s", indexPath)
+		VerboseLog(1, "Successfully recovered both main and cache indices from %s", indexPath)
 	}
 	
 	return nil
+}
+
+// loadIndexWithCleanCopyingOriginal loads an index file and creates clean copies of entries that need fixing (original implementation)
+func (dc *DirectoryCache) loadIndexWithCleanCopyingOriginal(indexPath, recoveryIndexPath string, verbosity int) (*skiplistWrapper, error) {
+	// Open the corrupted index file
+	file, err := os.Open(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open index file %s: %w", indexPath, err)
+	}
+	defer file.Close()
+
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	if stat.Size() < HeaderSize {
+		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+	}
+
+	// Memory map the file for reading
+	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Get direct pointer to header in mmap'd memory
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+
+	// Basic header validation (signature, byte order, version)
+	if err := header.ValidateSignature(dc.signature); err != nil {
+		return nil, err
+	}
+	if err := header.ValidateByteOrder(); err != nil {
+		return nil, err
+	}
+	if err := header.ValidateVersion(dc.version); err != nil {
+		return nil, err
+	}
+
+	// Check Clean flag - we've already handled header checksum validation in loadIndexFromFileWithProcessor
+	isClean := (header.Flags & IndexFlagClean) != 0
+	if verbosity >= 2 {
+		if isClean {
+			VerboseLog(2, "Processing clean index file: %s", indexPath)
+		} else {
+			VerboseLog(2, "Processing unclean index file (likely interrupted): %s", indexPath)
+		}
+	}
+
+	// Create skiplist for recovery
+	skiplist := NewSkiplistWrapper(int(header.EntryCount), CacheContext)
+	
+	// Parse entries and create clean copies when needed
+	offset := 0
+	entryData := data[HeaderSize:]
+	validEntryCount := 0
+
+	for i := uint32(0); i < header.EntryCount; i++ {
+		if offset >= len(entryData) {
+			if verbosity >= 2 {
+				VerboseLog(2, "Unexpected end of data at entry %d", i)
+			}
+			break
+		}
+
+		// Get direct pointer to binaryEntry in mmap'd memory
+		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
+		
+		// Validate this entry with recovery validation (allows fixable issues)
+		config := DefaultValidationConfig(ValidationRecovery, verbosity)
+		processor := UnifiedValidationProcessor(config)
+		
+		shouldInclude, err := processor(entry, i, indexPath)
+		if err != nil {
+			if verbosity >= 2 {
+				VerboseLog(2, "Entry %d validation failed: %v", i, err)
+			}
+			// Try to skip to next entry - use entry size or estimate
+			if entry.Size > 0 && entry.Size < 4096 {
+				offset += int(entry.Size)
+			} else {
+				offset += 256 // Conservative skip
+			}
+			continue
+		}
+
+		if shouldInclude {
+			// Check if entry needs fixing (clean copying)
+			needsFixing := false
+			hashTypeFixed := false
+			
+			// Entry needs fixing if:
+			// 1. File is unclean (header suggests corruption possible)
+			// 2. Entry has structural issues but recoverable data
+			// 3. Entry has invalid hash type that can be corrected
+			if !isClean {
+				needsFixing = true
+			}
+			
+			// Check for hash type issues and fix if needed
+			if entry.HashType == 0 || !isValidHashType(entry.HashType) {
+				if verbosity >= 2 {
+					VerboseLog(2, "Entry %d has invalid hash type %d", i, entry.HashType)
+				}
+				needsFixing = true
+				hashTypeFixed = true
+			}
+
+			if needsFixing {
+				// Create clean copy in recovery index (with hash type fixing if needed)
+				cleanEntryRef, err := dc.createCleanEntryCopyWithFixes(entry, recoveryIndexPath, hashTypeFixed, verbosity)
+				if err != nil {
+					if verbosity >= 2 {
+						VerboseLog(2, "Failed to create clean copy of entry %d: %v", i, err)
+					}
+					offset += int(entry.Size)
+					continue
+				}
+				
+				// Add clean copy to skiplist
+				skiplist.Insert(cleanEntryRef, CacheContext)
+				validEntryCount++
+				
+				if verbosity >= 3 {
+					VerboseLog(3, "Created clean copy for entry %d: %s", i, entry.RelativePath())
+				}
+			} else {
+				// In recovery mode, we need clean copies of all entries from unclean files
+				// to ensure memory safety - force clean copying
+				needsFixing = true
+			}
+		}
+
+		// Move to next entry
+		offset += int(entry.Size)
+	}
+
+	if verbosity >= 1 {
+		VerboseLog(1, "Recovered %d valid entries from %d total entries", validEntryCount, header.EntryCount)
+	}
+
+	return skiplist, nil
+}
+
+// loadIndexWithCleanCopyingAndFixes loads an index file and creates clean copies with interactive fixing support
+func (dc *DirectoryCache) loadIndexWithCleanCopyingAndFixes(indexPath, recoveryIndexPath string, fixMode FixMode, verbosity int) (*skiplistWrapper, error) {
+	// Create enhanced validation config with fix mode support
+	config := ValidationConfigWithFixes(ValidationRecovery, fixMode, verbosity, dc.RootDir)
+	
+	// Use the existing function as a base, but with enhanced validation
+	return dc.loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath, config)
+}
+
+// loadIndexWithCleanCopying loads an index file and creates clean copies of entries that need fixing (legacy compatibility)
+func (dc *DirectoryCache) loadIndexWithCleanCopying(indexPath, recoveryIndexPath string, verbosity int) (*skiplistWrapper, error) {
+	config := ValidationConfigWithFixes(ValidationRecovery, FixModeNone, verbosity, dc.RootDir)
+	return dc.loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath, config)
+}
+
+// loadIndexWithCleanCopyingEnhanced is the core implementation with full fix support
+func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath string, config ValidationConfig) (*skiplistWrapper, error) {
+	// Open the corrupted index file
+	file, err := os.Open(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open index file %s: %w", indexPath, err)
+	}
+	defer file.Close()
+
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	if stat.Size() < HeaderSize {
+		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+	}
+
+	// Memory map the file for reading
+	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap file: %w", err)
+	}
+	defer unix.Munmap(data)
+
+	// Get direct pointer to header in mmap'd memory
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+
+	// Basic header validation (signature, byte order, version)
+	if err := header.ValidateSignature(dc.signature); err != nil {
+		return nil, err
+	}
+	if err := header.ValidateByteOrder(); err != nil {
+		return nil, err
+	}
+	if err := header.ValidateVersion(dc.version); err != nil {
+		return nil, err
+	}
+
+	// Check Clean flag
+	isClean := (header.Flags & IndexFlagClean) != 0
+	if config.Verbosity >= 2 {
+		if isClean {
+			VerboseLog(2, "Processing clean index file: %s", indexPath)
+		} else {
+			VerboseLog(2, "Processing unclean index file (likely interrupted): %s", indexPath)
+		}
+	}
+
+	// Create skiplist for recovery
+	skiplist := NewSkiplistWrapper(int(header.EntryCount), CacheContext)
+	
+	// Parse entries and apply fixes
+	offset := 0
+	entryData := data[HeaderSize:]
+	validEntryCount := 0
+	fixesApplied := 0
+
+	for i := uint32(0); i < header.EntryCount; i++ {
+		if offset >= len(entryData) {
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Unexpected end of data at entry %d", i)
+			}
+			break
+		}
+
+		// Get direct pointer to binaryEntry in mmap'd memory
+		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
+		
+		// Create a copy of the entry for potential fixing
+		entrySize := int(entry.Size)
+		if entrySize <= 0 || entrySize > 4096 {
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Invalid entry size %d at entry %d, skipping", entrySize, i)
+			}
+			offset += 256 // Conservative skip
+			continue
+		}
+		
+		entryCopy := make([]byte, entrySize)
+		sourceBytes := (*[4096]byte)(unsafe.Pointer(entry))[:entrySize:entrySize]
+		copy(entryCopy, sourceBytes)
+		
+		// Get pointer to our copy for fixing
+		workingEntry := (*binaryEntry)(unsafe.Pointer(&entryCopy[0]))
+		
+		// Apply fixes to the working copy
+		hadFixes, err := dc.applyFixesToEntry(workingEntry, i, config)
+		if err != nil {
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Failed to apply fixes to entry %d: %v", i, err)
+			}
+			offset += int(entry.Size)
+			continue
+		}
+		
+		if hadFixes {
+			fixesApplied++
+		}
+		
+		// Validate the (potentially fixed) entry
+		processor := UnifiedValidationProcessor(config)
+		shouldInclude, err := processor(workingEntry, i, indexPath)
+		if err != nil {
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Entry %d validation failed even after fixes: %v", i, err)
+			}
+			offset += int(entry.Size)
+			continue
+		}
+
+		if shouldInclude {
+			// Create clean copy in recovery index
+			_, cleanOffset, err := dc.appendRawEntryToScanIndex(recoveryIndexPath, entryCopy)
+			if err != nil {
+				if config.Verbosity >= 2 {
+					VerboseLog(2, "Failed to create clean copy of entry %d: %v", i, err)
+				}
+				offset += int(entry.Size)
+				continue
+			}
+			
+			// Create skiplist reference to the clean copy
+			recoveryIndexFile := &mmapIndexFile{
+				File:     nil,
+				Data:     nil,
+				Size:     0,
+				Offset:   int(cleanOffset),
+				Type:     "recovery",
+				FilePath: recoveryIndexPath,
+			}
+			
+			cleanEntryRef := binaryEntryRef{
+				Offset:    int(cleanOffset),
+				IndexFile: recoveryIndexFile,
+			}
+			
+			skiplist.Insert(cleanEntryRef, CacheContext)
+			validEntryCount++
+			
+			if config.Verbosity >= 3 {
+				VerboseLog(3, "Successfully processed entry %d: %s", i, workingEntry.RelativePath())
+			}
+		}
+
+		// Move to next entry
+		offset += int(entry.Size)
+	}
+
+	if config.Verbosity >= 1 {
+		VerboseLog(1, "Enhanced recovery: processed %d valid entries from %d total, applied %d fixes", 
+			validEntryCount, header.EntryCount, fixesApplied)
+	}
+
+	return skiplist, nil
+}
+
+// isValidHashType checks if a hash type is valid
+func isValidHashType(hashType uint16) bool {
+	switch hashType {
+	case HashTypeSHA1, HashTypeSHA256, HashTypeSHA512:
+		return true
+	default:
+		return false
+	}
+}
+
+// createCleanEntryCopyWithFixes creates a clean copy of a binaryEntry with optional fixes applied
+func (dc *DirectoryCache) createCleanEntryCopyWithFixes(sourceEntry *binaryEntry, recoveryIndexPath string, fixHashType bool, verbosity int) (binaryEntryRef, error) {
+	// Copy the entry data to clean memory
+	entrySize := int(sourceEntry.Size)
+	entryData := make([]byte, entrySize)
+	
+	// Copy from source entry
+	sourceBytes := (*[4096]byte)(unsafe.Pointer(sourceEntry))[:entrySize:entrySize]
+	copy(entryData, sourceBytes)
+	
+	// Apply fixes if needed
+	if fixHashType {
+		// Get the clean entry pointer to modify
+		cleanEntry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
+		
+		// Fix hash type - use current configured hash type
+		newHashType := dc.GetCurrentHashType()
+		if verbosity >= 2 {
+			VerboseLog(2, "Fixing hash type from %d to %d for entry: %s", 
+				cleanEntry.HashType, newHashType, cleanEntry.RelativePath())
+		}
+		cleanEntry.HashType = newHashType
+	}
+	
+	// Append the clean copy to recovery index using raw data append
+	_, cleanOffset, err := dc.appendRawEntryToScanIndex(recoveryIndexPath, entryData)
+	if err != nil {
+		return binaryEntryRef{}, fmt.Errorf("failed to append clean entry to recovery index: %w", err)
+	}
+	
+	// For recovery operations, we create a temporary mmapIndexFile reference
+	// This is safe because the recovery index will be cleaned up after use
+	recoveryIndexFile := &mmapIndexFile{
+		File:     nil, // File will be closed by caller
+		Data:     nil, // Will be set when needed
+		Size:     0,   // Will be updated when accessed
+		Offset:   int(cleanOffset),
+		Type:     "recovery",
+		FilePath: recoveryIndexPath,
+	}
+	
+	return binaryEntryRef{
+		Offset:    int(cleanOffset),
+		IndexFile: recoveryIndexFile,
+	}, nil
+}
+
+// analyzeEntryForFixes analyzes a binary entry and returns a list of fixable issues
+func (dc *DirectoryCache) analyzeEntryForFixes(entry *binaryEntry, entryIndex uint32, config ValidationConfig) ([]FixableIssue, error) {
+	var issues []FixableIssue
+	
+	// Get entry path for file-based checks
+	entryPath := entry.RelativePath()
+	fullPath := filepath.Join(config.RootDir, entryPath)
+	
+	// Check 1: Hash Type Issues
+	if entry.HashType == 0 || !isValidHashType(entry.HashType) {
+		currentHashType := dc.GetCurrentHashType()
+		issues = append(issues, FixableIssue{
+			Type:        "hash_type",
+			Description: fmt.Sprintf("Invalid hash type %d", entry.HashType),
+			FixAction:   fmt.Sprintf("Update to current configured hash type (%d)", currentHashType),
+			CurrentPath: entryPath,
+			EntryIndex:  entryIndex,
+			FixFunc: func() error {
+				entry.HashType = currentHashType
+				return nil
+			},
+		})
+	}
+	
+	// Check 2: Missing Files (offer to delete entry)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		issues = append(issues, FixableIssue{
+			Type:        "missing_file",
+			Description: fmt.Sprintf("File no longer exists: %s", entryPath),
+			FixAction:   "Mark entry as deleted (will be excluded from output)",
+			CurrentPath: entryPath,
+			EntryIndex:  entryIndex,
+			FixFunc: func() error {
+				entry.SetDeleted()
+				return nil
+			},
+		})
+	} else if err == nil {
+		// File exists - check for other issues
+		
+		// Get current file info
+		stat, err := os.Stat(fullPath)
+		if err != nil {
+			return issues, fmt.Errorf("failed to stat file %s: %w", fullPath, err)
+		}
+		
+		sysStat, ok := stat.Sys().(*syscall.Stat_t)
+		if !ok {
+			// Can't get detailed file info, skip file-based fixes
+			return issues, nil
+		}
+		
+		// Check 3: File Size Mismatch
+		if entry.FileSize != uint64(stat.Size()) {
+			issues = append(issues, FixableIssue{
+				Type:        "file_size",
+				Description: fmt.Sprintf("File size mismatch: entry has %d bytes, file has %d bytes", entry.FileSize, stat.Size()),
+				FixAction:   fmt.Sprintf("Update entry to match current file size (%d bytes)", stat.Size()),
+				CurrentPath: entryPath,
+				EntryIndex:  entryIndex,
+				FixFunc: func() error {
+					entry.FileSize = uint64(stat.Size())
+					return nil
+				},
+			})
+		}
+		
+		// Check 4: Mode Mismatch
+		if entry.Mode != uint32(stat.Mode()) {
+			issues = append(issues, FixableIssue{
+				Type:        "file_mode",
+				Description: fmt.Sprintf("File mode mismatch: entry has %o, file has %o", entry.Mode, stat.Mode()),
+				FixAction:   fmt.Sprintf("Update entry to match current file mode (%o)", stat.Mode()),
+				CurrentPath: entryPath,
+				EntryIndex:  entryIndex,
+				FixFunc: func() error {
+					entry.Mode = uint32(stat.Mode())
+					return nil
+				},
+			})
+		}
+		
+		// Check 5: Time Mismatch (be more lenient with time - only fix if very different)
+		currentMTime := encodeWallTime(sysStat.Mtim.Sec, sysStat.Mtim.Nsec)
+		if entry.MTimeWall != currentMTime {
+			// Only offer to fix if the difference is significant (more than 1 second)
+			entryTime := timeFromWall(entry.MTimeWall)
+			currentTime := timeFromWall(currentMTime)
+			if entryTime.Sub(currentTime).Abs() > time.Second {
+				issues = append(issues, FixableIssue{
+					Type:        "mtime",
+					Description: fmt.Sprintf("Modification time mismatch: entry has %v, file has %v", entryTime, currentTime),
+					FixAction:   fmt.Sprintf("Update entry to match current file time (%v)", currentTime),
+					CurrentPath: entryPath,
+					EntryIndex:  entryIndex,
+					FixFunc: func() error {
+						entry.MTimeWall = currentMTime
+						entry.CTimeWall = encodeWallTime(sysStat.Ctim.Sec, sysStat.Ctim.Nsec)
+						return nil
+					},
+				})
+			}
+		}
+		
+		// Check 6: UID/GID Mismatch
+		if entry.UID != sysStat.Uid || entry.GID != sysStat.Gid {
+			issues = append(issues, FixableIssue{
+				Type:        "ownership",
+				Description: fmt.Sprintf("Ownership mismatch: entry has %d:%d, file has %d:%d", entry.UID, entry.GID, sysStat.Uid, sysStat.Gid),
+				FixAction:   fmt.Sprintf("Update entry to match current ownership (%d:%d)", sysStat.Uid, sysStat.Gid),
+				CurrentPath: entryPath,
+				EntryIndex:  entryIndex,
+				FixFunc: func() error {
+					entry.UID = sysStat.Uid
+					entry.GID = sysStat.Gid
+					return nil
+				},
+			})
+		}
+	}
+	
+	return issues, nil
+}
+
+// promptUserForFix prompts the user whether to apply a specific fix
+func promptUserForFix(issue FixableIssue) bool {
+	fmt.Printf("\nIssue found in entry %d (%s):\n", issue.EntryIndex, issue.CurrentPath)
+	fmt.Printf("  Problem: %s\n", issue.Description)
+	fmt.Printf("  Proposed fix: %s\n", issue.FixAction)
+	fmt.Printf("Apply this fix? [y/N]: ")
+	
+	var response string
+	fmt.Scanln(&response)
+	
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
+}
+
+// applyFixesToEntry analyzes and optionally applies fixes to a binary entry
+func (dc *DirectoryCache) applyFixesToEntry(entry *binaryEntry, entryIndex uint32, config ValidationConfig) (bool, error) {
+	// Analyze entry for fixable issues
+	issues, err := dc.analyzeEntryForFixes(entry, entryIndex, config)
+	if err != nil {
+		return false, fmt.Errorf("failed to analyze entry for fixes: %w", err)
+	}
+	
+	if len(issues) == 0 {
+		return false, nil // No fixes needed
+	}
+	
+	appliedFixes := false
+	
+	for _, issue := range issues {
+		shouldApply := false
+		
+		switch config.FixMode {
+		case FixModeAuto:
+			// Apply all safe fixes automatically
+			shouldApply = true
+			if config.Verbosity >= 1 {
+				VerboseLog(1, "Auto-applying fix for %s: %s", issue.Type, issue.Description)
+			}
+			
+		case FixModeManual:
+			// Prompt user for each fix
+			shouldApply = promptUserForFix(issue)
+			
+		case FixModeNone:
+			// No fixes applied
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Found fixable issue (not applying): %s - %s", issue.Type, issue.Description)
+			}
+			continue
+		}
+		
+		if shouldApply {
+			if err := issue.FixFunc(); err != nil {
+				return false, fmt.Errorf("failed to apply fix for %s: %w", issue.Type, err)
+			}
+			appliedFixes = true
+			
+			if config.Verbosity >= 2 {
+				VerboseLog(2, "Applied fix for %s: %s", issue.Type, issue.FixAction)
+			}
+		}
+	}
+	
+	return appliedFixes, nil
+}
+
+// createCleanEntryCopy creates a clean copy of a binaryEntry in the recovery index file (legacy compatibility)
+func (dc *DirectoryCache) createCleanEntryCopy(sourceEntry *binaryEntry, recoveryIndexPath string) (binaryEntryRef, error) {
+	return dc.createCleanEntryCopyWithFixes(sourceEntry, recoveryIndexPath, false, 0)
+}
+
+// appendRawEntryToScanIndex appends raw binaryEntry data to a scan index file
+func (dc *DirectoryCache) appendRawEntryToScanIndex(scanIndexPath string, entryData []byte) (*binaryEntry, uint32, error) {
+	// Open scan index file for append
+	file, err := os.OpenFile(scanIndexPath, os.O_RDWR, 0644)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open scan index for append: %w", err)
+	}
+	defer file.Close()
+
+	// Get current file size to determine append offset
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to stat scan index: %w", err)
+	}
+	
+	currentSize := stat.Size()
+	appendOffset := uint32(currentSize)
+	
+	// Calculate new file size
+	newSize := currentSize + int64(len(entryData))
+	
+	// Extend the file
+	if err := file.Truncate(newSize); err != nil {
+		return nil, 0, fmt.Errorf("failed to extend scan index: %w", err)
+	}
+	
+	// Memory map the extended file
+	data, err := unix.Mmap(int(file.Fd()), 0, int(newSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to mmap extended scan index: %w", err)
+	}
+	defer unix.Munmap(data)
+	
+	// Copy entry data to the append position
+	copy(data[currentSize:], entryData)
+	
+	// Get pointer to the appended entry
+	cleanEntry := (*binaryEntry)(unsafe.Pointer(&data[currentSize]))
+	
+	// Update header entry count
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	header.EntryCount++
+	
+	return cleanEntry, appendOffset, nil
 }
 
 // RecoverFromScanFiles attempts to recover from scan index files in the .dcfh directory

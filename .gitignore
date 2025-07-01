@@ -3,13 +3,15 @@
 
 # Build artifacts and binaries
 dcfh
+dcfhfind
 dircachefilehash
 cmd/dcfh
 pkg.test
 dist/
 
 # Generated files
-cmd/constants_version.go
+cmd/dcfh/constants_version.go
+cmd/dcfhfind/constants_version.go
 
 # Profile data
 *.prof

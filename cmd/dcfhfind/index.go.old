@@ -139,6 +139,7 @@ func showIndexUsage() {
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index list\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=auto\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck main.idx\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index explore main.idx\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index search filename.txt\n")
 	fmt.Fprintf(os.Stderr, "  dcfh index recover\n")
@@ -247,16 +248,25 @@ func handleIndexCheck(args []string) {
 	var validationMode dcfh.ValidationMode = dcfh.ValidationStrict // Default to strict
 	var checkExtract bool = false
 	
-	// Process arguments
+	// Get validation mode from global options
+	modeStr := options.GetString("mode")
+	switch modeStr {
+	case "strict":
+		validationMode = dcfh.ValidationStrict
+	case "lenient":
+		validationMode = dcfh.ValidationLenient
+	case "diagnostic":
+		validationMode = dcfh.ValidationDiagnostic
+	default:
+		outputError(fmt.Sprintf("Invalid validation mode: %s. Valid modes: strict, lenient, diagnostic", modeStr))
+		showIndexCheckUsage()
+		os.Exit(1)
+	}
+
+	// Process remaining arguments (looking for --extract)
 	filteredArgs := []string{}
 	for _, arg := range args {
 		switch arg {
-		case "--mode=strict", "-strict":
-			validationMode = dcfh.ValidationStrict
-		case "--mode=lenient", "-lenient":
-			validationMode = dcfh.ValidationLenient
-		case "--mode=diagnostic", "-diagnostic":
-			validationMode = dcfh.ValidationDiagnostic
 		case "--extract", "-extract":
 			checkExtract = true
 		default:
@@ -293,16 +303,63 @@ func handleIndexCheck(args []string) {
 	
 	dcfhDir := filepath.Join(repoRoot, ".dcfh")
 	
-	// Find all .idx files
-	indexFiles, err := findIndexFiles(dcfhDir)
-	if err != nil {
-		outputError(fmt.Sprintf("Failed to scan for index files: %v", err))
+	// Check if a specific index file was provided
+	var indexFiles []IndexFileInfo
+	if len(filteredArgs) > 0 {
+		// Check specific file(s)
+		for _, indexPath := range filteredArgs {
+			// Make path absolute if relative
+			if !filepath.IsAbs(indexPath) {
+				// If it's just a filename, look in dcfhDir
+				if !strings.Contains(indexPath, string(filepath.Separator)) {
+					indexPath = filepath.Join(dcfhDir, indexPath)
+				} else {
+					// Otherwise make it absolute from current directory
+					absPath, err := filepath.Abs(indexPath)
+					if err != nil {
+						outputError(fmt.Sprintf("Failed to resolve path %s: %v", indexPath, err))
+						os.Exit(1)
+					}
+					indexPath = absPath
+				}
+			}
+			
+			// Check if file exists
+			info, err := os.Stat(indexPath)
+			if err != nil {
+				outputError(fmt.Sprintf("Cannot access %s: %v", indexPath, err))
+				os.Exit(1)
+			}
+			
+			if info.IsDir() {
+				outputError(fmt.Sprintf("%s is a directory, not an index file", indexPath))
+				os.Exit(1)
+			}
+			
+			// Create IndexFileInfo for the specific file
+			fileInfo := IndexFileInfo{
+				Path:    indexPath,
+				Name:    filepath.Base(indexPath),
+				Size:    info.Size(),
+				ModTime: info.ModTime(),
+				Type:    determineIndexType(filepath.Base(indexPath)),
+			}
+			
+			// Try to read entry count
+			if entryCount, err := getIndexEntryCount(indexPath); err == nil {
+				fileInfo.EntryCount = entryCount
+			} else {
+				fileInfo.IsCorrupted = true
+				fileInfo.ErrorMessage = err.Error()
+			}
+			
+			indexFiles = append(indexFiles, fileInfo)
+		}
+	} else {
+		// idxck requires a specific index file name
+		outputError("idxck requires an index file name")
+		showIndexCheckUsage()
 		os.Exit(1)
-	}
-	
-	if len(indexFiles) == 0 {
-		fmt.Printf("No index files found in %s\n", dcfhDir)
-		return
 	}
 	
 	// Perform checks
@@ -770,13 +827,35 @@ func findIndexFiles(dcfhDir string) ([]IndexFileInfo, error) {
 			return err
 		}
 		
-		// Skip directories
+		// Skip directories, but check if we should skip this directory entirely
 		if info.IsDir() {
+			// Skip recovery subdirectories to avoid recursion into backup files
+			if info.Name() == "recovery" || strings.HasPrefix(info.Name(), "recovery-") {
+				if options.GetInt("verbose") >= 3 {
+					fmt.Fprintf(os.Stderr, "[VERBOSE-3] Skipping recovery directory: %s\n", info.Name())
+				}
+				return filepath.SkipDir
+			}
+			// Skip any other subdirectories - only scan the immediate .dcfh directory
+			if path != dcfhDir {
+				if options.GetInt("verbose") >= 3 {
+					fmt.Fprintf(os.Stderr, "[VERBOSE-3] Skipping subdirectory: %s\n", path)
+				}
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		
 		// Only process .idx files
 		if !strings.HasSuffix(info.Name(), ".idx") {
+			return nil
+		}
+		
+		// Skip recovery files that might be in the root directory
+		if strings.HasPrefix(info.Name(), "recover-") {
+			if options.GetInt("verbose") >= 3 {
+				fmt.Fprintf(os.Stderr, "[VERBOSE-3] Skipping recovery file: %s\n", info.Name())
+			}
 			return nil
 		}
 		
@@ -834,7 +913,9 @@ func getIndexEntryCount(indexPath string) (int, error) {
 
 // showIndexCheckUsage shows usage for idxck command
 func showIndexCheckUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh index idxck [OPTIONS] [--fix=MODE]\n\n")
+	fmt.Fprintf(os.Stderr, "Usage: dcfh index idxck [OPTIONS] [--fix=MODE] FILE...\n\n")
+	fmt.Fprintf(os.Stderr, "Check and optionally repair specific index files.\n")
+	fmt.Fprintf(os.Stderr, "At least one index file must be specified.\n\n")
 	fmt.Fprintf(os.Stderr, "Validation modes:\n")
 	fmt.Fprintf(os.Stderr, "  --mode=strict     Strict validation - fail on any error (default)\n")
 	fmt.Fprintf(os.Stderr, "  --mode=lenient    Lenient validation - skip invalid entries\n")
@@ -847,11 +928,13 @@ func showIndexCheckUsage() {
 	fmt.Fprintf(os.Stderr, "\nOther options:\n")
 	fmt.Fprintf(os.Stderr, "  --extract         Extract valid entries (same as --fix=extract)\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck                          # Strict validation, no fixes\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=diagnostic        # Report all issues\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=extract             # Extract valid entries\n")
-	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=lenient --fix=auto # Lenient validation with auto-fix\n")
-	fmt.Fprintf(os.Stderr, "  dcfh --json index idxck --fix=auto         # JSON output with auto-fix\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck main.idx                 # Check specific index file\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck main.idx cache.idx       # Check multiple files\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck /path/to/backup.idx      # Check external index file\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=diagnostic main.idx # Report all issues\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --fix=extract main.idx   # Extract valid entries from specific file\n")
+	fmt.Fprintf(os.Stderr, "  dcfh index idxck --mode=lenient --fix=auto main.idx # Lenient validation with auto-fix\n")
+	fmt.Fprintf(os.Stderr, "  dcfh --json index idxck --fix=auto main.idx # JSON output with auto-fix\n")
 }
 
 // checkIndexFileWithMode performs validation and optional repair using unified validation framework
@@ -876,7 +959,14 @@ func checkIndexFileWithMode(fileInfo IndexFileInfo, fixMode FixMode, validationM
 	
 	// Create unified validation processor
 	verbosity := options.GetInt("verbose")
-	config := dcfh.DefaultValidationConfig(validationMode, verbosity)
+	
+	// For fix=none (read-only), always use diagnostic mode to report all issues
+	effectiveValidationMode := validationMode
+	if fixMode == FixModeNone {
+		effectiveValidationMode = dcfh.ValidationDiagnostic
+	}
+	
+	config := dcfh.DefaultValidationConfig(effectiveValidationMode, verbosity)
 	processor := dcfh.UnifiedValidationProcessor(config)
 	
 	// Load and validate index with unified processor
@@ -927,21 +1017,146 @@ func checkIndexFileWithMode(fileInfo IndexFileInfo, fixMode FixMode, validationM
 		}
 		
 		if shouldFix {
-			// Create backup before fixing
+			// Try to create backup before fixing (non-fatal if it fails)
 			backupPath, err := createBackup(fileInfo.Path)
 			if err != nil {
-				result.Error = fmt.Sprintf("Failed to create backup: %v", err)
-				return result
+				// Log backup failure but continue with repair
+				result.Issues = append(result.Issues, fmt.Sprintf("Warning: Failed to create backup: %v", err))
+				if verbosity >= 1 {
+					fmt.Fprintf(os.Stderr, "[VERBOSE-1] Warning: Could not create backup for %s: %v\n", fileInfo.Name, err)
+				}
+				
+				// In manual mode, ask user if they want to proceed without backup
+				if fixMode == FixModeManual {
+					fmt.Printf("Cannot create backup for %s. Proceed with repair anyway? [y/N]: ", fileInfo.Name)
+					var response string
+					fmt.Scanln(&response)
+					if !(strings.ToLower(response) == "y" || strings.ToLower(response) == "yes") {
+						result.Issues = append(result.Issues, "Repair skipped: user declined to proceed without backup")
+						return result
+					}
+				}
+				// In auto mode, proceed without backup for non-destructive repairs
+			} else {
+				result.BackupPath = backupPath
+				if verbosity >= 2 {
+					fmt.Fprintf(os.Stderr, "[VERBOSE-2] Created backup: %s\n", backupPath)
+				}
 			}
-			result.BackupPath = backupPath
 			
-			// TODO: Implement actual repair logic
-			result.FixesApplied = append(result.FixesApplied, "Simulated repair applied")
-			result.IsValid = true // Assume repair succeeded
+			// Attempt to apply fixes
+			fixesSuccess, fixErrors := attemptIndexRepairs(fileInfo, fixMode, options.GetInt("verbose"))
+			result.FixesApplied = append(result.FixesApplied, fixesSuccess...)
+			
+			if len(fixErrors) > 0 {
+				for _, fixErr := range fixErrors {
+					result.Issues = append(result.Issues, fmt.Sprintf("Fix failed: %v", fixErr))
+				}
+				// Don't mark as valid if fixes failed
+			} else {
+				// Re-validate the file after repairs to confirm success
+				// Use simple validation instead of full recursive check
+				if isValidIndexFile(fileInfo.Path) {
+					result.IsValid = true
+				} else {
+					result.Issues = append(result.Issues, "File still has issues after repair attempt")
+				}
+			}
 		}
 	}
 	
 	return result
+}
+
+// attemptIndexRepairs attempts to repair issues in an index file
+func attemptIndexRepairs(fileInfo IndexFileInfo, fixMode FixMode, verbosity int) ([]string, []error) {
+	var successfulFixes []string
+	var fixErrors []error
+	
+	if verbosity >= 1 {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-1] Attempting to repair %s\n", fileInfo.Name)
+	}
+	
+	// For now, integrate with the recovery system we built
+	// First, determine if this is a repository directory
+	dcfhDir := filepath.Dir(fileInfo.Path)
+	repoDir := filepath.Dir(dcfhDir)
+	
+	// Initialize DirectoryCache for recovery operations
+	dc := dcfh.NewDirectoryCache(repoDir, "")
+	if dc == nil {
+		fixErrors = append(fixErrors, fmt.Errorf("failed to initialize DirectoryCache for repairs"))
+		return successfulFixes, fixErrors
+	}
+	
+	// Convert cmd FixMode to pkg FixMode
+	var pkgFixMode dcfh.FixMode
+	switch fixMode {
+	case FixModeAuto:
+		pkgFixMode = dcfh.FixModeAuto
+	case FixModeManual:
+		pkgFixMode = dcfh.FixModeManual
+	default:
+		pkgFixMode = dcfh.FixModeNone
+	}
+	
+	// Attempt recovery-based repair
+	if verbosity >= 2 {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-2] Attempting recovery-based repair for %s\n", fileInfo.Name)
+	}
+	
+	err := dc.RecoverFromIndexWithFixes(fileInfo.Path, pkgFixMode, verbosity)
+	if err != nil {
+		fixErrors = append(fixErrors, fmt.Errorf("recovery-based repair failed: %w", err))
+		
+		// In manual mode, offer alternative repair options
+		if fixMode == FixModeManual {
+			fmt.Printf("Recovery-based repair failed for %s: %v\n", fileInfo.Name, err)
+			fmt.Printf("Available alternatives:\n")
+			fmt.Printf("  1. Skip this file and continue\n")
+			fmt.Printf("  2. Mark file as requiring manual inspection\n")
+			fmt.Printf("  3. Attempt to rebuild empty index\n")
+			fmt.Printf("Choose option [1-3]: ")
+			
+			var choice string
+			fmt.Scanln(&choice)
+			
+			switch choice {
+			case "1":
+				successfulFixes = append(successfulFixes, "Skipped at user request")
+			case "2":
+				successfulFixes = append(successfulFixes, "Marked for manual inspection")
+				// Create a marker file or log entry
+				markerPath := fileInfo.Path + ".needs-manual-repair"
+				if err := os.WriteFile(markerPath, []byte(fmt.Sprintf("Index file requires manual repair\nOriginal error: %v\nTimestamp: %v\n", err, time.Now())), 0644); err == nil {
+					successfulFixes = append(successfulFixes, fmt.Sprintf("Created repair marker: %s", markerPath))
+				}
+			case "3":
+				if fileInfo.Type == "main" {
+					if err := dc.CreateEmptyMainIndex(); err == nil {
+						successfulFixes = append(successfulFixes, "Rebuilt empty main index")
+					} else {
+						fixErrors = append(fixErrors, fmt.Errorf("failed to rebuild empty index: %w", err))
+					}
+				} else {
+					successfulFixes = append(successfulFixes, "Cannot rebuild non-main index files")
+				}
+			default:
+				successfulFixes = append(successfulFixes, "No action taken")
+			}
+		}
+	} else {
+		successfulFixes = append(successfulFixes, "Recovery-based repair completed successfully")
+	}
+	
+	return successfulFixes, fixErrors
+}
+
+// isValidIndexFile performs a simple validation check on an index file
+func isValidIndexFile(indexPath string) bool {
+	// Try to validate the header without full validation
+	_, err := dcfh.ValidateIndexHeader(indexPath, true, 0)
+	return err == nil
 }
 
 // createBackup creates a backup of the index file before repair

@@ -21,15 +21,74 @@ go test -v ./pkg/...  # verbose output
 ```
 
 ### CLI Usage
-The main CLI commands are:
+
+**Daily Operations (`dcfh`)**:
 - `dcfh init <dir>` - Initialize repository in directory
 - `dcfh status` - Show file status (modified/added/deleted)
 - `dcfh update [paths...]` - Update index with current state
 - `dcfh dupes` - Find duplicate files
+- `dcfh snapshot <subcommand>` - Create and manage index state snapshots (create, list, forget, remove, status)
+- `dcfh config` - Get and set repository configuration options
 
-Global options: `--json`, `--verbose`, `--version`
+Global options: `--json`, `--verbose`, `--version`, `--dry-run`, `--hash-workers`, `--symlinks`
+
+**Specialized Tooling (`dcfhfind`)**:
+```bash
+dcfhfind [starting-points...] [expressions]
+
+# Starting points: main, cache, scan, all, /path/to/index.idx
+# Tests: --name, --path, --size, --mtime, --hash, --valid, --corrupt
+# Actions: --print, --ls, --printf, --fix, --export
+# Operators: --and, --or, --not, \( \)
+```
+
+Examples:
+```bash
+dcfhfind main --name "*.go" --print
+dcfhfind all --corrupt --fix auto
+dcfhfind cache --not --in-index main --ls
+```
+
+### Help System
+All commands have comprehensive help documentation:
+```bash
+dcfh <command> help        # Command-specific help
+dcfh <command> --help      # Alternative help syntax
+dcfh --help               # Global help and command overview
+```
+
+Examples:
+- `dcfh init help` - Repository initialization guidance
+- `dcfh snapshot help` - Snapshot management operations
+- `dcfh config help` - Configuration options and examples
 
 ## Architecture
+
+### Command Separation (v0.0.14+)
+
+Starting with v0.0.14, the CLI interface has been separated into two distinct tools:
+
+**`dcfh` - Daily Operations**:
+- `init` - Initialize repository
+- `status` - Show file status
+- `update` - Update index with current state  
+- `dupes` - Find duplicate files
+- `snapshot` - Snapshot management
+- `config` - Configuration management
+- `version` - Version information
+
+**`dcfhfind` - Specialized Tooling**:
+- Unix `find(1)`-style interface for dcfh repositories
+- Advanced index management and diagnostics
+- Recovery operations and validation
+- Complex queries with boolean logic
+- Repository exploration and analysis
+
+This separation provides:
+- **Focused daily workflow** with `dcfh` for common operations
+- **Powerful diagnostic tools** with `dcfhfind` for repository management
+- **Familiar Unix interface** for advanced users
+- **Reduced complexity** in the main `dcfh` command
 
 ### Layered Architecture Overview
 
@@ -54,10 +113,28 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 - `pkg/status.go` - Status reporting (`dcfh status` command)
 - `pkg/update.go` - Update operations (`dcfh update` command)
 - `pkg/dupes.go` - Duplicate file detection (`dcfh dupes` command)
+- `pkg/snapshot.go` - Snapshot management (`dcfh snapshot` commands)
+- `pkg/recovery.go` - Index recovery and validation (`dcfh index recover` commands)
 - (Note: `init` functionality is in `pkg/dircache.go` as `NewDirectoryCache`)
 
-**Layer 5: CLI Interface**
-- `cmd/dcfh.go` - Command-line interface with commands: init, status, update, dupes
+**Layer 5: CLI Interface** (separated into daily-use and specialized tooling)
+
+**Daily-Use Commands** (`cmd/dcfh/`):
+- `dcfh.go` - Main entry point and command routing
+- `common.go` - Shared utilities, output formatting, and main help system
+- `init.go` - Repository initialization (`dcfh init` command)
+- `status.go` - Status checking (`dcfh status` command)
+- `update.go` - Index updating (`dcfh update` command)
+- `dupes.go` - Duplicate detection (`dcfh dupes` command)
+- `snapshot.go` - Snapshot operations (`dcfh snapshot` subcommands: create, list, remove, etc.)
+- `config.go` - Configuration management (`dcfh config` command)
+- `version.go` - Version information (`dcfh version` command)
+- `options.go` - Command-line option parsing system
+
+**Specialized Tooling** (`cmd/dcfhfind/`):
+- `main.go` - Find-style interface entry point
+- `DESIGN.md` - Comprehensive specification for find(1)-style operations
+- Index management and diagnostic operations (Unix find syntax for dcfh repositories)
 
 ### Layer 1: Foundation Components
 
@@ -206,3 +283,73 @@ This design ensures that index replacement is atomic and scan indices don't inte
 **Memory Leak Solutions** (Rejected during initial investigation):
 1. **Multiple separate mmap files per entry** - Created 100K+ mmaps, caused 90GB memory leak
 2. **Immediate munmap after each append** - Broke concurrent hash workers accessing the memory
+
+## Recent Development Work
+
+### Help System (v0.0.13)
+**Status**: Complete
+**Description**: Comprehensive help system improvements providing professional CLI experience
+
+**Features Implemented**:
+- **Complete Help Coverage**: All commands now have detailed help functions
+  - `dcfh init help` - Repository initialization guidance
+  - `dcfh status help` - File status checking with output categories
+  - `dcfh update help` - Index updating with performance tips
+  - `dcfh dupes help` - Duplicate detection with format explanations
+  - `dcfh index recover help` - Comprehensive recovery documentation
+  - `dcfh config help` - Configuration management
+- **Recovery Documentation**: Detailed help for all 3 recovery modes and 4 strategies
+- **Standardized Integration**: Consistent help flag checking (`help`, `-h`, `--help`)
+- **Professional Content**: Usage patterns, examples, performance guidance, tips
+
+**Architecture Notes**:
+- Current implementation functional but has boilerplate code duplication
+- Future refactor needed for context-aware help system
+- Help content scattered across multiple functions (technical debt)
+
+**Technical Debt Identified**:
+1. **Boilerplate**: Repetitive help flag checking across all commands
+2. **No Context Awareness**: Help system doesn't understand command hierarchy
+3. **Manual Formatting**: Hardcoded fmt.Fprintf calls instead of templates
+4. **No Discovery**: Missing "did you mean?" and subcommand listing features
+
+### Snapshot System (v0.0.12)
+**Status**: Complete
+**Description**: restic-style snapshot management for index state preservation
+
+**Features Implemented**:
+- **Snapshot Operations**: create, list, remove, forget (retention policies)
+- **Output Formats**: Single-line (default) and detailed verbose formats
+- **Integration**: Full CLI integration with JSON, dry-run, and verbose support
+- **Retention Policies**: Configurable time-based snapshot cleanup
+
+### Recovery System (v0.0.11-v0.0.12)
+**Status**: Complete
+**Description**: Comprehensive index recovery and validation system
+
+**Recovery Modes**:
+1. **Auto-recovery**: Try multiple strategies automatically
+2. **Comprehensive with Preservation**: Merge all available index data
+3. **Specific File Recovery**: Recover from designated index file
+
+**Recovery Strategies** (tried in order):
+1. Comprehensive state preservation (merge all data)
+2. Cache index recovery (cache.idx only)
+3. Scan file recovery (scan-*.idx files)
+4. Main index recovery (main.idx only)
+
+**Safety Features**:
+- Pre-recovery snapshots created in `.dcfh/recovery/` before operations
+- Validation filtering removes corrupted entries
+- Atomic index replacement via temp files and rename
+- Backup creation for all modified index files
+
+### File Organization Refactor (v0.0.10-v0.0.11)
+**Status**: Complete
+**Description**: Split monolithic cmd/dcfh.go into focused command files
+
+**Benefits Achieved**:
+- **Maintainability**: Each command in separate file
+- **Focused Responsibility**: Clear separation of concerns
+- **Easier Development**: Smaller, focused files for command implementation
+- **Better Testing**: Command-specific test organization
