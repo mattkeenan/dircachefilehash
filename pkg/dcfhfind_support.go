@@ -104,6 +104,61 @@ func FindRepositoryRootFrom(startDir string) (string, error) {
 	return realDir, nil
 }
 
+// ResolveIndexFile resolves an index specifier to an actual file path
+// Supports index types: "main", "cache", "scan-PID-TID", or direct file paths
+func ResolveIndexFile(indexSpec string) (string, error) {
+	// If it's an absolute path or contains path separators, treat as direct file path
+	if filepath.IsAbs(indexSpec) || strings.Contains(indexSpec, "/") || strings.Contains(indexSpec, "\\") {
+		// Validate that the file exists
+		if _, err := os.Stat(indexSpec); err != nil {
+			return "", fmt.Errorf("index file not found: %s", indexSpec)
+		}
+		return indexSpec, nil
+	}
+	
+	// Otherwise, discover repository and resolve index type
+	repoRoot, err := FindRepositoryRootFrom("")
+	if err != nil {
+		return "", fmt.Errorf("not in a dcfh repository: %v", err)
+	}
+	
+	dcfhDir := filepath.Join(repoRoot, ".dcfh")
+	
+	switch indexSpec {
+	case "main":
+		return filepath.Join(dcfhDir, "main.idx"), nil
+	case "cache":
+		return filepath.Join(dcfhDir, "cache.idx"), nil
+	case "scan":
+		// For scan, we'd need to handle multiple files - not supported yet
+		return "", fmt.Errorf("scan index type not yet supported (use scan-PID-TID instead)")
+	default:
+		// Check if it's a specific scan index (scan-PID-TID pattern)
+		if strings.HasPrefix(indexSpec, "scan-") {
+			scanFile := indexSpec
+			if !strings.HasSuffix(scanFile, ".idx") {
+				scanFile += ".idx"
+			}
+			scanPath := filepath.Join(dcfhDir, scanFile)
+			if _, err := os.Stat(scanPath); err != nil {
+				return "", fmt.Errorf("scan index file not found: %s", scanPath)
+			}
+			return scanPath, nil
+		}
+		
+		// Try appending .idx if it doesn't have an extension
+		if !strings.Contains(indexSpec, ".") {
+			indexWithExt := indexSpec + ".idx"
+			indexPath := filepath.Join(dcfhDir, indexWithExt)
+			if _, err := os.Stat(indexPath); err == nil {
+				return indexPath, nil
+			}
+		}
+		
+		return "", fmt.Errorf("unknown index type: %s (use 'main', 'cache', 'scan-PID-TID', or full path)", indexSpec)
+	}
+}
+
 // TimeFromWall converts wall time format back to time.Time
 // This is an exported wrapper around the internal timeFromWall() function
 func TimeFromWall(wall uint64) time.Time {

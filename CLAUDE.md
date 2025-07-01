@@ -18,13 +18,14 @@ Where `<message>` is a brief description of what was completed or what permissio
 
 ## IMPORTANT: Running dcfh Commands
 
-When you need to run `dcfh` commands from anywhere in the repository, always use:
+When you need to run `dcfh` or `dcfhfix` commands from anywhere in the repository, always use:
 
 ```bash
 $(git rev-parse --show-toplevel)/dcfh
+$(git rev-parse --show-toplevel)/dcfhfix
 ```
 
-This ensures you're always using the correct dcfh executable regardless of your current working directory.
+This ensures you're always using the correct executables regardless of your current working directory.
 
 ## Commands
 

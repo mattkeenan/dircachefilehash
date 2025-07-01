@@ -34,15 +34,17 @@ type ParsedOptions struct {
 	args      []string
 	defs      map[string]*OptionDef
 	shortMap  map[string]string // Maps short options to long options
+	explicitlySet map[string]bool // Tracks which options were explicitly set
 }
 
 // NewParsedOptions creates a new options parser
 func NewParsedOptions() *ParsedOptions {
 	return &ParsedOptions{
-		values:   make(map[string]string),
-		args:     []string{},
-		defs:     make(map[string]*OptionDef),
-		shortMap: make(map[string]string),
+		values:        make(map[string]string),
+		args:          []string{},
+		defs:          make(map[string]*OptionDef),
+		shortMap:      make(map[string]string),
+		explicitlySet: make(map[string]bool),
 	}
 }
 
@@ -125,19 +127,23 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 			// --option=value format with boolean
 			if optValue == "true" || optValue == "1" {
 				p.values[optName] = "true"
+				p.explicitlySet[optName] = true
 			} else if optValue == "false" || optValue == "0" {
 				p.values[optName] = "false"
+				p.explicitlySet[optName] = true
 			} else {
 				return fmt.Errorf("invalid boolean value for --%s: %s", optName, optValue)
 			}
 		} else {
 			// --option format (sets to true)
 			p.values[optName] = "true"
+			p.explicitlySet[optName] = true
 		}
 	case OptionTypeString, OptionTypeInt:
 		if optValue != "" {
 			// --option=value format (bound with =)
 			p.values[optName] = optValue
+			p.explicitlySet[optName] = true
 		} else {
 			// --option without value - this is an error for string/int options
 			return fmt.Errorf("option --%s requires a value (use --%s=value)", optName, optName)
@@ -177,19 +183,23 @@ func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, con
 		case OptionTypeBool:
 			// For boolean options, just set to true
 			p.values[longOpt] = "true"
+			p.explicitlySet[longOpt] = true
 			
 		case OptionTypeInt:
 			// For integer options, check if count > 1 (repetition)
 			if count > 1 {
 				// Use repetition count as value (e.g., -vvv = verbose level 3)
 				p.values[longOpt] = strconv.Itoa(count)
+				p.explicitlySet[longOpt] = true
 			} else {
 				// Single occurrence, look for next available integer argument
 				if nextArg := p.findNextAvailableIntArg(args, *i, consumed); nextArg != "" {
 					p.values[longOpt] = nextArg
+					p.explicitlySet[longOpt] = true
 				} else {
 					// No available integer argument, default to 1
 					p.values[longOpt] = "1"
+					p.explicitlySet[longOpt] = true
 				}
 			}
 			
@@ -197,6 +207,7 @@ func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, con
 			// String options must consume next available argument
 			if nextArg := p.findNextAvailableArg(args, *i, consumed); nextArg != "" {
 				p.values[longOpt] = nextArg
+				p.explicitlySet[longOpt] = true
 			} else {
 				return fmt.Errorf("option -%s requires a value", short)
 			}
@@ -255,8 +266,7 @@ func (p *ParsedOptions) GetBool(option string) bool {
 
 // IsSet returns true if an option was explicitly set
 func (p *ParsedOptions) IsSet(option string) bool {
-	_, exists := p.values[option]
-	return exists
+	return p.explicitlySet[option]
 }
 
 // GetArgs returns non-option arguments
