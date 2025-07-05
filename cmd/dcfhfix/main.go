@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -695,18 +697,73 @@ func headerEditJSON(indexFile string, jsonData string, options *ParsedOptions) e
 }
 
 func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
-	format := getFormat(options)
-	if !options.GetBool("quiet") {
-		if format == "json" {
-			fmt.Printf("# JSON format entry show not yet implemented for %d paths\n", len(paths))
-		} else {
-			fmt.Printf("# Human format entry show not yet implemented for %d paths\n", len(paths))
+	if len(paths) == 0 {
+		return fmt.Errorf("no paths specified")
+	}
+	
+	// Convert paths to a map for quick lookup
+	pathSet := make(map[string]bool)
+	for _, path := range paths {
+		// Normalize path (remove leading ./ etc)
+		normalizedPath := filepath.Clean(path)
+		if normalizedPath == "." {
+			normalizedPath = ""
+		}
+		pathSet[normalizedPath] = true
+	}
+	
+	// Collect matching entries
+	var matchingEntries []*dircachefilehash.EntryInfo
+	var notFoundPaths []string
+	foundPaths := make(map[string]bool)
+	
+	// Use IterateIndexFile to search through the index
+	// NOTE: While this is O(n), it's actually the safer approach for dcfhfix because:
+	// a) Loading into a skiplist is also O(n), so we're not adding significant overhead
+	// b) For a repair tool, we need the safer entry-by-entry iteration in case the
+	//    index file is corrupted - a skiplist load might fail on corruption
+	err := dircachefilehash.IterateIndexFile(indexFile, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
+		entryPath := entry.Path
+		if pathSet[entryPath] {
+			matchingEntries = append(matchingEntries, entry)
+			foundPaths[entryPath] = true
+		}
+		return true // Continue iteration
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to read index file: %v", err)
+	}
+	
+	// Find paths that weren't found
+	for _, path := range paths {
+		normalizedPath := filepath.Clean(path)
+		if normalizedPath == "." {
+			normalizedPath = ""
+		}
+		if !foundPaths[normalizedPath] {
+			notFoundPaths = append(notFoundPaths, path)
 		}
 	}
-	return fmt.Errorf("entry show not yet implemented")
+	
+	// Display results
+	format := getFormat(options)
+	if format == "json" {
+		return displayEntriesJSON(matchingEntries, notFoundPaths, options)
+	} else {
+		return displayEntriesHuman(matchingEntries, notFoundPaths, options)
+	}
 }
 
 func entryEdit(indexFile string, field string, value string, paths []string, options *ParsedOptions) error {
+	if field == "json" {
+		return entryEditJSON(indexFile, value, paths, options)
+	}
+	
+	if len(paths) == 0 {
+		return fmt.Errorf("no paths specified")
+	}
+	
 	// Create backup before editing
 	pathsDesc := fmt.Sprintf("%d paths", len(paths))
 	if len(paths) <= 3 {
@@ -721,7 +778,85 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 		}
 	}
 	
-	return fmt.Errorf("entry edit field not yet implemented")
+	if options.GetBool("dry-run") {
+		fmt.Printf("Would edit entry field '%s' to value '%s' for paths: %s\n", field, value, pathsDesc)
+		return nil
+	}
+	
+	// Validate the field name and value first
+	switch field {
+	case "ctime", "mtime":
+		_, err := parseTimeValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid time value for %s: %v", field, err)
+		}
+	case "dev", "ino", "uid", "gid":
+		_, err := parseUint32(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s value: %v", field, err)
+		}
+	case "mode":
+		_, err := parseUint32(value)
+		if err != nil {
+			return fmt.Errorf("invalid mode value: %v", err)
+		}
+	case "file_size":
+		_, err := parseUint64(value)
+		if err != nil {
+			return fmt.Errorf("invalid file_size value: %v", err)
+		}
+	case "hash_type":
+		_, err := parseUint16(value)
+		if err != nil {
+			return fmt.Errorf("invalid hash_type value: %v", err)
+		}
+	case "hash":
+		_, err := parseHashValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid hash value: %v", err)
+		}
+	case "flag_is_deleted":
+		_, err := parseBoolValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid flag_is_deleted value: %v", err)
+		}
+	case "path":
+		return fmt.Errorf("path cannot be edited (would change entry identity)")
+	case "size":
+		return fmt.Errorf("size is auto-calculated and cannot be manually edited")
+	default:
+		return fmt.Errorf("unknown entry field: %s", field)
+	}
+	
+	// Create path set for matching
+	pathSet := make(map[string]bool)
+	for _, path := range paths {
+		normalizedPath := filepath.Clean(path)
+		if normalizedPath == "." {
+			normalizedPath = ""
+		}
+		pathSet[normalizedPath] = true
+	}
+	
+	// Process entries using safe workflow approach (never edit files directly)
+	entriesFixed, entriesDiscarded, err := processEntriesWithWorkflow(indexFile, pathSet, field, value, options)
+	if err != nil {
+		return fmt.Errorf("failed to process entries: %v", err)
+	}
+	
+	if entriesFixed == 0 {
+		return fmt.Errorf("no matching entries found for specified paths")
+	}
+	
+	if !options.GetBool("quiet") {
+		fmt.Printf("Updated field '%s' to '%s' for %d matching entries", field, value, entriesFixed)
+		if entriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		}
+		fmt.Println()
+	}
+	
+	return nil
 }
 
 func entryEditJSON(indexFile string, jsonData string, paths []string, options *ParsedOptions) error {
@@ -1168,6 +1303,73 @@ func parseUint32(value string) (uint32, error) {
 	return uint32(val), err
 }
 
+// parseUint64 parses a string value as uint64 with support for hex/octal/decimal
+func parseUint64(value string) (uint64, error) {
+	// Handle hex values (with or without 0x prefix)
+	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
+		val, err := strconv.ParseUint(value[2:], 16, 64)
+		return val, err
+	}
+	// Handle octal values (with 0 prefix)
+	if strings.HasPrefix(value, "0") && len(value) > 1 {
+		val, err := strconv.ParseUint(value, 8, 64)
+		return val, err
+	}
+	// Handle decimal values
+	val, err := strconv.ParseUint(value, 10, 64)
+	return val, err
+}
+
+// parseTimeValue parses time in various formats and returns wall time
+func parseTimeValue(value string) (uint64, error) {
+	// Try ISO 8601 format first
+	if t, err := time.Parse("2006-01-02T15:04:05.000000000Z", value); err == nil {
+		return dircachefilehash.TimeToWall(t), nil
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05Z", value); err == nil {
+		return dircachefilehash.TimeToWall(t), nil
+	}
+	// Try Unix timestamp
+	if timestamp, err := strconv.ParseInt(value, 10, 64); err == nil {
+		t := time.Unix(timestamp, 0)
+		return dircachefilehash.TimeToWall(t), nil
+	}
+	return 0, fmt.Errorf("invalid time format, use ISO 8601 (2006-01-02T15:04:05Z) or Unix timestamp")
+}
+
+// parseHashValue parses and validates a hash string
+func parseHashValue(value string) ([]byte, error) {
+	// Remove any 0x prefix
+	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
+		value = value[2:]
+	}
+	
+	// Decode hex string
+	hash, err := hex.DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex string: %v", err)
+	}
+	
+	// Validate hash length (must be 20, 32, or 64 bytes for SHA1, SHA256, SHA512)
+	if len(hash) != 20 && len(hash) != 32 && len(hash) != 64 {
+		return nil, fmt.Errorf("invalid hash length %d, must be 20 (SHA1), 32 (SHA256), or 64 (SHA512) bytes", len(hash))
+	}
+	
+	return hash, nil
+}
+
+// parseBoolValue parses various boolean representations
+func parseBoolValue(value string) (bool, error) {
+	switch strings.ToLower(value) {
+	case "true", "1", "yes", "on":
+		return true, nil
+	case "false", "0", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value: %s (use true/false, 1/0, yes/no, on/off)", value)
+	}
+}
+
 // writeIndexFile writes the modified index data back to disk safely
 func writeIndexFile(indexAccess *indexFileAccess, targetPath string, options *ParsedOptions) error {
 	// Create a temporary file for atomic write
@@ -1205,6 +1407,90 @@ func writeIndexFile(indexAccess *indexFileAccess, targetPath string, options *Pa
 	err = os.Rename(tempFile, targetPath)
 	if err != nil {
 		return fmt.Errorf("failed to rename temp file: %v", err)
+	}
+	
+	return nil
+}
+
+// displayEntriesJSON displays entries in JSON format
+func displayEntriesJSON(entries []*dircachefilehash.EntryInfo, notFoundPaths []string, options *ParsedOptions) error {
+	// Convert entries to JSON-friendly format with ISO 8601 timestamps
+	jsonEntries := make([]map[string]interface{}, len(entries))
+	for i, entry := range entries {
+		mtime := dircachefilehash.TimeFromWall(entry.MTimeWall)
+		ctime := dircachefilehash.TimeFromWall(entry.CTimeWall)
+		
+		jsonEntries[i] = map[string]interface{}{
+			"path":            entry.Path,
+			"flag_is_deleted": entry.IsDeleted,
+			"file_size":       entry.FileSize,
+			"mode":            entry.Mode,
+			"uid":             entry.UID,
+			"gid":             entry.GID,
+			"dev":             entry.Dev,
+			"mtime":           mtime.UTC().Format("2006-01-02T15:04:05.000000000Z"),
+			"ctime":           ctime.UTC().Format("2006-01-02T15:04:05.000000000Z"),
+			"hash":            entry.HashStr,
+			"hash_type":       entry.HashType,
+		}
+	}
+	
+	output := map[string]interface{}{
+		"entries": jsonEntries,
+	}
+	
+	if len(notFoundPaths) > 0 && !options.GetBool("quiet") {
+		output["not_found"] = notFoundPaths
+	}
+	
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %v", err)
+	}
+	
+	fmt.Printf("%s\n", data)
+	return nil
+}
+
+// displayEntriesHuman displays entries in human-readable format
+func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []string, options *ParsedOptions) error {
+	if len(entries) == 0 {
+		if !options.GetBool("quiet") {
+			fmt.Printf("No entries found.\n")
+		}
+	} else {
+		if !options.GetBool("quiet") {
+			fmt.Printf("Found %d entries:\n\n", len(entries))
+		}
+		
+		for _, entry := range entries {
+			fmt.Printf("Path: %s\n", entry.Path)
+			fmt.Printf("  Size: %d bytes\n", entry.FileSize)
+			fmt.Printf("  Mode: %04o\n", entry.Mode&0o7777)
+			fmt.Printf("  UID: %d\n", entry.UID)
+			fmt.Printf("  GID: %d\n", entry.GID)
+			fmt.Printf("  Dev: %d\n", entry.Dev)
+			
+			// Convert wall time to readable format
+			mtime := dircachefilehash.TimeFromWall(entry.MTimeWall)
+			ctime := dircachefilehash.TimeFromWall(entry.CTimeWall)
+			fmt.Printf("  MTime: %s\n", mtime.Format("2006-01-02 15:04:05"))
+			fmt.Printf("  CTime: %s\n", ctime.Format("2006-01-02 15:04:05"))
+			
+			fmt.Printf("  Hash Type: %d\n", entry.HashType)
+			fmt.Printf("  Hash: %s\n", entry.HashStr)
+			fmt.Printf("  Deleted: %t\n", entry.IsDeleted)
+			fmt.Printf("\n")
+		}
+	}
+	
+	// Show not found paths
+	if len(notFoundPaths) > 0 && !options.GetBool("quiet") {
+		fmt.Printf("Paths not found in index:\n")
+		for _, path := range notFoundPaths {
+			fmt.Printf("  %s\n", path)
+		}
+		fmt.Printf("\n")
 	}
 	
 	return nil
@@ -1317,6 +1603,598 @@ func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customH
 	// For a full implementation, we'd need to implement the vectorio approach
 	
 	return file.Sync()
+}
+
+// modifyEntriesInRawData modifies entries in the raw data buffer
+func modifyEntriesInRawData(data []byte, pathSet map[string]bool, field, value string, entriesModified *int) error {
+	if len(data) < dircachefilehash.HeaderSize {
+		return fmt.Errorf("invalid index data")
+	}
+	
+	// Get entry count from header (may be unreliable in corrupted files)
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	entryCount := header.EntryCount
+	
+	// Process entries in the data buffer
+	offset := dircachefilehash.HeaderSize
+	entriesProcessed := uint32(0)
+	
+	for entriesProcessed < entryCount && offset < len(data) {
+		if offset + 4 > len(data) {
+			break
+		}
+		
+		// Read entry size
+		entrySize := *(*uint32)(unsafe.Pointer(&data[offset]))
+		if entrySize < 48 || offset + int(entrySize) > len(data) {
+			break
+		}
+		
+		// Parse the entry to get its path
+		entryPath := extractEntryPath(data, offset, entrySize)
+		if pathSet[entryPath] {
+			// Modify the specified field directly in the data buffer
+			err := modifyEntryFieldInData(data, offset, field, value)
+			if err != nil {
+				return fmt.Errorf("failed to modify entry %s: %v", entryPath, err)
+			}
+			*entriesModified++
+		}
+		
+		offset += int(entrySize)
+		entriesProcessed++
+	}
+	
+	return nil
+}
+
+// writeRawDataWithChecksum writes the raw data with correct checksum
+func writeRawDataWithChecksum(data []byte, indexFile string) error {
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	
+	// Clear checksum field first
+	for i := range header.Checksum {
+		header.Checksum[i] = 0
+	}
+	
+	// Calculate checksum of header (excluding checksum field) + entries
+	hasher := sha1.New()
+	
+	// Hash header fields before checksum field
+	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
+	
+	// Hash entry data (everything after header)
+	if len(data) > dircachefilehash.HeaderSize {
+		hasher.Write(data[dircachefilehash.HeaderSize:])
+	}
+	
+	// Store checksum in header
+	checksum := hasher.Sum(nil)
+	copy(header.Checksum[:], checksum)
+	
+	// Write to temp file then rename atomically
+	tempFile := indexFile + ".tmp"
+	defer func() {
+		if _, err := os.Stat(tempFile); err == nil {
+			os.Remove(tempFile)
+		}
+	}()
+	
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	
+	if err := os.Rename(tempFile, indexFile); err != nil {
+		return fmt.Errorf("failed to replace original file: %w", err)
+	}
+	
+	return nil
+}
+
+// modifyEntriesInData modifies entries in the loaded index data (DEPRECATED)
+func modifyEntriesInData(entryData *EntryData, paths []string, field, value string, modified *bool) error {
+	if len(entryData.OriginalData) < dircachefilehash.HeaderSize {
+		return fmt.Errorf("invalid index data")
+	}
+	
+	// Convert paths to a map for quick lookup
+	pathSet := make(map[string]bool)
+	for _, path := range paths {
+		// Normalize path (remove leading ./ etc)
+		normalizedPath := filepath.Clean(path)
+		if normalizedPath == "." {
+			normalizedPath = ""
+		}
+		pathSet[normalizedPath] = true
+	}
+	
+	// Find entry offsets using IterateIndexFile to get accurate paths
+	entryOffsets := make(map[string]int) // path -> offset in data buffer
+	
+	// Process entries manually to get both paths and offsets
+	data := entryData.OriginalData
+	offset := dircachefilehash.HeaderSize
+	
+	for i := uint32(0); i < entryData.EntryCount && offset < len(data); i++ {
+		if offset + 4 > len(data) {
+			break
+		}
+		
+		// Read entry size
+		entrySize := *(*uint32)(unsafe.Pointer(&data[offset]))
+		if entrySize < 48 || offset + int(entrySize) > len(data) {
+			break
+		}
+		
+		// Use a temporary file to get the proper path via IterateIndexFile
+		// But first, let's try the direct approach since we need the offset anyway
+		tempFile, err := os.CreateTemp("", "dcfhfix-temp-*.idx")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %v", err)
+		}
+		defer os.Remove(tempFile.Name())
+		defer tempFile.Close()
+		
+		// Write just this entry's data to get its path
+		if _, err := tempFile.Write(data[:dircachefilehash.HeaderSize]); err != nil {
+			return fmt.Errorf("failed to write header: %v", err)
+		}
+		if _, err := tempFile.Write(data[offset:offset+int(entrySize)]); err != nil {
+			return fmt.Errorf("failed to write entry: %v", err)
+		}
+		tempFile.Close()
+		
+		// Get the path using IterateIndexFile
+		err = dircachefilehash.IterateIndexFile(tempFile.Name(), func(entry *dircachefilehash.EntryInfo, indexType string) bool {
+			entryOffsets[entry.Path] = offset
+			return false // Stop after first entry
+		})
+		if err != nil {
+			// Fall back to manual extraction if IterateIndexFile fails
+			entryPath := extractEntryPath(data, offset, entrySize)
+			entryOffsets[entryPath] = offset
+		}
+		
+		offset += int(entrySize)
+	}
+	
+	// Now modify the entries we found
+	entriesModified := 0
+	for entryPath, entryOffset := range entryOffsets {
+		if pathSet[entryPath] {
+			// Modify the specified field directly in the data buffer
+			err := modifyEntryFieldInData(data, entryOffset, field, value)
+			if err != nil {
+				return fmt.Errorf("failed to modify entry %s: %v", entryPath, err)
+			}
+			entriesModified++
+			*modified = true
+		}
+	}
+	
+	if entriesModified == 0 {
+		return fmt.Errorf("no matching entries found")
+	}
+	
+	return nil
+}
+
+// createModifiedIndexFile creates a new index file with modified entries
+func createModifiedIndexFile(indexFile string, pathSet map[string]bool, field, value string, entriesModified *int) error {
+	// Create temporary file
+	tempFile := indexFile + ".tmp"
+	defer func() {
+		if _, err := os.Stat(tempFile); err == nil {
+			os.Remove(tempFile)
+		}
+	}()
+	
+	// Create new file
+	newFile, err := os.Create(tempFile)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer newFile.Close()
+	
+	// Copy header from original file
+	originalHeader, err := getIndexHeader(indexFile)
+	if err != nil {
+		return fmt.Errorf("failed to read original header: %v", err)
+	}
+	
+	// Write header (we'll update entry count later)
+	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(originalHeader))
+	if _, err := newFile.Write(headerBytes[:]); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	
+	// Process entries using IterateIndexFile
+	entryCount := uint32(0)
+	err = dircachefilehash.IterateIndexFile(indexFile, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
+		var entryToWrite *dircachefilehash.EntryInfo
+		
+		// Check if this entry should be modified
+		if pathSet[entry.Path] {
+			// Create a copy and modify it
+			modifiedEntry := *entry
+			if modifyErr := modifyEntryInfo(&modifiedEntry, field, value); modifyErr != nil {
+				return false // Stop iteration on error
+			}
+			entryToWrite = &modifiedEntry
+			*entriesModified++
+		} else {
+			// Use original entry
+			entryToWrite = entry
+		}
+		
+		// Write the entry to the new file
+		if writeErr := writeEntryInfoToFile(newFile, entryToWrite); writeErr != nil {
+			return false // Stop iteration on error
+		}
+		
+		entryCount++
+		return true // Continue iteration
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to process entries: %v", err)
+	}
+	
+	// Update header with correct entry count
+	if _, err := newFile.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek to header: %w", err)
+	}
+	originalHeader.EntryCount = entryCount
+	
+	// Calculate checksum of the entire file content (header + entries)
+	if err := calculateAndWriteChecksum(newFile, originalHeader); err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+	
+	// Sync and close
+	if err := newFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+	newFile.Close()
+	
+	// Atomic replace
+	if err := os.Rename(tempFile, indexFile); err != nil {
+		return fmt.Errorf("failed to replace original file: %w", err)
+	}
+	
+	return nil
+}
+
+// modifyEntryInfo modifies a field in an EntryInfo struct
+func modifyEntryInfo(entry *dircachefilehash.EntryInfo, field, value string) error {
+	switch field {
+	case "ctime":
+		wallTime, err := parseTimeValue(value)
+		if err != nil {
+			return err
+		}
+		entry.CTimeWall = wallTime
+	case "mtime":
+		wallTime, err := parseTimeValue(value)
+		if err != nil {
+			return err
+		}
+		entry.MTimeWall = wallTime
+	case "dev":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		entry.Dev = val
+	case "ino":
+		return fmt.Errorf("ino field not available in EntryInfo (use dev instead)")
+	case "uid":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		entry.UID = val
+	case "gid":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		entry.GID = val
+	case "mode":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		entry.Mode = val
+	case "file_size":
+		val, err := parseUint64(value)
+		if err != nil {
+			return err
+		}
+		entry.FileSize = val
+	case "hash_type":
+		val, err := parseUint16(value)
+		if err != nil {
+			return err
+		}
+		entry.HashType = val
+	case "hash":
+		_, err := parseHashValue(value) // Validate format
+		if err != nil {
+			return err
+		}
+		entry.HashStr = value
+	case "flag_is_deleted":
+		val, err := parseBoolValue(value)
+		if err != nil {
+			return err
+		}
+		entry.IsDeleted = val
+	default:
+		return fmt.Errorf("unknown field: %s", field)
+	}
+	
+	return nil
+}
+
+// writeEntryInfoToFile writes an EntryInfo as binary data to a file
+func writeEntryInfoToFile(file *os.File, entry *dircachefilehash.EntryInfo) error {
+	// Convert EntryInfo back to binary format
+	pathBytes := []byte(entry.Path)
+	pathLen := len(pathBytes)
+	
+	// Calculate total entry size with 8-byte alignment
+	// Size(4) + CTimeWall(8) + MTimeWall(8) + Dev(4) + Ino(4) + Mode(4) + UID(4) + GID(4) + FileSize(8) + EntryFlags(2) + HashType(2) + Hash(64) + Path + null terminator + padding
+	baseSize := 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 8 + 2 + 2 + 64 + pathLen + 1 // +1 for null terminator
+	padding := (8 - (baseSize % 8)) % 8
+	totalSize := baseSize + padding
+	
+	// Create the binary entry buffer
+	buffer := make([]byte, totalSize)
+	offset := 0
+	
+	// Size (4 bytes)
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = uint32(totalSize)
+	offset += 4
+	
+	// CTimeWall (8 bytes)
+	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.CTimeWall
+	offset += 8
+	
+	// MTimeWall (8 bytes)
+	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.MTimeWall
+	offset += 8
+	
+	// Dev (4 bytes)
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.Dev
+	offset += 4
+	
+	// Ino (4 bytes) - not available in EntryInfo, use 0
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = 0
+	offset += 4
+	
+	// Mode (4 bytes)
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.Mode
+	offset += 4
+	
+	// UID (4 bytes)
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.UID
+	offset += 4
+	
+	// GID (4 bytes)
+	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.GID
+	offset += 4
+	
+	// FileSize (8 bytes)
+	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.FileSize
+	offset += 8
+	
+	// EntryFlags (2 bytes)
+	var flags uint16 = 0
+	if entry.IsDeleted {
+		flags |= 1 // EntryFlagDeleted = 1
+	}
+	*(*uint16)(unsafe.Pointer(&buffer[offset])) = flags
+	offset += 2
+	
+	// HashType (2 bytes)
+	*(*uint16)(unsafe.Pointer(&buffer[offset])) = entry.HashType
+	offset += 2
+	
+	// Hash (64 bytes)
+	hashBytes, err := hex.DecodeString(entry.HashStr)
+	if err != nil {
+		return fmt.Errorf("invalid hash string: %v", err)
+	}
+	copy(buffer[offset:offset+64], hashBytes)
+	offset += 64
+	
+	// Path + null terminator (rest of the space)
+	copy(buffer[offset:], pathBytes)
+	offset += pathLen
+	buffer[offset] = 0 // null terminator
+	// Padding is already zero-initialized
+	
+	// Write the binary entry to file
+	if _, err := file.Write(buffer); err != nil {
+		return fmt.Errorf("failed to write entry: %w", err)
+	}
+	
+	return nil
+}
+
+// calculateAndWriteChecksum calculates the SHA-1 checksum and writes the complete header
+func calculateAndWriteChecksum(file *os.File, header *indexHeader) error {
+	// Get current file size
+	currentPos, err := file.Seek(0, 2) // Seek to end
+	if err != nil {
+		return fmt.Errorf("failed to get file size: %w", err)
+	}
+	
+	// Read all content except header to calculate checksum
+	if _, err := file.Seek(dircachefilehash.HeaderSize, 0); err != nil {
+		return fmt.Errorf("failed to seek to entries: %w", err)
+	}
+	
+	content := make([]byte, currentPos-dircachefilehash.HeaderSize)
+	if _, err := file.Read(content); err != nil {
+		return fmt.Errorf("failed to read entries for checksum: %w", err)
+	}
+	
+	// Calculate SHA-1 checksum of the entries
+	hasher := sha1.New()
+	hasher.Write(content)
+	checksum := hasher.Sum(nil)
+	
+	// Copy checksum to header (clear first, then copy)
+	for i := range header.Checksum {
+		header.Checksum[i] = 0
+	}
+	copy(header.Checksum[:], checksum)
+	
+	// Write the complete header with checksum
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek to header: %w", err)
+	}
+	
+	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(header))
+	if _, err := file.Write(headerBytes[:]); err != nil {
+		return fmt.Errorf("failed to write header with checksum: %w", err)
+	}
+	
+	return nil
+}
+
+// extractEntryPath extracts the path from an entry in the data buffer
+func extractEntryPath(data []byte, offset int, entrySize uint32) string {
+	// The path starts at the address of Path[0], not after the struct
+	// Path field offset = Size(4) + CTimeWall(8) + MTimeWall(8) + Dev(4) + Ino(4) + Mode(4) + UID(4) + GID(4) + FileSize(8) + EntryFlags(2) + HashType(2) + Hash(64) = 112 bytes
+	pathFieldOffset := 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 8 + 2 + 2 + 64
+	pathStart := offset + pathFieldOffset
+	pathEnd := offset + int(entrySize)
+	
+	// Scan backwards from end to find actual end (remove null padding)
+	for pathEnd > pathStart && data[pathEnd-1] == 0 {
+		pathEnd--
+	}
+	
+	if pathEnd <= pathStart {
+		return ""
+	}
+	
+	return string(data[pathStart:pathEnd])
+}
+
+// modifyEntryFieldInData modifies a specific field directly in the data buffer
+func modifyEntryFieldInData(data []byte, offset int, field, value string) error {
+	switch field {
+	case "ctime":
+		wallTime, err := parseTimeValue(value)
+		if err != nil {
+			return err
+		}
+		*(*uint64)(unsafe.Pointer(&data[offset+4])) = wallTime // CTimeWall at offset 4
+	case "mtime":
+		wallTime, err := parseTimeValue(value)
+		if err != nil {
+			return err
+		}
+		*(*uint64)(unsafe.Pointer(&data[offset+12])) = wallTime // MTimeWall at offset 12
+	case "dev":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		*(*uint32)(unsafe.Pointer(&data[offset+20])) = val // Dev at offset 20
+	case "ino":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		*(*uint32)(unsafe.Pointer(&data[offset+24])) = val // Ino at offset 24
+	case "uid":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		*(*uint32)(unsafe.Pointer(&data[offset+32])) = val // UID at offset 32
+	case "gid":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		*(*uint32)(unsafe.Pointer(&data[offset+36])) = val // GID at offset 36
+	case "mode":
+		val, err := parseUint32(value)
+		if err != nil {
+			return err
+		}
+		*(*uint32)(unsafe.Pointer(&data[offset+28])) = val // Mode at offset 28
+	case "file_size":
+		val, err := parseUint64(value)
+		if err != nil {
+			return err
+		}
+		*(*uint64)(unsafe.Pointer(&data[offset+40])) = val // FileSize at offset 40
+	case "hash_type":
+		val, err := parseUint16(value)
+		if err != nil {
+			return err
+		}
+		*(*uint16)(unsafe.Pointer(&data[offset+50])) = val // HashType at offset 50
+	case "hash":
+		hashBytes, err := parseHashValue(value)
+		if err != nil {
+			return err
+		}
+		// Clear and copy hash at offset 52
+		hashStart := offset + 52
+		for i := 0; i < 64; i++ {
+			data[hashStart+i] = 0
+		}
+		copy(data[hashStart:], hashBytes)
+	case "flag_is_deleted":
+		val, err := parseBoolValue(value)
+		if err != nil {
+			return err
+		}
+		flagsPtr := (*uint16)(unsafe.Pointer(&data[offset+48])) // EntryFlags at offset 48
+		if val {
+			*flagsPtr |= 1 // Set deleted flag (EntryFlagDeleted = 1)
+		} else {
+			*flagsPtr &^= 1 // Clear deleted flag
+		}
+	default:
+		return fmt.Errorf("unknown field: %s", field)
+	}
+	
+	return nil
+}
+
+// writeModifiedIndex writes the modified index data back to disk
+func writeModifiedIndex(entryData *EntryData, indexFile string, options *ParsedOptions) error {
+	// Create temporary file path
+	tempFile := indexFile + ".tmp"
+	defer func() {
+		// Clean up temp file if it still exists
+		if _, err := os.Stat(tempFile); err == nil {
+			os.Remove(tempFile)
+		}
+	}()
+	
+	// Write the modified data to temp file
+	if err := os.WriteFile(tempFile, entryData.OriginalData, 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	
+	// Atomic replace
+	if err := os.Rename(tempFile, indexFile); err != nil {
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	
+	return nil
 }
 
 

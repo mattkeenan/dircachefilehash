@@ -414,7 +414,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 		
 		// Validate binaryEntry chaining consistency
-		if err := dc.validateEntryChaining(entry, offset, entryData); err != nil {
+		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
 			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
 		
@@ -1103,33 +1103,33 @@ func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
 
 // validateEntryChaining validates the consistency of a binaryEntry's internal structure
 // and its position within the mmap'd data
-func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, entryData []byte) error {
+func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, entryData []byte, entryIndex int) error {
 	// Basic size validation
 	if entry.Size == 0 {
-		return fmt.Errorf("entry has zero size at offset %d", offset)
+		return fmt.Errorf("entry has zero size at offset %d (entry index %d)", offset, entryIndex)
 	}
 	
 	minSize := uint32(unsafe.Sizeof(*entry))
 	if entry.Size < minSize {
-		return fmt.Errorf("entry size %d too small (minimum %d) at offset %d", 
-			entry.Size, minSize, offset)
+		return fmt.Errorf("entry size %d too small (minimum %d) at offset %d (entry index %d)", 
+			entry.Size, minSize, offset, entryIndex)
 	}
 	
 	maxReasonableSize := uint32(4096) // Reasonable maximum for path + padding
 	if entry.Size > maxReasonableSize {
-		return fmt.Errorf("entry size %d unreasonably large (maximum %d) at offset %d", 
-			entry.Size, maxReasonableSize, offset)
+		return fmt.Errorf("entry size %d unreasonably large (maximum %d) at offset %d (entry index %d)", 
+			entry.Size, maxReasonableSize, offset, entryIndex)
 	}
 	
 	// Validate that the entry doesn't extend beyond available data
 	if offset+int(entry.Size) > len(entryData) {
-		return fmt.Errorf("entry size %d at offset %d would extend beyond data bounds (available: %d)",
-			entry.Size, offset, len(entryData)-offset)
+		return fmt.Errorf("entry size %d at offset %d would extend beyond data bounds (available: %d) (entry index %d)",
+			entry.Size, offset, len(entryData)-offset, entryIndex)
 	}
 	
 	// Validate 8-byte alignment
 	if entry.Size%8 != 0 {
-		return fmt.Errorf("entry size %d not 8-byte aligned at offset %d", entry.Size, offset)
+		return fmt.Errorf("entry size %d not 8-byte aligned at offset %d (entry index %d)", entry.Size, offset, entryIndex)
 	}
 	
 	// Validate that the entry pointer is 8-byte aligned

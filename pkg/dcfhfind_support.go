@@ -165,6 +165,12 @@ func TimeFromWall(wall uint64) time.Time {
 	return timeFromWall(wall)
 }
 
+// TimeToWall converts time.Time to wall time format
+// This is an exported wrapper around the internal timeWall() function
+func TimeToWall(t time.Time) uint64 {
+	return timeWall(t)
+}
+
 // ValidateEntryInfo performs comprehensive validation of an entry
 // Returns true if the entry is valid, false if invalid, and error if validation fails
 func ValidateEntryInfo(entry *EntryInfo, repoPath string) (bool, error) {

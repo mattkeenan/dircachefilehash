@@ -308,6 +308,11 @@ This design ensures that index replacement is atomic and scan indices don't inte
 
 ### Constraints and Design Rules
 
+**Development Anti-Patterns (Learn from Repeated Mistakes)**:
+- **Repeated Similar Errors**: If you encounter the same class of errors multiple times (e.g., offset calculation bugs, checksum errors), this indicates a fundamental approach problem. Stop and redesign the approach rather than fixing individual instances.
+- **Manual Offset Calculations**: Never manually calculate struct field offsets (e.g., `offset+4`, `offset+28`). Use `unsafe.Offsetof()` and centralized field accessors.
+- **Unsafe Data Access in Repair Tools**: Repair tools must assume data is corrupted. Always validate bounds, alignment, and reasonableness before accessing any field.
+
 **Critical Constraints (Must Be Enforced)**:
 1. **Single Entry Writing Path**: `AppendEntryToScanIndex()` is the ONLY function that writes binaryEntries to index files
 2. **Private Low-Level Function**: `writeBinaryEntryToMmap()` is private and only called by `AppendEntryToScanIndex()`

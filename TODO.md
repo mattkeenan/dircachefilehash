@@ -12,6 +12,11 @@ This file tracks upcoming development tasks for the dircachefilehash project.
 - [ ] Consider renaming `pkg/file.go` to `pkg/filehash.go` for clarity
 - [ ] Consider renaming `pkg/middleware.go` to better reflect its workflow nature
 - [ ] Review layer separation and ensure proper abstraction boundaries
+- [ ] Export skiplist wrapper functions (Find, Insert, etc.) for low-level package access
+  - Current skiplist wrapper is "high-level" within pkg but "low-level" for external users
+  - External tools like dcfhfix need efficient O(log n) entry lookup instead of O(n) iteration
+  - Should export: Find(), Insert(), ForEach(), and other core skiplist operations
+  - Consider adding FindEntries() function that takes index path + paths array
 
 ### Performance & Optimization
 - [ ] Profile memory usage during large directory scans
