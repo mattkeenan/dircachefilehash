@@ -9,12 +9,14 @@ before:
   hooks:
     # Clean up any previous builds
     - go mod tidy
-    # Generate version info
-    - sh -c "cd cmd && go generate"
+    # Generate version info for all commands
+    - sh -c "cd cmd/dcfh && go generate"
+    - sh -c "cd cmd/dcfhfind && go generate"
+    - sh -c "cd cmd/dcfhfix && go generate"
 
 builds:
   - id: dcfh
-    main: ./cmd
+    main: ./cmd/dcfh
     binary: dcfh
     env:
       - CGO_ENABLED=0
@@ -30,6 +32,40 @@ builds:
     ldflags:
       - -s -w
       # Note: Version info is generated via go generate, not ldflags
+    tags:
+      - netgo
+
+  - id: dcfhfind
+    main: ./cmd/dcfhfind
+    binary: dcfhfind
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    tags:
+      - netgo
+
+  - id: dcfhfix
+    main: ./cmd/dcfhfix
+    binary: dcfhfix
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
     tags:
       - netgo
 
@@ -57,9 +93,15 @@ nfpms:
     homepage: https://github.com/mattkeenan/dircachefilehash
     maintainer: Matt Keenan <matt@example.com>  # Replace with your email
     description: |-
-      Directory Cache File Hash - A fast file indexing and duplicate detection tool.
-      dcfh provides efficient file indexing with SHA-1 hashing for duplicate detection,
-      change tracking, and integrity verification across large directory structures.
+      Directory Cache File Hash - A fast file indexing and duplicate detection tool suite.
+      
+      Includes three specialized tools:
+      - dcfh: Daily operations (init, status, update, dupes, snapshots)
+      - dcfhfind: Unix find(1)-style search interface for index files
+      - dcfhfix: Index repair and recovery tool
+      
+      Features efficient file indexing with SHA-1/SHA-256/SHA-512 hashing for duplicate
+      detection, change tracking, and integrity verification across large directory structures.
     license: MIT
     formats:
       - deb
@@ -74,6 +116,14 @@ nfpms:
     contents:
       - src: ./dcfh
         dst: /usr/bin/dcfh
+        file_info:
+          mode: 0755
+      - src: ./dcfhfind
+        dst: /usr/bin/dcfhfind
+        file_info:
+          mode: 0755
+      - src: ./dcfhfix
+        dst: /usr/bin/dcfhfix
         file_info:
           mode: 0755
       - src: ./README.md
@@ -153,19 +203,21 @@ release:
   header: |
     ## dcfh {{.Tag}}
     
-    A fast file indexing and duplicate detection tool.
+    A fast file indexing and duplicate detection tool suite.
+    
+    This release includes three specialized tools:
+    - **dcfh**: Daily operations (init, status, update, dupes, snapshots)
+    - **dcfhfind**: Unix find(1)-style search interface for index files
+    - **dcfhfix**: Index repair and recovery tool
     
     ### Installation
     
     #### Binary Downloads
-    Download the appropriate binary for your platform from the assets below.
+    Download the appropriate archive for your platform from the assets below. Each archive contains all three tools.
     
     #### Linux Packages
     - **Debian/Ubuntu**: Download the `.deb` package and install with `sudo dpkg -i dcfh_*.deb`
     - **RHEL/CentOS/Fedora**: Download the `.rpm` package and install with `sudo rpm -i dcfh_*.rpm`
-    
-    #### Windows
-    - Download the `.zip` package and extract `dcfh.exe` to your PATH
     
     ### What's Changed
   footer: |

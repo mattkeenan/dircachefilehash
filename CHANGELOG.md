@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2025-01-06
+
+### Changed
+- Updated goreleaser configuration to properly build all three tools
+  - Fixed build configuration to handle multi-binary structure
+  - All three binaries (dcfh, dcfhfind, dcfhfix) now included in single package
+  - Corrected go generate hooks for each tool directory
+
 ## [0.6.1] - 2025-01-06
 
 ### Fixed
