@@ -34,19 +34,19 @@ type SafeEntryAccessor struct {
 
 // Field offsets calculated at compile time - never hardcode these!
 var (
-	offsetSize       = uintptr(0)                                        // Size is first field
-	offsetCTimeWall  = unsafe.Offsetof((*binaryEntry)(nil).CTimeWall)   // Will be 4
-	offsetMTimeWall  = unsafe.Offsetof((*binaryEntry)(nil).MTimeWall)   // Will be 12
-	offsetDev        = unsafe.Offsetof((*binaryEntry)(nil).Dev)         // Will be 20
-	offsetIno        = unsafe.Offsetof((*binaryEntry)(nil).Ino)         // Will be 24
-	offsetMode       = unsafe.Offsetof((*binaryEntry)(nil).Mode)        // Will be 28
-	offsetUID        = unsafe.Offsetof((*binaryEntry)(nil).UID)         // Will be 32
-	offsetGID        = unsafe.Offsetof((*binaryEntry)(nil).GID)         // Will be 36
-	offsetFileSize   = unsafe.Offsetof((*binaryEntry)(nil).FileSize)    // Will be 40
-	offsetEntryFlags = unsafe.Offsetof((*binaryEntry)(nil).EntryFlags)  // Will be 48
-	offsetHashType   = unsafe.Offsetof((*binaryEntry)(nil).HashType)    // Will be 50
-	offsetHash       = unsafe.Offsetof((*binaryEntry)(nil).Hash)        // Will be 52
-	offsetPath       = unsafe.Offsetof((*binaryEntry)(nil).Path)        // Will be 116
+	offsetSize       = uintptr(0)                                      // Size is first field
+	offsetCTimeWall  = unsafe.Offsetof((*binaryEntry)(nil).CTimeWall)  // Will be 4
+	offsetMTimeWall  = unsafe.Offsetof((*binaryEntry)(nil).MTimeWall)  // Will be 12
+	offsetDev        = unsafe.Offsetof((*binaryEntry)(nil).Dev)        // Will be 20
+	offsetIno        = unsafe.Offsetof((*binaryEntry)(nil).Ino)        // Will be 24
+	offsetMode       = unsafe.Offsetof((*binaryEntry)(nil).Mode)       // Will be 28
+	offsetUID        = unsafe.Offsetof((*binaryEntry)(nil).UID)        // Will be 32
+	offsetGID        = unsafe.Offsetof((*binaryEntry)(nil).GID)        // Will be 36
+	offsetFileSize   = unsafe.Offsetof((*binaryEntry)(nil).FileSize)   // Will be 40
+	offsetEntryFlags = unsafe.Offsetof((*binaryEntry)(nil).EntryFlags) // Will be 48
+	offsetHashType   = unsafe.Offsetof((*binaryEntry)(nil).HashType)   // Will be 50
+	offsetHash       = unsafe.Offsetof((*binaryEntry)(nil).Hash)       // Will be 52
+	offsetPath       = unsafe.Offsetof((*binaryEntry)(nil).Path)       // Will be 116
 	minEntrySize     = unsafe.Sizeof(binaryEntry{})
 )
 
@@ -63,21 +63,21 @@ func NewSafeEntryAccessor(data []byte, entryIdx int, offset int) (*SafeEntryAcce
 
 	// Read the size field (first 4 bytes)
 	size := *(*uint32)(unsafe.Pointer(&data[offset]))
-	
+
 	// Validate size field
 	if size == 0 {
 		return nil, fmt.Errorf("entry %d: zero size at offset %d", entryIdx, offset)
 	}
-	
+
 	if size < uint32(minEntrySize) {
-		return nil, fmt.Errorf("entry %d: size %d too small (minimum %d) at offset %d", 
+		return nil, fmt.Errorf("entry %d: size %d too small (minimum %d) at offset %d",
 			entryIdx, size, minEntrySize, offset)
 	}
-	
+
 	if size > 4096 { // Reasonable maximum
 		return nil, fmt.Errorf("entry %d: size %d unreasonably large at offset %d", entryIdx, size, offset)
 	}
-	
+
 	maxOffset := offset + int(size)
 	if maxOffset > len(data) {
 		return nil, fmt.Errorf("entry %d: size %d extends beyond data bounds at offset %d", entryIdx, size, offset)
@@ -95,7 +95,7 @@ func NewSafeEntryAccessor(data []byte, entryIdx int, offset int) (*SafeEntryAcce
 func (sea *SafeEntryAccessor) validateFieldAccess(fieldOffset uintptr, fieldSize int, fieldName string) error {
 	absoluteOffset := sea.offset + int(fieldOffset)
 	if absoluteOffset+fieldSize > sea.maxOffset {
-		return fmt.Errorf("entry %d: %s field access would extend beyond entry bounds (offset %d, field size %d, entry max %d)", 
+		return fmt.Errorf("entry %d: %s field access would extend beyond entry bounds (offset %d, field size %d, entry max %d)",
 			sea.entryIdx, fieldName, absoluteOffset, fieldSize, sea.maxOffset)
 	}
 	return nil
@@ -242,10 +242,10 @@ func (sea *SafeEntryAccessor) GetPath() (string, error) {
 	if err := sea.validateFieldAccess(offsetPath, 1, "path"); err != nil {
 		return "", err
 	}
-	
+
 	pathStart := sea.offset + int(offsetPath)
 	pathData := sea.data[pathStart:sea.maxOffset]
-	
+
 	// Find null terminator or use all remaining data
 	pathEnd := len(pathData)
 	for i, b := range pathData {
@@ -254,6 +254,6 @@ func (sea *SafeEntryAccessor) GetPath() (string, error) {
 			break
 		}
 	}
-	
+
 	return string(pathData[:pathEnd]), nil
 }

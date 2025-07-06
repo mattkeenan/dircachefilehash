@@ -14,24 +14,24 @@ import (
 
 // SnapshotMetadata represents metadata for a snapshot
 type SnapshotMetadata struct {
-	ID          string            `json:"id"`          // ISO 8601 datetime string
-	Time        time.Time         `json:"time"`        // Parsed time for convenience
-	Hostname    string            `json:"hostname,omitempty"`
-	Username    string            `json:"username,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Tree        string            `json:"tree"`        // Hash of the tree structure
-	Files       map[string]string `json:"files"`       // filename -> hash mapping
-	Summary     SnapshotSummary   `json:"summary"`
-	Repository  string            `json:"repository"`  // Repository root path
+	ID         string            `json:"id"`   // ISO 8601 datetime string
+	Time       time.Time         `json:"time"` // Parsed time for convenience
+	Hostname   string            `json:"hostname,omitempty"`
+	Username   string            `json:"username,omitempty"`
+	Tags       []string          `json:"tags,omitempty"`
+	Tree       string            `json:"tree"`  // Hash of the tree structure
+	Files      map[string]string `json:"files"` // filename -> hash mapping
+	Summary    SnapshotSummary   `json:"summary"`
+	Repository string            `json:"repository"` // Repository root path
 }
 
 // SnapshotSummary provides summary statistics for a snapshot
 type SnapshotSummary struct {
-	FilesCount    int   `json:"files_count"`
-	TotalSize     int64 `json:"total_size"`
-	MainEntries   int   `json:"main_entries,omitempty"`
-	CacheEntries  int   `json:"cache_entries,omitempty"`
-	ScanFiles     int   `json:"scan_files,omitempty"`
+	FilesCount   int   `json:"files_count"`
+	TotalSize    int64 `json:"total_size"`
+	MainEntries  int   `json:"main_entries,omitempty"`
+	CacheEntries int   `json:"cache_entries,omitempty"`
+	ScanFiles    int   `json:"scan_files,omitempty"`
 }
 
 // SnapshotRepository manages snapshot storage and operations
@@ -42,11 +42,11 @@ type SnapshotRepository struct {
 
 // RetentionPolicy defines snapshot retention rules (restic-style)
 type RetentionPolicy struct {
-	Hourly   int `json:"hourly,omitempty"`
-	Daily    int `json:"daily,omitempty"`
-	Weekly   int `json:"weekly,omitempty"`
-	Monthly  int `json:"monthly,omitempty"`
-	Yearly   int `json:"yearly,omitempty"`
+	Hourly  int `json:"hourly,omitempty"`
+	Daily   int `json:"daily,omitempty"`
+	Weekly  int `json:"weekly,omitempty"`
+	Monthly int `json:"monthly,omitempty"`
+	Yearly  int `json:"yearly,omitempty"`
 }
 
 // ComparisonDirection defines direction for snapshot comparison
@@ -79,7 +79,7 @@ func (sr *SnapshotRepository) Initialise() error {
 	if err := os.MkdirAll(sr.SnapshotsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", sr.SnapshotsDir, err)
 	}
-	
+
 	// Create config file if it doesn't exist
 	configPath := filepath.Join(sr.SnapshotsDir, "config")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -88,17 +88,17 @@ func (sr *SnapshotRepository) Initialise() error {
 			"id":      generateRepositoryID(),
 			"created": time.Now().UTC(),
 		}
-		
+
 		configData, err := json.MarshalIndent(config, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal config: %w", err)
 		}
-		
+
 		if err := os.WriteFile(configPath, configData, 0644); err != nil {
 			return fmt.Errorf("failed to write config: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -107,54 +107,54 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 	if err := sr.Initialise(); err != nil {
 		return nil, fmt.Errorf("failed to initialise snapshot repository: %w", err)
 	}
-	
+
 	// Generate snapshot ID using ISO 8601 datetime
 	now := time.Now().UTC()
 	snapshotID := generateSnapshotID(now)
 	snapshotDir := filepath.Join(sr.SnapshotsDir, snapshotID)
-	
+
 	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create snapshot directory: %w", err)
 	}
-	
+
 	// Find all files to snapshot (.idx files and ignore file)
 	filesToSnapshot, err := sr.findFilesToSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find files to snapshot: %w", err)
 	}
-	
+
 	// Copy files and collect metadata
 	files := make(map[string]string)
 	var totalSize int64
-	
+
 	for _, file := range filesToSnapshot {
 		// Copy file preserving metadata
 		srcPath := filepath.Join(sr.BasePath, file)
 		dstPath := filepath.Join(snapshotDir, file)
-		
+
 		VerboseLog(2, "Copying %s (%s)", file, formatSize(getFileSize(srcPath)))
-		
+
 		fileHash, size, err := sr.copyFileWithHash(srcPath, dstPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to copy %s: %w", file, err)
 		}
-		
+
 		VerboseLog(3, "File %s: hash=%s, size=%d", file, fileHash, size)
-		
+
 		files[file] = fileHash
 		totalSize += size
 	}
-	
+
 	// Get hostname and username
 	hostname, _ := os.Hostname()
 	username := os.Getenv("USER")
 	if username == "" {
 		username = os.Getenv("USERNAME")
 	}
-	
+
 	// Calculate tree hash
 	treeHash := sr.calculateTreeHash(files)
-	
+
 	// Create metadata
 	metadata := &SnapshotMetadata{
 		ID:         snapshotID,
@@ -170,7 +170,7 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 			TotalSize:  totalSize,
 		},
 	}
-	
+
 	// Save tags to separate file if any tags provided
 	if len(tags) > 0 {
 		tagsPath := filepath.Join(snapshotDir, "tags")
@@ -179,30 +179,30 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 			return nil, fmt.Errorf("failed to write tags file: %w", err)
 		}
 	}
-	
+
 	// Analyze snapshot content for detailed summary
 	if err := sr.analyzeSnapshotContent(snapshotDir, &metadata.Summary); err != nil {
 		// Non-fatal - just log and continue
 		VerboseLog(3, "Warning: failed to analyze snapshot content: %v", err)
 	}
-	
+
 	// Log level 2: Show total entries in all indices
 	if metadata.Summary.MainEntries > 0 || metadata.Summary.CacheEntries > 0 {
-		VerboseLog(2, "Index analysis: main.idx=%d entries, cache.idx=%d entries", 
+		VerboseLog(2, "Index analysis: main.idx=%d entries, cache.idx=%d entries",
 			metadata.Summary.MainEntries, metadata.Summary.CacheEntries)
 	}
-	
+
 	// Save metadata
 	metadataPath := filepath.Join(snapshotDir, "metadata.json")
 	metadataData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
-	
+
 	if err := os.WriteFile(metadataPath, metadataData, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
-	
+
 	return metadata, nil
 }
 
@@ -211,33 +211,33 @@ func (sr *SnapshotRepository) ListSnapshots() ([]*SnapshotMetadata, error) {
 	if _, err := os.Stat(sr.SnapshotsDir); os.IsNotExist(err) {
 		return []*SnapshotMetadata{}, nil
 	}
-	
+
 	entries, err := os.ReadDir(sr.SnapshotsDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snapshots directory: %w", err)
 	}
-	
+
 	var snapshots []*SnapshotMetadata
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "config" {
 			continue
 		}
-		
+
 		metadataPath := filepath.Join(sr.SnapshotsDir, entry.Name(), "metadata.json")
 		metadata, err := sr.loadSnapshotMetadata(metadataPath)
 		if err != nil {
 			VerboseLog(1, "Warning: failed to load metadata for snapshot %s: %v", entry.Name(), err)
 			continue
 		}
-		
+
 		snapshots = append(snapshots, metadata)
 	}
-	
+
 	// Sort by time (newest first)
 	sort.Slice(snapshots, func(i, j int) bool {
 		return snapshots[i].Time.After(snapshots[j].Time)
 	})
-	
+
 	return snapshots, nil
 }
 
@@ -247,15 +247,15 @@ func (sr *SnapshotRepository) ForgetSnapshots(policy RetentionPolicy, dryRun boo
 	if err != nil {
 		return nil, fmt.Errorf("failed to list snapshots: %w", err)
 	}
-	
+
 	if len(snapshots) == 0 {
 		return []string{}, nil
 	}
-	
+
 	// Group snapshots by time period
 	toKeep := sr.selectSnapshotsToKeep(snapshots, policy)
 	toRemove := sr.findSnapshotsToRemove(snapshots, toKeep)
-	
+
 	var removed []string
 	for _, snapshot := range toRemove {
 		if dryRun {
@@ -269,28 +269,28 @@ func (sr *SnapshotRepository) ForgetSnapshots(policy RetentionPolicy, dryRun boo
 		}
 		removed = append(removed, snapshot.ID)
 	}
-	
+
 	return removed, nil
 }
 
 // selectSnapshotsToKeep determines which snapshots to keep based on retention policy
 func (sr *SnapshotRepository) selectSnapshotsToKeep(snapshots []*SnapshotMetadata, policy RetentionPolicy) map[string]*SnapshotMetadata {
 	toKeep := make(map[string]*SnapshotMetadata)
-	
+
 	// Group snapshots by time periods
 	hourlyGroups := sr.groupSnapshotsByHour(snapshots)
 	dailyGroups := sr.groupSnapshotsByDay(snapshots)
 	weeklyGroups := sr.groupSnapshotsByWeek(snapshots)
 	monthlyGroups := sr.groupSnapshotsByMonth(snapshots)
 	yearlyGroups := sr.groupSnapshotsByYear(snapshots)
-	
+
 	// Keep the latest snapshot from each group, up to the policy limits
 	sr.selectFromGroups(hourlyGroups, policy.Hourly, toKeep)
 	sr.selectFromGroups(dailyGroups, policy.Daily, toKeep)
 	sr.selectFromGroups(weeklyGroups, policy.Weekly, toKeep)
 	sr.selectFromGroups(monthlyGroups, policy.Monthly, toKeep)
 	sr.selectFromGroups(yearlyGroups, policy.Yearly, toKeep)
-	
+
 	return toKeep
 }
 
@@ -369,27 +369,27 @@ func (sr *SnapshotRepository) selectFromGroups(groups map[string][]*SnapshotMeta
 	if limit <= 0 {
 		return
 	}
-	
+
 	// Get all group keys and sort them in reverse chronological order (newest first)
 	var keys []string
 	for key := range groups {
 		keys = append(keys, key)
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
-	
+
 	// Select the latest snapshot from each group, up to the limit
 	count := 0
 	for _, key := range keys {
 		if count >= limit {
 			break
 		}
-		
+
 		// Sort snapshots in this group by time (newest first)
 		groupSnapshots := groups[key]
 		sort.Slice(groupSnapshots, func(i, j int) bool {
 			return groupSnapshots[i].Time.After(groupSnapshots[j].Time)
 		})
-		
+
 		// Keep the latest snapshot from this group
 		if len(groupSnapshots) > 0 {
 			latest := groupSnapshots[0]
@@ -406,23 +406,23 @@ func (sr *SnapshotRepository) findFilesToSnapshot() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var files []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		name := entry.Name()
 		// Include .idx files and ignore file
 		if strings.HasSuffix(name, ".idx") || name == "ignore" {
 			files = append(files, name)
 		}
 	}
-	
+
 	// Debug output
 	VerboseLog(3, "Found %d files to snapshot in %s: %v", len(files), sr.BasePath, files)
-	
+
 	return files, nil
 }
 
@@ -432,28 +432,28 @@ func (sr *SnapshotRepository) copyFileWithHash(src, dst string) (string, int64, 
 	if err != nil {
 		return "", 0, err
 	}
-	
+
 	// Calculate hash
 	hash := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(hash[:])
-	
+
 	// Get source file info for metadata preservation
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return "", 0, err
 	}
-	
+
 	// Write destination file
 	if err := os.WriteFile(dst, data, srcInfo.Mode()); err != nil {
 		return "", 0, err
 	}
-	
+
 	// Preserve timestamps
 	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
 		// Non-fatal
 		VerboseLog(2, "Warning: failed to preserve timestamps for %s: %v", dst, err)
 	}
-	
+
 	return hashStr, int64(len(data)), nil
 }
 
@@ -464,7 +464,7 @@ func (sr *SnapshotRepository) calculateTreeHash(files map[string]string) string 
 		items = append(items, fmt.Sprintf("%s:%s", filename, hash))
 	}
 	sort.Strings(items)
-	
+
 	content := strings.Join(items, "\n")
 	hash := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(hash[:])
@@ -475,19 +475,19 @@ func (sr *SnapshotRepository) analyzeSnapshotContent(snapshotDir string, summary
 	if err != nil {
 		return err
 	}
-	
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".idx") {
 			continue
 		}
-		
+
 		indexPath := filepath.Join(snapshotDir, entry.Name())
 		header, err := ValidateIndexHeader(indexPath, true, 0) // Validate version compatibility (current version is 0)
 		if err != nil {
 			VerboseLog(3, "Warning: failed to analyze %s: %v", entry.Name(), err)
 			continue
 		}
-		
+
 		entryCount := int(header.EntryCount)
 		switch entry.Name() {
 		case "main.idx":
@@ -499,11 +499,11 @@ func (sr *SnapshotRepository) analyzeSnapshotContent(snapshotDir string, summary
 				summary.ScanFiles++
 			}
 		}
-		
-		VerboseLog(3, "Index %s: %d entries, version=%d, flags=0x%x", 
+
+		VerboseLog(3, "Index %s: %d entries, version=%d, flags=0x%x",
 			entry.Name(), entryCount, header.Version, header.Flags)
 	}
-	
+
 	return nil
 }
 
@@ -512,12 +512,12 @@ func (sr *SnapshotRepository) loadSnapshotMetadata(metadataPath string) (*Snapsh
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var metadata SnapshotMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, err
 	}
-	
+
 	// Load tags from tags file if it exists
 	snapshotDir := filepath.Dir(metadataPath)
 	tagsPath := filepath.Join(snapshotDir, "tags")
@@ -536,7 +536,7 @@ func (sr *SnapshotRepository) loadSnapshotMetadata(metadataPath string) (*Snapsh
 			metadata.Tags = cleanTags
 		}
 	}
-	
+
 	return &metadata, nil
 }
 
@@ -572,4 +572,3 @@ func formatSize(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
-

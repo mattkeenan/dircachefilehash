@@ -75,9 +75,9 @@ func TestSetDebugFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset debug flags
 			SetDebugFlags("")
-			
+
 			SetDebugFlags(tt.input)
-			
+
 			if IsDebugEnabled("extravalidation") != tt.expectedExtraValid {
 				t.Errorf("extravalidation: expected %v, got %v", tt.expectedExtraValid, IsDebugEnabled("extravalidation"))
 			}
@@ -96,7 +96,7 @@ func TestSetDebugFlags(t *testing.T) {
 
 func TestDebugFlagAccessors(t *testing.T) {
 	SetDebugFlags("extravalidation,indexchaining")
-	
+
 	if !IsDebugEnabled("extravalidation") {
 		t.Error("Expected IsDebugEnabled('extravalidation') to return true")
 	}
@@ -113,7 +113,7 @@ func TestDebugFlagAccessors(t *testing.T) {
 
 func TestDebugFlagCaseInsensitive(t *testing.T) {
 	SetDebugFlags("ExtraValidation")
-	
+
 	// Should work with different cases
 	if !IsDebugEnabled("extravalidation") {
 		t.Error("Expected lowercase flag name to work")
@@ -145,7 +145,7 @@ func TestDebugFlagValueParsing(t *testing.T) {
 		{"flag:unknown", "flag", true}, // Default to true for unknown values
 		{"flag", "flag", true},         // Default to true for simple flag names
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			SetDebugFlags(tt.input)

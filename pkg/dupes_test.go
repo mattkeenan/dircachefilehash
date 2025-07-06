@@ -54,7 +54,7 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 	if len(duplicates) != 0 {
 		t.Errorf("Expected no duplicates in empty index, got %d", len(duplicates))
 	}
-	
+
 	// Report string copy stats
 	copies, accesses, rate := GetStringCopyStats()
 	t.Logf("String copy stats: %d copies out of %d accesses (%.2f%% copy rate)", copies, accesses, rate)
@@ -75,10 +75,10 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	// Test different flag combinations
 	testFlags := []map[string]string{
-		{},                    // No flags
-		{"v": "1"},           // Verbose level 1
-		{"v": "2"},           // Verbose level 2
-		{"other": "value"},   // Other flags
+		{},                 // No flags
+		{"v": "1"},         // Verbose level 1
+		{"v": "2"},         // Verbose level 2
+		{"other": "value"}, // Other flags
 	}
 
 	for i, flags := range testFlags {
@@ -173,11 +173,11 @@ func TestDuplicateGroup_SingleFile(t *testing.T) {
 // Test that duplicate groups maintain consistency
 func TestDuplicateGroup_Consistency(t *testing.T) {
 	testCases := []struct {
-		name     string
-		hash     string
-		files    []string
-		count    int
-		isValid  bool
+		name    string
+		hash    string
+		files   []string
+		count   int
+		isValid bool
 	}{
 		{
 			name:    "valid group",

@@ -14,10 +14,10 @@ import (
 
 // HashAlgorithm represents a hash algorithm configuration
 type HashAlgorithm struct {
-	Name     string
-	TypeID   uint16
-	Size     int
-	NewFunc  func() hash.Hash
+	Name    string
+	TypeID  uint16
+	Size    int
+	NewFunc func() hash.Hash
 }
 
 // GetHashAlgorithm returns the hash algorithm configuration for the given name
@@ -114,7 +114,7 @@ func GetHashSize(hashType uint16) int {
 func (dc *DirectoryCache) GetCurrentHashType() uint16 {
 	// 1. Check command line options first (via overrides)
 	// Command line overrides are already applied to the config during initialization
-	
+
 	// 2. Check config file settings (which may include command line overrides)
 	if dc.config != nil {
 		hashConfig := dc.config.GetHashConfig()
@@ -125,7 +125,7 @@ func (dc *DirectoryCache) GetCurrentHashType() uint16 {
 			}
 		}
 	}
-	
+
 	// 3. Default to SHA256 (as specified in requirements)
 	return HashTypeSHA256
 }
@@ -147,7 +147,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 
 	hasher := algorithm.NewFunc()
 	buffer := make([]byte, bufferSize)
-	
+
 	for {
 		// Check for shutdown signal before each read
 		select {
@@ -156,12 +156,12 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 		default:
 			// Continue with read
 		}
-		
+
 		n, err := file.Read(buffer)
 		if n > 0 {
 			hasher.Write(buffer[:n])
 		}
-		
+
 		if err == io.EOF {
 			// Successfully reached end of file
 			break
@@ -181,18 +181,18 @@ func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdown
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 	}
-	
+
 	// Get buffer size from config
 	bufferSize, err := dc.getHashBufferSize()
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get hash buffer size: %w", err)
 	}
-	
+
 	hashBytes, err := HashFileInterruptible(filePath, algorithm, bufferSize, shutdownChan)
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	return hashBytes, algorithm.TypeID, nil
 }
 
@@ -202,7 +202,7 @@ func (dc *DirectoryCache) getHashBufferSize() (int, error) {
 		// Fallback to 2MB if no config
 		return 2 * 1024 * 1024, nil
 	}
-	
+
 	performanceConfig := dc.config.GetPerformanceConfig()
 	return ParseHumanSize(performanceConfig.HashBuffer)
 }

@@ -131,9 +131,9 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 
 	// Test verbose flag parsing
 	tests := []struct {
-		name          string
-		flags         map[string]string
-		expectClean   bool
+		name        string
+		flags       map[string]string
+		expectClean bool
 	}{
 		{
 			name:        "no verbose flag",
@@ -177,7 +177,7 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 			// but we can test the verbose flag parsing logic
 			verboseLevel, exists := tt.flags["v"]
 			hasCleanStatus := false
-			
+
 			if exists && verboseLevel != "" {
 				if level, err := strconv.Atoi(verboseLevel); err == nil && level > 0 {
 					hasCleanStatus = true

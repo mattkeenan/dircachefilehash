@@ -32,13 +32,13 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 	// Create a temporary DirectoryCache to use for loading
 	tempDir := filepath.Dir(indexPath)
 	dc := NewDirectoryCache(tempDir, "")
-	
+
 	// Load the index file into a skiplist
 	refs, err := dc.LoadIndexFromFileForValidation(indexPath)
 	if err != nil {
 		return fmt.Errorf("failed to load index: %w", err)
 	}
-	
+
 	// Create skiplist and insert all entries
 	skiplist := NewSkiplistWrapper(16, MainContext)
 	for _, ref := range refs {
@@ -74,7 +74,7 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 			HashStr:   entry.HashString(),
 			HashType:  entry.HashType,
 		}
-		
+
 		// Call the user-provided callback
 		return callback(info, indexType)
 	})
@@ -126,15 +126,15 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 		}
 		return indexSpec, nil
 	}
-	
+
 	// Otherwise, discover repository and resolve index type
 	repoRoot, err := FindRepositoryRootFrom("")
 	if err != nil {
 		return "", fmt.Errorf("not in a dcfh repository: %v", err)
 	}
-	
+
 	dcfhDir := filepath.Join(repoRoot, ".dcfh")
-	
+
 	switch indexSpec {
 	case "main":
 		return filepath.Join(dcfhDir, "main.idx"), nil
@@ -156,7 +156,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 			}
 			return scanPath, nil
 		}
-		
+
 		// Try appending .idx if it doesn't have an extension
 		if !strings.Contains(indexSpec, ".") {
 			indexWithExt := indexSpec + ".idx"
@@ -165,7 +165,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 				return indexPath, nil
 			}
 		}
-		
+
 		return "", fmt.Errorf("unknown index type: %s (use 'main', 'cache', 'scan-PID-TID', or full path)", indexSpec)
 	}
 }
@@ -189,34 +189,34 @@ func ValidateEntryInfo(entry *EntryInfo, repoPath string) (bool, error) {
 	if entry.Path == "" {
 		return false, nil
 	}
-	
+
 	if entry.HashStr == "" {
 		return false, nil
 	}
-	
+
 	// Validate hash type
 	if entry.HashType == 0 || entry.HashType > 3 {
 		return false, nil
 	}
-	
+
 	// Check hash string length based on type
 	expectedLength := map[uint16]int{
-		1: 40, // SHA1 - 20 bytes * 2 hex chars
-		2: 64, // SHA256 - 32 bytes * 2 hex chars  
+		1: 40,  // SHA1 - 20 bytes * 2 hex chars
+		2: 64,  // SHA256 - 32 bytes * 2 hex chars
 		3: 128, // SHA512 - 64 bytes * 2 hex chars
 	}
-	
+
 	if expected, ok := expectedLength[entry.HashType]; ok {
 		if len(entry.HashStr) != expected {
 			return false, nil
 		}
 	}
-	
+
 	// Validate file size is reasonable (less than 4 exabytes)
 	if entry.FileSize > (1 << 62) {
 		return false, nil
 	}
-	
+
 	return true, nil
 }
 
@@ -224,26 +224,26 @@ func ValidateEntryInfo(entry *EntryInfo, repoPath string) (bool, error) {
 // Returns true if hashes match, false if they don't, and error if verification fails
 func VerifyEntryChecksum(entry *EntryInfo, repoPath string) (bool, error) {
 	filePath := filepath.Join(repoPath, entry.Path)
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return false, fmt.Errorf("file does not exist")
 	} else if err != nil {
 		return false, fmt.Errorf("stat error: %w", err)
 	}
-	
+
 	// Get hash algorithm
 	algorithm, err := GetHashAlgorithmByType(entry.HashType)
 	if err != nil {
 		return false, fmt.Errorf("invalid hash type %d: %w", entry.HashType, err)
 	}
-	
+
 	// Calculate current file hash
 	currentHash, err := HashFileToHexString(filePath, algorithm)
 	if err != nil {
 		return false, fmt.Errorf("failed to calculate hash: %w", err)
 	}
-	
+
 	// Compare hashes (case-insensitive)
 	return strings.EqualFold(currentHash, entry.HashStr), nil
 }
@@ -252,32 +252,32 @@ func VerifyEntryChecksum(entry *EntryInfo, repoPath string) (bool, error) {
 // Returns true if corruption is detected, and a list of corruption issues found
 func DetectEntryCorruption(entry *EntryInfo) (bool, []string) {
 	var issues []string
-	
+
 	// Check for all-zero hash (common corruption indicator)
 	if entry.HashStr == strings.Repeat("0", len(entry.HashStr)) {
 		issues = append(issues, "all-zero hash")
 	}
-	
+
 	// Check for invalid hash type
 	if entry.HashType == 0 || entry.HashType > 3 {
 		issues = append(issues, fmt.Sprintf("invalid hash type: %d", entry.HashType))
 	}
-	
+
 	// Check for unreasonable file size (>4 exabytes)
 	if entry.FileSize > (1 << 62) {
 		issues = append(issues, fmt.Sprintf("unreasonable file size: %d bytes", entry.FileSize))
 	}
-	
+
 	// Check for empty path
 	if entry.Path == "" {
 		issues = append(issues, "empty file path")
 	}
-	
+
 	// Check for empty hash
 	if entry.HashStr == "" {
 		issues = append(issues, "empty hash")
 	}
-	
+
 	// Check hash string contains only hex characters
 	if entry.HashStr != "" {
 		for _, r := range entry.HashStr {
@@ -287,6 +287,6 @@ func DetectEntryCorruption(entry *EntryInfo) (bool, []string) {
 			}
 		}
 	}
-	
+
 	return len(issues) > 0, issues
 }

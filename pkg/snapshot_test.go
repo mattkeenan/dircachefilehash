@@ -300,45 +300,45 @@ func TestRetentionPolicy_ForgetSnapshots(t *testing.T) {
 			t.Fatalf("Failed to create snapshot %d: %v", i, err)
 		}
 		snapshotIDs = append(snapshotIDs, snapshot.ID)
-		
+
 		// Modify the snapshot time to be on different days
 		// Read and update metadata to simulate snapshots from different days
 		snapshotDir := filepath.Join(tempDir, "snapshots", snapshot.ID)
 		metadataPath := filepath.Join(snapshotDir, "metadata.json")
-		
+
 		// Read existing metadata
 		metadataBytes, err := os.ReadFile(metadataPath)
 		if err != nil {
 			t.Fatalf("Failed to read metadata: %v", err)
 		}
-		
+
 		var metadata SnapshotMetadata
 		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 			t.Fatalf("Failed to parse metadata: %v", err)
 		}
-		
+
 		// Update time to be on different days (going backwards in time)
 		newTime := baseTime.AddDate(0, 0, -i)
 		metadata.Time = newTime
 		newID := generateSnapshotID(newTime)
 		metadata.ID = newID
-		
+
 		// Write updated metadata
 		updatedBytes, err := json.MarshalIndent(metadata, "", "  ")
 		if err != nil {
 			t.Fatalf("Failed to marshal updated metadata: %v", err)
 		}
-		
+
 		if err := os.WriteFile(metadataPath, updatedBytes, 0644); err != nil {
 			t.Fatalf("Failed to write updated metadata: %v", err)
 		}
-		
+
 		// Rename snapshot directory to match new ID
 		newSnapshotDir := filepath.Join(tempDir, "snapshots", newID)
 		if err := os.Rename(snapshotDir, newSnapshotDir); err != nil {
 			t.Fatalf("Failed to rename snapshot directory: %v", err)
 		}
-		
+
 		// Update our tracking
 		snapshotIDs[i] = newID
 	}
@@ -595,7 +595,7 @@ func TestSnapshotRepository_RemoveNonexistentSnapshot(t *testing.T) {
 	// Try to remove a nonexistent snapshot
 	nonexistentID := "nonexistent-snapshot-id"
 	err = repo.RemoveSnapshot(nonexistentID)
-	
+
 	// Should not return an error (os.RemoveAll doesn't fail on nonexistent paths)
 	if err != nil {
 		t.Errorf("RemoveSnapshot should not fail on nonexistent snapshot, got: %v", err)

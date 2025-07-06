@@ -50,7 +50,6 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	return skiplist, nil
 }
 
-
 // CreateTmpIndexFromScan scans the directory and creates a temporary index using the new scan workflow
 func (dc *DirectoryCache) createTmpIndexFromScan(shutdownChan <-chan struct{}, comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	// Use the new PerformHwangLinScanToSkiplist workflow
@@ -61,7 +60,6 @@ func (dc *DirectoryCache) createTmpIndexFromScan(shutdownChan <-chan struct{}, c
 
 	return scanSkiplist, nil
 }
-
 
 // UpdateCacheIndexWithWorkflow implements the cache update workflow as specified
 func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struct{}) (*skiplistWrapper, error) {
@@ -77,7 +75,6 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
-	
 
 	// Step 3: Make a copy of the main index skiplist
 	workingSkiplist := mainSkiplist.Copy()
@@ -86,7 +83,6 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 	if err := workingSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
 		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
-	
 
 	// Step 5: Create tmp index from scan using Hwang-Lin algorithm
 	scanSkiplist, err := dc.createTmpIndexFromScan(shutdownChan, workingSkiplist)
@@ -104,7 +100,6 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 		os.Remove(dc.CacheFile)
 		return scanSkiplist, nil
 	}
-	
 
 	// Step 10 & 11: Write cache index using vectorio with atomic rename
 	tempCachePath := dc.generateTempFileName("cache")

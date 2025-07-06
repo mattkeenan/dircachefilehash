@@ -15,7 +15,7 @@ func TestExtractPidFromIndexFileName(t *testing.T) {
 		{"tmp-42-999.idx", 42},
 		{"invalid.idx", 0},
 		{"scan-abc-def.idx", 0},
-		{"scan-1234.idx", 0}, // Not enough parts
+		{"scan-1234.idx", 0},  // Not enough parts
 		{"scan-1234-5678", 0}, // No .idx suffix
 		{"", 0},
 	}
@@ -33,7 +33,7 @@ func TestIsProcessRunning(t *testing.T) {
 	if !isProcessRunning(1) {
 		t.Errorf("PID 1 should be running on Unix systems")
 	}
-	
+
 	// Test with an obviously invalid PID (very high number unlikely to be used)
 	if isProcessRunning(999999) {
 		t.Errorf("PID 999999 should not be running")

@@ -44,7 +44,7 @@ func TestCallbackArchitecture(t *testing.T) {
 	if err := cache.Update(nil, flags); err != nil {
 		t.Fatalf("Failed to update cache: %v", err)
 	}
-	
+
 	// Check if index file was created
 	if _, err := os.Stat(cache.IndexFile); os.IsNotExist(err) {
 		t.Fatalf("Index file was not created: %s", cache.IndexFile)
@@ -69,7 +69,7 @@ func TestCallbackArchitecture(t *testing.T) {
 		t.Errorf("Expected %d entries, got %d", len(testFiles), entryCount)
 	}
 
-	// Test 2: Test direct loadIndexFromFile 
+	// Test 2: Test direct loadIndexFromFile
 	refs, err := cache.loadIndexFromFile(cache.IndexFile)
 	if err != nil {
 		t.Fatalf("Failed to load index directly: %v", err)
@@ -80,7 +80,7 @@ func TestCallbackArchitecture(t *testing.T) {
 		t.Errorf("Expected %d refs, got %d", len(testFiles), len(refs))
 	}
 
-	// Test 3: Test Status detection 
+	// Test 3: Test Status detection
 	status, err := cache.Status(nil, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
@@ -88,7 +88,7 @@ func TestCallbackArchitecture(t *testing.T) {
 
 	// Should have no changes since we just updated
 	if status.HasChanges() {
-		t.Errorf("Expected no changes, but got: Added=%v, Modified=%v, Deleted=%v", 
+		t.Errorf("Expected no changes, but got: Added=%v, Modified=%v, Deleted=%v",
 			status.Added, status.Modified, status.Deleted)
 	}
 
@@ -113,7 +113,7 @@ func TestCallbackArchitecture(t *testing.T) {
 	if err := os.Remove(deletedFile); err != nil {
 		t.Fatalf("Failed to delete file: %v", err)
 	}
-	
+
 	// Verify file is actually deleted
 	if _, err := os.Stat(deletedFile); !os.IsNotExist(err) {
 		t.Fatalf("File %s should be deleted but still exists", deletedFile)
@@ -125,7 +125,7 @@ func TestCallbackArchitecture(t *testing.T) {
 		t.Fatalf("Failed to get status after deletion: %v", err)
 	}
 
-	t.Logf("Status after deletion: Added=%v, Modified=%v, Deleted=%v", 
+	t.Logf("Status after deletion: Added=%v, Modified=%v, Deleted=%v",
 		status.Added, status.Modified, status.Deleted)
 
 	// Should detect the deletion

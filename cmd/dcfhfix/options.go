@@ -30,11 +30,11 @@ type OptionDef struct {
 
 // ParsedOptions holds the parsed command-line options
 type ParsedOptions struct {
-	values    map[string]string
-	args      []string
-	defs      map[string]*OptionDef
-	shortMap  map[string]string // Maps short options to long options
-	explicitlySet map[string]bool // Tracks which options were explicitly set
+	values        map[string]string
+	args          []string
+	defs          map[string]*OptionDef
+	shortMap      map[string]string // Maps short options to long options
+	explicitlySet map[string]bool   // Tracks which options were explicitly set
 }
 
 // NewParsedOptions creates a new options parser
@@ -61,7 +61,7 @@ func (p *ParsedOptions) DefineOption(long, short string, optType OptionType, def
 	if short != "" {
 		p.shortMap[short] = long
 	}
-	
+
 	// Set default value
 	if defaultValue != "" {
 		p.values[long] = defaultValue
@@ -71,15 +71,15 @@ func (p *ParsedOptions) DefineOption(long, short string, optType OptionType, def
 // Parse parses command-line arguments
 func (p *ParsedOptions) Parse(args []string) error {
 	consumed := make([]bool, len(args)) // Track which arguments are consumed
-	
+
 	// First pass: identify options and mark consumed arguments
 	for i := 0; i < len(args); i++ {
 		if consumed[i] {
 			continue
 		}
-		
+
 		arg := args[i]
-		
+
 		if strings.HasPrefix(arg, "--") {
 			// Long option
 			consumed[i] = true
@@ -94,14 +94,14 @@ func (p *ParsedOptions) Parse(args []string) error {
 			}
 		}
 	}
-	
+
 	// Second pass: collect non-consumed arguments
 	for i := 0; i < len(args); i++ {
 		if !consumed[i] {
 			p.args = append(p.args, args[i])
 		}
 	}
-	
+
 	return nil
 }
 
@@ -109,18 +109,18 @@ func (p *ParsedOptions) Parse(args []string) error {
 func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consumed []bool) error {
 	optName := strings.TrimPrefix(arg, "--")
 	var optValue string
-	
+
 	// Check for --option=value format
 	if equalPos := strings.Index(optName, "="); equalPos != -1 {
 		optValue = optName[equalPos+1:]
 		optName = optName[:equalPos]
 	}
-	
+
 	def, exists := p.defs[optName]
 	if !exists {
 		return fmt.Errorf("unknown option: --%s", optName)
 	}
-	
+
 	switch def.Type {
 	case OptionTypeBool:
 		if optValue != "" {
@@ -148,7 +148,7 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 			// --option without value - this is an error for string/int options
 			return fmt.Errorf("option --%s requires a value (use --%s=value)", optName, optName)
 		}
-		
+
 		// Validate integer type
 		if def.Type == OptionTypeInt {
 			if _, err := strconv.Atoi(p.values[optName]); err != nil {
@@ -156,14 +156,14 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // parseShortOptions parses short option(s) (-o or -abc)
 func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, consumed []bool) error {
 	shortOpts := strings.TrimPrefix(arg, "-")
-	
+
 	// First, count occurrences of each option for repetition handling
 	optCounts := make(map[string]int)
 	for _, r := range shortOpts {
@@ -173,18 +173,18 @@ func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, con
 		}
 		optCounts[short]++
 	}
-	
+
 	// Process each unique option
 	for short, count := range optCounts {
 		longOpt := p.shortMap[short]
 		def := p.defs[longOpt]
-		
+
 		switch def.Type {
 		case OptionTypeBool:
 			// For boolean options, just set to true
 			p.values[longOpt] = "true"
 			p.explicitlySet[longOpt] = true
-			
+
 		case OptionTypeInt:
 			// For integer options, check if count > 1 (repetition)
 			if count > 1 {
@@ -202,7 +202,7 @@ func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, con
 					p.explicitlySet[longOpt] = true
 				}
 			}
-			
+
 		case OptionTypeString:
 			// String options must consume next available argument
 			if nextArg := p.findNextAvailableArg(args, *i, consumed); nextArg != "" {
@@ -213,7 +213,7 @@ func (p *ParsedOptions) parseShortOptions(arg string, args []string, i *int, con
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -278,13 +278,13 @@ func (p *ParsedOptions) GetArgs() []string {
 func (p *ParsedOptions) ShowUsage(programName string) {
 	fmt.Fprintf(os.Stderr, "Usage: %s [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]\n\n", programName)
 	fmt.Fprintf(os.Stderr, "Global Options:\n")
-	
+
 	for _, def := range p.defs {
 		var shortOpt string
 		if def.Short != "" {
 			shortOpt = fmt.Sprintf("-%s, ", def.Short)
 		}
-		
+
 		var valueDesc string
 		switch def.Type {
 		case OptionTypeString:
@@ -294,8 +294,8 @@ func (p *ParsedOptions) ShowUsage(programName string) {
 		case OptionTypeBool:
 			valueDesc = ""
 		}
-		
-		fmt.Fprintf(os.Stderr, "  %s--%s%s%s\n", shortOpt, def.Long, valueDesc, 
+
+		fmt.Fprintf(os.Stderr, "  %s--%s%s%s\n", shortOpt, def.Long, valueDesc,
 			strings.Repeat(" ", max(0, 20-len(def.Long)-len(valueDesc))))
 		fmt.Fprintf(os.Stderr, "        %s\n", def.Description)
 	}

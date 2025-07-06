@@ -27,7 +27,7 @@ type OutputConfig struct {
 
 // VerboseConfig represents verbosity configuration
 type VerboseConfig struct {
-	Level int  // Default verbose level (0=quiet, 1=basic, 2=detailed, 3=trace)
+	Level int    // Default verbose level (0=quiet, 1=basic, 2=detailed, 3=trace)
 	Debug string // Default debug flags (comma-separated)
 }
 
@@ -65,11 +65,11 @@ type AllConfig struct {
 // LoadConfig loads configuration from the .dcfh/config file
 func LoadConfig(dcfhDir string) (*Config, error) {
 	configPath := filepath.Join(dcfhDir, "config")
-	
+
 	cfg := &Config{
 		configPath: configPath,
 	}
-	
+
 	// Load existing config or create default
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Create default config
@@ -88,7 +88,7 @@ func LoadConfig(dcfhDir string) (*Config, error) {
 		}
 		cfg.ini = iniFile
 	}
-	
+
 	return cfg, nil
 }
 
@@ -103,7 +103,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default hash algorithm: %w", err)
 	}
-	
+
 	// Set default output format
 	outputSection, err := c.ini.NewSection("output")
 	if err != nil {
@@ -113,7 +113,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default output format: %w", err)
 	}
-	
+
 	// Set default verbose settings
 	verboseSection, err := c.ini.NewSection("verbose")
 	if err != nil {
@@ -127,7 +127,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default debug flags: %w", err)
 	}
-	
+
 	// Set default symlink settings
 	symlinkSection, err := c.ini.NewSection("symlink")
 	if err != nil {
@@ -137,7 +137,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default symlink mode: %w", err)
 	}
-	
+
 	// Set default performance settings
 	performanceSection, err := c.ini.NewSection("performance")
 	if err != nil {
@@ -147,7 +147,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default hash workers: %w", err)
 	}
-	
+
 	// Set default snapshot retention policy settings
 	snapshotSection, err := c.ini.NewSection("snapshot")
 	if err != nil {
@@ -177,7 +177,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to set default dry_run: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -186,14 +186,14 @@ func (c *Config) GetHashConfig() *HashConfig {
 	hashConfig := &HashConfig{
 		Default: "sha256", // fallback default
 	}
-	
+
 	if c.ini.HasSection("filehash") {
 		section := c.ini.Section("filehash")
 		if section.HasKey("default") {
 			hashConfig.Default = section.Key("default").String()
 		}
 	}
-	
+
 	return hashConfig
 }
 
@@ -202,14 +202,14 @@ func (c *Config) GetOutputConfig() *OutputConfig {
 	outputConfig := &OutputConfig{
 		Format: "human", // fallback default
 	}
-	
+
 	if c.ini.HasSection("output") {
 		section := c.ini.Section("output")
 		if section.HasKey("format") {
 			outputConfig.Format = section.Key("format").String()
 		}
 	}
-	
+
 	return outputConfig
 }
 
@@ -219,7 +219,7 @@ func (c *Config) GetVerboseConfig() *VerboseConfig {
 		Level: 0,  // fallback default
 		Debug: "", // fallback default
 	}
-	
+
 	if c.ini.HasSection("verbose") {
 		section := c.ini.Section("verbose")
 		if section.HasKey("level") {
@@ -231,7 +231,7 @@ func (c *Config) GetVerboseConfig() *VerboseConfig {
 			verboseConfig.Debug = section.Key("debug").String()
 		}
 	}
-	
+
 	return verboseConfig
 }
 
@@ -240,14 +240,14 @@ func (c *Config) GetSymlinkConfig() *SymlinkConfig {
 	symlinkConfig := &SymlinkConfig{
 		Mode: "all", // fallback default
 	}
-	
+
 	if c.ini.HasSection("symlink") {
 		section := c.ini.Section("symlink")
 		if section.HasKey("mode") {
 			symlinkConfig.Mode = section.Key("mode").String()
 		}
 	}
-	
+
 	return symlinkConfig
 }
 
@@ -257,7 +257,7 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 		HashWorkers: 4,    // fallback default
 		HashBuffer:  "2M", // fallback default - 2MB buffer for interruptible hashing
 	}
-	
+
 	if c.ini.HasSection("performance") {
 		section := c.ini.Section("performance")
 		if section.HasKey("hash_workers") {
@@ -271,7 +271,7 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 			}
 		}
 	}
-	
+
 	return performanceConfig
 }
 
@@ -285,7 +285,7 @@ func (c *Config) GetSnapshotConfig() *SnapshotConfig {
 		KeepYearly:  3,     // fallback default
 		DryRun:      false, // fallback default
 	}
-	
+
 	if c.ini.HasSection("snapshot") {
 		section := c.ini.Section("snapshot")
 		if section.HasKey("keep_hourly") {
@@ -319,7 +319,7 @@ func (c *Config) GetSnapshotConfig() *SnapshotConfig {
 			}
 		}
 	}
-	
+
 	return snapshotConfig
 }
 
@@ -390,10 +390,10 @@ func (c *Config) ApplyOverrides(overrides []string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid override format '%s', expected 'key:value'", override)
 		}
-		
+
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		
+
 		switch key {
 		case "default":
 			// filehash.default override
@@ -423,7 +423,7 @@ func (c *Config) ApplyOverrides(overrides []string) error {
 			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode, hash_workers)", key)
 		}
 	}
-	
+
 	return nil
 }
 

@@ -11,8 +11,8 @@ import (
 
 // Instrumentation counters for string copy performance analysis
 var (
-	stringCopyCount    int64 // Total string copies performed
-	stringAccessCount  int64 // Total string accesses attempted
+	stringCopyCount   int64 // Total string copies performed
+	stringAccessCount int64 // Total string accesses attempted
 )
 
 // GetStringCopyStats returns instrumentation statistics
@@ -202,7 +202,7 @@ func (sw *skiplistWrapper) ToNotContextIovecSlice(context string) []syscall.Iove
 // CallbackToIovecSlice generates Iovec slices for items that match the callback filter
 func (sw *skiplistWrapper) CallbackToIovecSlice(callback func(*binaryEntry, string) bool) []syscall.Iovec {
 	var iovecs []syscall.Iovec
-	
+
 	// Iterate through all items and create IoVec entries for resolved binaryEntry pointers
 	sw.ForEach(func(entry *binaryEntry, context string) bool {
 		if callback(entry, context) {
@@ -215,7 +215,7 @@ func (sw *skiplistWrapper) CallbackToIovecSlice(callback func(*binaryEntry, stri
 		}
 		return true // Continue iteration
 	})
-	
+
 	return iovecs
 }
 

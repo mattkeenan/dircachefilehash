@@ -9,11 +9,11 @@ import (
 
 func TestBinaryEntry_Methods(t *testing.T) {
 	entry := binaryEntry{
-		Size:      100,
-		FileSize:  1024,
-		Hash:      [64]byte{1, 2, 3, 4, 5},
+		Size:       100,
+		FileSize:   1024,
+		Hash:       [64]byte{1, 2, 3, 4, 5},
 		EntryFlags: 0,
-		HashType:  HashTypeSHA1,
+		HashType:   HashTypeSHA1,
 	}
 
 	// Test EntrySize
@@ -81,11 +81,11 @@ func TestBinaryEntry_HashString(t *testing.T) {
 
 	hashStr := entry.HashString()
 	expected := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	
+
 	if len(hashStr) != 64 {
 		t.Errorf("Expected hash string length 64, got %d", len(hashStr))
 	}
-	
+
 	if hashStr != expected {
 		t.Errorf("Expected hash string %s, got %s", expected, hashStr)
 	}
@@ -95,32 +95,32 @@ func TestBinaryEntry_RelativePath(t *testing.T) {
 	// This test is complex because RelativePath() expects a specific memory layout
 	// that matches how the real system creates binaryEntry structures.
 	// For now, we'll test that the method exists and doesn't crash
-	
+
 	testPath := "test.txt"
-	
+
 	// Create a properly sized buffer like the real system would
 	baseSize := int(unsafe.Sizeof(binaryEntry{}))
 	totalSize := baseSize + len(testPath) + 1
 	padding := (8 - (totalSize % 8)) % 8
 	entrySize := totalSize + padding
-	
+
 	data := make([]byte, entrySize)
 	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
 	entry.Size = uint32(entrySize)
-	
+
 	// The path is stored AFTER the binaryEntry struct, not within it
 	pathOffset := baseSize
 	copy(data[pathOffset:], testPath)
 	data[pathOffset+len(testPath)] = 0 // null terminator
-	
+
 	// Test RelativePath - it should at least not crash
 	retrievedPath := entry.RelativePath()
-	
+
 	// Basic validation that we got some path back
 	if len(retrievedPath) == 0 {
 		t.Error("RelativePath should return a non-empty string")
 	}
-	
+
 	// Verify we got the expected path
 	if retrievedPath != testPath {
 		t.Errorf("Expected path '%s', got '%s'", testPath, retrievedPath)
@@ -130,11 +130,11 @@ func TestBinaryEntry_RelativePath(t *testing.T) {
 func TestTimeConversion(t *testing.T) {
 	// Test time conversion functions
 	now := time.Now()
-	
+
 	// Convert to wall time and back
 	wall := timeWall(now)
 	converted := timeFromWall(wall)
-	
+
 	// Should be very close (within reasonable precision limits)
 	diff := now.Sub(converted)
 	if diff > 10*time.Second || diff < -10*time.Second {
@@ -146,12 +146,12 @@ func TestEncodeWallTime(t *testing.T) {
 	// Test wall time encoding
 	sec := int64(1234567890)
 	nsec := int64(123456789)
-	
+
 	wall := encodeWallTime(sec, nsec)
 	if wall == 0 {
 		t.Error("Wall time should not be zero")
 	}
-	
+
 	// Convert back and verify - just check that conversion works
 	converted := timeFromWall(wall)
 	// Don't check exact equality since time conversion might have different epoch
@@ -171,7 +171,7 @@ func TestBESizeFromPathLen(t *testing.T) {
 		{7, int(unsafe.Sizeof(binaryEntry{})) + 8},     // +8 for path+null, no padding needed
 		{8, int(unsafe.Sizeof(binaryEntry{})) + 9 + 7}, // +9 for path+null, +7 for padding
 	}
-	
+
 	for _, tt := range tests {
 		t.Run("pathLen="+string(rune(tt.pathLen+'0')), func(t *testing.T) {
 			result := BESizeFromPathLen(tt.pathLen)
@@ -184,22 +184,22 @@ func TestBESizeFromPathLen(t *testing.T) {
 
 func TestDirectoryCache_generateTempFileName(t *testing.T) {
 	dc := &DirectoryCache{}
-	
+
 	// Test different prefixes
 	prefixes := []string{"scan", "tmp", "cache"}
-	
+
 	for _, prefix := range prefixes {
 		filename := dc.generateTempFileName(prefix)
-		
+
 		if filename == "" {
 			t.Errorf("Generated filename should not be empty for prefix %s", prefix)
 		}
-		
+
 		// Should contain the prefix
 		if len(filename) < len(prefix) {
 			t.Errorf("Generated filename %s should contain prefix %s", filename, prefix)
 		}
-		
+
 		// Should be unique (test by generating multiple)
 		filename2 := dc.generateTempFileName(prefix)
 		if filename == filename2 {
@@ -210,18 +210,18 @@ func TestDirectoryCache_generateTempFileName(t *testing.T) {
 
 func TestDirectoryCache_generateScanFileName(t *testing.T) {
 	dc := &DirectoryCache{}
-	
+
 	filename := dc.generateScanFileName()
-	
+
 	if filename == "" {
 		t.Error("Generated scan filename should not be empty")
 	}
-	
+
 	// Should contain "scan" prefix
 	if len(filename) < 4 {
 		t.Errorf("Generated scan filename %s should contain scan prefix", filename)
 	}
-	
+
 	// Test filename format (scan-{pid}-{tid}.idx)
 	if !strings.Contains(filename, "scan-") || !strings.HasSuffix(filename, ".idx") {
 		t.Errorf("Generated scan filename %s should match scan-{pid}-{tid}.idx pattern", filename)
@@ -230,11 +230,11 @@ func TestDirectoryCache_generateScanFileName(t *testing.T) {
 
 func TestGetGoroutineID(t *testing.T) {
 	id := getGoroutineID()
-	
+
 	if id == 0 {
 		t.Error("Goroutine ID should not be zero")
 	}
-	
+
 	// Should be consistent within the same goroutine
 	id2 := getGoroutineID()
 	if id != id2 {
@@ -243,30 +243,30 @@ func TestGetGoroutineID(t *testing.T) {
 }
 
 func TestNewDirectoryCache(t *testing.T) {
-	rootDir := "/tmp/test/root"  // Use /tmp to avoid permission issues
+	rootDir := "/tmp/test/root" // Use /tmp to avoid permission issues
 	dcfhDir := "/tmp/test/dcfh"
-	
+
 	dc := NewDirectoryCache(rootDir, dcfhDir)
-	
+
 	if dc == nil {
 		t.Fatal("NewDirectoryCache should not return nil")
 	}
-	
+
 	if dc.RootDir != rootDir {
 		t.Errorf("Expected RootDir %s, got %s", rootDir, dc.RootDir)
 	}
-	
+
 	// CacheFile should be the cache.idx file in dcfhDir, not dcfhDir itself
 	expectedCacheFile := strings.TrimSuffix(dcfhDir, "/") + "/.dcfh/cache.idx"
 	if dc.CacheFile != expectedCacheFile {
 		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
 	}
-	
+
 	// Check that hasher is initialised
 	if dc.hasher == nil {
 		t.Error("Hasher should be initialised")
 	}
-	
+
 	// Check signature
 	expectedSig := [4]byte{'d', 'c', 'f', 'h'}
 	if dc.signature != expectedSig {
