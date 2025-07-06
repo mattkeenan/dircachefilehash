@@ -89,9 +89,13 @@ nfpms:
   - id: dcfh-packages
     package_name: dcfh
     file_name_template: "{{ .ConventionalFileName }}"
+    builds:
+      - dcfh
+      - dcfhfind
+      - dcfhfix
     vendor: Matt Keenan
     homepage: https://github.com/mattkeenan/dircachefilehash
-    maintainer: Matt Keenan <matt@example.com>  # Replace with your email
+    maintainer: Matt Keenan <github@mattkeenan.net>  # Replace with your email
     description: |-
       Directory Cache File Hash - A fast file indexing and duplicate detection tool suite.
       
@@ -114,18 +118,6 @@ nfpms:
     priority: optional
     meta: true
     contents:
-      - src: ./dcfh
-        dst: /usr/bin/dcfh
-        file_info:
-          mode: 0755
-      - src: ./dcfhfind
-        dst: /usr/bin/dcfhfind
-        file_info:
-          mode: 0755
-      - src: ./dcfhfix
-        dst: /usr/bin/dcfhfix
-        file_info:
-          mode: 0755
       - src: ./README.md
         dst: /usr/share/doc/dcfh/README.md
         file_info:
