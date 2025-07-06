@@ -97,7 +97,7 @@ type simpleHashManager struct {
 // ============================================================================
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPath) error {
+func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPath, shutdownChan <-chan struct{}) error {
 	defer VerboseEnter()()
 	defer close(resultChan)
 
@@ -149,7 +149,7 @@ func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPat
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "scanPath: scanning deduplicated path: %s", absPath)
 		}
-		if err := dc.scanPathRecursive(absPath, resultChan); err != nil {
+		if err := dc.scanPathRecursive(absPath, resultChan, shutdownChan); err != nil {
 			return fmt.Errorf("failed to scan path %s: %w", absPath, err)
 		}
 	}
@@ -250,7 +250,7 @@ func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *scannedPath) error {
+func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *scannedPath, shutdownChan <-chan struct{}) error {
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
@@ -259,6 +259,15 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 	pathQueue := []string{rootPath}
 
 	for len(pathQueue) > 0 {
+		// Check for shutdown
+		select {
+		case <-shutdownChan:
+			if IsDebugEnabled("scanning") {
+				fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan interrupted by shutdown\n")
+			}
+			return fmt.Errorf("scan interrupted by shutdown")
+		default:
+		}
 
 		// Always process the first path (lexicographically smallest)
 		currentPath := pathQueue[0]
@@ -806,6 +815,7 @@ func (dc *DirectoryCache) monitorJobs(
 	callStartChan <-chan uint64,
 	callFinishChan <-chan uint64,
 	collectionStop <-chan struct{},
+	shutdownChan <-chan struct{},
 ) {
 	var jobs []uint64 // Track pending hash jobs
 	stopped := false
@@ -859,6 +869,12 @@ func (dc *DirectoryCache) monitorJobs(
 		case <-timerChan:
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Timeout waiting for jobs to complete, pending jobs: %d - stuck jobs: %v\n", len(jobs), jobs)
+			}
+			return
+			
+		case <-shutdownChan:
+			if IsDebugEnabled("scanning") {
+				fmt.Fprintf(os.Stderr, "[SCAN] Monitor received shutdown signal, exiting immediately with %d pending jobs\n", len(jobs))
 			}
 			return
 		}
@@ -953,7 +969,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 		if IsDebugEnabled("scanning") {
 			fmt.Fprintf(os.Stderr, "[SCAN] Starting filesystem scan\n")
 		}
-		if err := dc.scanPath(paths, scanChan); err != nil {
+		if err := dc.scanPath(paths, scanChan, shutdownChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Scan error: %v\n", err)
 		}
 		if IsDebugEnabled("scanning") {
@@ -985,7 +1001,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 		if IsDebugEnabled("scanning") {
 			fmt.Fprintf(os.Stderr, "[SCAN] Starting job monitor\n")
 		}
-		dc.monitorJobs(callStartChan, callFinishChan, collectionStop)
+		dc.monitorJobs(callStartChan, callFinishChan, collectionStop, shutdownChan)
 		if IsDebugEnabled("scanning") {
 			fmt.Fprintf(os.Stderr, "[SCAN] Job monitor completed\n")
 		}
@@ -999,6 +1015,16 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	if IsDebugEnabled("scanning") {
 		fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan wait completed\n")
 	}
+	
+	// Check if shutdown occurred during scan
+	select {
+	case <-shutdownChan:
+		if IsDebugEnabled("scanning") {
+			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after filesystem scan\n")
+		}
+		return nil, fmt.Errorf("operation interrupted by shutdown")
+	default:
+	}
 
 	// Wait for comparison to complete
 	if IsDebugEnabled("scanning") {
@@ -1007,6 +1033,16 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	compareWg.Wait()
 	if IsDebugEnabled("scanning") {
 		fmt.Fprintf(os.Stderr, "[SCAN] Comparison wait completed\n")
+	}
+	
+	// Check if shutdown occurred during comparison
+	select {
+	case <-shutdownChan:
+		if IsDebugEnabled("scanning") {
+			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after comparison\n")
+		}
+		return nil, fmt.Errorf("operation interrupted by shutdown")
+	default:
 	}
 
 	// Signal that no more hash jobs will be submitted
