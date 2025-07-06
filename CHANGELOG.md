@@ -1,0 +1,39 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Initial public release of dircachefilehash
+- Three specialized CLI tools:
+  - `dcfh` - Daily operations (init, status, update, dupes, snapshots)
+  - `dcfhfind` - Unix find(1)-style search interface for index files
+  - `dcfhfix` - Index repair and recovery tool
+- Core features:
+  - Binary index format with selectable hash algorithms (SHA-1, SHA-256, SHA-512)
+  - Zero-copy skiplist operations for memory efficiency
+  - Concurrent file scanning with configurable worker pools
+  - Signal handling for graceful shutdown (SIGINT/SIGTERM)
+  - Atomic updates via temporary files and rename
+  - Memory-mapped file operations for performance
+  - Snapshot system for index state preservation
+  - Duplicate detection with fdupes-compatible output
+  - JSON output support for automation
+- Index format version 1 with:
+  - Host byte order for performance
+  - 64-bit file size support
+  - Custom time format (34-bit seconds since 1885 + 30-bit nanoseconds)
+  - Variable-length path storage
+  - SHA-1 checksums for integrity
+- Comprehensive test suite
+- Makefile-based build system
+- MIT License
+
+### Technical Notes
+- Requires Go 1.24.3 or later
+- Unix-only (Linux, macOS, BSD)
+- Time format supports dates from 1885 to ~2429

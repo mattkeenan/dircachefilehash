@@ -1,0 +1,30 @@
+.dcfh
+.*.swp
+
+# Build artifacts and binaries
+dcfh
+dcfhfind
+dircachefilehash
+cmd/dcfh
+pkg.test
+dist/
+
+# test directories
+test-*/
+
+# Generated files
+cmd/dcfh/constants_version.go
+cmd/dcfhfind/constants_version.go
+cmd/dcfhfix/constants_version.go
+
+# Profile data
+*.prof
+
+# Editor files
+tags
+
+# Callgraph analysis files
+*.svg.gv
+*.svg.svg
+callgraph.*
+all_calls.*
