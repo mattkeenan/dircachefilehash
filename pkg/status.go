@@ -19,10 +19,10 @@ const (
 
 // CleanStatus represents the clean status of index files
 type CleanStatus struct {
-	MainIndex     bool     `json:"main_index"`
-	CacheIndex    bool     `json:"cache_index"`
-	TempIndices   []string `json:"temp_indices,omitempty"`   // List of temporary index files found
-	HasTempFiles  bool     `json:"has_temp_files"`           // True if any temp files exist
+	MainIndex    bool     `json:"main_index"`
+	CacheIndex   bool     `json:"cache_index"`
+	TempIndices  []string `json:"temp_indices,omitempty"` // List of temporary index files found
+	HasTempFiles bool     `json:"has_temp_files"`         // True if any temp files exist
 }
 
 // StatusResult represents the result of a status check
@@ -72,12 +72,12 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	if verboseLevel, exists := flags["v"]; exists && verboseLevel != "" {
 		if level, err := strconv.Atoi(verboseLevel); err == nil && level > 0 {
 			result.CleanStatus = &CleanStatus{}
-			
+
 			// Check main index clean status
 			if dc.mmapIndex != nil && dc.mmapIndex.Header() != nil {
 				result.CleanStatus.MainIndex = dc.mmapIndex.Header().isClean()
 			}
-			
+
 			// Check cache index clean status by loading it
 			cacheSkiplist, err := dc.loadCacheIndex()
 			if err == nil && cacheSkiplist != nil {
@@ -88,7 +88,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 			} else {
 				result.CleanStatus.CacheIndex = false
 			}
-			
+
 			// Scan for temporary index files in the .dcfh directory
 			tempFiles, err := dc.scanForTempIndices()
 			if err == nil {
@@ -135,7 +135,7 @@ func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWra
 	// Use direct iteration instead of creating slices
 	indexCurrent := mainSkiplist.skiplist.First()
 	diskCurrent := scanSkiplist.skiplist.First()
-	
+
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "hwangLinStatus: starting, indexCurrent=%v, diskCurrent=%v", indexCurrent != nil, diskCurrent != nil)
 	}
@@ -143,10 +143,10 @@ func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWra
 	for indexCurrent != nil && diskCurrent != nil {
 		indexRef := indexCurrent.Item()
 		diskRef := diskCurrent.Item()
-		
+
 		indexEntry := indexRef.GetBinaryEntry()
 		diskEntry := diskRef.GetBinaryEntry()
-		
+
 		if indexEntry == nil {
 			// This should never happen - indicates a serious bug
 			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for index entry - this should never happen\n")
@@ -154,7 +154,7 @@ func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWra
 			continue
 		}
 		if diskEntry == nil {
-			// This should never happen - indicates a serious bug  
+			// This should never happen - indicates a serious bug
 			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for disk entry - this should never happen\n")
 			diskCurrent = diskCurrent.Next()
 			continue
@@ -172,7 +172,7 @@ func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWra
 			// Same file - check if deleted or modified
 			// Create string copy to avoid use-after-free when scan memory is unmapped
 			pathCopy := string([]byte(indexEntry.RelativePath()))
-			
+
 			// Check if the disk/cache entry is marked as deleted
 			if diskEntry.IsDeleted() {
 				callback(StatusDeleted, pathCopy, indexEntry, diskEntry)
@@ -274,4 +274,3 @@ func (sr *StatusResult) HasChanges() bool {
 func (sr *StatusResult) TotalChanges() int {
 	return len(sr.Modified) + len(sr.Added) + len(sr.Deleted)
 }
-

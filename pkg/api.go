@@ -9,7 +9,7 @@ func InitDebugFlags(flagsStr string) {
 	}
 }
 
-// LogDebugFlags logs the current debug flag status - for CLI compatibility  
+// LogDebugFlags logs the current debug flag status - for CLI compatibility
 func LogDebugFlags() {
 	// Log current debug state if verbose
 	if globalVerboseLevel > 0 {
@@ -22,7 +22,7 @@ func GetDebugEnabled(flag string) bool {
 	return IsDebugEnabled(flag)
 }
 
-// GetVerbose returns the current verbose level - public alternative  
+// GetVerbose returns the current verbose level - public alternative
 func GetVerbose() int {
 	return GetVerboseLevel()
 }

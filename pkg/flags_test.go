@@ -87,10 +87,10 @@ func TestFlagsSystemIntegration(t *testing.T) {
 				vLevel, vExists := flags["v"]
 				debug, debugExists := flags["debug"]
 				format, formatExists := flags["format"]
-				
+
 				return vExists && vLevel == "2" &&
-					   debugExists && debug == "t" &&
-					   formatExists && format == "json"
+					debugExists && debug == "t" &&
+					formatExists && format == "json"
 			},
 			expected: true,
 		},
@@ -150,7 +150,7 @@ func TestFlagsConventions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			isValid := validateFlagsConvention(tt.flags)
 			if isValid != tt.isValid {
-				t.Errorf("Flag convention validation failed for %s: expected %v, got %v", 
+				t.Errorf("Flag convention validation failed for %s: expected %v, got %v",
 					tt.description, tt.isValid, isValid)
 			}
 		})
@@ -177,7 +177,7 @@ func validateFlagsConvention(flags map[string]string) bool {
 // Test flags parsing for different operations
 func TestOperationFlagsIntegration(t *testing.T) {
 	operations := []string{"Status", "Update", "FindDuplicates"}
-	
+
 	testFlags := map[string]string{
 		"v":     "1",
 		"force": "t",
@@ -188,7 +188,7 @@ func TestOperationFlagsIntegration(t *testing.T) {
 		t.Run("operation_"+operation, func(t *testing.T) {
 			// Test that all operations can accept the same flags format
 			// This validates our generic flags system design
-			
+
 			// Simulate passing flags to each operation
 			switch operation {
 			case "Status":
@@ -223,29 +223,29 @@ func TestFlagsExtensibility(t *testing.T) {
 	baseFlags := map[string]string{
 		"v": "1",
 	}
-	
+
 	// Add new hypothetical flags
 	extendedFlags := map[string]string{
 		"v":        "1",
-		"colour":    "t",
+		"colour":   "t",
 		"format":   "json",
 		"timeout":  "30",
 		"parallel": "4",
 	}
-	
+
 	// Verify base functionality still works
 	if !validateFlagsConvention(baseFlags) {
 		t.Error("Base flags should remain valid")
 	}
-	
+
 	// Verify extended flags work (assuming they follow conventions)
-	extendedFlags["colour"] = "t"     // Boolean
-	extendedFlags["timeout"] = "30"  // Numeric
-	
+	extendedFlags["colour"] = "t"   // Boolean
+	extendedFlags["timeout"] = "30" // Numeric
+
 	if !validateFlagsConvention(extendedFlags) {
 		t.Error("Extended flags should be valid when following conventions")
 	}
-	
+
 	// Test backward compatibility
 	verboseLevel, exists := extendedFlags["v"]
 	if !exists || verboseLevel != "1" {

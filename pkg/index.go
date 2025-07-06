@@ -40,12 +40,12 @@ type mmapIndex struct {
 
 // mmapIndexFile represents a wrapper for index file lifecycle management
 type mmapIndexFile struct {
-	File     *os.File // File descriptor (nil for read-only main/cache indices)
-	Data     []byte   // Memory-mapped data
-	Size     int      // Current size of the mapping
-	Offset   int      // Current write offset for scan indices
-	Type     string   // Index type: "main", "cache", "scan"
-	FilePath string   // File path for debugging/cleanup
+	File     *os.File     // File descriptor (nil for read-only main/cache indices)
+	Data     []byte       // Memory-mapped data
+	Size     int          // Current size of the mapping
+	Offset   int          // Current write offset for scan indices
+	Type     string       // Index type: "main", "cache", "scan"
+	FilePath string       // File path for debugging/cleanup
 	mutex    sync.RWMutex // Protects Data/Size during mremap operations
 }
 
@@ -53,24 +53,23 @@ type mmapIndexFile struct {
 func (mif *mmapIndexFile) Cleanup() error {
 	mif.mutex.Lock()
 	defer mif.mutex.Unlock()
-	
+
 	if mif.Data != nil {
 		if err := unix.Munmap(mif.Data); err != nil {
 			return fmt.Errorf("failed to unmap %s index: %w", mif.Type, err)
 		}
 		mif.Data = nil
 	}
-	
+
 	if mif.File != nil {
 		if err := mif.File.Close(); err != nil {
 			return fmt.Errorf("failed to close %s index file: %w", mif.Type, err)
 		}
 		mif.File = nil
 	}
-	
+
 	return nil
 }
-
 
 // Header returns a direct pointer to the header in mmap'd memory (zero-copy)
 func (mi *mmapIndex) Header() *indexHeader {
@@ -116,27 +115,27 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 		return nil, err
 	}
 	defer file.Close()
-	
+
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
-	
+
 	if stat.Size() < HeaderSize {
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
-	
+
 	// Memory map just the header for reading
 	data, err := unix.Mmap(int(file.Fd()), 0, HeaderSize, unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap file header: %w", err)
 	}
 	defer unix.Munmap(data)
-	
+
 	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	
+
 	// Verify header using the standard validation methods
 	signature := [4]byte{'d', 'c', 'f', 'h'}
 	if err := header.ValidateSignature(signature); err != nil {
@@ -150,10 +149,10 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 			return nil, err
 		}
 	}
-	
+
 	// Check Clean flag to determine if we should trust the header checksum
 	isClean := (header.Flags & IndexFlagClean) != 0
-	
+
 	if validateChecksum && !isClean {
 		// File wasn't closed cleanly - header checksum is likely incorrect
 		// Skip checksum validation for recovery purposes
@@ -164,7 +163,7 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 			return nil, fmt.Errorf("header checksum validation failed: %w", err)
 		}
 	}
-	
+
 	// Create a copy of the header since we're unmapping the memory
 	headerCopy := *header
 	return &headerCopy, nil
@@ -174,12 +173,12 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) error {
 	// Calculate expected checksum
 	hasher := sha1.New()
-	
+
 	// Hash header up to checksum field
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-	
+
 	// If file has entry data, hash it too
 	entryDataSize := fileSize - HeaderSize - ChecksumSize
 	if entryDataSize > 0 {
@@ -190,13 +189,13 @@ func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) 
 		}
 		hasher.Write(entryData)
 	}
-	
+
 	// Compare with stored checksum
 	expectedChecksum := hasher.Sum(nil)
 	if !bytes.Equal(expectedChecksum, header.Checksum[:len(expectedChecksum)]) {
 		return fmt.Errorf("checksum mismatch: expected %x, got %x", expectedChecksum, header.Checksum[:len(expectedChecksum)])
 	}
-	
+
 	return nil
 }
 
@@ -222,17 +221,17 @@ func (ih *indexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint
 func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, entryData []byte, entrySize int) {
 	hasher := dc.hasher
 	hasher.Reset()
-	
+
 	// Hash header up to checksum field
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-	
+
 	// Hash entry data if any
 	if entrySize > 0 {
 		hasher.Write(entryData[:entrySize])
 	}
-	
+
 	// Store checksum in header
 	checksumBytes := hasher.Sum(nil)
 	copy(header.Checksum[:], checksumBytes)
@@ -242,17 +241,17 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, e
 func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *indexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec) {
 	hasher := dc.hasher
 	hasher.Reset()
-	
+
 	// Hash header up to (but not including) checksum field
 	headerBytes := unsafe.Slice((*byte)(headerIovec.Base), int(headerIovec.Len))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-	
+
 	// Hash entries
 	for _, iovec := range entryIovecs {
 		hasher.Write(unsafe.Slice((*byte)(iovec.Base), int(iovec.Len)))
 	}
-	
+
 	// Store checksum in header
 	checksumBytes := hasher.Sum(nil)
 	copy(header.Checksum[:], checksumBytes)
@@ -320,7 +319,6 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 	}
 }
 
-
 // EntryProcessor defines a callback function for processing entries during index loading
 // Parameters: entry (the binaryEntry), entryIndex (0-based), filePath (source file)
 // Returns: shouldInclude (whether to include in result), error (if processing failed)
@@ -363,7 +361,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create mmapIndexFile wrapper  
+	// Create mmapIndexFile wrapper
 	indexFile := &mmapIndexFile{
 		File:     file,
 		Data:     data,
@@ -388,7 +386,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 
 	// Check Clean flag to determine if we should trust the header checksum
 	isClean := (header.Flags & IndexFlagClean) != 0
-	
+
 	if !isClean {
 		// File wasn't closed cleanly - header checksum is likely incorrect
 		// Skip checksum validation for recovery purposes
@@ -412,19 +410,19 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 
 		// Get direct pointer to binaryEntry in mmap'd memory
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-		
+
 		// Validate binaryEntry chaining consistency
 		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
 			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
-		
+
 		// Perform extra validation if debug flag is enabled
 		if IsDebugEnabled("extravalidation") {
 			if err := entry.ValidateEntry(); err != nil {
 				return nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
 			}
 		}
-		
+
 		// Call the processor callback
 		shouldInclude := true
 		if processor != nil {
@@ -434,7 +432,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 			}
 			shouldInclude = include
 		}
-		
+
 		// Only include entry if processor says so
 		if shouldInclude {
 			// Create binaryEntryRef instead of storing pointer
@@ -447,7 +445,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 
 		// Move to next entry using Size field
 		nextOffset := offset + int(entry.Size)
-		
+
 		// Validate chaining consistency: current entry + Size = next entry
 		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
 			if nextOffset >= len(entryData) {
@@ -455,10 +453,10 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 					i, entry.Size, offset, nextOffset, len(entryData))
 			}
 		}
-		
+
 		offset = nextOffset
 	}
-	
+
 	// Final validation: ensure we consumed exactly the expected amount of data
 	if offset != len(entryData) {
 		return nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
@@ -480,14 +478,14 @@ func DefaultEntryProcessor() EntryProcessor {
 func VerboseEntryProcessor() EntryProcessor {
 	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
 		entryPath := entry.RelativePath()
-		
+
 		if GetVerboseLevel() >= 1 {
 			VerboseLog(1, "%s", entryPath) // Level 1: filename only (like 'ls')
 		}
 		if GetVerboseLevel() >= 2 {
 			// Level 2: ls -l style output (mode, index filename, mtime, path)
 			mtime := timeFromWall(entry.MTimeWall)
-			VerboseLog(2, "  %04o %8d %s %s (%s)", entry.Mode&0o7777, entry.FileSize, 
+			VerboseLog(2, "  %04o %8d %s %s (%s)", entry.Mode&0o7777, entry.FileSize,
 				mtime.Format("2006-01-02 15:04:05"), entryPath, filepath.Base(filePath))
 		}
 		if GetVerboseLevel() >= 3 {
@@ -502,25 +500,31 @@ func VerboseEntryProcessor() EntryProcessor {
 			VerboseLog(3, "    UID: %d", entry.UID)
 			VerboseLog(3, "    GID: %d", entry.GID)
 			VerboseLog(3, "    FileSize: %d", entry.FileSize)
-			VerboseLog(3, "    EntryFlags: 0x%04x%s", entry.EntryFlags, 
-				func() string { if entry.IsDeleted() { return " (DELETED)" } else { return "" } }())
+			VerboseLog(3, "    EntryFlags: 0x%04x%s", entry.EntryFlags,
+				func() string {
+					if entry.IsDeleted() {
+						return " (DELETED)"
+					} else {
+						return ""
+					}
+				}())
 			VerboseLog(3, "    HashType: %d (%s)", entry.HashType, HashTypeName(entry.HashType))
 			VerboseLog(3, "    Hash: %s", entry.HashString())
 			VerboseLog(3, "    Path: %s", entryPath)
 		}
-		
+
 		return true, nil
 	}
 }
 
 // SearchEntryProcessor returns a processor that searches for matching entries
 type SearchOptions struct {
-	Pattern      string  // Filename pattern (glob)
-	PathPrefix   string  // Path prefix filter
-	HashPrefix   string  // Hash prefix filter
-	ExactSize    *uint64 // Exact file size filter
-	ShowDeleted  bool    // Show only deleted entries
-	SearchCount  *int    // Pointer to counter for matches
+	Pattern     string  // Filename pattern (glob)
+	PathPrefix  string  // Path prefix filter
+	HashPrefix  string  // Hash prefix filter
+	ExactSize   *uint64 // Exact file size filter
+	ShowDeleted bool    // Show only deleted entries
+	SearchCount *int    // Pointer to counter for matches
 }
 
 func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
@@ -529,7 +533,7 @@ func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
 		if entry.IsDeleted() && !opts.ShowDeleted {
 			return false, nil
 		}
-		
+
 		// Skip non-deleted entries if only deleted requested
 		if !entry.IsDeleted() && opts.ShowDeleted {
 			return false, nil
@@ -567,7 +571,7 @@ func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
 		if opts.SearchCount != nil {
 			*opts.SearchCount++
 		}
-		
+
 		// Output the match based on verbose level
 		VerboseLog(0, "%s", entryPath)
 		if GetVerboseLevel() >= 1 {
@@ -576,9 +580,9 @@ func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
 			if entry.IsDeleted() {
 				deletedFlag = " (DELETED)"
 			}
-			VerboseLog(1, "  %04o %8d %s %s%s", 
-				entry.Mode&0o7777, entry.FileSize, 
-				mtime.Format("2006-01-02 15:04:05"), 
+			VerboseLog(1, "  %04o %8d %s %s%s",
+				entry.Mode&0o7777, entry.FileSize,
+				mtime.Format("2006-01-02 15:04:05"),
 				filepath.Base(filePath), deletedFlag)
 		}
 		if GetVerboseLevel() >= 2 {
@@ -588,7 +592,6 @@ func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
 		return false, nil // Don't include in skiplist, just process for output
 	}
 }
-
 
 // CompositeEntryProcessor combines multiple processors (all must return true to include entry)
 func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
@@ -619,7 +622,7 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, 
 func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader) error {
 	// Get the stored checksum from header
 	storedChecksum := header.Checksum[:]
-	
+
 	// Determine checksum algorithm from header
 	var hasher hash.Hash
 	var expectedSize int
@@ -636,21 +639,21 @@ func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader)
 	default:
 		return fmt.Errorf("unsupported checksum type: %d", header.ChecksumType)
 	}
-	
+
 	// Calculate checksum of header (excluding checksum field) + entries
 	hasher.Reset()
-	
+
 	// Hash header fields before checksum field
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-	
+
 	// Hash entry data (everything after header)
 	entryData := data[HeaderSize:]
 	hasher.Write(entryData)
-	
+
 	calculatedChecksum := hasher.Sum(nil)
-	
+
 	// Compare checksums
 	for i := 0; i < expectedSize; i++ {
 		if storedChecksum[i] != calculatedChecksum[i] {
@@ -688,7 +691,7 @@ func (dc *DirectoryCache) calculateChecksum(data []byte) []byte {
 func (dc *DirectoryCache) Close() error {
 	// Check for orphaned index files first (ignore errors during check)
 	dc.checkForOrphanedIndexFiles()
-	
+
 	if dc.mmapIndex != nil {
 		if err := unix.Munmap(dc.mmapIndex.data); err != nil {
 			return fmt.Errorf("failed to unmap: %w", err)
@@ -700,7 +703,6 @@ func (dc *DirectoryCache) Close() error {
 	}
 	return nil
 }
-
 
 func (dc *DirectoryCache) createEmptyIndex() error {
 	totalSize := HeaderSize
@@ -761,7 +763,7 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 	if newSize > dc.currentScan.Size {
 		// Lock for mremap operation (write lock)
 		dc.currentScan.mutex.Lock()
-		
+
 		// Expand the file using existing file descriptor
 		if err := dc.currentScan.File.Truncate(int64(newSize)); err != nil {
 			dc.currentScan.mutex.Unlock()
@@ -778,13 +780,13 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 		// Update stored mmap info
 		dc.currentScan.Data = newMmap
 		dc.currentScan.Size = newSize
-		
+
 		dc.currentScan.mutex.Unlock()
 	}
 
 	// Get header and update entry count
 	header := (*indexHeader)(unsafe.Pointer(&dc.currentScan.Data[0]))
-	entryOffset := dc.currentScan.Offset  // Write at current offset
+	entryOffset := dc.currentScan.Offset // Write at current offset
 	header.EntryCount++
 
 	// Write the new entry
@@ -795,7 +797,6 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 
 	// Get pointer to the created entry
 	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-
 
 	// Update offset for next entry
 	dc.currentScan.Offset += entrySize
@@ -833,7 +834,7 @@ func (dc *DirectoryCache) appendEntryToNamedIndex(indexFileName string, indexInf
 	if newSize > (*indexInfo).Size {
 		// Lock for mremap operation (write lock)
 		(*indexInfo).mutex.Lock()
-		
+
 		// Expand the file using existing file descriptor
 		if err := (*indexInfo).File.Truncate(int64(newSize)); err != nil {
 			(*indexInfo).mutex.Unlock()
@@ -850,13 +851,13 @@ func (dc *DirectoryCache) appendEntryToNamedIndex(indexFileName string, indexInf
 		// Update stored mmap info
 		(*indexInfo).Data = newMmap
 		(*indexInfo).Size = newSize
-		
+
 		(*indexInfo).mutex.Unlock()
 	}
 
 	// Get header and update entry count
 	header := (*indexHeader)(unsafe.Pointer(&(*indexInfo).Data[0]))
-	entryOffset := (*indexInfo).Offset  // Write at current offset
+	entryOffset := (*indexInfo).Offset // Write at current offset
 	header.EntryCount++
 
 	// Write the new entry
@@ -1031,32 +1032,32 @@ func (dc *DirectoryCache) CleanupFixIndex(fixInfo *mmapIndexFile) error {
 
 // CleanupCurrentScanFile cleans up scan index resources after temp index is written
 // This should be called after temp index writing but before rename operations
-// 
+//
 // CRITICAL ORDER to prevent use-after-free:
 // 1. Caller must "forget" scan skiplist (allow GC) - done by caller
-// 2. Munmap the scan index file - done here  
+// 2. Munmap the scan index file - done here
 // 3. Delete the scan index file - done here
 func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	if dc.currentScan == nil {
 		return fmt.Errorf("can't clean up missing scan index file: %w", os.ErrNotExist)
 	}
-	
+
 	// Get file path for deletion
 	filePath := dc.currentScan.FilePath
-	
+
 	// Step 2 - Cleanup mmap and file descriptor
 	if err := dc.currentScan.Cleanup(); err != nil {
 		return fmt.Errorf("failed to cleanup scan index: %w", err)
 	}
-	
+
 	// Step 3 - Remove the scan index file
 	err := os.Remove(filePath)
 	dc.currentScan = nil
-	
+
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove scan file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -1074,7 +1075,7 @@ func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *skiplistWrapper, 
 func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
 	// Generate IoVec slices for the specified context
 	var entryIovecs []syscall.Iovec
-	
+
 	if excludeDeleted {
 		// Use callback to filter out deleted entries for main index
 		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
@@ -1104,7 +1105,6 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 	for _, iovec := range entryIovecs {
 		totalEntrySize += int(iovec.Len)
 	}
-	
 
 	// Create output file (O_CREAT|O_WRONLY)
 	file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -1137,23 +1137,23 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 			return fmt.Errorf("failed to get system IOV_MAX: %w", err)
 		}
 		totalWritten := 0
-		
+
 		for offset := 0; offset < len(entryIovecs); offset += maxIovecs {
 			end := offset + maxIovecs
 			if end > len(entryIovecs) {
 				end = len(entryIovecs)
 			}
-			
+
 			// Use slice without copying to avoid allocation
 			chunk := entryIovecs[offset:end]
-			
+
 			if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), chunk); err != nil {
 				return fmt.Errorf("failed to write entries chunk with vectorio: %w", err)
 			} else {
 				totalWritten += nw
 			}
 		}
-		
+
 		if totalWritten != totalEntrySize {
 			return fmt.Errorf("entries write incomplete: wrote %d bytes, expected %d", totalWritten, totalEntrySize)
 		}
@@ -1161,10 +1161,10 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 
 	// Mark header as clean first (before calculating checksum)
 	header.setClean()
-	
+
 	// Calculate checksum from IoVecs and store in header
 	dc.calculateAndStoreHeaderChecksumFromIoVecs(&header, headerIovec, entryIovecs)
-	
+
 	// Rewrite the complete header with clean flag and checksum
 	if _, err := file.Seek(0, 0); err != nil {
 		return fmt.Errorf("failed to seek to beginning for final header: %w", err)
@@ -1184,12 +1184,11 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 	return nil
 }
 
-
 // MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
 func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *skiplistWrapper, scanSkiplist *skiplistWrapper, outputPath string) error {
 	// Create merged skiplist
 	mergedSkiplist := baseSkiplist.Copy()
-	
+
 	// Merge scan results into base skiplist
 	if err := mergedSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
 		return fmt.Errorf("failed to merge skiplists: %w", err)
@@ -1203,55 +1202,55 @@ func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *skiplistW
 // Falls back to conservative default if sysconf fails
 func getSystemIOVMax() (int, error) {
 	// _SC_IOV_MAX constant for sysconf() - platform specific
-	const SC_IOV_MAX = 60 // Linux value, may vary on other platforms
+	const SC_IOV_MAX = 60       // Linux value, may vary on other platforms
 	const fallbackIOVMax = 1024 // Conservative default per golang/go#58623
-	
+
 	// Call sysconf directly using unix.Syscall (syscall 99 on Linux)
 	r1, _, errno := unix.Syscall(99, uintptr(SC_IOV_MAX), 0, 0)
 	if errno != 0 {
 		// Fall back to conservative default if sysconf fails
 		return fallbackIOVMax, nil
 	}
-	
+
 	iovMax := int(r1)
-	
+
 	// Validate the result is reasonable, fall back if not
 	if iovMax <= 0 || iovMax > 1<<20 { // Sanity check: between 1 and 1M
 		return fallbackIOVMax, nil
 	}
-	
+
 	return iovMax, nil
 }
 
 // scanForTempIndices scans the .dcfh directory for temporary index files
 func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
 	var tempFiles []string
-	
+
 	// Get the .dcfh directory from the IndexFile path
 	dcfhDir := filepath.Dir(dc.IndexFile)
-	
+
 	// Read the .dcfh directory
 	entries, err := os.ReadDir(dcfhDir)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		name := entry.Name()
-		
+
 		// Look for temporary index files with patterns:
 		// - scan-{pid}-{tid}.idx (scan indices)
 		// - tmp-{pid}-{tid}.idx (temp indices)
 		if strings.HasPrefix(name, "scan-") && strings.HasSuffix(name, ".idx") ||
-		   strings.HasPrefix(name, "tmp-") && strings.HasSuffix(name, ".idx") {
+			strings.HasPrefix(name, "tmp-") && strings.HasSuffix(name, ".idx") {
 			tempFiles = append(tempFiles, name)
 		}
 	}
-	
+
 	return tempFiles, nil
 }
 
@@ -1262,42 +1261,42 @@ func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, 
 	if entry.Size == 0 {
 		return fmt.Errorf("entry has zero size at offset %d (entry index %d)", offset, entryIndex)
 	}
-	
+
 	minSize := uint32(unsafe.Sizeof(*entry))
 	if entry.Size < minSize {
-		return fmt.Errorf("entry size %d too small (minimum %d) at offset %d (entry index %d)", 
+		return fmt.Errorf("entry size %d too small (minimum %d) at offset %d (entry index %d)",
 			entry.Size, minSize, offset, entryIndex)
 	}
-	
+
 	maxReasonableSize := uint32(4096) // Reasonable maximum for path + padding
 	if entry.Size > maxReasonableSize {
-		return fmt.Errorf("entry size %d unreasonably large (maximum %d) at offset %d (entry index %d)", 
+		return fmt.Errorf("entry size %d unreasonably large (maximum %d) at offset %d (entry index %d)",
 			entry.Size, maxReasonableSize, offset, entryIndex)
 	}
-	
+
 	// Validate that the entry doesn't extend beyond available data
 	if offset+int(entry.Size) > len(entryData) {
 		return fmt.Errorf("entry size %d at offset %d would extend beyond data bounds (available: %d) (entry index %d)",
 			entry.Size, offset, len(entryData)-offset, entryIndex)
 	}
-	
+
 	// Validate 8-byte alignment
 	if entry.Size%8 != 0 {
 		return fmt.Errorf("entry size %d not 8-byte aligned at offset %d (entry index %d)", entry.Size, offset, entryIndex)
 	}
-	
+
 	// Validate that the entry pointer is 8-byte aligned
 	entryPtr := uintptr(unsafe.Pointer(entry))
 	if entryPtr%8 != 0 {
 		return fmt.Errorf("entry pointer 0x%x not 8-byte aligned at offset %d", entryPtr, offset)
 	}
-	
+
 	// If memory layout debugging is enabled, log layout information
 	if IsDebugEnabled("memorylayout") {
 		pathFieldOffset := uintptr(unsafe.Pointer(&entry.Path[0])) - entryPtr
-		os.Stderr.WriteString(fmt.Sprintf("Entry %d: size=%d, ptr=0x%x, path_offset=%d\n", 
+		os.Stderr.WriteString(fmt.Sprintf("Entry %d: size=%d, ptr=0x%x, path_offset=%d\n",
 			offset/int(minSize), entry.Size, entryPtr, pathFieldOffset))
 	}
-	
+
 	return nil
 }

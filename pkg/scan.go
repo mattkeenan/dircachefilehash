@@ -88,8 +88,8 @@ type simpleHashManager struct {
 	callFinishChan chan uint64 // job completion notifications
 	wg             sync.WaitGroup
 	shutdownChan   <-chan struct{} // shutdown notification
-	closed         bool           // track if channel is closed
-	closeMutex     sync.Mutex     // protect closed flag
+	closed         bool            // track if channel is closed
+	closeMutex     sync.Mutex      // protect closed flag
 }
 
 // ============================================================================
@@ -217,7 +217,7 @@ func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool
 	// Clean and make both paths absolute for proper comparison
 	targetPath = filepath.Clean(targetPath)
 	containerPath = filepath.Clean(containerPath)
-	
+
 	// Make both paths absolute
 	if !filepath.IsAbs(targetPath) {
 		var err error
@@ -226,7 +226,7 @@ func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool
 			return false
 		}
 	}
-	
+
 	if !filepath.IsAbs(containerPath) {
 		var err error
 		containerPath, err = filepath.Abs(containerPath)
@@ -234,7 +234,7 @@ func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool
 			return false
 		}
 	}
-	
+
 	// If paths are identical, target is contained
 	if targetPath == containerPath {
 		return true
@@ -296,7 +296,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 			if err != nil {
 				continue // Skip broken symlinks
 			}
-			
+
 			if targetInfo.IsDir() {
 				// This is a directory symlink - apply symlink mode logic
 				switch dc.symlinkMode {
@@ -309,12 +309,12 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 					if err != nil {
 						continue // Skip broken symlinks
 					}
-					
+
 					// Check if target is within rootDir
 					if !dc.isPathContained(target, dc.RootDir) {
 						continue // Skip directory symlinks pointing outside rootDir
 					}
-					
+
 					// Use target info for the directory symlink (traverse into it)
 					info = targetInfo
 				case "all":
@@ -471,11 +471,10 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 	var scanChanOpen bool = true
 	currentIndex := compareSkiplist.skiplist.First()
 	jobIDCounter := uint64(1)
-	
+
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "hwangLinCompareToSkiplist: starting comparison, compareSkiplist length = %d", compareSkiplist.Length())
 	}
-	
 
 	// Read first scanned path
 	if scanChanOpen {
@@ -502,8 +501,7 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			// Create string copy to avoid use-after-free when scan memory is unmapped
 			indexPath := string([]byte(indexEntry.RelativePath()))
 			cmp = strings.Compare(currentScanned.RelPath, indexPath)
-			
-			
+
 		}
 
 		if cmp == 0 {
@@ -626,7 +624,7 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 					Ctim: syscall.Timespec{Sec: timeFromWall(indexEntry.CTimeWall).Unix(), Nsec: 0},
 					Mtim: syscall.Timespec{Sec: timeFromWall(indexEntry.MTimeWall).Unix(), Nsec: 0},
 				}
-				
+
 				// Create string copy to avoid use-after-free when scan memory is unmapped
 				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, &scannedPath{
 					RelPath:  string([]byte(indexEntry.RelativePath())),
@@ -715,7 +713,7 @@ func (hjm *simpleHashManager) SubmitHashJob(job *hashJobStart, callStartChan cha
 func (hjm *simpleHashManager) FinishSubmitting() {
 	hjm.closeMutex.Lock()
 	defer hjm.closeMutex.Unlock()
-	
+
 	if !hjm.closed {
 		close(hjm.hashJobChan)
 		hjm.closed = true
@@ -733,17 +731,17 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 				// Channel closed, worker should exit
 				return
 			}
-			
+
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Hashing file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
 			}
-			
+
 			// Hash the file and update binaryEntry directly in mmap memory
 			// For symlinks, we hash the target path, not the target file contents
 			var hashBytes []byte
 			var hashType uint16
 			var err error
-			
+
 			// Check if this is a symlink by examining the file mode
 			if job.ScannedPath.Info.Mode()&os.ModeSymlink != 0 {
 				// This is a symlink - hash the target path
@@ -771,7 +769,7 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 
 			// Signal completion
 			hjm.callFinishChan <- job.JobID
-			
+
 		case <-hjm.shutdownChan:
 			// Shutdown requested, exit immediately
 			return
@@ -783,7 +781,7 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 func (hjm *simpleHashManager) Shutdown() {
 	hjm.closeMutex.Lock()
 	defer hjm.closeMutex.Unlock()
-	
+
 	if !hjm.closed {
 		close(hjm.hashJobChan)
 		hjm.closed = true
@@ -797,7 +795,7 @@ func (dc *DirectoryCache) updateBinaryEntryHash(entryRef binaryEntryRef, hash []
 	if entry == nil {
 		return fmt.Errorf("GetBinaryEntry returned nil for hash update - this should never happen")
 	}
-	
+
 	// Clear the hash field first
 	for i := range entry.Hash {
 		entry.Hash[i] = 0
@@ -806,7 +804,7 @@ func (dc *DirectoryCache) updateBinaryEntryHash(entryRef binaryEntryRef, hash []
 	// Copy the new hash
 	copy(entry.Hash[:], hash)
 	entry.HashType = hashType
-	
+
 	return nil
 }
 
@@ -871,7 +869,7 @@ func (dc *DirectoryCache) monitorJobs(
 				fmt.Fprintf(os.Stderr, "[SCAN] Timeout waiting for jobs to complete, pending jobs: %d - stuck jobs: %v\n", len(jobs), jobs)
 			}
 			return
-			
+
 		case <-shutdownChan:
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Monitor received shutdown signal, exiting immediately with %d pending jobs\n", len(jobs))
@@ -893,7 +891,6 @@ func (dc *DirectoryCache) monitorJobs(
 // RESULT PROCESSING FUNCTIONS
 // ============================================================================
 
-
 // getHashSize returns hash size based on type
 func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 	switch hashType {
@@ -908,7 +905,6 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 	}
 }
 
-
 // ============================================================================
 // MAIN SCAN FUNCTION
 // ============================================================================
@@ -921,7 +917,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
 	defer dc.scanMutex.Unlock()
-	
+
 	// If a scan is already in progress, wait for it and return the same results
 	if dc.scanInProgress {
 		// TODO: Handle race condition where files change between when the first scan
@@ -933,24 +929,24 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 		}
 		return dc.lastScanResult, nil
 	}
-	
+
 	// Mark scan as in progress
 	dc.scanInProgress = true
 	defer func() {
 		dc.scanInProgress = false
 	}()
-	
+
 	// Create result skiplist for scan entries
 	scanSkiplist := NewSkiplistWrapper(16, ScanContext)
-	
+
 	// Generate scan index filename for this operation
 	scanFileName := dc.generateScanFileName()
-	
+
 	// Initialise scan index with mmap
 	if err := dc.initialiseScanIndex(scanFileName); err != nil {
 		return nil, fmt.Errorf("failed to initialise scan index: %w", err)
 	}
-	
+
 	// Create channels for streaming data
 	scanChan := make(chan *scannedPath, 50)
 	callStartChan := make(chan uint64, 100)
@@ -1015,7 +1011,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	if IsDebugEnabled("scanning") {
 		fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan wait completed\n")
 	}
-	
+
 	// Check if shutdown occurred during scan
 	select {
 	case <-shutdownChan:
@@ -1034,7 +1030,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	if IsDebugEnabled("scanning") {
 		fmt.Fprintf(os.Stderr, "[SCAN] Comparison wait completed\n")
 	}
-	
+
 	// Check if shutdown occurred during comparison
 	select {
 	case <-shutdownChan:

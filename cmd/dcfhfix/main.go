@@ -34,7 +34,7 @@ type indexHeader struct {
 func main() {
 	// Define global options using the same pattern as dcfh
 	options := NewParsedOptions()
-	
+
 	// Define global options
 	options.DefineOption("help", "h", OptionTypeBool, "false", "Show help message")
 	options.DefineOption("version", "", OptionTypeBool, "false", "Show version information")
@@ -44,40 +44,40 @@ func main() {
 	options.DefineOption("force", "f", OptionTypeBool, "false", "Force operations even if validation passes")
 	options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress non-error output")
 	options.DefineOption("format", "", OptionTypeString, "human", "Output format for show commands (human|json)")
-	
+
 	// Parse command line arguments
 	if err := options.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Try 'dcfhfix --help' for more information.\n")
 		os.Exit(1)
 	}
-	
+
 	// Validate format option
 	format := options.GetString("format")
 	if format != "human" && format != "json" {
 		fmt.Fprintf(os.Stderr, "dcfhfix: invalid format '%s', must be 'human' or 'json'\n", format)
 		os.Exit(1)
 	}
-	
+
 	// Handle version first (before help)
 	if options.GetBool("version") {
 		fmt.Printf("dcfhfix %s\n", getVersionString())
 		os.Exit(0)
 	}
-	
+
 	// Handle help
 	if options.GetBool("help") || len(options.GetArgs()) == 0 {
 		showHelp()
 		os.Exit(0)
 	}
-	
+
 	args := options.GetArgs()
 	if len(args) < 2 {
 		fmt.Fprintf(os.Stderr, "dcfhfix: missing command\n")
 		fmt.Fprintf(os.Stderr, "Try 'dcfhfix --help' for more information.\n")
 		os.Exit(1)
 	}
-	
+
 	// Execute command - handle help specially
 	if args[0] == "help" {
 		if len(args) >= 2 {
@@ -87,16 +87,16 @@ func main() {
 		}
 		return
 	}
-	
+
 	// Discover repository and resolve index file
 	indexFile, err := dircachefilehash.ResolveIndexFile(args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	command := args[1]
-	
+
 	// Execute command
 	switch command {
 	case "header":
@@ -110,7 +110,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 	case "entry":
 		if len(args) < 3 {
 			fmt.Fprintf(os.Stderr, "dcfhfix: entry command requires subcommand\n")
@@ -122,7 +122,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 	case "fixes":
 		if len(args) < 3 {
 			fmt.Fprintf(os.Stderr, "dcfhfix: fixes command requires subcommand\n")
@@ -134,7 +134,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 	default:
 		fmt.Fprintf(os.Stderr, "dcfhfix: unknown command '%s'\n", command)
 		fmt.Fprintf(os.Stderr, "Try 'dcfhfix --help' for more information.\n")
@@ -145,7 +145,7 @@ func main() {
 func showHelp() {
 	fmt.Printf("dcfhfix - repair and edit tool for dcfh index files\n\n")
 	fmt.Printf("Usage: dcfhfix [OPTIONS] <index> <command> <subcommand> [args...]\n\n")
-	
+
 	fmt.Printf("Commands:\n")
 	fmt.Printf("  header show                    Show index header as JSON\n")
 	fmt.Printf("  header edit <field> <value>    Edit header field\n")
@@ -159,7 +159,7 @@ func showHelp() {
 	fmt.Printf("  fixes discard                  Remove latest backup from stack without restoring\n")
 	fmt.Printf("  fixes clear                    Clear all backups from stack\n")
 	fmt.Printf("  help [command]                 Show help for command\n\n")
-	
+
 	fmt.Printf("Options:\n")
 	fmt.Printf("  -h, --help          Show this help message\n")
 	fmt.Printf("      --version       Show version information\n")
@@ -169,60 +169,60 @@ func showHelp() {
 	fmt.Printf("  -f, --force         Force operations even if validation passes\n")
 	fmt.Printf("  -q, --quiet         Suppress non-error output\n")
 	fmt.Printf("      --format        Output format for show commands (human|json, default: human)\n\n")
-	
+
 	fmt.Printf("Index Types:\n")
 	fmt.Printf("  main               Main index (.dcfh/main.idx)\n")
 	fmt.Printf("  cache              Cache index (.dcfh/cache.idx)\n")
 	fmt.Printf("  scan               All scan indices (.dcfh/scan-*.idx)\n")
 	fmt.Printf("  scan-PID-TID       Specific scan index\n")
 	fmt.Printf("  /path/to/file.idx  Direct file path\n\n")
-	
+
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  # Show header information\n")
 	fmt.Printf("  dcfhfix main header show\n")
 	fmt.Printf("  dcfhfix main header show --format=json\n\n")
-	
+
 	fmt.Printf("  # Edit header fields\n")
 	fmt.Printf("  dcfhfix main header edit version 2\n")
 	fmt.Printf("  dcfhfix main header edit flags 0\n")
 	fmt.Printf("  dcfhfix main header edit json '{\"version\":2,\"flags\":0}'\n\n")
-	
+
 	fmt.Printf("  # Show specific entries\n")
 	fmt.Printf("  dcfhfix main entry show src/main.go README.md\n")
 	fmt.Printf("  dcfhfix main entry show src/main.go --format=json\n\n")
-	
+
 	fmt.Printf("  # Edit entry fields\n")
 	fmt.Printf("  dcfhfix main entry edit uid 1000 src/app.go\n")
 	fmt.Printf("  dcfhfix main entry edit mode 0644 file1.txt file2.txt\n")
 	fmt.Printf("  dcfhfix main entry edit json '{\"uid\":1000,\"gid\":1000}' src/app.go\n\n")
-	
+
 	fmt.Printf("  # Remove entries\n")
 	fmt.Printf("  dcfhfix main entry remove old-file.txt temp/\n\n")
-	
+
 	fmt.Printf("  # Resort index\n")
 	fmt.Printf("  dcfhfix main entry resort\n\n")
-	
+
 	fmt.Printf("  # Manage fix backups\n")
 	fmt.Printf("  dcfhfix main fixes list\n")
 	fmt.Printf("  dcfhfix main fixes pop\n")
 	fmt.Printf("  dcfhfix main fixes clear\n\n")
-	
+
 	fmt.Printf("Safety Features:\n")
 	fmt.Printf("  - Creates FIFO backup stack by default (disable with --backup=false)\n")
 	fmt.Printf("  - Easy rollback with 'fixes pop' command\n")
 	fmt.Printf("  - Validates changes before applying\n")
 	fmt.Printf("  - Dry-run mode shows what would be changed\n")
 	fmt.Printf("  - Warnings for dangerous edits (path, size, hash)\n\n")
-	
+
 	fmt.Printf("Field Names:\n")
 	fmt.Printf("  Header: signature, byte_order, version, entry_count, flags, checksum_type, checksum\n")
 	fmt.Printf("  Entry:  ctime, mtime, dev, ino, mode, uid, gid, size, flags, hashtype, hash\n")
 	fmt.Printf("  Special: json (for JSON object editing)\n\n")
-	
+
 	fmt.Printf("Output Formats:\n")
 	fmt.Printf("  human    Human-readable table format (default)\n")
 	fmt.Printf("  json     Machine-readable JSON format\n\n")
-	
+
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - Entries are identified by their path only\n")
 	fmt.Printf("  - Hashes must be hex strings without 0x prefix\n")
@@ -235,7 +235,7 @@ func showCommandHelp(args []string) {
 		showHelp()
 		return
 	}
-	
+
 	command := args[2]
 	switch command {
 	case "header":
@@ -253,29 +253,29 @@ func showCommandHelp(args []string) {
 func showHeaderHelp() {
 	fmt.Printf("dcfhfix header - View and edit index headers\n\n")
 	fmt.Printf("Usage: dcfhfix [OPTIONS] <index-file> header <subcommand> [args...]\n\n")
-	
+
 	fmt.Printf("Subcommands:\n")
 	fmt.Printf("  show                Display header as JSON\n")
 	fmt.Printf("  edit <field> <value> Edit individual header field\n")
 	fmt.Printf("  edit json <json>     Edit header using JSON data\n\n")
-	
+
 	fmt.Printf("Options:\n")
 	fmt.Printf("  All global options apply (--dry-run, --backup, etc.)\n\n")
-	
+
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  # Show current header\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header show\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header show --format=json\n\n")
-	
+
 	fmt.Printf("  # Edit individual fields\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header edit version 2\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header edit flags 0x0001\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header edit signature dcfh\n\n")
-	
+
 	fmt.Printf("  # Edit multiple fields with JSON\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header edit json '{\"version\":2,\"flags\":0}'\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx header edit json '{\"entry_count\":1234}' --dry-run\n\n")
-	
+
 	fmt.Printf("Header Fields:\n")
 	fmt.Printf("  signature      4-byte signature (string: 'dcfh')\n")
 	fmt.Printf("  byte_order     Byte order magic (hex: 0x0102030405060708)\n")
@@ -285,11 +285,11 @@ func showHeaderHelp() {
 	fmt.Printf("  checksum_type  Checksum algorithm type (integer)\n")
 	fmt.Printf("  checksum       File checksum (hex string, auto-calculated)\n")
 	fmt.Printf("  json           JSON object for multiple fields\n\n")
-	
+
 	fmt.Printf("Output Formats:\n")
 	fmt.Printf("  human    Human-readable table format (default)\n")
 	fmt.Printf("  json     Machine-readable JSON format\n\n")
-	
+
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - entry_count and checksum are auto-calculated on save\n")
 	fmt.Printf("  - Warnings shown for size/checksum field edits\n")
@@ -299,32 +299,32 @@ func showHeaderHelp() {
 func showEntryHelp() {
 	fmt.Printf("dcfhfix entry - View and edit index entries\n\n")
 	fmt.Printf("Usage: dcfhfix [OPTIONS] <index-file> entry <subcommand> [args...]\n\n")
-	
+
 	fmt.Printf("Subcommands:\n")
 	fmt.Printf("  show <path>...                 Show entries as JSON\n")
 	fmt.Printf("  edit <field> <value> <path>... Edit field for multiple entries\n")
 	fmt.Printf("  edit json <json> <path>...     Edit entries using JSON data\n")
 	fmt.Printf("  append <json>                  Add new entry from JSON\n")
 	fmt.Printf("  remove <path>...               Remove entries by path\n\n")
-	
+
 	fmt.Printf("Options:\n")
 	fmt.Printf("  All global options apply (--dry-run, --backup, etc.)\n\n")
-	
+
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  # Show entries\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry show src/main.go\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry show src/main.go --format=json\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry show 'src/*.go'\n\n")
-	
+
 	fmt.Printf("  # Edit entry fields\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit uid 1000 src/app.go config.json\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit mode 0644 '*.txt'\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit hash abc123def456 src/file.c\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit json '{\"uid\":1000,\"mode\":0644}' src/app.go\n\n")
-	
+
 	fmt.Printf("  # Manage entries\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry remove temp.txt old/\n\n")
-	
+
 	fmt.Printf("Entry Fields:\n")
 	fmt.Printf("  ctime, mtime    Timestamps (Unix nanoseconds or ISO8601 string)\n")
 	fmt.Printf("  dev, ino        Device/inode numbers (integer)\n")
@@ -335,11 +335,11 @@ func showEntryHelp() {
 	fmt.Printf("  hashtype        Hash algorithm (1=SHA1, 2=SHA256, 3=SHA512)\n")
 	fmt.Printf("  hash            Hash value (hex string, no 0x prefix)\n")
 	fmt.Printf("  json            JSON object for multiple fields\n\n")
-	
+
 	fmt.Printf("Output Formats:\n")
 	fmt.Printf("  human    Human-readable table format (default)\n")
 	fmt.Printf("  json     Machine-readable JSON format\n\n")
-	
+
 	fmt.Printf("Warnings:\n")
 	fmt.Printf("  - Editing 'size' or 'hash' may hide file modifications\n")
 	fmt.Printf("  - Path cannot be edited (use remove + append)\n")
@@ -349,42 +349,42 @@ func showEntryHelp() {
 func showFixesHelp() {
 	fmt.Printf("dcfhfix fixes - Manage backup stack for easy rollbacks\n\n")
 	fmt.Printf("Usage: dcfhfix [OPTIONS] <index-file> fixes <subcommand> [args...]\n\n")
-	
+
 	fmt.Printf("Subcommands:\n")
 	fmt.Printf("  list                List all backups in stack (newest first)\n")
 	fmt.Printf("  pop                 Restore latest backup and remove from stack\n")
 	fmt.Printf("  discard             Remove latest backup from stack without restoring\n")
 	fmt.Printf("  clear               Remove all backups from stack\n\n")
-	
+
 	fmt.Printf("Options:\n")
 	fmt.Printf("  All global options apply (--dry-run, --verbose, etc.)\n\n")
-	
+
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  # List current backups\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes list\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes list --format=json\n\n")
-	
+
 	fmt.Printf("  # Rollback last change\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes pop\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes pop --dry-run\n\n")
-	
+
 	fmt.Printf("  # Remove backup without restoring\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes discard\n\n")
-	
+
 	fmt.Printf("  # Clear all backups\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx fixes clear\n\n")
-	
+
 	fmt.Printf("Backup Stack:\n")
 	fmt.Printf("  - FIFO (First In, First Out) stack behaviour\n")
 	fmt.Printf("  - Latest backup is always at top of stack\n")
 	fmt.Printf("  - Backups stored in .dcfh/fixes/<index-type>/ directories\n")
 	fmt.Printf("  - Each backup includes timestamp and operation metadata\n")
 	fmt.Printf("  - Stack automatically managed during edit operations\n\n")
-	
+
 	fmt.Printf("Output Formats:\n")
 	fmt.Printf("  human    Human-readable table format (default)\n")
 	fmt.Printf("  json     Machine-readable JSON format\n\n")
-	
+
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - Backups are index-type specific (main.idx, cache.idx, etc.)\n")
 	fmt.Printf("  - Each edit operation creates one backup before changes\n")
@@ -406,7 +406,7 @@ func handleHeaderCommand(indexFile string, args []string, options *ParsedOptions
 	if len(args) < 1 {
 		return fmt.Errorf("header command requires subcommand")
 	}
-	
+
 	subcommand := args[0]
 	switch subcommand {
 	case "show":
@@ -429,7 +429,7 @@ func handleEntryCommand(indexFile string, args []string, options *ParsedOptions)
 	if len(args) < 1 {
 		return fmt.Errorf("entry command requires subcommand")
 	}
-	
+
 	subcommand := args[0]
 	switch subcommand {
 	case "show":
@@ -465,7 +465,7 @@ func handleFixesCommand(indexFile string, args []string, options *ParsedOptions)
 	if len(args) < 1 {
 		return fmt.Errorf("fixes command requires subcommand")
 	}
-	
+
 	subcommand := args[0]
 	switch subcommand {
 	case "list":
@@ -556,20 +556,20 @@ func headerShow(indexFile string, options *ParsedOptions) error {
 	defer indexAccess.Close()
 
 	header := indexAccess.header
-	
+
 	format := getFormat(options)
 	if format == "json" {
 		// JSON output
 		headerData := map[string]interface{}{
-			"signature":      string(header.Signature[:]),
-			"byte_order":     fmt.Sprintf("0x%016x", header.ByteOrder),
-			"version":        header.Version,
-			"entry_count":    header.EntryCount,
-			"flags":          fmt.Sprintf("0x%08x", header.Flags),
-			"checksum_type":  header.ChecksumType,
-			"checksum":       fmt.Sprintf("%x", header.Checksum[:]),
+			"signature":     string(header.Signature[:]),
+			"byte_order":    fmt.Sprintf("0x%016x", header.ByteOrder),
+			"version":       header.Version,
+			"entry_count":   header.EntryCount,
+			"flags":         fmt.Sprintf("0x%08x", header.Flags),
+			"checksum_type": header.ChecksumType,
+			"checksum":      fmt.Sprintf("%x", header.Checksum[:]),
 		}
-		
+
 		data, err := json.MarshalIndent(headerData, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal header JSON: %v", err)
@@ -586,7 +586,7 @@ func headerShow(indexFile string, options *ParsedOptions) error {
 		fmt.Printf("  Checksum Type: %d\n", header.ChecksumType)
 		fmt.Printf("  Checksum:      %x\n", header.Checksum[:])
 	}
-	
+
 	return nil
 }
 
@@ -594,7 +594,7 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 	if field == "json" {
 		return headerEditJSON(indexFile, value, options)
 	}
-	
+
 	// Create backup before editing
 	description := fmt.Sprintf("Edit header.%s = %s", field, value)
 	if !options.GetBool("dry-run") {
@@ -603,12 +603,12 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit header field '%s' to value '%s'\n", field, value)
 		return nil
 	}
-	
+
 	// Validate the field name and value first
 	var newHeaderData indexHeader
 	switch field {
@@ -640,19 +640,19 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 	default:
 		return fmt.Errorf("unknown header field: %s", field)
 	}
-	
+
 	// Load the index data
 	entryData, err := loadIndexIntoSkiplist(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to load index: %v", err)
 	}
-	
+
 	// Get the current header so we can modify it
 	currentHeader, err := getIndexHeader(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to read current header: %v", err)
 	}
-	
+
 	// Make a copy and modify the field
 	newHeaderData = *currentHeader
 	switch field {
@@ -668,17 +668,17 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 		val, _ := parseUint16(value) // already validated
 		newHeaderData.ChecksumType = val
 	}
-	
+
 	// Write the index with the modified header
 	err = writeIndexWithModifiedHeader(entryData, indexFile, &newHeaderData, options)
 	if err != nil {
 		return fmt.Errorf("failed to write modified index: %v", err)
 	}
-	
+
 	if !options.GetBool("quiet") {
 		fmt.Printf("Updated header field '%s' to '%s'\n", field, value)
 	}
-	
+
 	return nil
 }
 
@@ -688,14 +688,14 @@ func headerEditJSON(indexFile string, jsonData string, options *ParsedOptions) e
 	if len(jsonData) <= 50 {
 		description = fmt.Sprintf("Edit header with JSON: %s", jsonData)
 	}
-	
+
 	if !options.GetBool("dry-run") {
 		_, err := createBackup(indexFile, "header-edit-json", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	return fmt.Errorf("header edit JSON not yet implemented")
 }
 
@@ -703,7 +703,7 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths specified")
 	}
-	
+
 	// Convert paths to a map for quick lookup
 	pathSet := make(map[string]bool)
 	for _, path := range paths {
@@ -714,12 +714,12 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 		}
 		pathSet[normalizedPath] = true
 	}
-	
+
 	// Collect matching entries
 	var matchingEntries []*dircachefilehash.EntryInfo
 	var notFoundPaths []string
 	foundPaths := make(map[string]bool)
-	
+
 	// Use IterateIndexFile to search through the index
 	// NOTE: While this is O(n), it's actually the safer approach for dcfhfix because:
 	// a) Loading into a skiplist is also O(n), so we're not adding significant overhead
@@ -733,11 +733,11 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 		}
 		return true // Continue iteration
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to read index file: %v", err)
 	}
-	
+
 	// Find paths that weren't found
 	for _, path := range paths {
 		normalizedPath := filepath.Clean(path)
@@ -748,7 +748,7 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 			notFoundPaths = append(notFoundPaths, path)
 		}
 	}
-	
+
 	// Display results
 	format := getFormat(options)
 	if format == "json" {
@@ -762,30 +762,30 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 	if field == "json" {
 		return entryEditJSON(indexFile, value, paths, options)
 	}
-	
+
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths specified")
 	}
-	
+
 	// Create backup before editing
 	pathsDesc := fmt.Sprintf("%d paths", len(paths))
 	if len(paths) <= 3 {
 		pathsDesc = strings.Join(paths, ", ")
 	}
 	description := fmt.Sprintf("Edit entry.%s = %s for %s", field, value, pathsDesc)
-	
+
 	if !options.GetBool("dry-run") {
 		_, err := createBackup(indexFile, "entry-edit", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit entry field '%s' to value '%s' for paths: %s\n", field, value, pathsDesc)
 		return nil
 	}
-	
+
 	// Validate the field name and value first
 	switch field {
 	case "ctime", "mtime":
@@ -830,7 +830,7 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 	default:
 		return fmt.Errorf("unknown entry field: %s", field)
 	}
-	
+
 	// Create path set for matching
 	pathSet := make(map[string]bool)
 	for _, path := range paths {
@@ -840,17 +840,17 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 		}
 		pathSet[normalizedPath] = true
 	}
-	
+
 	// Process entries using safe workflow approach (never edit files directly)
 	entriesFixed, entriesDiscarded, err := processEntriesWithWorkflow(indexFile, pathSet, field, value, options)
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
-	
+
 	if entriesFixed == 0 {
 		return fmt.Errorf("no matching entries found for specified paths")
 	}
-	
+
 	if !options.GetBool("quiet") {
 		fmt.Printf("Updated field '%s' to '%s' for %d matching entries", field, value, entriesFixed)
 		if entriesDiscarded > 0 {
@@ -858,7 +858,7 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 		}
 		fmt.Println()
 	}
-	
+
 	return nil
 }
 
@@ -873,14 +873,14 @@ func entryEditJSON(indexFile string, jsonData string, paths []string, options *P
 		jsonDesc = jsonData
 	}
 	description := fmt.Sprintf("Edit entries with JSON %s for %s", jsonDesc, pathsDesc)
-	
+
 	if !options.GetBool("dry-run") {
 		_, err := createBackup(indexFile, "entry-edit-json", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	return fmt.Errorf("entry edit JSON not yet implemented")
 }
 
@@ -891,31 +891,31 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 		jsonDesc = jsonData
 	}
 	description := fmt.Sprintf("Append entry: %s", jsonDesc)
-	
+
 	if !options.GetBool("dry-run") {
 		_, err := createBackup(indexFile, "entry-append", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would append entry from JSON: %s\n", jsonDesc)
 		return nil
 	}
-	
+
 	// Parse and validate the JSON entry
 	newEntry, err := parseEntryFromJSON(jsonData)
 	if err != nil {
 		return fmt.Errorf("failed to parse JSON entry: %v", err)
 	}
-	
+
 	// Process entries using the workflow to append the new entry
 	entriesAdded, entriesDiscarded, err := processEntriesWithAppend(indexFile, newEntry, options)
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
-	
+
 	if !options.GetBool("quiet") {
 		fmt.Printf("Added %d entry", entriesAdded)
 		if entriesDiscarded > 0 {
@@ -923,7 +923,7 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 		}
 		fmt.Println()
 	}
-	
+
 	return nil
 }
 
@@ -934,23 +934,23 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 		pathsDesc = strings.Join(paths, ", ")
 	}
 	description := fmt.Sprintf("Remove entries: %s", pathsDesc)
-	
+
 	if !options.GetBool("dry-run") {
 		_, err := createBackup(indexFile, "entry-remove", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-	
+
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths specified")
 	}
-	
+
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would remove entries for paths: %s\n", pathsDesc)
 		return nil
 	}
-	
+
 	// Convert paths to a map for quick lookup
 	pathSet := make(map[string]bool)
 	for _, path := range paths {
@@ -960,17 +960,17 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 		}
 		pathSet[normalizedPath] = true
 	}
-	
+
 	// Process entries using the workflow to remove matching paths
 	entriesRemoved, entriesDiscarded, err := processEntriesWithRemoval(indexFile, pathSet, options)
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
-	
+
 	if entriesRemoved == 0 {
 		return fmt.Errorf("no matching entries found for specified paths")
 	}
-	
+
 	if !options.GetBool("quiet") {
 		fmt.Printf("Removed %d entries", entriesRemoved)
 		if entriesDiscarded > 0 {
@@ -978,7 +978,7 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 		}
 		fmt.Println()
 	}
-	
+
 	return nil
 }
 
@@ -1004,14 +1004,14 @@ func getBackupDir(indexFile string) (string, error) {
 			backupDir := filepath.Join(dcfhDir, "fixes", indexType)
 			return backupDir, nil
 		}
-		
+
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break // reached root
 		}
 		dir = parent
 	}
-	
+
 	return "", fmt.Errorf("could not find .dcfh directory")
 }
 
@@ -1020,27 +1020,27 @@ func createBackup(indexFile string, operation string, description string, option
 	if !options.GetBool("backup") {
 		return nil, nil // backup disabled
 	}
-	
+
 	backupDir, err := getBackupDir(indexFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find backup directory: %v", err)
 	}
-	
+
 	// Create backup directory if it doesn't exist
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create backup directory: %v", err)
 	}
-	
+
 	// Generate backup filename with timestamp
 	timestamp := time.Now()
 	backupFilename := fmt.Sprintf("%d-%s.idx", timestamp.Unix(), timestamp.Format("20060102T150405"))
 	backupPath := filepath.Join(backupDir, backupFilename)
-	
+
 	// Copy the index file to backup location
 	if err := copyFile(indexFile, backupPath); err != nil {
 		return nil, fmt.Errorf("failed to create backup: %v", err)
 	}
-	
+
 	// Create metadata
 	metadata := &BackupMetadata{
 		Timestamp:   timestamp,
@@ -1049,7 +1049,7 @@ func createBackup(indexFile string, operation string, description string, option
 		IndexFile:   indexFile,
 		BackupFile:  backupPath,
 	}
-	
+
 	// Save metadata
 	metadataPath := strings.TrimSuffix(backupPath, ".idx") + ".json"
 	if err := saveMetadata(metadata, metadataPath); err != nil {
@@ -1057,11 +1057,11 @@ func createBackup(indexFile string, operation string, description string, option
 		os.Remove(backupPath)
 		return nil, fmt.Errorf("failed to save backup metadata: %v", err)
 	}
-	
+
 	if options.GetInt("verbose") > 0 && !options.GetBool("quiet") {
 		fmt.Printf("Created backup: %s\n", backupFilename)
 	}
-	
+
 	return metadata, nil
 }
 
@@ -1072,13 +1072,13 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer srcFile.Close()
-	
+
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer dstFile.Close()
-	
+
 	_, err = io.Copy(dstFile, srcFile)
 	return err
 }
@@ -1089,7 +1089,7 @@ func saveMetadata(metadata *BackupMetadata, path string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(path, data, 0644)
 }
 
@@ -1099,12 +1099,12 @@ func loadMetadata(path string) (*BackupMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var metadata BackupMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, err
 	}
-	
+
 	return &metadata, nil
 }
 
@@ -1114,18 +1114,18 @@ func listBackups(indexFile string) ([]*BackupMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if backup directory exists
 	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
 		return []*BackupMetadata{}, nil // no backups
 	}
-	
+
 	// Read all .json files in backup directory
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read backup directory: %v", err)
 	}
-	
+
 	var backups []*BackupMetadata
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
@@ -1138,12 +1138,12 @@ func listBackups(indexFile string) ([]*BackupMetadata, error) {
 			backups = append(backups, metadata)
 		}
 	}
-	
+
 	// Sort by timestamp, newest first
 	sort.Slice(backups, func(i, j int) bool {
 		return backups[i].Timestamp.After(backups[j].Timestamp)
 	})
-	
+
 	return backups, nil
 }
 
@@ -1153,13 +1153,13 @@ func removeBackupFiles(metadata *BackupMetadata) error {
 	if err := os.Remove(metadata.BackupFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove backup file: %v", err)
 	}
-	
+
 	// Remove metadata file
 	metadataPath := strings.TrimSuffix(metadata.BackupFile, ".idx") + ".json"
 	if err := os.Remove(metadataPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove metadata file: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -1170,14 +1170,14 @@ func fixesList(indexFile string, options *ParsedOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
-	
+
 	if len(backups) == 0 {
 		if !options.GetBool("quiet") {
 			fmt.Printf("No backups found for %s\n", getIndexType(indexFile))
 		}
 		return nil
 	}
-	
+
 	format := getFormat(options)
 	if format == "json" {
 		data, err := json.MarshalIndent(backups, "", "  ")
@@ -1190,21 +1190,21 @@ func fixesList(indexFile string, options *ParsedOptions) error {
 		fmt.Printf("Backup stack for %s (%d entries):\n\n", getIndexType(indexFile), len(backups))
 		fmt.Printf("%-20s %-15s %-30s\n", "Timestamp", "Operation", "Description")
 		fmt.Printf("%-20s %-15s %-30s\n", strings.Repeat("-", 20), strings.Repeat("-", 15), strings.Repeat("-", 30))
-		
+
 		for i, backup := range backups {
 			marker := " "
 			if i == 0 {
 				marker = "*" // mark the top of stack
 			}
-			fmt.Printf("%s%-19s %-15s %-30s\n", 
-				marker, 
+			fmt.Printf("%s%-19s %-15s %-30s\n",
+				marker,
 				backup.Timestamp.Format("2006-01-02 15:04:05"),
 				backup.Operation,
 				backup.Description)
 		}
 		fmt.Printf("\n* = top of stack (most recent)\n")
 	}
-	
+
 	return nil
 }
 
@@ -1213,38 +1213,38 @@ func fixesPop(indexFile string, options *ParsedOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
-	
+
 	if len(backups) == 0 {
 		return fmt.Errorf("no backups available to restore")
 	}
-	
+
 	latest := backups[0] // newest backup
-	
+
 	if options.GetBool("dry-run") {
-		fmt.Printf("Would restore backup from %s (%s: %s)\n", 
+		fmt.Printf("Would restore backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
 			latest.Description)
 		return nil
 	}
-	
+
 	// Restore the backup
 	if err := copyFile(latest.BackupFile, indexFile); err != nil {
 		return fmt.Errorf("failed to restore backup: %v", err)
 	}
-	
+
 	// Remove the backup files
 	if err := removeBackupFiles(latest); err != nil {
 		return fmt.Errorf("backup restored but failed to clean up backup files: %v", err)
 	}
-	
+
 	if !options.GetBool("quiet") {
-		fmt.Printf("Restored backup from %s (%s: %s)\n", 
+		fmt.Printf("Restored backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
 			latest.Description)
 	}
-	
+
 	return nil
 }
 
@@ -1253,33 +1253,33 @@ func fixesDiscard(indexFile string, options *ParsedOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
-	
+
 	if len(backups) == 0 {
 		return fmt.Errorf("no backups available to discard")
 	}
-	
+
 	latest := backups[0] // newest backup
-	
+
 	if options.GetBool("dry-run") {
-		fmt.Printf("Would discard backup from %s (%s: %s)\n", 
+		fmt.Printf("Would discard backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
 			latest.Description)
 		return nil
 	}
-	
+
 	// Remove the backup files
 	if err := removeBackupFiles(latest); err != nil {
 		return fmt.Errorf("failed to discard backup: %v", err)
 	}
-	
+
 	if !options.GetBool("quiet") {
-		fmt.Printf("Discarded backup from %s (%s: %s)\n", 
+		fmt.Printf("Discarded backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
 			latest.Description)
 	}
-	
+
 	return nil
 }
 
@@ -1288,35 +1288,35 @@ func fixesClear(indexFile string, options *ParsedOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
-	
+
 	if len(backups) == 0 {
 		if !options.GetBool("quiet") {
 			fmt.Printf("No backups to clear for %s\n", getIndexType(indexFile))
 		}
 		return nil
 	}
-	
+
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would clear %d backup(s) for %s\n", len(backups), getIndexType(indexFile))
 		return nil
 	}
-	
+
 	// Remove all backup files
 	for _, backup := range backups {
 		if err := removeBackupFiles(backup); err != nil {
-			return fmt.Errorf("failed to remove backup from %s: %v", 
+			return fmt.Errorf("failed to remove backup from %s: %v",
 				backup.Timestamp.Format("2006-01-02 15:04:05"), err)
 		}
 	}
-	
+
 	// Remove backup directory if it's empty
 	backupDir, _ := getBackupDir(indexFile)
 	os.Remove(backupDir) // ignore error if directory not empty or doesn't exist
-	
+
 	if !options.GetBool("quiet") {
 		fmt.Printf("Cleared %d backup(s) for %s\n", len(backups), getIndexType(indexFile))
 	}
-	
+
 	return nil
 }
 
@@ -1394,18 +1394,18 @@ func parseHashValue(value string) ([]byte, error) {
 	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
 		value = value[2:]
 	}
-	
+
 	// Decode hex string
 	hash, err := hex.DecodeString(value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid hex string: %v", err)
 	}
-	
+
 	// Validate hash length (must be 20, 32, or 64 bytes for SHA1, SHA256, SHA512)
 	if len(hash) != 20 && len(hash) != 32 && len(hash) != 64 {
 		return nil, fmt.Errorf("invalid hash length %d, must be 20 (SHA1), 32 (SHA256), or 64 (SHA512) bytes", len(hash))
 	}
-	
+
 	return hash, nil
 }
 
@@ -1425,7 +1425,7 @@ func parseBoolValue(value string) (bool, error) {
 func writeIndexFile(indexAccess *indexFileAccess, targetPath string, options *ParsedOptions) error {
 	// Create a temporary file for atomic write
 	tempFile := targetPath + ".tmp"
-	
+
 	// Create the temp file
 	file, err := os.Create(tempFile)
 	if err != nil {
@@ -1438,28 +1438,28 @@ func writeIndexFile(indexAccess *indexFileAccess, targetPath string, options *Pa
 			os.Remove(tempFile)
 		}
 	}()
-	
+
 	// Write the modified data
 	_, err = file.Write(indexAccess.data)
 	if err != nil {
 		return fmt.Errorf("failed to write to temp file: %v", err)
 	}
-	
+
 	// Sync to ensure data is written
 	err = file.Sync()
 	if err != nil {
 		return fmt.Errorf("failed to sync temp file: %v", err)
 	}
-	
+
 	// Close before rename
 	file.Close()
-	
+
 	// Atomically replace the original file
 	err = os.Rename(tempFile, targetPath)
 	if err != nil {
 		return fmt.Errorf("failed to rename temp file: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -1470,7 +1470,7 @@ func displayEntriesJSON(entries []*dircachefilehash.EntryInfo, notFoundPaths []s
 	for i, entry := range entries {
 		mtime := dircachefilehash.TimeFromWall(entry.MTimeWall)
 		ctime := dircachefilehash.TimeFromWall(entry.CTimeWall)
-		
+
 		jsonEntries[i] = map[string]interface{}{
 			"path":            entry.Path,
 			"flag_is_deleted": entry.IsDeleted,
@@ -1485,20 +1485,20 @@ func displayEntriesJSON(entries []*dircachefilehash.EntryInfo, notFoundPaths []s
 			"hash_type":       entry.HashType,
 		}
 	}
-	
+
 	output := map[string]interface{}{
 		"entries": jsonEntries,
 	}
-	
+
 	if len(notFoundPaths) > 0 && !options.GetBool("quiet") {
 		output["not_found"] = notFoundPaths
 	}
-	
+
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %v", err)
 	}
-	
+
 	fmt.Printf("%s\n", data)
 	return nil
 }
@@ -1513,7 +1513,7 @@ func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []
 		if !options.GetBool("quiet") {
 			fmt.Printf("Found %d entries:\n\n", len(entries))
 		}
-		
+
 		for _, entry := range entries {
 			fmt.Printf("Path: %s\n", entry.Path)
 			fmt.Printf("  Size: %d bytes\n", entry.FileSize)
@@ -1521,20 +1521,20 @@ func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []
 			fmt.Printf("  UID: %d\n", entry.UID)
 			fmt.Printf("  GID: %d\n", entry.GID)
 			fmt.Printf("  Dev: %d\n", entry.Dev)
-			
+
 			// Convert wall time to readable format
 			mtime := dircachefilehash.TimeFromWall(entry.MTimeWall)
 			ctime := dircachefilehash.TimeFromWall(entry.CTimeWall)
 			fmt.Printf("  MTime: %s\n", mtime.Format("2006-01-02 15:04:05"))
 			fmt.Printf("  CTime: %s\n", ctime.Format("2006-01-02 15:04:05"))
-			
+
 			fmt.Printf("  Hash Type: %d\n", entry.HashType)
 			fmt.Printf("  Hash: %s\n", entry.HashStr)
 			fmt.Printf("  Deleted: %t\n", entry.IsDeleted)
 			fmt.Printf("\n")
 		}
 	}
-	
+
 	// Show not found paths
 	if len(notFoundPaths) > 0 && !options.GetBool("quiet") {
 		fmt.Printf("Paths not found in index:\n")
@@ -1543,7 +1543,7 @@ func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []
 		}
 		fmt.Printf("\n")
 	}
-	
+
 	return nil
 }
 
@@ -1556,26 +1556,26 @@ func loadIndexIntoSkiplist(indexFile string) (*EntryData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read index file: %w", err)
 	}
-	
+
 	// Validate minimum size
 	if len(data) < dircachefilehash.HeaderSize {
 		return nil, fmt.Errorf("index file too small: %d bytes", len(data))
 	}
-	
+
 	// Read header to get entry count
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	
+
 	// Basic validation
 	if string(header.Signature[:]) != "dcfh" {
 		return nil, fmt.Errorf("invalid signature: %s", string(header.Signature[:]))
 	}
-	
+
 	entryData := &EntryData{
 		IndexFile:    indexFile,
 		OriginalData: data,
 		EntryCount:   header.EntryCount,
 	}
-	
+
 	return entryData, nil
 }
 
@@ -1628,20 +1628,20 @@ type EntryData struct {
 func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customHeader *indexHeader) error {
 	// Set the entry count from the original data
 	customHeader.EntryCount = entryData.EntryCount
-	
+
 	// Create output file
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer file.Close()
-	
+
 	// Write custom header
 	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(customHeader))
 	if _, err := file.Write(headerBytes[:]); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
-	
+
 	// Write original entry data (skip original header)
 	if len(entryData.OriginalData) > dircachefilehash.HeaderSize {
 		entryBytes := entryData.OriginalData[dircachefilehash.HeaderSize:]
@@ -1649,10 +1649,10 @@ func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customH
 			return fmt.Errorf("failed to write entries: %w", err)
 		}
 	}
-	
+
 	// Note: This simplified approach doesn't recalculate checksums
 	// For a full implementation, we'd need to implement the vectorio approach
-	
+
 	return file.Sync()
 }
 
@@ -1661,26 +1661,26 @@ func modifyEntriesInRawData(data []byte, pathSet map[string]bool, field, value s
 	if len(data) < dircachefilehash.HeaderSize {
 		return fmt.Errorf("invalid index data")
 	}
-	
+
 	// Get entry count from header (may be unreliable in corrupted files)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	entryCount := header.EntryCount
-	
+
 	// Process entries in the data buffer
 	offset := dircachefilehash.HeaderSize
 	entriesProcessed := uint32(0)
-	
+
 	for entriesProcessed < entryCount && offset < len(data) {
-		if offset + 4 > len(data) {
+		if offset+4 > len(data) {
 			break
 		}
-		
+
 		// Read entry size
 		entrySize := *(*uint32)(unsafe.Pointer(&data[offset]))
-		if entrySize < 48 || offset + int(entrySize) > len(data) {
+		if entrySize < 48 || offset+int(entrySize) > len(data) {
 			break
 		}
-		
+
 		// Parse the entry to get its path
 		entryPath := extractEntryPath(data, offset, entrySize)
 		if pathSet[entryPath] {
@@ -1691,40 +1691,40 @@ func modifyEntriesInRawData(data []byte, pathSet map[string]bool, field, value s
 			}
 			*entriesModified++
 		}
-		
+
 		offset += int(entrySize)
 		entriesProcessed++
 	}
-	
+
 	return nil
 }
 
 // writeRawDataWithChecksum writes the raw data with correct checksum
 func writeRawDataWithChecksum(data []byte, indexFile string) error {
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	
+
 	// Clear checksum field first
 	for i := range header.Checksum {
 		header.Checksum[i] = 0
 	}
-	
+
 	// Calculate checksum of header (excluding checksum field) + entries
 	hasher := sha1.New()
-	
+
 	// Hash header fields before checksum field
 	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-	
+
 	// Hash entry data (everything after header)
 	if len(data) > dircachefilehash.HeaderSize {
 		hasher.Write(data[dircachefilehash.HeaderSize:])
 	}
-	
+
 	// Store checksum in header
 	checksum := hasher.Sum(nil)
 	copy(header.Checksum[:], checksum)
-	
+
 	// Write to temp file then rename atomically
 	tempFile := indexFile + ".tmp"
 	defer func() {
@@ -1732,15 +1732,15 @@ func writeRawDataWithChecksum(data []byte, indexFile string) error {
 			os.Remove(tempFile)
 		}
 	}()
-	
+
 	if err := os.WriteFile(tempFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	
+
 	if err := os.Rename(tempFile, indexFile); err != nil {
 		return fmt.Errorf("failed to replace original file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -1749,7 +1749,7 @@ func modifyEntriesInData(entryData *EntryData, paths []string, field, value stri
 	if len(entryData.OriginalData) < dircachefilehash.HeaderSize {
 		return fmt.Errorf("invalid index data")
 	}
-	
+
 	// Convert paths to a map for quick lookup
 	pathSet := make(map[string]bool)
 	for _, path := range paths {
@@ -1760,25 +1760,25 @@ func modifyEntriesInData(entryData *EntryData, paths []string, field, value stri
 		}
 		pathSet[normalizedPath] = true
 	}
-	
+
 	// Find entry offsets using IterateIndexFile to get accurate paths
 	entryOffsets := make(map[string]int) // path -> offset in data buffer
-	
+
 	// Process entries manually to get both paths and offsets
 	data := entryData.OriginalData
 	offset := dircachefilehash.HeaderSize
-	
+
 	for i := uint32(0); i < entryData.EntryCount && offset < len(data); i++ {
-		if offset + 4 > len(data) {
+		if offset+4 > len(data) {
 			break
 		}
-		
+
 		// Read entry size
 		entrySize := *(*uint32)(unsafe.Pointer(&data[offset]))
-		if entrySize < 48 || offset + int(entrySize) > len(data) {
+		if entrySize < 48 || offset+int(entrySize) > len(data) {
 			break
 		}
-		
+
 		// Use a temporary file to get the proper path via IterateIndexFile
 		// But first, let's try the direct approach since we need the offset anyway
 		tempFile, err := os.CreateTemp("", "dcfhfix-temp-*.idx")
@@ -1787,16 +1787,16 @@ func modifyEntriesInData(entryData *EntryData, paths []string, field, value stri
 		}
 		defer os.Remove(tempFile.Name())
 		defer tempFile.Close()
-		
+
 		// Write just this entry's data to get its path
 		if _, err := tempFile.Write(data[:dircachefilehash.HeaderSize]); err != nil {
 			return fmt.Errorf("failed to write header: %v", err)
 		}
-		if _, err := tempFile.Write(data[offset:offset+int(entrySize)]); err != nil {
+		if _, err := tempFile.Write(data[offset : offset+int(entrySize)]); err != nil {
 			return fmt.Errorf("failed to write entry: %v", err)
 		}
 		tempFile.Close()
-		
+
 		// Get the path using IterateIndexFile
 		err = dircachefilehash.IterateIndexFile(tempFile.Name(), func(entry *dircachefilehash.EntryInfo, indexType string) bool {
 			entryOffsets[entry.Path] = offset
@@ -1807,10 +1807,10 @@ func modifyEntriesInData(entryData *EntryData, paths []string, field, value stri
 			entryPath := extractEntryPath(data, offset, entrySize)
 			entryOffsets[entryPath] = offset
 		}
-		
+
 		offset += int(entrySize)
 	}
-	
+
 	// Now modify the entries we found
 	entriesModified := 0
 	for entryPath, entryOffset := range entryOffsets {
@@ -1824,11 +1824,11 @@ func modifyEntriesInData(entryData *EntryData, paths []string, field, value stri
 			*modified = true
 		}
 	}
-	
+
 	if entriesModified == 0 {
 		return fmt.Errorf("no matching entries found")
 	}
-	
+
 	return nil
 }
 
@@ -1841,31 +1841,31 @@ func createModifiedIndexFile(indexFile string, pathSet map[string]bool, field, v
 			os.Remove(tempFile)
 		}
 	}()
-	
+
 	// Create new file
 	newFile, err := os.Create(tempFile)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer newFile.Close()
-	
+
 	// Copy header from original file
 	originalHeader, err := getIndexHeader(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to read original header: %v", err)
 	}
-	
+
 	// Write header (we'll update entry count later)
 	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(originalHeader))
 	if _, err := newFile.Write(headerBytes[:]); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
-	
+
 	// Process entries using IterateIndexFile
 	entryCount := uint32(0)
 	err = dircachefilehash.IterateIndexFile(indexFile, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
 		var entryToWrite *dircachefilehash.EntryInfo
-		
+
 		// Check if this entry should be modified
 		if pathSet[entry.Path] {
 			// Create a copy and modify it
@@ -1879,42 +1879,42 @@ func createModifiedIndexFile(indexFile string, pathSet map[string]bool, field, v
 			// Use original entry
 			entryToWrite = entry
 		}
-		
+
 		// Write the entry to the new file
 		if writeErr := writeEntryInfoToFile(newFile, entryToWrite); writeErr != nil {
 			return false // Stop iteration on error
 		}
-		
+
 		entryCount++
 		return true // Continue iteration
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
-	
+
 	// Update header with correct entry count
 	if _, err := newFile.Seek(0, 0); err != nil {
 		return fmt.Errorf("failed to seek to header: %w", err)
 	}
 	originalHeader.EntryCount = entryCount
-	
+
 	// Calculate checksum of the entire file content (header + entries)
 	if err := calculateAndWriteChecksum(newFile, originalHeader); err != nil {
 		return fmt.Errorf("failed to calculate checksum: %w", err)
 	}
-	
+
 	// Sync and close
 	if err := newFile.Sync(); err != nil {
 		return fmt.Errorf("failed to sync temp file: %w", err)
 	}
 	newFile.Close()
-	
+
 	// Atomic replace
 	if err := os.Rename(tempFile, indexFile); err != nil {
 		return fmt.Errorf("failed to replace original file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -1986,7 +1986,7 @@ func modifyEntryInfo(entry *dircachefilehash.EntryInfo, field, value string) err
 	default:
 		return fmt.Errorf("unknown field: %s", field)
 	}
-	
+
 	return nil
 }
 
@@ -1995,53 +1995,53 @@ func writeEntryInfoToFile(file *os.File, entry *dircachefilehash.EntryInfo) erro
 	// Convert EntryInfo back to binary format
 	pathBytes := []byte(entry.Path)
 	pathLen := len(pathBytes)
-	
+
 	// Calculate total entry size with 8-byte alignment
 	// Size(4) + CTimeWall(8) + MTimeWall(8) + Dev(4) + Ino(4) + Mode(4) + UID(4) + GID(4) + FileSize(8) + EntryFlags(2) + HashType(2) + Hash(64) + Path + null terminator + padding
 	baseSize := 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 8 + 2 + 2 + 64 + pathLen + 1 // +1 for null terminator
 	padding := (8 - (baseSize % 8)) % 8
 	totalSize := baseSize + padding
-	
+
 	// Create the binary entry buffer
 	buffer := make([]byte, totalSize)
 	offset := 0
-	
+
 	// Size (4 bytes)
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = uint32(totalSize)
 	offset += 4
-	
+
 	// CTimeWall (8 bytes)
 	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.CTimeWall
 	offset += 8
-	
+
 	// MTimeWall (8 bytes)
 	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.MTimeWall
 	offset += 8
-	
+
 	// Dev (4 bytes)
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.Dev
 	offset += 4
-	
+
 	// Ino (4 bytes) - not available in EntryInfo, use 0
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = 0
 	offset += 4
-	
+
 	// Mode (4 bytes)
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.Mode
 	offset += 4
-	
+
 	// UID (4 bytes)
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.UID
 	offset += 4
-	
+
 	// GID (4 bytes)
 	*(*uint32)(unsafe.Pointer(&buffer[offset])) = entry.GID
 	offset += 4
-	
+
 	// FileSize (8 bytes)
 	*(*uint64)(unsafe.Pointer(&buffer[offset])) = entry.FileSize
 	offset += 8
-	
+
 	// EntryFlags (2 bytes)
 	var flags uint16 = 0
 	if entry.IsDeleted {
@@ -2049,11 +2049,11 @@ func writeEntryInfoToFile(file *os.File, entry *dircachefilehash.EntryInfo) erro
 	}
 	*(*uint16)(unsafe.Pointer(&buffer[offset])) = flags
 	offset += 2
-	
+
 	// HashType (2 bytes)
 	*(*uint16)(unsafe.Pointer(&buffer[offset])) = entry.HashType
 	offset += 2
-	
+
 	// Hash (64 bytes)
 	hashBytes, err := hex.DecodeString(entry.HashStr)
 	if err != nil {
@@ -2061,18 +2061,18 @@ func writeEntryInfoToFile(file *os.File, entry *dircachefilehash.EntryInfo) erro
 	}
 	copy(buffer[offset:offset+64], hashBytes)
 	offset += 64
-	
+
 	// Path + null terminator (rest of the space)
 	copy(buffer[offset:], pathBytes)
 	offset += pathLen
 	buffer[offset] = 0 // null terminator
 	// Padding is already zero-initialized
-	
+
 	// Write the binary entry to file
 	if _, err := file.Write(buffer); err != nil {
 		return fmt.Errorf("failed to write entry: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -2083,38 +2083,38 @@ func calculateAndWriteChecksum(file *os.File, header *indexHeader) error {
 	if err != nil {
 		return fmt.Errorf("failed to get file size: %w", err)
 	}
-	
+
 	// Read all content except header to calculate checksum
 	if _, err := file.Seek(dircachefilehash.HeaderSize, 0); err != nil {
 		return fmt.Errorf("failed to seek to entries: %w", err)
 	}
-	
+
 	content := make([]byte, currentPos-dircachefilehash.HeaderSize)
 	if _, err := file.Read(content); err != nil {
 		return fmt.Errorf("failed to read entries for checksum: %w", err)
 	}
-	
+
 	// Calculate SHA-1 checksum of the entries
 	hasher := sha1.New()
 	hasher.Write(content)
 	checksum := hasher.Sum(nil)
-	
+
 	// Copy checksum to header (clear first, then copy)
 	for i := range header.Checksum {
 		header.Checksum[i] = 0
 	}
 	copy(header.Checksum[:], checksum)
-	
+
 	// Write the complete header with checksum
 	if _, err := file.Seek(0, 0); err != nil {
 		return fmt.Errorf("failed to seek to header: %w", err)
 	}
-	
+
 	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(header))
 	if _, err := file.Write(headerBytes[:]); err != nil {
 		return fmt.Errorf("failed to write header with checksum: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -2125,16 +2125,16 @@ func extractEntryPath(data []byte, offset int, entrySize uint32) string {
 	pathFieldOffset := 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 8 + 2 + 2 + 64
 	pathStart := offset + pathFieldOffset
 	pathEnd := offset + int(entrySize)
-	
+
 	// Scan backwards from end to find actual end (remove null padding)
 	for pathEnd > pathStart && data[pathEnd-1] == 0 {
 		pathEnd--
 	}
-	
+
 	if pathEnd <= pathStart {
 		return ""
 	}
-	
+
 	return string(data[pathStart:pathEnd])
 }
 
@@ -2220,7 +2220,7 @@ func modifyEntryFieldInData(data []byte, offset int, field, value string) error 
 	default:
 		return fmt.Errorf("unknown field: %s", field)
 	}
-	
+
 	return nil
 }
 
@@ -2234,18 +2234,16 @@ func writeModifiedIndex(entryData *EntryData, indexFile string, options *ParsedO
 			os.Remove(tempFile)
 		}
 	}()
-	
+
 	// Write the modified data to temp file
 	if err := os.WriteFile(tempFile, entryData.OriginalData, 0644); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	
+
 	// Atomic replace
 	if err := os.Rename(tempFile, indexFile); err != nil {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
-	
+
 	return nil
 }
-
-

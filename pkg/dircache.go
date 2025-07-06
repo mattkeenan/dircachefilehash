@@ -21,7 +21,7 @@ func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {
 
 	for _, entry := range entries {
 		name := entry.Name()
-		
+
 		// Check for our temporary index file patterns
 		if (strings.HasPrefix(name, "tmp-") || strings.HasPrefix(name, "scan-")) && strings.HasSuffix(name, ".idx") {
 			pid := extractPidFromIndexFileName(name)
@@ -41,20 +41,20 @@ func extractPidFromIndexFileName(filename string) int {
 		return 0
 	}
 	base := strings.TrimSuffix(filename, ".idx")
-	
+
 	// Split on dashes
 	parts := strings.Split(base, "-")
 	if len(parts) < 3 {
 		return 0
 	}
-	
+
 	// PID is the second part (index 1)
 	pidStr := parts[1]
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return 0
 	}
-	
+
 	return pid
 }
 
@@ -66,7 +66,7 @@ func isProcessRunning(pid int) bool {
 	if err == nil {
 		return true // Process exists and we can signal it
 	}
-	
+
 	// Check the specific error
 	if errno, ok := err.(syscall.Errno); ok {
 		if errno == syscall.ESRCH {
@@ -78,7 +78,7 @@ func isProcessRunning(pid int) bool {
 			return true
 		}
 	}
-	
+
 	// For any other error, assume process doesn't exist
 	return false
 }
@@ -166,7 +166,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dcfhPath, err)
 		return dc
 	}
-	
+
 	// Load configuration
 	config, err := LoadConfig(dcfhPath)
 	if err != nil {
@@ -174,7 +174,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
 	}
 	dc.config = config
-	
+
 	// Initialise hash workers from config (default to 4 if no config)
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
@@ -206,14 +206,14 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 	if dc.config == nil {
 		return fmt.Errorf("no configuration loaded, cannot apply overrides")
 	}
-	
+
 	var allOverrides []string
-	
+
 	// Collect hash algorithm override
 	if filehashOverride, exists := flags["filehash"]; exists {
 		allOverrides = append(allOverrides, filehashOverride)
 	}
-	
+
 	// Set symlink mode from flags or config
 	if symlinkMode, exists := flags["symlinks"]; exists {
 		dc.symlinkMode = symlinkMode
@@ -223,7 +223,7 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 	} else {
 		dc.symlinkMode = "all" // default fallback
 	}
-	
+
 	// Set hash workers from flags or keep current config value
 	if hashWorkersStr, exists := flags["hash_workers"]; exists {
 		hashWorkers, err := strconv.Atoi(hashWorkersStr)
@@ -236,56 +236,56 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 		dc.hashWorkers = hashWorkers
 		allOverrides = append(allOverrides, "hash_workers:"+hashWorkersStr)
 	}
-	
+
 	// Apply all overrides
 	if len(allOverrides) > 0 {
 		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
 			return fmt.Errorf("failed to apply configuration overrides: %w", err)
 		}
-		
+
 		// Validate all configurations
 		if err := dc.validateAllConfigs(); err != nil {
 			return fmt.Errorf("invalid configuration after overrides: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
 // validateAllConfigs validates all configuration options
 func (dc *DirectoryCache) validateAllConfigs() error {
 	allConfig := dc.config.GetAllConfig()
-	
+
 	// Validate hash algorithm
 	if err := ValidateHashAlgorithm(allConfig.Hash.Default); err != nil {
 		return err
 	}
-	
+
 	// Validate output format
 	if err := ValidateOutputFormat(allConfig.Output.Format); err != nil {
 		return err
 	}
-	
+
 	// Validate verbose level
 	if err := ValidateVerboseLevel(allConfig.Verbose.Level); err != nil {
 		return err
 	}
-	
+
 	// Validate debug flags
 	if err := ValidateDebugFlags(allConfig.Verbose.Debug); err != nil {
 		return err
 	}
-	
+
 	// Validate symlink mode
 	if err := ValidateSymlinkMode(allConfig.Symlink.Mode); err != nil {
 		return err
 	}
-	
+
 	// Validate hash workers
 	if err := ValidateHashWorkers(allConfig.Performance.HashWorkers); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 

@@ -67,7 +67,7 @@ func showUsage() {
 func showHelp() {
 	fmt.Printf("dcfhfind - find-style interface for dcfh repositories\n\n")
 	fmt.Printf("Usage: dcfhfind [starting-points...] [expressions]\n\n")
-	
+
 	fmt.Printf("STARTING POINTS:\n")
 	fmt.Printf("  main              Search main index (.dcfh/main.idx)\n")
 	fmt.Printf("  cache             Search cache index (.dcfh/cache.idx)\n")
@@ -76,7 +76,7 @@ func showHelp() {
 	fmt.Printf("  all               Search all indices (main + cache + scan)\n")
 	fmt.Printf("  /path/to/file.idx Direct file path\n")
 	fmt.Printf("  .dcfh/*.idx       Shell patterns\n\n")
-	
+
 	fmt.Printf("TESTS:\n")
 	fmt.Printf("  --name PATTERN    Match filename (glob)\n")
 	fmt.Printf("  --path PATTERN    Match full path (glob)\n")
@@ -99,7 +99,7 @@ func showHelp() {
 	fmt.Printf("  --perm MODE       Exact permissions\n")
 	fmt.Printf("  --perm -MODE      All bits set\n")
 	fmt.Printf("  --perm /MODE      Any bits set\n\n")
-	
+
 	fmt.Printf("ACTIONS:\n")
 	fmt.Printf("  --print           Print path (default)\n")
 	fmt.Printf("  --print0          Print null-terminated paths\n")
@@ -108,19 +108,19 @@ func showHelp() {
 	fmt.Printf("  --validate        Validate entry\n")
 	fmt.Printf("  --checksum        Verify hash against file (WARNING: slow on many/large files)\n")
 	fmt.Printf("  --fix {auto|manual|none}  Apply fixes (required argument)\n\n")
-	
+
 	fmt.Printf("OPERATORS:\n")
 	fmt.Printf("  --and             Logical AND (implicit)\n")
 	fmt.Printf("  --or              Logical OR\n")
 	fmt.Printf("  --not, !          Logical NOT\n")
 	fmt.Printf("  \\( ... \\)          Grouping\n\n")
-	
+
 	fmt.Printf("GLOBAL OPTIONS:\n")
 	fmt.Printf("  --repo DIR        Repository root directory\n")
 	fmt.Printf("  --maxdepth N      Maximum search depth\n")
 	fmt.Printf("  --warn            Enable warnings\n")
 	fmt.Printf("  --nowarn          Suppress warnings\n\n")
-	
+
 	fmt.Printf("PRINTF FORMAT SPECIFIERS:\n")
 	fmt.Printf("  %%p - Full path          %%s - Size in bytes\n")
 	fmt.Printf("  %%f - Filename only      %%m - Permissions (octal)\n")
@@ -130,12 +130,12 @@ func showHelp() {
 	fmt.Printf("  %%i - Index source       %%Y - Hash type\n")
 	fmt.Printf("  %%d - Device number      %%%% - Literal %%\n")
 	fmt.Printf("  Escape sequences: \\n (newline), \\t (tab), \\r (carriage return)\n\n")
-	
+
 	fmt.Printf("PERFORMANCE NOTES:\n")
 	fmt.Printf("  The --checksum action reads file contents to compute hashes, which can be\n")
 	fmt.Printf("  very slow when processing many files or large files. Consider using --valid\n")
 	fmt.Printf("  for faster validation that doesn't require reading file contents.\n\n")
-	
+
 	fmt.Printf("EXAMPLES:\n")
 	fmt.Printf("  dcfhfind main --name \"*.go\"                    # Find Go files\n")
 	fmt.Printf("  dcfhfind all --size +100M --ls                # Large files\n")
@@ -186,9 +186,9 @@ type EvalContext struct {
 
 // IndexFile represents a resolved index file to search
 type IndexFile struct {
-	Path      string
-	Type      string // "main", "cache", "scan", "file"
-	ScanID    string // for scan files: "PID-TID"
+	Path   string
+	Type   string // "main", "cache", "scan", "file"
+	ScanID string // for scan files: "PID-TID"
 }
 
 func parseArguments(args []string) (*Arguments, error) {
@@ -200,7 +200,7 @@ func parseArguments(args []string) (*Arguments, error) {
 	}
 
 	i := 0
-	
+
 	// Parse starting points (everything before first -- option)
 	for i < len(args) && !strings.HasPrefix(args[i], "--") && args[i] != "!" && args[i] != "(" {
 		result.StartingPoints = append(result.StartingPoints, args[i])
@@ -218,7 +218,7 @@ func parseArguments(args []string) (*Arguments, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Apply global arguments
 	for option, value := range globalArgs {
 		switch option {
@@ -233,7 +233,7 @@ func parseArguments(args []string) (*Arguments, error) {
 			result.GlobalOptions.Warn = false
 		}
 	}
-	
+
 	result.Expressions = expressions
 	result.Actions = actions
 
@@ -253,12 +253,12 @@ func parseComplexExpressions(args []string) ([]Expression, []Action, map[string]
 		globalArgs: make(map[string]string),
 		actions:    []Action{},
 	}
-	
+
 	expressions, err := parser.parseExpressionList()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	
+
 	// If we have multiple expressions, combine them with implicit AND
 	var finalExpression Expression
 	if len(expressions) == 0 {
@@ -275,12 +275,12 @@ func parseComplexExpressions(args []string) ([]Expression, []Action, map[string]
 			}
 		}
 	}
-	
+
 	var result []Expression
 	if finalExpression != nil {
 		result = []Expression{finalExpression}
 	}
-	
+
 	return result, parser.actions, parser.globalArgs, nil
 }
 
@@ -310,7 +310,7 @@ func (p *ExpressionParser) next() string {
 
 func (p *ExpressionParser) parseExpressionList() ([]Expression, error) {
 	var expressions []Expression
-	
+
 	for p.pos < len(p.tokens) {
 		expr, err := p.parseOrExpression()
 		if err != nil {
@@ -320,7 +320,7 @@ func (p *ExpressionParser) parseExpressionList() ([]Expression, error) {
 			expressions = append(expressions, expr)
 		}
 	}
-	
+
 	return expressions, nil
 }
 
@@ -329,7 +329,7 @@ func (p *ExpressionParser) parseOrExpression() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for p.peek() == "--or" {
 		p.next() // consume --or
 		right, err := p.parseAndExpression()
@@ -338,7 +338,7 @@ func (p *ExpressionParser) parseOrExpression() (Expression, error) {
 		}
 		left = &OrExpression{Left: left, Right: right}
 	}
-	
+
 	return left, nil
 }
 
@@ -347,7 +347,7 @@ func (p *ExpressionParser) parseAndExpression() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for p.peek() == "--and" || (p.peek() != "" && p.peek() != "--or" && p.peek() != ")" && p.isTestExpression(p.peek())) {
 		if p.peek() == "--and" {
 			p.next() // consume --and
@@ -361,7 +361,7 @@ func (p *ExpressionParser) parseAndExpression() (Expression, error) {
 			left = &AndExpression{Left: left, Right: right}
 		}
 	}
-	
+
 	return left, nil
 }
 
@@ -374,7 +374,7 @@ func (p *ExpressionParser) parseNotExpression() (Expression, error) {
 		}
 		return &NotExpression{Expr: expr}, nil
 	}
-	
+
 	return p.parsePrimaryExpression()
 }
 
@@ -383,7 +383,7 @@ func (p *ExpressionParser) parsePrimaryExpression() (Expression, error) {
 	if token == "" {
 		return nil, nil
 	}
-	
+
 	if token == "(" {
 		p.next() // consume (
 		expr, err := p.parseOrExpression()
@@ -396,12 +396,12 @@ func (p *ExpressionParser) parsePrimaryExpression() (Expression, error) {
 		p.next() // consume )
 		return expr, nil
 	}
-	
+
 	// Handle global options
 	if p.isGlobalOption(token) {
 		return p.parseGlobalOption()
 	}
-	
+
 	// Parse basic expression or action
 	return p.parseBasicExpression()
 }
@@ -409,7 +409,7 @@ func (p *ExpressionParser) parsePrimaryExpression() (Expression, error) {
 func (p *ExpressionParser) isTestExpression(token string) bool {
 	tests := []string{
 		"--name", "--iname", "--path", "--ipath", "--size", "--empty", "--deleted",
-		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type", 
+		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type",
 		"--mtime", "--mmin", "--ctime", "--cmin", "--not", "!", "(",
 	}
 	for _, test := range tests {
@@ -432,7 +432,7 @@ func (p *ExpressionParser) isGlobalOption(token string) bool {
 
 func (p *ExpressionParser) parseGlobalOption() (Expression, error) {
 	token := p.next()
-	
+
 	switch token {
 	case "--repo":
 		if p.pos >= len(p.tokens) {
@@ -451,7 +451,7 @@ func (p *ExpressionParser) parseGlobalOption() (Expression, error) {
 	case "--nowarn":
 		p.globalArgs["--nowarn"] = "true"
 	}
-	
+
 	return nil, nil // Global options don't produce expressions
 }
 
@@ -459,9 +459,9 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 	if p.pos >= len(p.tokens) {
 		return nil, fmt.Errorf("unexpected end of expression")
 	}
-	
+
 	token := p.next()
-	
+
 	switch token {
 	case "--name":
 		if p.pos >= len(p.tokens) {
@@ -469,28 +469,28 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		}
 		pattern := p.next()
 		return &NameTest{Pattern: pattern, CaseSensitive: true}, nil
-		
+
 	case "--iname":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--iname requires a pattern")
 		}
 		pattern := p.next()
 		return &NameTest{Pattern: pattern, CaseSensitive: false}, nil
-		
+
 	case "--path":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--path requires a pattern")
 		}
 		pattern := p.next()
 		return &PathTest{Pattern: pattern, CaseSensitive: true}, nil
-		
+
 	case "--ipath":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--ipath requires a pattern")
 		}
 		pattern := p.next()
 		return &PathTest{Pattern: pattern, CaseSensitive: false}, nil
-		
+
 	case "--size":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--size requires a size specification")
@@ -498,7 +498,7 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		sizeSpec := p.next()
 		expr, _, err := parseSizeTest(sizeSpec)
 		return expr, err
-		
+
 	case "--empty":
 		return &EmptyTest{}, nil
 	case "--deleted":
@@ -507,72 +507,72 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		return &ValidTest{}, nil
 	case "--corrupt":
 		return &CorruptTest{}, nil
-		
+
 	case "--hash":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--hash requires a hash value")
 		}
 		hash := p.next()
 		return &HashTest{Hash: hash}, nil
-		
+
 	case "--mtime":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--mtime requires a time specification")
 		}
 		timeSpec := p.next()
 		return parseTimeTest(timeSpec, "mtime")
-		
+
 	case "--mmin":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--mmin requires a time specification")
 		}
 		timeSpec := p.next()
 		return parseTimeTest(timeSpec, "mmin")
-		
+
 	case "--ctime":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--ctime requires a time specification")
 		}
 		timeSpec := p.next()
 		return parseTimeTest(timeSpec, "ctime")
-		
+
 	case "--cmin":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--cmin requires a time specification")
 		}
 		timeSpec := p.next()
 		return parseTimeTest(timeSpec, "cmin")
-		
+
 	case "--hash-prefix":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--hash-prefix requires a prefix")
 		}
 		prefix := p.next()
 		return &HashPrefixTest{Prefix: prefix}, nil
-		
+
 	case "--hash-type":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--hash-type requires a type")
 		}
 		hashType := p.next()
 		return &HashTypeTest{Type: hashType}, nil
-		
+
 	// Actions
 	case "--print":
 		action := &PrintAction{}
 		p.actions = append(p.actions, action)
 		return nil, nil // Actions don't produce expressions
-		
+
 	case "--print0":
 		action := &Print0Action{}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	case "--ls":
 		action := &LsAction{}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	case "--printf":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--printf requires a format string")
@@ -581,17 +581,17 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		action := &PrintfAction{Format: format}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	case "--validate":
 		action := &ValidateAction{}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	case "--checksum":
 		action := &ChecksumAction{}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	case "--fix":
 		if p.pos >= len(p.tokens) {
 			return nil, fmt.Errorf("--fix requires an argument (auto|manual|none)")
@@ -603,7 +603,7 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 		action := &FixAction{Mode: fixMode}
 		p.actions = append(p.actions, action)
 		return nil, nil
-		
+
 	default:
 		return nil, fmt.Errorf("unknown expression: %s", token)
 	}
@@ -613,31 +613,31 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 	if len(sizeSpec) == 0 {
 		return nil, 0, fmt.Errorf("empty size specification")
 	}
-	
+
 	var mode string
 	var sizeStr string
-	
+
 	// Parse prefix (+, -, or exact)
 	switch sizeSpec[0] {
 	case '+':
 		mode = "+"
 		sizeStr = sizeSpec[1:]
 	case '-':
-		mode = "-" 
+		mode = "-"
 		sizeStr = sizeSpec[1:]
 	default:
 		mode = "="
 		sizeStr = sizeSpec
 	}
-	
+
 	if len(sizeStr) == 0 {
 		return nil, 0, fmt.Errorf("size specification missing numeric value")
 	}
-	
+
 	// Parse unit suffix
 	var multiplier int64 = 1
 	var numStr string
-	
+
 	if len(sizeStr) > 0 {
 		lastChar := sizeStr[len(sizeStr)-1]
 		switch lastChar {
@@ -670,15 +670,15 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 			numStr = sizeStr
 		}
 	}
-	
+
 	if len(numStr) == 0 {
 		return nil, 0, fmt.Errorf("size specification missing numeric value")
 	}
-	
+
 	// Parse the numeric part
 	var size int64
 	var err error
-	
+
 	// Handle decimal numbers for units
 	if strings.Contains(numStr, ".") {
 		var floatSize float64
@@ -695,11 +695,11 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 		}
 		size = intSize * multiplier
 	}
-	
+
 	if size < 0 {
 		return nil, 0, fmt.Errorf("size cannot be negative")
 	}
-	
+
 	return &SizeTest{Size: size, Mode: mode}, 2, nil
 }
 
@@ -707,10 +707,10 @@ func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
 	if len(timeSpec) == 0 {
 		return nil, fmt.Errorf("empty time specification")
 	}
-	
+
 	var mode string
 	var timeStr string
-	
+
 	// Parse prefix (+, -, or exact)
 	switch timeSpec[0] {
 	case '+':
@@ -723,21 +723,21 @@ func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
 		mode = "="
 		timeStr = timeSpec
 	}
-	
+
 	if len(timeStr) == 0 {
 		return nil, fmt.Errorf("time specification missing numeric value")
 	}
-	
+
 	// Parse the numeric part
 	value, err := strconv.Atoi(timeStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid time number: %s", timeStr)
 	}
-	
+
 	if value < 0 {
 		return nil, fmt.Errorf("time value cannot be negative")
 	}
-	
+
 	// Create appropriate test based on type
 	switch timeType {
 	case "mtime":
@@ -813,7 +813,7 @@ func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFil
 				} else {
 					indexPath = filepath.Join(dcfhDir, point+".idx")
 				}
-				
+
 				// Extract scan ID
 				basename := filepath.Base(indexPath)
 				if strings.HasPrefix(basename, "scan-") && strings.HasSuffix(basename, ".idx") {
@@ -837,7 +837,7 @@ func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFil
 	// Remove duplicates and check file existence
 	var result []IndexFile
 	seen := make(map[string]bool)
-	
+
 	for _, indexFile := range indexFiles {
 		if seen[indexFile.Path] {
 			continue
@@ -912,7 +912,7 @@ func processIndexFile(indexFile IndexFile, args *Arguments) error {
 				}
 			}
 		}
-		
+
 		return true // Continue iteration
 	})
 }

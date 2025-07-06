@@ -108,7 +108,7 @@ func isGitDirty() bool {
 		// If we can't check git status, assume clean
 		return false
 	}
-	
+
 	// If there's any output from git status --porcelain, the repo is dirty
 	return len(strings.TrimSpace(string(statusOutput))) > 0
 }

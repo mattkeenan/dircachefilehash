@@ -7,19 +7,19 @@ import (
 // Test basic option definition and parsing
 func TestOptionDefinition(t *testing.T) {
 	options := NewParsedOptions()
-	
+
 	// Test defining options
 	options.DefineOption("test-string", "s", OptionTypeString, "default", "Test string option")
 	options.DefineOption("test-bool", "b", OptionTypeBool, "false", "Test bool option")
 	options.DefineOption("test-int", "i", OptionTypeInt, "0", "Test int option")
-	
+
 	// Test parsing simple options
 	args := []string{"--test-string=value", "--test-bool", "--test-int=42"}
 	err := options.Parse(args)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	
+
 	// Test values
 	if options.GetString("test-string") != "value" {
 		t.Errorf("Expected string 'value', got %s", options.GetString("test-string"))
@@ -35,23 +35,23 @@ func TestOptionDefinition(t *testing.T) {
 // Test short option parsing
 func TestShortOptions(t *testing.T) {
 	options := NewParsedOptions()
-	
+
 	options.DefineOption("verbose", "v", OptionTypeInt, "0", "Verbose level")
 	options.DefineOption("help", "h", OptionTypeBool, "false", "Show help")
 	options.DefineOption("quiet", "q", OptionTypeBool, "false", "Quiet mode")
-	
+
 	// Test combined short options
 	args := []string{"-vvv", "-hq"}
 	err := options.Parse(args)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	
+
 	// Verbose should be 3 (repeated 3 times)
 	if options.GetInt("verbose") != 3 {
 		t.Errorf("Expected verbose level 3, got %d", options.GetInt("verbose"))
 	}
-	
+
 	// Help and quiet should be true
 	if !options.GetBool("help") {
 		t.Errorf("Expected help true, got %v", options.GetBool("help"))
@@ -64,16 +64,16 @@ func TestShortOptions(t *testing.T) {
 // Test argument collection
 func TestArgumentCollection(t *testing.T) {
 	options := NewParsedOptions()
-	
+
 	options.DefineOption("format", "f", OptionTypeString, "human", "Format option")
 	options.DefineOption("verbose", "v", OptionTypeBool, "false", "Verbose mode")
-	
+
 	args := []string{"--format=json", "file1.idx", "header", "show", "--verbose", "arg1", "arg2"}
 	err := options.Parse(args)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	
+
 	// Check options
 	if options.GetString("format") != "json" {
 		t.Errorf("Expected format 'json', got %s", options.GetString("format"))
@@ -81,19 +81,24 @@ func TestArgumentCollection(t *testing.T) {
 	if !options.GetBool("verbose") {
 		t.Errorf("Expected verbose true, got %v", options.GetBool("verbose"))
 	}
-	
+
 	// Check non-option arguments
 	expectedArgs := []string{"file1.idx", "header", "show", "arg1", "arg2"}
 	actualArgs := options.GetArgs()
-	
+
 	if len(actualArgs) != len(expectedArgs) {
 		t.Errorf("Expected %d args, got %d", len(expectedArgs), len(actualArgs))
 	}
-	
+
 	for i, expected := range expectedArgs {
 		if i >= len(actualArgs) || actualArgs[i] != expected {
-			t.Errorf("Expected arg[%d] = %s, got %s", i, expected, 
-				func() string { if i < len(actualArgs) { return actualArgs[i] }; return "<missing>" }())
+			t.Errorf("Expected arg[%d] = %s, got %s", i, expected,
+				func() string {
+					if i < len(actualArgs) {
+						return actualArgs[i]
+					}
+					return "<missing>"
+				}())
 		}
 	}
 }
@@ -141,12 +146,12 @@ func TestBooleanOptions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			options := NewParsedOptions()
 			options.DefineOption("test-bool", "t", OptionTypeBool, "false", "Test boolean")
-			
+
 			err := options.Parse(tt.args)
 			if err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
-			
+
 			if options.GetBool("test-bool") != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, options.GetBool("test-bool"))
 			}
@@ -216,7 +221,7 @@ func TestOptionErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			options := NewParsedOptions()
 			tt.setup(options)
-			
+
 			err := options.Parse(tt.args)
 			if tt.wantErr && err == nil {
 				t.Errorf("Expected error but got none")
@@ -231,17 +236,17 @@ func TestOptionErrors(t *testing.T) {
 // Test default values
 func TestDefaultValues(t *testing.T) {
 	options := NewParsedOptions()
-	
+
 	options.DefineOption("string-opt", "s", OptionTypeString, "default-string", "String option")
 	options.DefineOption("bool-opt", "b", OptionTypeBool, "true", "Bool option")
 	options.DefineOption("int-opt", "i", OptionTypeInt, "42", "Int option")
-	
+
 	// Parse empty args
 	err := options.Parse([]string{})
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	
+
 	// Check defaults
 	if options.GetString("string-opt") != "default-string" {
 		t.Errorf("Expected default string 'default-string', got %s", options.GetString("string-opt"))
@@ -257,16 +262,16 @@ func TestDefaultValues(t *testing.T) {
 // Test IsSet functionality
 func TestIsSet(t *testing.T) {
 	options := NewParsedOptions()
-	
+
 	options.DefineOption("set-option", "s", OptionTypeString, "default", "Set option")
 	options.DefineOption("unset-option", "u", OptionTypeString, "default", "Unset option")
-	
+
 	args := []string{"--set-option=value"}
 	err := options.Parse(args)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	
+
 	if !options.IsSet("set-option") {
 		t.Errorf("Expected set-option to be set")
 	}

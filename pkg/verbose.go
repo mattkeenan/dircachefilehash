@@ -25,21 +25,21 @@ func VerboseEnter() func() {
 	if globalVerboseLevel < 3 {
 		return func() {} // No-op
 	}
-	
+
 	// Get caller function name
 	pc, _, _, ok := runtime.Caller(1)
 	if !ok {
 		return func() {}
 	}
-	
+
 	funcName := runtime.FuncForPC(pc).Name()
 	// Strip package prefix for cleaner output
 	if idx := strings.LastIndex(funcName, "."); idx != -1 {
 		funcName = funcName[idx+1:]
 	}
-	
+
 	fmt.Fprintf(os.Stderr, "[TRACE] Entering function: %s\n", funcName)
-	
+
 	return func() {
 		fmt.Fprintf(os.Stderr, "[TRACE] Exiting function: %s\n", funcName)
 	}
@@ -63,19 +63,19 @@ func SetDebugFlags(flagsStr string) {
 	if flagsStr == "" {
 		return
 	}
-	
+
 	flags := strings.Split(flagsStr, ",")
 	for _, flag := range flags {
 		flag = strings.TrimSpace(flag)
 		if flag == "" {
 			continue
 		}
-		
+
 		// Handle flag:value format
 		parts := strings.SplitN(flag, ":", 2)
 		flagName := strings.ToLower(parts[0])
 		flagValue := true // Default to true for simple flag names
-		
+
 		if len(parts) > 1 {
 			// Parse the value
 			switch strings.ToLower(parts[1]) {
@@ -87,7 +87,7 @@ func SetDebugFlags(flagsStr string) {
 				flagValue = true // Default to true for unknown values
 			}
 		}
-		
+
 		debugFlags[flagName] = flagValue
 	}
 }

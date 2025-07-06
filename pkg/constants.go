@@ -2,7 +2,7 @@ package dircachefilehash
 
 import (
 	"strings"
-	
+
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
@@ -23,8 +23,8 @@ const (
 
 // Header and file format constants
 const (
-	HeaderSize         = 88 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(2) + checksum_type(2) + checksum(64)
-	ChecksumSize       = 64 // Maximum checksum size (512 bits)
+	HeaderSize          = 88 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(2) + checksum_type(2) + checksum(64)
+	ChecksumSize        = 64 // Maximum checksum size (512 bits)
 	CurrentIndexVersion = 1  // Current index file format version
 )
 
@@ -79,7 +79,7 @@ const (
 	IndexFlagClean  uint16 = 1 << 1 // Index file is in clean/complete state
 )
 
-// Entry flags  
+// Entry flags
 const (
 	EntryFlagDeleted uint16 = 1 << 0 // Entry marked as deleted
 )

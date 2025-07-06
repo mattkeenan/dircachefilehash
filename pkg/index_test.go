@@ -39,7 +39,7 @@ func TestIndexHeader_SetHeader(t *testing.T) {
 
 func TestIndexHeader_CleanMethods(t *testing.T) {
 	var header indexHeader
-	
+
 	// Test initial state (not clean)
 	if header.isClean() {
 		t.Error("Expected header to be initially not clean")
@@ -168,12 +168,12 @@ func TestDirectoryCache_scanForTempIndices(t *testing.T) {
 func TestBinaryEntry_Size(t *testing.T) {
 	// Test that binaryEntry size calculation is correct
 	expectedSize := int(unsafe.Sizeof(binaryEntry{}))
-	
+
 	// This is more of a documentation test to ensure we know the size
 	if expectedSize == 0 {
 		t.Error("binaryEntry size should not be zero")
 	}
-	
+
 	// The exact size may vary by platform, but should be reasonable
 	if expectedSize > 200 || expectedSize < 50 {
 		t.Errorf("binaryEntry size %d seems unreasonable", expectedSize)

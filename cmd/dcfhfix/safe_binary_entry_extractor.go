@@ -14,77 +14,77 @@ func getBinaryEntryFromOffset(data []byte, entryIdx int, offset int) (*binaryEnt
 	if err != nil {
 		return nil, fmt.Errorf("entry structure invalid: %w", err)
 	}
-	
+
 	// Create new binaryEntry struct and populate all fields safely
 	entry := &binaryEntry{}
-	
+
 	// Read all fields through safe accessor
 	entry.Size, err = accessor.GetSize()
 	if err != nil {
 		return nil, fmt.Errorf("size field corrupted: %w", err)
 	}
-	
+
 	entry.CTimeWall, err = accessor.GetCTimeWall()
 	if err != nil {
 		return nil, fmt.Errorf("ctime field corrupted: %w", err)
 	}
-	
+
 	entry.MTimeWall, err = accessor.GetMTimeWall()
 	if err != nil {
 		return nil, fmt.Errorf("mtime field corrupted: %w", err)
 	}
-	
+
 	entry.Dev, err = accessor.GetDev()
 	if err != nil {
 		return nil, fmt.Errorf("dev field corrupted: %w", err)
 	}
-	
+
 	entry.Ino, err = accessor.GetIno()
 	if err != nil {
 		return nil, fmt.Errorf("ino field corrupted: %w", err)
 	}
-	
+
 	entry.Mode, err = accessor.GetMode()
 	if err != nil {
 		return nil, fmt.Errorf("mode field corrupted: %w", err)
 	}
-	
+
 	entry.UID, err = accessor.GetUID()
 	if err != nil {
 		return nil, fmt.Errorf("uid field corrupted: %w", err)
 	}
-	
+
 	entry.GID, err = accessor.GetGID()
 	if err != nil {
 		return nil, fmt.Errorf("gid field corrupted: %w", err)
 	}
-	
+
 	entry.FileSize, err = accessor.GetFileSize()
 	if err != nil {
 		return nil, fmt.Errorf("file_size field corrupted: %w", err)
 	}
-	
+
 	entry.EntryFlags, err = accessor.GetEntryFlags()
 	if err != nil {
 		return nil, fmt.Errorf("entry_flags field corrupted: %w", err)
 	}
-	
+
 	entry.HashType, err = accessor.GetHashType()
 	if err != nil {
 		return nil, fmt.Errorf("hash_type field corrupted: %w", err)
 	}
-	
+
 	entry.Hash, err = accessor.GetHash()
 	if err != nil {
 		return nil, fmt.Errorf("hash field corrupted: %w", err)
 	}
-	
+
 	// Get path and copy into Path field (with null termination)
 	pathStr, err := accessor.GetPath()
 	if err != nil {
 		return nil, fmt.Errorf("path field corrupted: %w", err)
 	}
-	
+
 	// Validate path is reasonable
 	if len(pathStr) == 0 {
 		return nil, fmt.Errorf("path is empty")
@@ -92,7 +92,7 @@ func getBinaryEntryFromOffset(data []byte, entryIdx int, offset int) (*binaryEnt
 	if len(pathStr) > 4000 { // Reasonable maximum
 		return nil, fmt.Errorf("path too long: %d characters", len(pathStr))
 	}
-	
+
 	// Store path in a way that can be retrieved later
 	// Note: The actual path is variable length and extends beyond the struct
 	// For now, store the first 8 bytes in the Path field for compatibility
@@ -103,7 +103,7 @@ func getBinaryEntryFromOffset(data []byte, entryIdx int, offset int) (*binaryEnt
 		}
 		copy(entry.Path[:copyLen], pathStr)
 	}
-	
+
 	return entry, nil
 }
 
@@ -111,7 +111,7 @@ func getBinaryEntryFromOffset(data []byte, entryIdx int, offset int) (*binaryEnt
 func attemptErrorFixAtOffset(data []byte, entryIdx int, offset int, originalErr error) (*binaryEntry, error) {
 	// Based on the error type, attempt specific fixes
 	errStr := originalErr.Error()
-	
+
 	switch {
 	case contains(errStr, "size field corrupted"):
 		// Try to reconstruct size from other fields if possible
@@ -132,7 +132,7 @@ func attemptErrorFixAtOffset(data []byte, entryIdx int, offset int, originalErr 
 func fixCommandAtOffset(entry *binaryEntry, field, value string) (*binaryEntry, error) {
 	// Create a copy to avoid modifying the original
 	fixed := *entry
-	
+
 	switch field {
 	case "ctime":
 		wallTime, err := parseTimeValue(value)
@@ -183,7 +183,7 @@ func fixCommandAtOffset(entry *binaryEntry, field, value string) (*binaryEntry, 
 	default:
 		return nil, fmt.Errorf("unsupported field: %s", field)
 	}
-	
+
 	return &fixed, nil
 }
 

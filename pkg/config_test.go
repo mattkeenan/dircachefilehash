@@ -42,7 +42,7 @@ func TestConfigOverrides(t *testing.T) {
 	// Apply multiple overrides
 	err = config.ApplyOverrides([]string{
 		"default:sha1",
-		"format:json", 
+		"format:json",
 		"level:2",
 		"debug:scan,extravalidation",
 	})
@@ -52,19 +52,19 @@ func TestConfigOverrides(t *testing.T) {
 
 	// Check that all overrides were applied
 	allConfig := config.GetAllConfig()
-	
+
 	if allConfig.Hash.Default != "sha1" {
 		t.Errorf("Expected hash algorithm 'sha1' after override, got '%s'", allConfig.Hash.Default)
 	}
-	
+
 	if allConfig.Output.Format != "json" {
 		t.Errorf("Expected output format 'json' after override, got '%s'", allConfig.Output.Format)
 	}
-	
+
 	if allConfig.Verbose.Level != 2 {
 		t.Errorf("Expected verbose level 2 after override, got %d", allConfig.Verbose.Level)
 	}
-	
+
 	if allConfig.Verbose.Debug != "scan,extravalidation" {
 		t.Errorf("Expected debug flags 'scan,extravalidation' after override, got '%s'", allConfig.Verbose.Debug)
 	}
@@ -98,10 +98,10 @@ func TestHashAlgorithmValidation(t *testing.T) {
 
 func TestGetHashAlgorithm(t *testing.T) {
 	testCases := []struct {
-		name     string
-		typeID   uint16
-		size     int
-		valid    bool
+		name   string
+		typeID uint16
+		size   int
+		valid  bool
 	}{
 		{"sha1", HashTypeSHA1, HashSizeSHA1, true},
 		{"sha256", HashTypeSHA256, HashSizeSHA256, true},
@@ -139,8 +139,8 @@ func TestConfigValidation(t *testing.T) {
 			{"human", true},
 			{"json", true},
 			{"fdupes", true},
-			{"Human", true}, // case insensitive
-			{"JSON", true},  // case insensitive
+			{"Human", true},  // case insensitive
+			{"JSON", true},   // case insensitive
 			{"FDUPES", true}, // case insensitive
 			{"xml", false},
 			{"", false},

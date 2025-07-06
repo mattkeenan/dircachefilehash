@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.2] - 2025-01-06
+## [0.6.4] - 2025-07-06
+
+### Changed
+- Applied `gofmt -s` formatting to all Go source files for consistency
+
+## [0.6.3] - 2025-07-06
+
+### Fixed
+- Added maintainer email to goreleaser configuration
+- Updated .gitignore to properly exclude dcfhfix binary
+- Corrected goreleaser nfpm configuration for debian package generation
+
+## [0.6.2] - 2025-07-06
 
 ### Changed
 - Updated goreleaser configuration to properly build all three tools
@@ -13,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All three binaries (dcfh, dcfhfind, dcfhfix) now included in single package
   - Corrected go generate hooks for each tool directory
 
-## [0.6.1] - 2025-01-06
+## [0.6.1] - 2025-07-06
 
 ### Fixed
 - Signal handling now properly interrupts filesystem scanning operations (brown paper bag fix)
@@ -21,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Process now exits within milliseconds of receiving SIGINT/SIGTERM instead of timing out
   - Ensures graceful shutdown during concurrent hash operations
 
-## [0.6.0] - 2025-01-06
+## [0.6.0] - 2025-07-06
 
 ### Added
 - Initial public release of dircachefilehash

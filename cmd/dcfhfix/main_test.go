@@ -57,7 +57,7 @@ func TestArgumentParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			options := NewParsedOptions()
-			
+
 			// Define the same options as main
 			options.DefineOption("help", "h", OptionTypeBool, "false", "Show help message")
 			options.DefineOption("version", "", OptionTypeBool, "false", "Show version information")
@@ -67,7 +67,7 @@ func TestArgumentParsing(t *testing.T) {
 			options.DefineOption("force", "f", OptionTypeBool, "false", "Force operations")
 			options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress output")
 			options.DefineOption("format", "", OptionTypeString, "human", "Output format")
-			
+
 			err := options.Parse(tt.args)
 			if err != nil {
 				if !tt.wantErr {
@@ -75,7 +75,7 @@ func TestArgumentParsing(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// Check format validation
 			format := options.GetString("format")
 			if format != "human" && format != "json" {
@@ -84,7 +84,7 @@ func TestArgumentParsing(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if tt.wantErr {
 				t.Errorf("Expected error but got none")
 			}
@@ -120,17 +120,17 @@ func TestGetFormat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			options := NewParsedOptions()
 			options.DefineOption("format", "", OptionTypeString, "human", "Output format")
-			
+
 			var args []string
 			if tt.format != "" {
 				args = []string{fmt.Sprintf("--format=%s", tt.format)}
 			}
-			
+
 			err := options.Parse(args)
 			if err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
-			
+
 			got := getFormat(options)
 			if got != tt.want {
 				t.Errorf("getFormat() = %v, want %v", got, tt.want)
@@ -208,10 +208,10 @@ func TestCommandRouting(t *testing.T) {
 				}
 				return
 			}
-			
+
 			indexFile := tt.args[0]
 			command := tt.args[1]
-			
+
 			if command == tt.wantCmd {
 				// Command matches expected
 				if len(tt.args) >= 3 {
@@ -225,7 +225,7 @@ func TestCommandRouting(t *testing.T) {
 			} else if !tt.wantErr {
 				t.Errorf("Expected command %s, got %s", tt.wantCmd, command)
 			}
-			
+
 			// Verify index file is captured
 			if indexFile != "test.idx" && !tt.wantErr {
 				t.Errorf("Expected index file test.idx, got %s", indexFile)
@@ -285,9 +285,9 @@ func TestHandleHeaderCommand(t *testing.T) {
 			options := NewParsedOptions()
 			options.DefineOption("format", "", OptionTypeString, "human", "Output format")
 			options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress output")
-			
+
 			err := handleHeaderCommand("test.idx", tt.args, options)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -378,9 +378,9 @@ func TestHandleEntryCommand(t *testing.T) {
 			options := NewParsedOptions()
 			options.DefineOption("format", "", OptionTypeString, "human", "Output format")
 			options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress output")
-			
+
 			err := handleEntryCommand("test.idx", tt.args, options)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -447,7 +447,7 @@ func TestOptionParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			options := NewParsedOptions()
-			
+
 			// Define all options
 			options.DefineOption("help", "h", OptionTypeBool, "false", "Show help")
 			options.DefineOption("version", "", OptionTypeBool, "false", "Show version")
@@ -457,12 +457,12 @@ func TestOptionParsing(t *testing.T) {
 			options.DefineOption("force", "f", OptionTypeBool, "false", "Force operations")
 			options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress output")
 			options.DefineOption("format", "", OptionTypeString, "human", "Output format")
-			
+
 			err := options.Parse(tt.args)
 			if err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
-			
+
 			tt.checkFn(t, options)
 		})
 	}
@@ -481,7 +481,7 @@ func TestGetIndexType(t *testing.T) {
 		{"unknown.txt", "unknown"},
 		{"noextension", "unknown"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := getIndexType(tt.input)
@@ -500,19 +500,19 @@ func TestBackupMetadata(t *testing.T) {
 		IndexFile:   "/test/main.idx",
 		BackupFile:  "/test/backup.idx",
 	}
-	
+
 	// Test JSON marshaling
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		t.Fatalf("Failed to marshal metadata: %v", err)
 	}
-	
+
 	// Test JSON unmarshaling
 	var restored BackupMetadata
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatalf("Failed to unmarshal metadata: %v", err)
 	}
-	
+
 	// Verify critical fields
 	if restored.Operation != metadata.Operation {
 		t.Errorf("Operation mismatch: got %q, want %q", restored.Operation, metadata.Operation)
@@ -526,7 +526,7 @@ func TestBackupMetadata(t *testing.T) {
 func TestHandleFixesCommand(t *testing.T) {
 	options := NewParsedOptions()
 	options.DefineOption("format", "", OptionTypeString, "human", "Output format")
-	
+
 	tests := []struct {
 		name    string
 		args    []string
@@ -551,11 +551,11 @@ func TestHandleFixesCommand(t *testing.T) {
 			wantErr: false, // Will succeed and show "No backups found"
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := handleFixesCommand("nonexistent.idx", tt.args, options)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -574,10 +574,10 @@ func TestHandleFixesCommand(t *testing.T) {
 // Benchmark option parsing
 func BenchmarkOptionParsing(b *testing.B) {
 	args := []string{"--format=json", "--dry-run", "-vvv", "test.idx", "header", "show"}
-	
+
 	for i := 0; i < b.N; i++ {
 		options := NewParsedOptions()
-		
+
 		// Define options
 		options.DefineOption("help", "h", OptionTypeBool, "false", "Show help")
 		options.DefineOption("version", "", OptionTypeBool, "false", "Show version")
@@ -587,7 +587,7 @@ func BenchmarkOptionParsing(b *testing.B) {
 		options.DefineOption("force", "f", OptionTypeBool, "false", "Force operations")
 		options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress output")
 		options.DefineOption("format", "", OptionTypeString, "human", "Output format")
-		
+
 		err := options.Parse(args)
 		if err != nil {
 			b.Fatalf("Parse() error = %v", err)

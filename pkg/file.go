@@ -5,7 +5,6 @@ import (
 	"os"
 )
 
-
 // hashFile calculates hash of a file's contents using the configured algorithm
 func (dc *DirectoryCache) hashFile(filePath string) (string, error) {
 	return dc.hashFileWithAlgorithm(filePath, nil)
@@ -18,19 +17,18 @@ func (dc *DirectoryCache) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 	}
-	
+
 	// Read the symlink target path (not the target file contents)
 	targetPath, err := os.Readlink(symlinkPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to read symlink target: %w", err)
 	}
-	
+
 	// Hash the target path string
 	hasher := algorithm.NewFunc()
 	hasher.Write([]byte(targetPath))
 	return hasher.Sum(nil), algorithm.TypeID, nil
 }
-
 
 // hashFileWithAlgorithm calculates hash of a file using the specified algorithm or default
 func (dc *DirectoryCache) hashFileWithAlgorithm(filePath string, algorithm *HashAlgorithm) (string, error) {
@@ -42,7 +40,7 @@ func (dc *DirectoryCache) hashFileWithAlgorithm(filePath string, algorithm *Hash
 			return "", fmt.Errorf("failed to get default hash algorithm: %w", err)
 		}
 	}
-	
+
 	return HashFileToHexString(filePath, algorithm)
 }
 
@@ -56,12 +54,12 @@ func (dc *DirectoryCache) hashFileWithAlgorithmToBytes(filePath string, algorith
 			return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 		}
 	}
-	
+
 	hashBytes, err := HashFile(filePath, algorithm)
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	return hashBytes, algorithm.TypeID, nil
 }
 
@@ -71,7 +69,7 @@ func (dc *DirectoryCache) getDefaultHashAlgorithm() (*HashAlgorithm, error) {
 		// Fallback to SHA256 if no config
 		return GetHashAlgorithm("sha256")
 	}
-	
+
 	hashConfig := dc.config.GetHashConfig()
 	return GetHashAlgorithm(hashConfig.Default)
 }
