@@ -87,6 +87,9 @@ type simpleHashManager struct {
 	hashJobChan    chan *hashJobStart
 	callFinishChan chan uint64 // job completion notifications
 	wg             sync.WaitGroup
+	shutdownChan   <-chan struct{} // shutdown notification
+	closed         bool           // track if channel is closed
+	closeMutex     sync.Mutex     // protect closed flag
 }
 
 // ============================================================================
@@ -677,10 +680,11 @@ func (dc *DirectoryCache) isFileChangedFromScanned(indexEntry *binaryEntry, scan
 // ============================================================================
 
 // NewSimpleHashManager creates a new simple hash manager
-func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan chan uint64) *simpleHashManager {
+func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan chan uint64, shutdownChan <-chan struct{}) *simpleHashManager {
 	manager := &simpleHashManager{
 		hashJobChan:    make(chan *hashJobStart, 100),
 		callFinishChan: callFinishChan,
+		shutdownChan:   shutdownChan,
 	}
 
 	// Start workers
@@ -700,56 +704,81 @@ func (hjm *simpleHashManager) SubmitHashJob(job *hashJobStart, callStartChan cha
 
 // FinishSubmitting signals that no more hash jobs will be submitted
 func (hjm *simpleHashManager) FinishSubmitting() {
-	close(hjm.hashJobChan)
+	hjm.closeMutex.Lock()
+	defer hjm.closeMutex.Unlock()
+	
+	if !hjm.closed {
+		close(hjm.hashJobChan)
+		hjm.closed = true
+	}
 }
 
 // hashWorker processes hash jobs and updates entries directly in scan index mmap
 func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
 
-	for job := range hjm.hashJobChan {
-		if IsDebugEnabled("scanning") {
-			fmt.Fprintf(os.Stderr, "[SCAN] Hashing file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
-		}
-		
-		// Hash the file and update binaryEntry directly in mmap memory
-		// For symlinks, we hash the target path, not the target file contents
-		var hashBytes []byte
-		var hashType uint16
-		var err error
-		
-		// Check if this is a symlink by examining the file mode
-		if job.ScannedPath.Info.Mode()&os.ModeSymlink != 0 {
-			// This is a symlink - hash the target path
-			hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
-		} else {
-			// Regular file - hash the file contents
-			hashBytes, hashType, err = dc.hashFileWithAlgorithmToBytes(job.FilePath, nil)
-		}
-
-		if err == nil {
-			// Update the binaryEntry directly in the scan index mmap memory
-			// This provides zero-copy updates to the scan index file
-			if updateErr := dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, hashType); updateErr != nil {
-				fmt.Fprintf(os.Stderr, "[ERROR] Failed to update binary entry hash: %v\n", updateErr)
+	for {
+		select {
+		case job, ok := <-hjm.hashJobChan:
+			if !ok {
+				// Channel closed, worker should exit
+				return
 			}
-		}
-
-		if IsDebugEnabled("scanning") {
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[SCAN] Hash failed for file: %s (job %d) - %v\n", job.ScannedPath.RelPath, job.JobID, err)
+			
+			if IsDebugEnabled("scanning") {
+				fmt.Fprintf(os.Stderr, "[SCAN] Hashing file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
+			}
+			
+			// Hash the file and update binaryEntry directly in mmap memory
+			// For symlinks, we hash the target path, not the target file contents
+			var hashBytes []byte
+			var hashType uint16
+			var err error
+			
+			// Check if this is a symlink by examining the file mode
+			if job.ScannedPath.Info.Mode()&os.ModeSymlink != 0 {
+				// This is a symlink - hash the target path
+				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
-				fmt.Fprintf(os.Stderr, "[SCAN] Hash completed for file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
+				// Regular file - hash the file contents with interruptible hashing
+				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, hjm.shutdownChan)
 			}
-		}
 
-		// Signal completion
-		hjm.callFinishChan <- job.JobID
+			if err == nil {
+				// Update the binaryEntry directly in the scan index mmap memory
+				// This provides zero-copy updates to the scan index file
+				if updateErr := dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, hashType); updateErr != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] Failed to update binary entry hash: %v\n", updateErr)
+				}
+			}
+
+			if IsDebugEnabled("scanning") {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[SCAN] Hash failed for file: %s (job %d) - %v\n", job.ScannedPath.RelPath, job.JobID, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[SCAN] Hash completed for file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
+				}
+			}
+
+			// Signal completion
+			hjm.callFinishChan <- job.JobID
+			
+		case <-hjm.shutdownChan:
+			// Shutdown requested, exit immediately
+			return
+		}
 	}
 }
 
 // Shutdown gracefully shuts down the hash manager
 func (hjm *simpleHashManager) Shutdown() {
+	hjm.closeMutex.Lock()
+	defer hjm.closeMutex.Unlock()
+	
+	if !hjm.closed {
+		close(hjm.hashJobChan)
+		hjm.closed = true
+	}
 	hjm.wg.Wait()
 }
 
@@ -871,7 +900,7 @@ func (dc *DirectoryCache) getHashSize(hashType uint16) int {
 // PerformHwangLinScan performs a complete Hwang-Lin scan with asynchronous hash job coordination
 
 // PerformHwangLinScanToSkiplist performs Hwang-Lin scan and builds a skiplist directly with scan index files
-func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan struct{}, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
@@ -913,7 +942,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(paths []string, compareS
 	collectionStop := make(chan struct{})
 
 	// Create hash job manager for concurrent hashing
-	hashJobManager := dc.newSimpleHashManager(dc.hashWorkers, callFinishChan)
+	hashJobManager := dc.newSimpleHashManager(dc.hashWorkers, callFinishChan, shutdownChan)
 	defer hashJobManager.Shutdown()
 
 	// Start filesystem scan

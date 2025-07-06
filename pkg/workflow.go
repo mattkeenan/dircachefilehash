@@ -52,9 +52,9 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 
 
 // CreateTmpIndexFromScan scans the directory and creates a temporary index using the new scan workflow
-func (dc *DirectoryCache) createTmpIndexFromScan(comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) createTmpIndexFromScan(shutdownChan <-chan struct{}, comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	// Use the new PerformHwangLinScanToSkiplist workflow
-	scanSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, comparisonSkiplist)
+	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform scan to skiplist: %w", err)
 	}
@@ -64,7 +64,7 @@ func (dc *DirectoryCache) createTmpIndexFromScan(comparisonSkiplist *skiplistWra
 
 
 // UpdateCacheIndexWithWorkflow implements the cache update workflow as specified
-func (dc *DirectoryCache) updateCacheIndexWithWorkflow() (*skiplistWrapper, error) {
+func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struct{}) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 	// Step 1: Load main index
 	mainSkiplist, err := dc.LoadMainIndex()
@@ -89,7 +89,7 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow() (*skiplistWrapper, erro
 	
 
 	// Step 5: Create tmp index from scan using Hwang-Lin algorithm
-	scanSkiplist, err := dc.createTmpIndexFromScan(workingSkiplist)
+	scanSkiplist, err := dc.createTmpIndexFromScan(shutdownChan, workingSkiplist)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scan index: %w", err)
 	}

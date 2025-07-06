@@ -806,6 +806,85 @@ func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPat
 	return entry, nil
 }
 
+// appendEntryToNamedIndex is a generic function that appends a binaryEntry to any named index file
+// This supports both scan indices and fix indices with proper mmap management
+func (dc *DirectoryCache) appendEntryToNamedIndex(indexFileName string, indexInfo **mmapIndexFile, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) (*binaryEntry, error) {
+	// Calculate entry size requirements
+	entrySize := int(unsafe.Sizeof(binaryEntry{})) + len(relPath) + 1 // +1 for null terminator
+	padding := (8 - (entrySize % 8)) % 8
+	entrySize += padding
+
+	// Ensure index is initialized
+	if *indexInfo == nil {
+		return nil, fmt.Errorf("index not initialized for file %s", indexFileName)
+	}
+
+	// Check if we need to expand the file
+	requiredSize := (*indexInfo).Offset + entrySize
+	newSize := (*indexInfo).Size
+	for newSize < requiredSize {
+		newSize = newSize * 2
+		if newSize > 1<<30 { // Cap at 1GB
+			newSize = requiredSize + (1 << 20) // Add 1MB at a time
+		}
+	}
+
+	// Expand file and mmap if necessary
+	if newSize > (*indexInfo).Size {
+		// Lock for mremap operation (write lock)
+		(*indexInfo).mutex.Lock()
+		
+		// Expand the file using existing file descriptor
+		if err := (*indexInfo).File.Truncate(int64(newSize)); err != nil {
+			(*indexInfo).mutex.Unlock()
+			return nil, fmt.Errorf("failed to expand index file: %w", err)
+		}
+
+		// Expand the mmap using mremap
+		newMmap, err := unix.Mremap((*indexInfo).Data, newSize, unix.MREMAP_MAYMOVE)
+		if err != nil {
+			(*indexInfo).mutex.Unlock()
+			return nil, fmt.Errorf("failed to mremap index file: %w", err)
+		}
+
+		// Update stored mmap info
+		(*indexInfo).Data = newMmap
+		(*indexInfo).Size = newSize
+		
+		(*indexInfo).mutex.Unlock()
+	}
+
+	// Get header and update entry count
+	header := (*indexHeader)(unsafe.Pointer(&(*indexInfo).Data[0]))
+	entryOffset := (*indexInfo).Offset  // Write at current offset
+	header.EntryCount++
+
+	// Write the new entry
+	entryData := (*indexInfo).Data[entryOffset:]
+	dc.writeBinaryEntryToMmap(entryData, relPath, hash, hashType, info, stat, isDeleted)
+
+	// Get pointer to the created entry
+	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
+
+	// Update offset for next entry
+	(*indexInfo).Offset += entrySize
+
+	return entry, nil
+}
+
+// AppendEntryToScanIndex is an exported wrapper for appending entries to scan index files
+func (dc *DirectoryCache) AppendEntryToScanIndex(scanFileName string, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) (*binaryEntry, error) {
+	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
+		return nil, fmt.Errorf("scan index not initialized for file %s", scanFileName)
+	}
+	return dc.appendEntryToNamedIndex(scanFileName, &dc.currentScan, relPath, hash, hashType, info, stat, isDeleted)
+}
+
+// AppendEntryToFixIndex is an exported wrapper for appending entries to fix index files
+func (dc *DirectoryCache) AppendEntryToFixIndex(fixFileName string, fixIndex **mmapIndexFile, relPath string, hash []byte, hashType uint16, info os.FileInfo, stat *syscall.Stat_t, isDeleted bool) (*binaryEntry, error) {
+	return dc.appendEntryToNamedIndex(fixFileName, fixIndex, relPath, hash, hashType, info, stat, isDeleted)
+}
+
 // initialiseScanIndex creates and initialises a new scan index file with mmap
 func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 	// Create the scan index file (use 0666, let umask control final permissions)
@@ -881,6 +960,75 @@ func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 	return nil
 }
 
+// InitializeFixIndex creates and initializes a new fix index file with mmap
+// Similar to scan indices but for dcfhfix operations
+func (dc *DirectoryCache) InitializeFixIndex(fixFileName string) (*mmapIndexFile, error) {
+	// Create the fix index file
+	file, err := os.OpenFile(fixFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fix file %s: %w", fixFileName, err)
+	}
+	// Keep file open throughout fix process
+
+	// Initial size is just the header
+	initialSize := HeaderSize
+	if err := file.Truncate(int64(initialSize)); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to truncate fix file: %w", err)
+	}
+
+	// Create initial mmap
+	data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to mmap fix file: %w", err)
+	}
+
+	// Initialize header for writable index (automatically clears Clean flag)
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+
+	// Create mmapIndexFile for fix index
+	fixInfo := &mmapIndexFile{
+		FilePath: fixFileName,
+		File:     file,
+		Data:     data,
+		Size:     initialSize,
+		Offset:   HeaderSize, // Start writing after header
+		Type:     "fix",
+	}
+
+	return fixInfo, nil
+}
+
+// CleanupFixIndex cleans up fix index resources after completion
+func (dc *DirectoryCache) CleanupFixIndex(fixInfo *mmapIndexFile) error {
+	if fixInfo == nil {
+		return fmt.Errorf("can't clean up nil fix index")
+	}
+
+	// Munmap
+	if fixInfo.Data != nil {
+		if err := unix.Munmap(fixInfo.Data); err != nil {
+			return fmt.Errorf("failed to munmap fix index: %w", err)
+		}
+	}
+
+	// Close file
+	if fixInfo.File != nil {
+		if err := fixInfo.File.Close(); err != nil {
+			return fmt.Errorf("failed to close fix index file: %w", err)
+		}
+	}
+
+	// Delete the file
+	if err := os.Remove(fixInfo.FilePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove fix index file: %w", err)
+	}
+
+	return nil
+}
+
 // CleanupCurrentScanFile cleans up scan index resources after temp index is written
 // This should be called after temp index writing but before rename operations
 // 
@@ -930,18 +1078,24 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 	if excludeDeleted {
 		// Use callback to filter out deleted entries for main index
 		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
-			// Include entry if it matches context (or no context filter) and is not deleted
+			// Include entry if it matches context (or no context filter), is not deleted, and has a valid hash
 			contextMatch := (context == "" || entryContext == context)
-			return contextMatch && !entry.IsDeleted()
+			return contextMatch && !entry.IsDeleted() && !entry.IsHashEmpty()
 		})
 	} else {
-		// Include all entries for cache index (including deleted ones)
-		if context == "" {
-			entryIovecs = skiplist.ToIovecSlice()
-		} else {
-			// For cache index, exclude MainContext entries (keep CacheContext + ScanContext)
-			entryIovecs = skiplist.ToNotContextIovecSlice(MainContext)
-		}
+		// Include all entries for cache index (including deleted ones) but exclude entries with empty hashes
+		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
+			// For cache index, include if has valid hash and either no context filter or matches context
+			if entry.IsHashEmpty() {
+				return false
+			}
+			if context == "" {
+				return true
+			} else {
+				// For cache index, exclude MainContext entries (keep CacheContext + ScanContext)
+				return entryContext != MainContext
+			}
+		})
 	}
 
 	// Calculate entry data size

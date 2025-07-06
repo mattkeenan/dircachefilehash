@@ -8,11 +8,7 @@ import (
 
 func TestConfigDefaults(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dcfh-config-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Load config (should create default)
 	config, err := LoadConfig(tempDir)
@@ -35,11 +31,7 @@ func TestConfigDefaults(t *testing.T) {
 
 func TestConfigOverrides(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dcfh-config-override-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Load config
 	config, err := LoadConfig(tempDir)
@@ -192,11 +184,7 @@ func TestConfigValidation(t *testing.T) {
 
 func TestSnapshotConfigDefaults(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-config-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Load config (should create default)
 	config, err := LoadConfig(tempDir)
@@ -228,11 +216,7 @@ func TestSnapshotConfigDefaults(t *testing.T) {
 
 func TestSnapshotConfigModification(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dcfh-snapshot-config-modify-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Load config
 	config, err := LoadConfig(tempDir)
@@ -279,11 +263,7 @@ func TestSnapshotConfigModification(t *testing.T) {
 
 func TestAllConfigIncludesSnapshot(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dcfh-all-config-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Load config
 	config, err := LoadConfig(tempDir)

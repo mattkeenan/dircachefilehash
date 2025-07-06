@@ -1,8 +1,6 @@
 package dircachefilehash
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -36,13 +34,9 @@ func TestDuplicateGroup_Fields(t *testing.T) {
 func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir := t.TempDir()
-	dcfhDir := filepath.Join(tempDir, ".dcfh")
-	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
 
 	// Create DirectoryCache instance
-	dc := NewDirectoryCache(tempDir, dcfhDir)
+	dc := NewDirectoryCache(tempDir, tempDir)
 	defer dc.Close()
 
 	// Create empty index
@@ -52,7 +46,7 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 
 	// Test FindDuplicates with empty flags
 	flags := map[string]string{}
-	duplicates, err := dc.FindDuplicates(flags)
+	duplicates, err := dc.FindDuplicates(nil, flags)
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -69,13 +63,9 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir := t.TempDir()
-	dcfhDir := filepath.Join(tempDir, ".dcfh")
-	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
 
 	// Create DirectoryCache instance
-	dc := NewDirectoryCache(tempDir, dcfhDir)
+	dc := NewDirectoryCache(tempDir, tempDir)
 	defer dc.Close()
 
 	// Create empty index
@@ -93,7 +83,7 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	for i, flags := range testFlags {
 		t.Run("flags_test_"+string(rune(i+'0')), func(t *testing.T) {
-			duplicates, err := dc.FindDuplicates(flags)
+			duplicates, err := dc.FindDuplicates(nil, flags)
 			if err != nil {
 				t.Fatalf("FindDuplicates failed with flags %v: %v", flags, err)
 			}

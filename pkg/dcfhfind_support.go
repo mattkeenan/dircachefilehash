@@ -89,6 +89,17 @@ func FindRepositoryRootFrom(startDir string) (string, error) {
 		return repoDir()
 	}
 
+	// If startDir IS a .dcfh directory, return its parent as repo root
+	if filepath.Base(startDir) == ".dcfh" {
+		repoRoot := filepath.Dir(startDir)
+		realDir, err := filepath.EvalSymlinks(repoRoot)
+		if err != nil {
+			// If symlink resolution fails, fall back to original path
+			realDir = repoRoot
+		}
+		return realDir, nil
+	}
+
 	// Validate the specified directory has a .dcfh subdirectory
 	dcfhPath := filepath.Join(startDir, ".dcfh")
 	if info, err := os.Stat(dcfhPath); err != nil || !info.IsDir() {

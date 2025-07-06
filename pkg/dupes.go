@@ -15,10 +15,10 @@ type DuplicateGroup struct {
 }
 
 // FindDuplicates returns groups of files with identical hashes using the new workflow
-func (dc *DirectoryCache) FindDuplicates(flags map[string]string) ([]DuplicateGroup, error) {
+func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map[string]string) ([]DuplicateGroup, error) {
 	// Use the new cache update workflow to ensure we have current data
 	// We don't need the scan result for duplicates, so we ignore it
-	if _, err := dc.updateCacheIndexWithWorkflow(); err != nil {
+	if _, err := dc.updateCacheIndexWithWorkflow(shutdownChan); err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 

@@ -220,7 +220,7 @@ func benchmarkDirectoryScan(b *testing.B, config BenchmarkConfig) {
 		
 		// Time the full update operation
 		updateStart := time.Now()
-		if err := cache.Update(map[string]string{}); err != nil {
+		if err := cache.Update(nil, map[string]string{}); err != nil {
 			b.Fatalf("Update failed: %v", err)
 		}
 		updateDuration := time.Since(updateStart)
@@ -283,7 +283,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	// Create initial index
 	dcfhDir := filepath.Join(tempDir, "dcfh")
 	cache := NewDirectoryCache(datasetDir, dcfhDir)
-	if err := cache.Update(map[string]string{}); err != nil {
+	if err := cache.Update(nil, map[string]string{}); err != nil {
 		b.Fatalf("Initial update failed: %v", err)
 	}
 	cache.Close()
@@ -304,7 +304,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	b.Run("Status", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			cache := NewDirectoryCache(datasetDir, dcfhDir)
-			if _, err := cache.Status(map[string]string{}); err != nil {
+			if _, err := cache.Status(nil, map[string]string{}); err != nil {
 				b.Fatalf("Status failed: %v", err)
 			}
 			cache.Close()
@@ -318,7 +318,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			if _, err := cache.LoadMainIndex(); err != nil {
 				b.Fatalf("LoadMainIndex failed: %v", err)
 			}
-			if _, err := cache.FindDuplicates(map[string]string{}); err != nil {
+			if _, err := cache.FindDuplicates(nil, map[string]string{}); err != nil {
 				b.Fatalf("FindDuplicates failed: %v", err)
 			}
 			cache.Close()
@@ -369,7 +369,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		
 		// Step 2: Initial update (index all files)
 		updateStart := time.Now()
-		if err := cache.Update(map[string]string{}); err != nil {
+		if err := cache.Update(nil, map[string]string{}); err != nil {
 			b.Fatalf("Initial update failed: %v", err)
 		}
 		initialUpdateDuration := time.Since(updateStart)
@@ -417,7 +417,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		
 		// Step 4: Run status to detect changes
 		statusStart := time.Now()
-		statusResult, err := cache.Status(map[string]string{"v": "1"})
+		statusResult, err := cache.Status(nil, map[string]string{"v": "1"})
 		if err != nil {
 			b.Fatalf("Status failed: %v", err)
 		}
@@ -425,7 +425,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		
 		// Step 5: Update again to incorporate changes
 		finalUpdateStart := time.Now()
-		if err := cache.Update(map[string]string{}); err != nil {
+		if err := cache.Update(nil, map[string]string{}); err != nil {
 			b.Fatalf("Final update failed: %v", err)
 		}
 		finalUpdateDuration := time.Since(finalUpdateStart)
@@ -492,7 +492,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			b.StartTimer()
 			
 			// Perform operation
-			if err := cache.Update(map[string]string{}); err != nil {
+			if err := cache.Update(nil, map[string]string{}); err != nil {
 				b.Fatalf("Update failed: %v", err)
 			}
 			

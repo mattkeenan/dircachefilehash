@@ -41,7 +41,7 @@ func TestCallbackArchitecture(t *testing.T) {
 	}
 
 	// Perform initial update to create index
-	if err := cache.Update(flags); err != nil {
+	if err := cache.Update(nil, flags); err != nil {
 		t.Fatalf("Failed to update cache: %v", err)
 	}
 	
@@ -81,7 +81,7 @@ func TestCallbackArchitecture(t *testing.T) {
 	}
 
 	// Test 3: Test Status detection 
-	status, err := cache.Status(flags)
+	status, err := cache.Status(nil, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestCallbackArchitecture(t *testing.T) {
 		t.Fatalf("Failed to modify file: %v", err)
 	}
 
-	status, err = cache.Status(flags)
+	status, err = cache.Status(nil, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after modification: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestCallbackArchitecture(t *testing.T) {
 	}
 	t.Logf("File %s successfully deleted", deletedFile)
 
-	status, err = cache.Status(flags)
+	status, err = cache.Status(nil, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after deletion: %v", err)
 	}

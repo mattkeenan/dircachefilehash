@@ -13,6 +13,7 @@ func TestBinaryEntry_Methods(t *testing.T) {
 		FileSize:  1024,
 		Hash:      [64]byte{1, 2, 3, 4, 5},
 		EntryFlags: 0,
+		HashType:  HashTypeSHA1,
 	}
 
 	// Test EntrySize
@@ -35,6 +36,35 @@ func TestBinaryEntry_Methods(t *testing.T) {
 	entry.ClearDeleted()
 	if entry.IsDeleted() {
 		t.Error("Expected entry to not be deleted after ClearDeleted()")
+	}
+
+	// Test IsHashEmpty - entry with some hash data should not be empty
+	if entry.IsHashEmpty() {
+		t.Error("Expected entry with hash data to not be empty")
+	}
+
+	// Test IsHashEmpty - entry with all zeros should be empty
+	emptyEntry := binaryEntry{}
+	if !emptyEntry.IsHashEmpty() {
+		t.Error("Expected entry with zero hash to be empty")
+	}
+
+	// Test IsHashEmpty - entry with partial hash data should not be empty
+	partialEntry := binaryEntry{Hash: [64]byte{0, 0, 0, 1}, HashType: HashTypeSHA1}
+	if partialEntry.IsHashEmpty() {
+		t.Error("Expected entry with partial hash to not be empty")
+	}
+
+	// Test IsHashEmpty - entry with HashType = 0 should be empty regardless of hash content
+	zeroTypeEntry := binaryEntry{HashType: 0, Hash: [64]byte{1, 2, 3, 4, 5}}
+	if !zeroTypeEntry.IsHashEmpty() {
+		t.Error("Expected entry with HashType = 0 to be empty")
+	}
+
+	// Test IsHashEmpty - entry with valid HashType but zero hash should be empty
+	validTypeZeroHash := binaryEntry{HashType: HashTypeSHA1}
+	if !validTypeZeroHash.IsHashEmpty() {
+		t.Error("Expected entry with valid HashType but zero hash to be empty")
 	}
 }
 

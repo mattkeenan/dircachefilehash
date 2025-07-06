@@ -245,20 +245,14 @@ func TestHandleHeaderCommand(t *testing.T) {
 		{
 			name:    "Show command",
 			args:    []string{"show"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // File doesn't exist
+			errMsg:  "failed to open index file",
 		},
 		{
 			name:    "Edit field command",
 			args:    []string{"edit", "version", "2"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
-		},
-		{
-			name:    "Edit JSON command",
-			args:    []string{"edit", "json", `{"version":2}`},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // File doesn't exist
+			errMsg:  "failed to load index",
 		},
 		{
 			name:    "Edit without args",
@@ -320,38 +314,26 @@ func TestHandleEntryCommand(t *testing.T) {
 		{
 			name:    "Show command",
 			args:    []string{"show", "path1", "path2"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // File doesn't exist
+			errMsg:  "failed to read index file",
 		},
 		{
 			name:    "Edit field command",
 			args:    []string{"edit", "uid", "1000", "path1"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
-		},
-		{
-			name:    "Edit JSON command",
-			args:    []string{"edit", "json", `{"uid":1000}`, "path1"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // File doesn't exist
+			errMsg:  "failed to process entries",
 		},
 		{
 			name:    "Append command",
 			args:    []string{"append", `{"path":"newfile.txt"}`},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // Missing required fields
+			errMsg:  "hash is required",
 		},
 		{
 			name:    "Remove command",
 			args:    []string{"remove", "path1", "path2"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
-		},
-		{
-			name:    "Resort command",
-			args:    []string{"resort"},
-			wantErr: true, // Not implemented yet
-			errMsg:  "not yet implemented",
+			wantErr: true, // File doesn't exist
+			errMsg:  "failed to process entries",
 		},
 		{
 			name:    "Show without paths",
@@ -564,9 +546,9 @@ func TestHandleFixesCommand(t *testing.T) {
 			errMsg:  "unknown fixes subcommand",
 		},
 		{
-			name:    "List command (will fail but routing works)",
+			name:    "List command (will succeed with no backups)",
 			args:    []string{"list"},
-			wantErr: true, // Will fail due to no backup dir, but routing works
+			wantErr: false, // Will succeed and show "No backups found"
 		},
 	}
 	

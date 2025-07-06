@@ -520,7 +520,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	
 	// Now use Hwang-Lin workflow to merge with current disk state
 	// This ensures we have the most up-to-date information
-	currentSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, recoverySkiplist)
+	currentSkiplist, err := dc.performHwangLinScanToSkiplist(nil, []string{}, recoverySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan current state for recovery: %w", err)
 	}
@@ -1390,7 +1390,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	}
 	
 	// Step 5: Merge with current disk state via Hwang-Lin
-	finalSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, mergedSkiplist)
+	finalSkiplist, err := dc.performHwangLinScanToSkiplist(nil, []string{}, mergedSkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to merge recovered data with current state: %w", err)
 	}

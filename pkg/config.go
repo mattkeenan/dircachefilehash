@@ -38,7 +38,8 @@ type SymlinkConfig struct {
 
 // PerformanceConfig represents performance-related configuration
 type PerformanceConfig struct {
-	HashWorkers int // Number of concurrent hash workers (default: 4)
+	HashWorkers int    // Number of concurrent hash workers (default: 4)
+	HashBuffer  string // Hash buffer size for interruptible hashing (default: "2M")
 }
 
 // SnapshotConfig represents snapshot retention policy configuration
@@ -253,7 +254,8 @@ func (c *Config) GetSymlinkConfig() *SymlinkConfig {
 // GetPerformanceConfig returns the performance configuration
 func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 	performanceConfig := &PerformanceConfig{
-		HashWorkers: 4, // fallback default
+		HashWorkers: 4,    // fallback default
+		HashBuffer:  "2M", // fallback default - 2MB buffer for interruptible hashing
 	}
 	
 	if c.ini.HasSection("performance") {
@@ -261,6 +263,11 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 		if section.HasKey("hash_workers") {
 			if workers, err := section.Key("hash_workers").Int(); err == nil {
 				performanceConfig.HashWorkers = workers
+			}
+		}
+		if section.HasKey("hash_buffer") {
+			if bufferSize := section.Key("hash_buffer").String(); bufferSize != "" {
+				performanceConfig.HashBuffer = bufferSize
 			}
 		}
 	}

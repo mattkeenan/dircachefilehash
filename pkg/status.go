@@ -34,11 +34,11 @@ type StatusResult struct {
 }
 
 // Status compares the current directory state with the loaded index using the new workflow
-func (dc *DirectoryCache) Status(flags map[string]string) (*StatusResult, error) {
+func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]string) (*StatusResult, error) {
 	defer VerboseEnter()()
 	// Use the new cache update workflow which implements steps 1-11 as specified
 	// This returns the scan result which we can reuse to avoid duplicate scans
-	currentSkiplist, err := dc.updateCacheIndexWithWorkflow()
+	currentSkiplist, err := dc.updateCacheIndexWithWorkflow(shutdownChan)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}

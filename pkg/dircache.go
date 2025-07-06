@@ -138,6 +138,27 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		ignoreManager: NewIgnoreManager(dcfhDir),
 	}
 
+	// Prevent creating .dcfh inside .dcfh (nested repositories)
+	if filepath.Base(dcfhDir) == ".dcfh" {
+		fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside another .dcfh directory: %s\n", dcfhDir)
+		return dc
+	}
+
+	// Check if we're trying to create .dcfh inside any .dcfh subdirectory
+	dir := dcfhDir
+	for {
+		if filepath.Base(dir) == ".dcfh" {
+			fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside .dcfh directory tree: %s\n", dcfhDir)
+			return dc
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
 	// Ensure the .dcfh directory exists
 	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
 	if err := os.MkdirAll(dcfhPath, 0755); err != nil {
@@ -278,6 +299,18 @@ func repoDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// First check if current directory IS a .dcfh directory
+	if filepath.Base(cwd) == ".dcfh" {
+		// We're inside a .dcfh directory, return its parent as repo root
+		repoRoot := filepath.Dir(cwd)
+		realDir, err := filepath.EvalSymlinks(repoRoot)
+		if err != nil {
+			// If symlink resolution fails, fall back to original path
+			realDir = repoRoot
+		}
+		return realDir, nil
 	}
 
 	dir := cwd

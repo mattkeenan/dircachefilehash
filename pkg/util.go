@@ -249,6 +249,19 @@ func (be *binaryEntry) HashString() string {
 	return unsafe.String(&result[0], len(result))
 }
 
+// IsHashEmpty returns true if this entry has an empty (all zeros) hash
+func (be *binaryEntry) IsHashEmpty() bool {
+	// If hash type is 0, no hash type is set, so hash is empty
+	if be.HashType == 0 {
+		return true
+	}
+	
+	// Check if all 64 bytes of the hash are zero
+	// Direct array comparison is optimized in Go
+	var zeroHash [64]byte
+	return be.Hash == zeroHash
+}
+
 // EntrySize returns the total size of this entry including padding
 func (be *binaryEntry) EntrySize() int {
 	return int(be.Size)
@@ -367,6 +380,63 @@ func (dc *DirectoryCache) generateScanFileName() string {
 	tid := getGoroutineID()
 	return filepath.Join(filepath.Dir(dc.IndexFile),
 		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
+}
+
+// ParseHumanSize parses human-readable size strings (e.g., "2M", "512k", "1G")
+func ParseHumanSize(sizeStr string) (int, error) {
+	if sizeStr == "" {
+		return 0, fmt.Errorf("empty size string")
+	}
+	
+	// Convert to uppercase for consistent parsing
+	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
+	
+	// Extract numeric part and suffix
+	var numPart string
+	var suffix string
+	for i, char := range sizeStr {
+		if char >= '0' && char <= '9' || char == '.' {
+			numPart += string(char)
+		} else {
+			suffix = sizeStr[i:]
+			break
+		}
+	}
+	
+	if numPart == "" {
+		return 0, fmt.Errorf("no numeric part in size string: %s", sizeStr)
+	}
+	
+	// Parse the numeric part
+	num, err := strconv.ParseFloat(numPart, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid numeric part in size string %s: %w", sizeStr, err)
+	}
+	
+	// Apply multiplier based on suffix
+	var multiplier int64 = 1
+	switch suffix {
+	case "", "B":
+		multiplier = 1
+	case "K", "KB":
+		multiplier = 1024
+	case "M", "MB":
+		multiplier = 1024 * 1024
+	case "G", "GB":
+		multiplier = 1024 * 1024 * 1024
+	default:
+		return 0, fmt.Errorf("unknown size suffix: %s", suffix)
+	}
+	
+	result := int64(num * float64(multiplier))
+	if result <= 0 {
+		return 0, fmt.Errorf("size must be positive: %s", sizeStr)
+	}
+	if result > int64(^uint(0)>>1) { // Check for int overflow
+		return 0, fmt.Errorf("size too large: %s", sizeStr)
+	}
+	
+	return int(result), nil
 }
 
 

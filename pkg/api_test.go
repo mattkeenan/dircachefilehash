@@ -46,7 +46,7 @@ func TestPublicAPI(t *testing.T) {
 		t.Logf("Stats: %d entries, %d bytes", stats, size)
 		
 		// Status should work
-		result, err := dc.Status(map[string]string{})
+		result, err := dc.Status(nil, map[string]string{})
 		if err != nil {
 			t.Errorf("Status() failed: %v", err)
 		}

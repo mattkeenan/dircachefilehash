@@ -48,7 +48,7 @@ func TestHwangLinStatus(t *testing.T) {
 		
 		// Simulate scan that finds the same files (no changes)
 		// For this test, we'll create an identical scan result
-		scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+		scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 		if err != nil {
 			t.Fatalf("Failed to create scan result: %v", err)
 		}
@@ -97,7 +97,7 @@ func TestHwangLinStatus(t *testing.T) {
 		}
 		
 		// Create scan result that includes the new file
-		scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+		scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 		if err != nil {
 			t.Fatalf("Failed to create scan result: %v", err)
 		}
@@ -148,7 +148,7 @@ func TestHwangLinStatus(t *testing.T) {
 		}
 		
 		// Create scan result that doesn't include the deleted file
-		scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+		scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 		if err != nil {
 			t.Fatalf("Failed to create scan result: %v", err)
 		}
@@ -200,7 +200,7 @@ func TestHwangLinStatus(t *testing.T) {
 		}
 		
 		// Create scan result with modified file
-		scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+		scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 		if err != nil {
 			t.Fatalf("Failed to create scan result: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestHwangLinStatus(t *testing.T) {
 		}
 		
 		// Create scan result
-		scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+		scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 		if err != nil {
 			t.Fatalf("Failed to create scan result: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestHwangLinScanFunction(t *testing.T) {
 	
 	// Perform cache update workflow which uses hwangLinCompareToSkiplist internally
 	// If string safety is working, this won't crash
-	_, err := dc.updateCacheIndexWithWorkflow()
+	_, err := dc.updateCacheIndexWithWorkflow(nil)
 	if err != nil {
 		t.Fatalf("Cache workflow failed: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestStringCopySafety(t *testing.T) {
 	}
 	
 	// Create scan result
-	scanSkiplist, err := dc.updateCacheIndexWithWorkflow()
+	scanSkiplist, err := dc.updateCacheIndexWithWorkflow(nil)
 	if err != nil {
 		t.Fatalf("Failed to create scan result: %v", err)
 	}
@@ -444,7 +444,7 @@ func createTestRepository(t *testing.T, files map[string]string) (*DirectoryCach
 	dc := NewDirectoryCache(testDir, testDir)
 	
 	// Update to create initial index
-	if err := dc.Update(map[string]string{}); err != nil {
+	if err := dc.Update(nil, map[string]string{}); err != nil {
 		t.Fatalf("Failed to create initial index: %v", err)
 	}
 	

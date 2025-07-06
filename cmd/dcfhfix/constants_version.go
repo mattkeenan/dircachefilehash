@@ -4,10 +4,10 @@ package main
 
 // getVersionString returns the version string
 func getVersionString() string {
-	return "v0.0.13-UNCOMMITTED-27d809de"
+	return "v0.0.13-UNCOMMITTED-c1b5e23a"
 }
 
 // getGitCommit returns the git commit hash
 func getGitCommit() string {
-	return "27d809de89a35180b63d72cca134817bd9252aa6"
+	return "c1b5e23a8bd78978f301aa425ddc4e5f3e78d44b"
 }

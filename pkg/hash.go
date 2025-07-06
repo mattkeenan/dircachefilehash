@@ -135,3 +135,74 @@ func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
 	hashType := dc.GetCurrentHashType()
 	return GetHashAlgorithmByType(hashType)
 }
+
+// HashFileInterruptible calculates the hash of a file using a configurable buffer size
+// and checks for shutdown signals between buffer reads for graceful interruption
+func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize int, shutdownChan <-chan struct{}) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	hasher := algorithm.NewFunc()
+	buffer := make([]byte, bufferSize)
+	
+	for {
+		// Check for shutdown signal before each read
+		select {
+		case <-shutdownChan:
+			return nil, fmt.Errorf("hash operation interrupted by shutdown")
+		default:
+			// Continue with read
+		}
+		
+		n, err := file.Read(buffer)
+		if n > 0 {
+			hasher.Write(buffer[:n])
+		}
+		
+		if err == io.EOF {
+			// Successfully reached end of file
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read from file %s: %w", filePath, err)
+		}
+	}
+
+	return hasher.Sum(nil), nil
+}
+
+// HashFileInterruptibleToBytes is a convenience function that also returns the type ID
+func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdownChan <-chan struct{}) ([]byte, uint16, error) {
+	// Get default algorithm
+	algorithm, err := dc.getDefaultHashAlgorithm()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
+	}
+	
+	// Get buffer size from config
+	bufferSize, err := dc.getHashBufferSize()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get hash buffer size: %w", err)
+	}
+	
+	hashBytes, err := HashFileInterruptible(filePath, algorithm, bufferSize, shutdownChan)
+	if err != nil {
+		return nil, 0, err
+	}
+	
+	return hashBytes, algorithm.TypeID, nil
+}
+
+// getHashBufferSize gets the configured hash buffer size in bytes
+func (dc *DirectoryCache) getHashBufferSize() (int, error) {
+	if dc.config == nil {
+		// Fallback to 2MB if no config
+		return 2 * 1024 * 1024, nil
+	}
+	
+	performanceConfig := dc.config.GetPerformanceConfig()
+	return ParseHumanSize(performanceConfig.HashBuffer)
+}

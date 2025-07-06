@@ -53,7 +53,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 		
 		// Update index
-		if err := dc.Update(map[string]string{}); err != nil {
+		if err := dc.Update(nil, map[string]string{}); err != nil {
 			t.Fatalf("Update failed: %v", err)
 		}
 		
@@ -99,7 +99,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 		
 		// Update index
-		if err := dc.Update(map[string]string{}); err != nil {
+		if err := dc.Update(nil, map[string]string{}); err != nil {
 			t.Fatalf("Update after modification failed: %v", err)
 		}
 		
@@ -138,7 +138,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 		
 		// Run status to create cache
-		_, err := dc.Status(map[string]string{})
+		_, err := dc.Status(nil, map[string]string{})
 		if err != nil {
 			t.Fatalf("Status failed: %v", err)
 		}
@@ -174,7 +174,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 		
 		// Update main index to include the cache changes for integrity test
-		if err := dc.Update(map[string]string{}); err != nil {
+		if err := dc.Update(nil, map[string]string{}); err != nil {
 			t.Fatalf("Failed to update main index after cache test: %v", err)
 		}
 	})

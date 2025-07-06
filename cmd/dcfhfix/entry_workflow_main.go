@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"os"
+	"unsafe"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
@@ -75,15 +77,89 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 	return nil
 }
 
-// finalizeTempIndex calculates checksum and finalizes the temp index
+// finalizeTempIndex calculates checksum and finalizes the temp index using pkg functions
 func finalizeTempIndex(tmpIndexFile string) error {
-	// TODO: Implement proper checksum calculation and finalization
-	// This should:
-	// 1. Update the entry count in the header
-	// 2. Calculate SHA-1 checksum of the entire file content
-	// 3. Set the clean flag
-	// 4. Write the final header
+	// Create DirectoryCache instance to access pkg checksum functions
+	dc := dcfh.NewDirectoryCache("", "")
+	defer dc.Close()
 	
-	// For now, this is a placeholder
+	// Open file for reading and writing
+	file, err := os.OpenFile(tmpIndexFile, os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open temp index file: %v", err)
+	}
+	defer file.Close()
+	
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat temp index file: %v", err)
+	}
+	fileSize := stat.Size()
+	
+	if fileSize < dcfh.HeaderSize {
+		return fmt.Errorf("temp index file too small: %d bytes", fileSize)
+	}
+	
+	// Read the entire file
+	data := make([]byte, fileSize)
+	if _, err := file.ReadAt(data, 0); err != nil {
+		return fmt.Errorf("failed to read temp index file: %v", err)
+	}
+	
+	// Get header
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	
+	// Count actual entries by parsing the file
+	entryData := data[dcfh.HeaderSize:]
+	var actualEntryCount uint32
+	offset := 0
+	
+	for offset < len(entryData) {
+		if offset+int(unsafe.Sizeof(binaryEntry{})) > len(entryData) {
+			break
+		}
+		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
+		if entry.Size == 0 || int(entry.Size) > len(entryData)-offset {
+			break
+		}
+		actualEntryCount++
+		offset += int(entry.Size)
+	}
+	
+	// Update entry count in header
+	header.EntryCount = actualEntryCount
+	
+	// Set clean flag (following pkg pattern)
+	header.Flags |= dcfh.IndexFlagClean
+	
+	// Calculate checksum following exact pkg pattern:
+	// Hash header up to checksum field + hash all entry data
+	hasher := sha1.New()
+	
+	// Hash header up to checksum field (following pkg implementation exactly)
+	headerBytes := (*[dcfh.HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
+	
+	// Hash entry data if any (following pkg implementation exactly)
+	if len(entryData) > 0 {
+		hasher.Write(entryData)
+	}
+	
+	// Store checksum in header (following pkg implementation exactly)
+	checksumBytes := hasher.Sum(nil)
+	copy(header.Checksum[:], checksumBytes)
+	
+	// Write the updated header back to file
+	if _, err := file.WriteAt(data[:dcfh.HeaderSize], 0); err != nil {
+		return fmt.Errorf("failed to write updated header: %v", err)
+	}
+	
+	// Sync to ensure data is written
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp index file: %v", err)
+	}
+	
 	return nil
 }

@@ -122,10 +122,6 @@ func TestCleanStatusFields(t *testing.T) {
 func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	dcfhDir := filepath.Join(tempDir, ".dcfh")
-	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
 
 	// Create some test files
 	testFile := filepath.Join(tempDir, "test.txt")
@@ -168,8 +164,8 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create DirectoryCache instance
-			dc := NewDirectoryCache(tempDir, dcfhDir)
+			// Create DirectoryCache instance - use tempDir as both root and dcfh location
+			dc := NewDirectoryCache(tempDir, tempDir)
 			defer dc.Close()
 
 			// Initialise with empty index to avoid complex setup

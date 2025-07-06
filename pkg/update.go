@@ -9,23 +9,23 @@ import (
 )
 
 // Update scans the directory and updates the index file using the new workflow
-func (dc *DirectoryCache) Update(flags map[string]string, paths ...string) error {
+func (dc *DirectoryCache) Update(shutdownChan <-chan struct{}, flags map[string]string, paths ...string) error {
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
-		return dc.updateFullRepository()
+		return dc.updateFullRepository(shutdownChan)
 	} else {
 		// Specific paths: selective update - manage main vs cache indices
-		return dc.updateSpecificPaths(paths)
+		return dc.updateSpecificPaths(shutdownChan, paths)
 	}
 }
 
 // updateFullRepository updates the entire repository and puts everything in main index
-func (dc *DirectoryCache) updateFullRepository() error {
+func (dc *DirectoryCache) updateFullRepository(shutdownChan <-chan struct{}) error {
 	// Create empty skiplist for comparison (full scan)
 	emptySkiplist := NewSkiplistWrapper(16, "empty")
 
 	// Use new scan workflow to get all files
-	scanSkiplist, err := dc.performHwangLinScanToSkiplist([]string{}, emptySkiplist)
+	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, []string{}, emptySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
@@ -57,7 +57,7 @@ func (dc *DirectoryCache) updateFullRepository() error {
 }
 
 // updateSpecificPaths updates only specified paths and manages main index vs cache
-func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
+func (dc *DirectoryCache) updateSpecificPaths(shutdownChan <-chan struct{}, paths []string) error {
 	// Load main index to use as comparison base
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -65,7 +65,7 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	}
 
 	// Use new scan workflow with main index as comparison to get only changes in specified paths
-	scanSkiplist, err := dc.performHwangLinScanToSkiplist(paths, mainSkiplist)
+	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, paths, mainSkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan specified paths: %w", err)
 	}
@@ -95,7 +95,7 @@ func (dc *DirectoryCache) updateSpecificPaths(paths []string) error {
 	}
 
 	// Update cache using the new workflow
-	if _, err := dc.updateCacheIndexWithWorkflow(); err != nil {
+	if _, err := dc.updateCacheIndexWithWorkflow(shutdownChan); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
 	}
 

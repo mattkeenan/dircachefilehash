@@ -256,7 +256,8 @@ func showHeaderHelp() {
 	
 	fmt.Printf("Subcommands:\n")
 	fmt.Printf("  show                Display header as JSON\n")
-	fmt.Printf("  edit <field> <value> Edit individual header field\n\n")
+	fmt.Printf("  edit <field> <value> Edit individual header field\n")
+	fmt.Printf("  edit json <json>     Edit header using JSON data\n\n")
 	
 	fmt.Printf("Options:\n")
 	fmt.Printf("  All global options apply (--dry-run, --backup, etc.)\n\n")
@@ -302,9 +303,9 @@ func showEntryHelp() {
 	fmt.Printf("Subcommands:\n")
 	fmt.Printf("  show <path>...                 Show entries as JSON\n")
 	fmt.Printf("  edit <field> <value> <path>... Edit field for multiple entries\n")
+	fmt.Printf("  edit json <json> <path>...     Edit entries using JSON data\n")
 	fmt.Printf("  append <json>                  Add new entry from JSON\n")
-	fmt.Printf("  remove <path>...               Remove entries by path\n")
-	fmt.Printf("  resort                         Resort all entries by path\n\n")
+	fmt.Printf("  remove <path>...               Remove entries by path\n\n")
 	
 	fmt.Printf("Options:\n")
 	fmt.Printf("  All global options apply (--dry-run, --backup, etc.)\n\n")
@@ -318,11 +319,11 @@ func showEntryHelp() {
 	fmt.Printf("  # Edit entry fields\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit uid 1000 src/app.go config.json\n")
 	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit mode 0644 '*.txt'\n")
-	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit hash abc123def456 src/file.c\n\n")
+	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit hash abc123def456 src/file.c\n")
+	fmt.Printf("  dcfhfix .dcfh/main.idx entry edit json '{\"uid\":1000,\"mode\":0644}' src/app.go\n\n")
 	
 	fmt.Printf("  # Manage entries\n")
-	fmt.Printf("  dcfhfix .dcfh/main.idx entry remove temp.txt old/\n")
-	fmt.Printf("  dcfhfix .dcfh/main.idx entry resort\n\n")
+	fmt.Printf("  dcfhfix .dcfh/main.idx entry remove temp.txt old/\n\n")
 	
 	fmt.Printf("Entry Fields:\n")
 	fmt.Printf("  ctime, mtime    Timestamps (Unix nanoseconds or ISO8601 string)\n")
@@ -414,6 +415,10 @@ func handleHeaderCommand(indexFile string, args []string, options *ParsedOptions
 		if len(args) < 3 {
 			return fmt.Errorf("header edit requires field and value arguments")
 		}
+		// For JSON editing, only need 3 args total (edit, json, value)
+		if args[1] == "json" && len(args) >= 3 {
+			return headerEditJSON(indexFile, args[2], options)
+		}
 		return headerEdit(indexFile, args[1], args[2], options)
 	default:
 		return fmt.Errorf("unknown header subcommand: %s", subcommand)
@@ -451,8 +456,6 @@ func handleEntryCommand(indexFile string, args []string, options *ParsedOptions)
 			return fmt.Errorf("entry remove requires path arguments")
 		}
 		return entryRemove(indexFile, args[1:], options)
-	case "resort":
-		return entryResort(indexFile, options)
 	default:
 		return fmt.Errorf("unknown entry subcommand: %s", subcommand)
 	}
@@ -896,7 +899,32 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 		}
 	}
 	
-	return fmt.Errorf("entry append not yet implemented")
+	if options.GetBool("dry-run") {
+		fmt.Printf("Would append entry from JSON: %s\n", jsonDesc)
+		return nil
+	}
+	
+	// Parse and validate the JSON entry
+	newEntry, err := parseEntryFromJSON(jsonData)
+	if err != nil {
+		return fmt.Errorf("failed to parse JSON entry: %v", err)
+	}
+	
+	// Process entries using the workflow to append the new entry
+	entriesAdded, entriesDiscarded, err := processEntriesWithAppend(indexFile, newEntry, options)
+	if err != nil {
+		return fmt.Errorf("failed to process entries: %v", err)
+	}
+	
+	if !options.GetBool("quiet") {
+		fmt.Printf("Added %d entry", entriesAdded)
+		if entriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		}
+		fmt.Println()
+	}
+	
+	return nil
 }
 
 func entryRemove(indexFile string, paths []string, options *ParsedOptions) error {
@@ -914,21 +942,44 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 		}
 	}
 	
-	return fmt.Errorf("entry remove not yet implemented")
-}
-
-func entryResort(indexFile string, options *ParsedOptions) error {
-	// Create backup before resorting
-	description := "Resort all entries by path"
-	
-	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "entry-resort", description, options)
-		if err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
+	if len(paths) == 0 {
+		return fmt.Errorf("no paths specified")
 	}
 	
-	return fmt.Errorf("entry resort not yet implemented")
+	if options.GetBool("dry-run") {
+		fmt.Printf("Would remove entries for paths: %s\n", pathsDesc)
+		return nil
+	}
+	
+	// Convert paths to a map for quick lookup
+	pathSet := make(map[string]bool)
+	for _, path := range paths {
+		normalizedPath := filepath.Clean(path)
+		if normalizedPath == "." {
+			normalizedPath = ""
+		}
+		pathSet[normalizedPath] = true
+	}
+	
+	// Process entries using the workflow to remove matching paths
+	entriesRemoved, entriesDiscarded, err := processEntriesWithRemoval(indexFile, pathSet, options)
+	if err != nil {
+		return fmt.Errorf("failed to process entries: %v", err)
+	}
+	
+	if entriesRemoved == 0 {
+		return fmt.Errorf("no matching entries found for specified paths")
+	}
+	
+	if !options.GetBool("quiet") {
+		fmt.Printf("Removed %d entries", entriesRemoved)
+		if entriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		}
+		fmt.Println()
+	}
+	
+	return nil
 }
 
 // Backup management functions
