@@ -9,6 +9,9 @@ cmd/dcfh
 pkg.test
 dist/
 
+# test directories
+test-*/
+
 # Generated files
 cmd/dcfh/constants_version.go
 cmd/dcfhfind/constants_version.go
