@@ -4,7 +4,7 @@
 # Build artifacts and binaries
 dcfh
 dcfhfind
-dircachefilehash
+dcfhfix
 cmd/dcfh
 pkg.test
 dist/
