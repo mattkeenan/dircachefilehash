@@ -467,6 +467,20 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 	callStartChan chan<- uint64,
 ) error {
 	defer VerboseEnter()()
+	
+	// Track if we exit early to drain the channel
+	earlyExit := false
+	defer func() {
+		if earlyExit {
+			// Drain any remaining items from scanChan in a separate goroutine
+			go func() {
+				for range scanChan {
+					// Just consume to prevent blocking
+				}
+			}()
+		}
+	}()
+	
 	var currentScanned *scannedPath
 	var scanChanOpen bool = true
 	currentIndex := compareSkiplist.skiplist.First()
@@ -540,6 +554,17 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 					ScannedPath: currentScanned,
 				}
 
+				// Check for shutdown before submitting new job
+				if hashJobManager.IsShuttingDown() {
+					if IsDebugEnabled("scanning") {
+						fmt.Fprintf(os.Stderr, "[SCAN] Skipping hash job submission during shutdown for file: %s\n", currentScanned.RelPath)
+					}
+					// Don't return error - just stop submitting new jobs and continue with what we have
+					// The scan skiplist already has the entry, we just won't hash it
+					earlyExit = true
+					break
+				}
+
 				hashJobManager.SubmitHashJob(hashJob, callStartChan)
 
 			} else {
@@ -585,6 +610,17 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				FilePath:    currentScanned.AbsPath,
 				IndexEntry:  createBinaryEntryRef(scanEntry, dc.currentScan), // Hash worker will update this safely
 				ScannedPath: currentScanned,
+			}
+
+			// Check for shutdown before submitting new job
+			if hashJobManager.IsShuttingDown() {
+				if IsDebugEnabled("scanning") {
+					fmt.Fprintf(os.Stderr, "[SCAN] Skipping hash job submission during shutdown for file: %s\n", currentScanned.RelPath)
+				}
+				// Don't return error - just stop submitting new jobs and continue with what we have
+				// The scan skiplist already has the entry, we just won't hash it
+				earlyExit = true
+				break
 			}
 
 			if IsDebugEnabled("scanning") {
@@ -701,6 +737,16 @@ func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan ch
 	}
 
 	return manager
+}
+
+// IsShuttingDown checks if shutdown has been requested
+func (hjm *simpleHashManager) IsShuttingDown() bool {
+	select {
+	case <-hjm.shutdownChan:
+		return true
+	default:
+		return false
+	}
 }
 
 // SubmitHashJob submits a hash job and signals the start
@@ -1015,10 +1061,11 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	// Check if shutdown occurred during scan
 	select {
 	case <-shutdownChan:
-		if IsDebugEnabled("scanning") {
-			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after filesystem scan\n")
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after filesystem scan, returning partial skiplist with %d entries\n", scanSkiplist.Length())
 		}
-		return nil, fmt.Errorf("operation interrupted by shutdown")
+		// Return partial skiplist with error to indicate incomplete scan
+		return scanSkiplist, fmt.Errorf("operation interrupted by shutdown")
 	default:
 	}
 
@@ -1034,10 +1081,11 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 	// Check if shutdown occurred during comparison
 	select {
 	case <-shutdownChan:
-		if IsDebugEnabled("scanning") {
-			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after comparison\n")
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[SCAN] Shutdown detected after comparison, returning partial skiplist with %d entries\n", scanSkiplist.Length())
 		}
-		return nil, fmt.Errorf("operation interrupted by shutdown")
+		// Return partial skiplist with error to indicate incomplete scan
+		return scanSkiplist, fmt.Errorf("operation interrupted by shutdown")
 	default:
 	}
 

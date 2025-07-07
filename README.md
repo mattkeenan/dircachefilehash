@@ -281,6 +281,10 @@ If you need to manually update tags:
 gotags -R -f tags .
 ```
 
+## Development
+
+The maintainer occasionally uses AI assistance (Claude) as a personal development tool to help with code implementation, testing, and documentation. This is simply a personal preference. Contributors are welcome to use whatever development tools and methodologies they prefer - the use of AI tools is neither encouraged nor discouraged. No explicit AI tooling or references are maintained within the repository itself.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest features.

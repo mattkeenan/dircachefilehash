@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2025-07-07
+
+### Fixed
+- Fixed signal handling to properly handle interrupted scans
+  - Status command now correctly creates cache.idx when interrupted by SIGINT/SIGTERM
+  - Update command now writes partial index data when interrupted instead of losing progress
+  - Fixed race condition where hash job submission could cause "send on closed channel" panic
+  - Fixed deadlock in scan channel when comparison exits early due to shutdown
+  - Both status and update commands now handle partial data gracefully
+- Added proper signal handling tests to verify shutdown behavior
+  - Tests verify index files are created with partial data on interruption
+  - Tests ensure process exits within specified time limits (typically <10ms)
+  - Tests check for panics and race conditions during concurrent operations
+
+### Changed
+- Improved debug logging for interrupted operations
+  - Added concise messages showing when scans are interrupted and partial data counts
+  - Debug messages only appear with `--debug=scan` flag
+- Added Development section to README.md
+  - Documented that AI tools are used as a personal preference by the maintainer
+  - Clarified that contributors can use any development tools they prefer
+
 ## [0.6.4] - 2025-07-06
 
 ### Changed
