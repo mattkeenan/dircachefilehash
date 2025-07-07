@@ -19,6 +19,9 @@ cmd/dcfhfind/constants_version.go
 # Profile data
 *.prof
 
+# Log files
+*.log
+
 # Editor files
 tags
 
