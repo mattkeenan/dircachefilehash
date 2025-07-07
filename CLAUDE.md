@@ -35,6 +35,39 @@ make build
 ./dcfh --help
 ```
 
+### Local Build Version Override
+For local development builds, you can override the version string in two ways:
+
+#### Method 1: Using .local-version file (Recommended)
+```bash
+# Create a .local-version file with your desired version
+echo "v0.6.5" > .local-version
+
+# Build normally - Makefile will automatically use the override
+make build
+
+# This produces version strings like: v0.6.5-LOCAL-44713286
+# Format: {override}-LOCAL-{commit}
+```
+
+#### Method 2: Using environment variable
+```bash
+# Build with custom version (must match v[0-9]+.[0-9]+.[0-9]+ format)
+DCFH_VERSION_OVERRIDE=v0.6.5 make build
+```
+
+This is useful for:
+- Local development on branches that diverged from older tags
+- Testing version-specific behavior
+- Creating meaningful version strings for local builds
+
+The override:
+- Must match the format `v[0-9]+\.[0-9]+\.[0-9]+` (e.g., v0.6.5)
+- Adds a "LOCAL" slug to distinguish from official builds
+- Preserves the commit hash for traceability
+- Applies to all three tools (dcfh, dcfhfind, dcfhfix)
+- The `.local-version` file is ignored by git
+
 ### Testing
 ```bash
 go test ./pkg/...

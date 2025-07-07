@@ -22,6 +22,9 @@ cmd/dcfhfind/constants_version.go
 # Log files
 *.log
 
+# Local version override
+.local-version
+
 # Editor files
 tags
 

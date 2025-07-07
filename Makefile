@@ -1,5 +1,11 @@
 # Makefile for dcfh (Directory Cache File Hash)
 
+# Check for local version override file
+ifneq ($(wildcard .local-version),)
+  DCFH_VERSION_OVERRIDE ?= $(shell cat .local-version | tr -d '\n')
+  export DCFH_VERSION_OVERRIDE
+endif
+
 # Default target
 .PHONY: all
 all: build

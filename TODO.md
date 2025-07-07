@@ -56,6 +56,9 @@ This file tracks upcoming development tasks for the dircachefilehash project.
 - [ ] Clean up temporary files on interrupted operations
 - [ ] Add metrics collection for performance monitoring
 - [ ] Implement log rotation for verbose output
+- [ ] Fix goreleaser deprecation warning: replace `nfpms.builds` with `nfpms.ids`
+  - Current config uses deprecated `builds:` field under nfpms section
+  - Should either use `ids:` to reference build IDs or remove field entirely to include all builds
 
 ### Platform Support
 - [ ] Test on additional Unix variants
