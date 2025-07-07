@@ -26,9 +26,11 @@ func (dc *DirectoryCache) updateFullRepository(shutdownChan <-chan struct{}) err
 
 	// Use new scan workflow to get all files
 	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, []string{}, emptySkiplist)
-	if err != nil {
+	if err != nil && scanSkiplist == nil {
+		// Only return error if we got no data at all
 		return fmt.Errorf("failed to scan repository: %w", err)
 	}
+	// If we have partial data due to interruption, continue with what we have
 
 	// Write everything to main index using vectorio (exclude deleted entries)
 	tempIndexPath := dc.generateTempFileName("index")
@@ -66,9 +68,11 @@ func (dc *DirectoryCache) updateSpecificPaths(shutdownChan <-chan struct{}, path
 
 	// Use new scan workflow with main index as comparison to get only changes in specified paths
 	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, paths, mainSkiplist)
-	if err != nil {
+	if err != nil && scanSkiplist == nil {
+		// Only return error if we got no data at all
 		return fmt.Errorf("failed to scan specified paths: %w", err)
 	}
+	// If we have partial data due to interruption, continue with what we have
 
 	// Merge scan results with main index (scan results take precedence)
 	updatedMainSkiplist := mainSkiplist.Copy()

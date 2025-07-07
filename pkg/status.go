@@ -39,8 +39,13 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	// Use the new cache update workflow which implements steps 1-11 as specified
 	// This returns the scan result which we can reuse to avoid duplicate scans
 	currentSkiplist, err := dc.updateCacheIndexWithWorkflow(shutdownChan)
-	if err != nil {
+	if err != nil && currentSkiplist == nil {
+		// Only return error if we got no data at all
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
+	}
+	// If we have partial data due to interruption, continue with what we have
+	if err != nil && IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[STATUS] Cache update interrupted, continuing with partial data (%d entries)\n", currentSkiplist.Length())
 	}
 
 	// Load both main and cache indices for comparison

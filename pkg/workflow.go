@@ -54,11 +54,8 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 func (dc *DirectoryCache) createTmpIndexFromScan(shutdownChan <-chan struct{}, comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	// Use the new PerformHwangLinScanToSkiplist workflow
 	scanSkiplist, err := dc.performHwangLinScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
-	if err != nil {
-		return nil, fmt.Errorf("failed to perform scan to skiplist: %w", err)
-	}
-
-	return scanSkiplist, nil
+	// Pass through both the skiplist and error - the caller will decide if partial data is acceptable
+	return scanSkiplist, err
 }
 
 // UpdateCacheIndexWithWorkflow implements the cache update workflow as specified
@@ -86,8 +83,13 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 
 	// Step 5: Create tmp index from scan using Hwang-Lin algorithm
 	scanSkiplist, err := dc.createTmpIndexFromScan(shutdownChan, workingSkiplist)
-	if err != nil {
+	if err != nil && scanSkiplist == nil {
+		// Only return error if we got no data at all
 		return nil, fmt.Errorf("failed to create scan index: %w", err)
+	}
+	// If we have partial data due to interruption, continue with what we have
+	if err != nil && IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[WORKFLOW] Scan interrupted, continuing with partial data (%d entries)\n", scanSkiplist.Length())
 	}
 
 	// Steps 6-8 are handled inside CreateTmpIndexFromScan (Hwang-Lin, hashing, waiting)
@@ -97,8 +99,15 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 
 	// If no cache entries, remove cache file
 	if cacheOnlySkiplist.IsEmpty() {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[WORKFLOW] No cache entries found, removing cache file\n")
+		}
 		os.Remove(dc.CacheFile)
 		return scanSkiplist, nil
+	}
+	
+	if IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[WORKFLOW] Writing cache index with %d entries\n", cacheOnlySkiplist.Length())
 	}
 
 	// Step 10 & 11: Write cache index using vectorio with atomic rename
