@@ -288,6 +288,25 @@ This design ensures that index replacement is atomic and scan indices don't inte
 
 ## Development Notes
 
+### Branch Management and AI Tools
+
+**Branch Naming Convention**:
+- `local-*` branches are for local development and may include AI tools and files
+- GitHub branches (`main`, `staging`, `dev`) should NOT include AI-specific tools and files
+- This ensures smooth collaboration with other contributors who may use different development tools
+
+**Local Development Branches**:
+- Can include Claude-specific files (CLAUDE.md, etc.)
+- Can include AI-generated development tools and utilities
+- Should be regularly synced with main using cherry-pick or rebase
+- Never push `local-*` branches to GitHub
+- TODO.md is for general repository use but AI references should be cleaned when squashing to public branches
+
+**GitHub Branches**:
+- Must not contain AI-specific tools or references
+- Should have clean commit messages without AI tool mentions
+- Focus on the code changes themselves, not the tools used to create them
+
 ### Code Style and Language
 
 **British English**: All documentation, comments, and user-facing text should use British spelling conventions:
