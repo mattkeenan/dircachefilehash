@@ -190,6 +190,11 @@ func TestSymlinkModeInternal(t *testing.T) {
 		}
 	}
 	
+	// Add a regular file to the repo root for comparison
+	if err := os.WriteFile(filepath.Join(repoDir, "root.txt"), []byte("root content"), 0644); err != nil {
+		t.Fatalf("Failed to write root file: %v", err)
+	}
+	
 	// Create symlinks
 	internalLink := filepath.Join(repoDir, "internal-link")
 	if err := os.Symlink(internalTarget, internalLink); err != nil {
@@ -208,6 +213,10 @@ func TestSymlinkModeInternal(t *testing.T) {
 	}
 	dc := NewDirectoryCache(repoDir, repoDir)
 	
+	// Enable debug output
+	SetDebugFlags("symlinks")
+	defer SetDebugFlags("")
+	
 	shutdownChan := make(<-chan struct{})
 	flags := map[string]string{"symlinks": "internal"}
 	if err := dc.Update(shutdownChan, flags); err != nil {
@@ -219,11 +228,31 @@ func TestSymlinkModeInternal(t *testing.T) {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
 	
-	// Should have: internal-target/ + file0.txt + internal-link + external-link
-	// But NOT external-target/file1.txt
-	expectedCount := 4
+	// Should have: root.txt + internal-target/file0.txt (direct) + internal-link/file0.txt (via symlink)
+	// But NOT file1.txt (via external-link which is not followed)
+	expectedCount := 3
 	if fileCount != expectedCount {
 		t.Errorf("Expected %d files with symlinks=internal, got %d", expectedCount, fileCount)
+		
+		// Debug: List all files found
+		status, err := dc.Status(shutdownChan, flags)
+		if err == nil {
+			t.Logf("Modified: %v", status.Modified)
+			t.Logf("Added: %v", status.Added)
+			t.Logf("Deleted: %v", status.Deleted)
+		}
+		
+		// Also try to see what's in the main index
+		mainSkiplist, err := dc.LoadMainIndex()
+		if err == nil {
+			t.Logf("Files in main index:")
+			mainSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
+				if !entry.IsDeleted() {
+					t.Logf("  %s", entry.RelativePath())
+				}
+				return true
+			})
+		}
 	}
 }
 
@@ -257,6 +286,11 @@ func TestSymlinkModeExternal(t *testing.T) {
 		}
 	}
 	
+	// Add a regular file to the repo root for comparison
+	if err := os.WriteFile(filepath.Join(repoDir, "root.txt"), []byte("root content"), 0644); err != nil {
+		t.Fatalf("Failed to write root file: %v", err)
+	}
+	
 	// Create symlinks
 	internalLink := filepath.Join(repoDir, "internal-link")
 	if err := os.Symlink(internalTarget, internalLink); err != nil {
@@ -286,9 +320,9 @@ func TestSymlinkModeExternal(t *testing.T) {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
 	
-	// Should have: internal-target/ + file0.txt + internal-link + external-link + file1.txt
-	// External symlink IS followed
-	expectedCount := 5
+	// Should have: root.txt + internal-target/file0.txt (direct scan) + external-link/file1.txt (via symlink)
+	// But NOT internal-link/file0.txt (internal symlink not followed in external mode)
+	expectedCount := 3
 	if fileCount != expectedCount {
 		t.Errorf("Expected %d files with symlinks=external, got %d", expectedCount, fileCount)
 	}
@@ -351,11 +385,8 @@ func TestSymlinkCacheRadixBehavior(t *testing.T) {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 	
-	// Switch to none - this should efficiently handle the radix cache
+	// Switch to none and check status before updating
 	flags["symlinks"] = "none"
-	if err := dc.Update(shutdownChan, flags); err != nil {
-		t.Fatalf("Failed update with symlinks=none: %v", err)
-	}
 	
 	status, err := dc.Status(shutdownChan, flags)
 	if err != nil {

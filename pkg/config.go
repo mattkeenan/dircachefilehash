@@ -36,6 +36,11 @@ type SymlinkConfig struct {
 	Mode string // Default symlink mode: all, internal, external, none (can append ,strict)
 }
 
+// IgnoreConfig represents ignore pattern handling configuration
+type IgnoreConfig struct {
+	IgnoreIsDeindex bool // Whether newly ignored files should be marked as deleted (default: true)
+}
+
 // PerformanceConfig represents performance-related configuration
 type PerformanceConfig struct {
 	HashWorkers int    // Number of concurrent hash workers (default: 4)
@@ -136,6 +141,16 @@ func (c *Config) setDefaults() error {
 	_, err = symlinkSection.NewKey("mode", "none")
 	if err != nil {
 		return fmt.Errorf("failed to set default symlink mode: %w", err)
+	}
+
+	// Set default ignore settings
+	ignoreSection, err := c.ini.NewSection("ignore")
+	if err != nil {
+		return fmt.Errorf("failed to create ignore section: %w", err)
+	}
+	_, err = ignoreSection.NewKey("ignore_is_deindex", "true")
+	if err != nil {
+		return fmt.Errorf("failed to set default ignore_is_deindex: %w", err)
 	}
 
 	// Set default performance settings
@@ -249,6 +264,24 @@ func (c *Config) GetSymlinkConfig() *SymlinkConfig {
 	}
 
 	return symlinkConfig
+}
+
+// GetIgnoreConfig returns the ignore configuration
+func (c *Config) GetIgnoreConfig() *IgnoreConfig {
+	ignoreConfig := &IgnoreConfig{
+		IgnoreIsDeindex: true, // fallback default
+	}
+
+	if c.ini.HasSection("ignore") {
+		section := c.ini.Section("ignore")
+		if section.HasKey("ignore_is_deindex") {
+			if deindex, err := section.Key("ignore_is_deindex").Bool(); err == nil {
+				ignoreConfig.IgnoreIsDeindex = deindex
+			}
+		}
+	}
+
+	return ignoreConfig
 }
 
 // GetPerformanceConfig returns the performance configuration

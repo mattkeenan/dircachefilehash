@@ -407,6 +407,38 @@ func (dc *DirectoryCache) shouldFollowSymlink(symlinkPath string) bool {
 	}
 }
 
+// shouldIndex determines if a file should be included in the index based on:
+// - Symlink following rules (for directory symlinks in the path)
+// - Ignore patterns
+// Returns false if the file should be treated as deleted/not indexed
+func (dc *DirectoryCache) shouldIndex(relPath string) bool {
+	// Check if any parent directory is an unfollowed symlink
+	dir := filepath.Dir(relPath)
+	for dir != "." && dir != "/" && dir != "" {
+		fullPath := filepath.Join(dc.RootDir, dir)
+		if info, err := os.Lstat(fullPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			// This is a symlink - check if we would follow it
+			if !dc.shouldFollowSymlink(fullPath) {
+				if IsDebugEnabled("symlinks") {
+					fmt.Fprintf(os.Stderr, "[SYMLINK] File %s under unfollowed symlink %s\n", relPath, dir)
+				}
+				return false
+			}
+		}
+		dir = filepath.Dir(dir)
+	}
+
+	// Check ignore patterns if deindexing is enabled
+	if dc.ignoreIsDeindex && dc.ignoreManager.ShouldIgnore(relPath) {
+		if IsDebugEnabled("scan") {
+			VerboseLog(3, "shouldIndex: ignoring path due to ignore pattern: %s", relPath)
+		}
+		return false
+	}
+
+	return true
+}
+
 
 // scanPathRecursive recursively scans a path and streams results as they're found
 // This provides significant performance benefits:
@@ -697,9 +729,6 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 		}
 	}()
 	
-	// Track currently unfollowed symlink directory (only one at a time since paths are sorted)
-	var currentUnfollowedDir string
-	
 	var currentScanned *scannedPath
 	var scanChanOpen bool = true
 	currentIndex := compareSkiplist.skiplist.First()
@@ -751,11 +780,10 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				continue
 			}
 			
-			// Check if this path is under a currently unfollowed symlink directory
-			// Since paths are sorted, we only need to track one unfollowed dir at a time
-			if currentUnfollowedDir != "" && strings.HasPrefix(currentScanned.RelPath, currentUnfollowedDir+"/") {
-				// This file is under an unfollowed symlink - treat as deleted
-				// Don't submit for hashing, just mark as deleted
+			// Check if this file should still be indexed
+			if !dc.shouldIndex(currentScanned.RelPath) {
+				// File exists but should no longer be indexed (ignored or under unfollowed symlink)
+				// Create a deleted entry
 				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
 				if err != nil {
 					return fmt.Errorf("failed to create deleted scan index entry: %w", err)
@@ -776,46 +804,6 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				}
 				currentIndex = currentIndex.Next()
 				continue
-			} else if currentUnfollowedDir != "" && !strings.HasPrefix(currentScanned.RelPath, currentUnfollowedDir) {
-				// We've moved past the unfollowed directory - clear it
-				currentUnfollowedDir = ""
-			}
-			
-			// Check if this entry itself is a directory symlink that we no longer follow
-			if indexEntry.Mode&uint32(os.ModeSymlink) != 0 {
-				// Check if this is actually a symlink to a directory
-				symlinkPath := filepath.Join(dc.RootDir, indexEntry.RelativePath())
-				targetInfo, err := os.Stat(symlinkPath)
-				isSymlinkToDir := err == nil && targetInfo.IsDir()
-				
-				if isSymlinkToDir && !dc.shouldFollowSymlink(symlinkPath) {
-					// This is a directory symlink we're no longer following
-					currentUnfollowedDir = indexEntry.RelativePath()
-					if IsDebugEnabled("scan") {
-						VerboseLog(3, "Found unfollowed symlink dir: %s (symlink mode: %s)", currentUnfollowedDir, dc.symlinkMode)
-					}
-					
-					// Mark the symlink itself as present but not followed
-					scanEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
-					if err != nil {
-						return fmt.Errorf("failed to create scan index entry: %w", err)
-					}
-					
-					// Copy hash from existing entry (symlinks have their own hash)
-					copy(scanEntry.Hash[:], indexEntry.Hash[:])
-					scanEntry.HashType = indexEntry.HashType
-					
-					// Insert into scan skiplist
-					scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
-					scanSkiplist.Insert(scanRef, ScanContext)
-					
-					// Advance both
-					if scanChanOpen {
-						currentScanned, scanChanOpen = <-scanChan
-					}
-					currentIndex = currentIndex.Next()
-					continue
-				}
 			}
 
 			if dc.isFileChangedFromScanned(indexEntry, currentScanned) {
@@ -877,7 +865,18 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			currentIndex = currentIndex.Next()
 
 		} else if cmp < 0 {
-			// File only in scan - new file, create scan index entry and submit for hashing
+			// File only in scan - new file
+			// Check if this file should be indexed
+			if !dc.shouldIndex(currentScanned.RelPath) {
+				// File should not be indexed (ignored or under unfollowed symlink)
+				// Skip without creating entry
+				if scanChanOpen {
+					currentScanned, scanChanOpen = <-scanChan
+				}
+				continue
+			}
+			
+			// Create scan index entry and submit for hashing
 			scanEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
 			if err != nil {
 				return fmt.Errorf("failed to create scan index entry: %w", err)
@@ -930,34 +929,15 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			// Get the relative path for checking
 			relPath := string([]byte(indexEntry.RelativePath()))
 			
-			// Check if this path is under the currently unfollowed symlink directory
-			if currentUnfollowedDir != "" && strings.HasPrefix(relPath, currentUnfollowedDir+"/") {
-				// This file is under an unfollowed symlink - skip it entirely
-				// No need to create a deleted entry since we never followed the symlink
+			// Check if this file should still be indexed based on symlink and ignore rules
+			if dc.shouldIndex(relPath) {
+				// File should be indexed but isn't present - it's been deleted from disk
+				// Fall through to create deleted entry
+			} else {
+				// File should not be indexed (due to symlink or ignore rules)
+				// Skip without creating deleted entry
 				currentIndex = currentIndex.Next()
 				continue
-			} else if currentUnfollowedDir != "" && !strings.HasPrefix(relPath, currentUnfollowedDir) {
-				// We've moved past the unfollowed directory - clear it
-				currentUnfollowedDir = ""
-			}
-			
-			// Check if this entry itself is a directory symlink that we no longer follow
-			if indexEntry.Mode&uint32(os.ModeSymlink) != 0 {
-				// Check if this is actually a symlink to a directory
-				symlinkPath := filepath.Join(dc.RootDir, relPath)
-				targetInfo, err := os.Stat(symlinkPath)
-				isSymlinkToDir := err == nil && targetInfo.IsDir()
-				
-				if isSymlinkToDir && !dc.shouldFollowSymlink(symlinkPath) {
-					// This is a directory symlink we're no longer following
-					currentUnfollowedDir = relPath
-					if IsDebugEnabled("scan") {
-						VerboseLog(3, "Found unfollowed symlink dir in deleted section: %s", currentUnfollowedDir)
-					}
-					// Skip the symlink itself and all its contents
-					currentIndex = currentIndex.Next()
-					continue
-				}
 			}
 
 			// Skip already deleted entries

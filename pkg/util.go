@@ -41,9 +41,10 @@ type DirectoryCache struct {
 	hasher        hash.Hash      // SHA-1 hasher for checksums
 	mmapIndex     *mmapIndex     // Memory-mapped index file
 	ignoreManager *IgnoreManager // Ignore pattern manager
-	config        *Config        // Configuration manager
-	symlinkMode   string         // Current symlink handling mode
-	hashWorkers   int            // Number of concurrent hash workers
+	config          *Config        // Configuration manager
+	symlinkMode     string         // Current symlink handling mode
+	ignoreIsDeindex bool           // Whether newly ignored files should be marked as deleted
+	hashWorkers     int            // Number of concurrent hash workers
 
 	// Concurrent scan synchronization
 	scanMutex      sync.RWMutex     // Protects scan operations

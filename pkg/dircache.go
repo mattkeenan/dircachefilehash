@@ -221,7 +221,15 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 		symlinkConfig := dc.config.GetSymlinkConfig()
 		dc.symlinkMode = symlinkConfig.Mode
 	} else {
-		dc.symlinkMode = "all" // default fallback
+		dc.symlinkMode = "none" // default fallback
+	}
+
+	// Set ignore deindex behavior from config
+	if dc.config != nil {
+		ignoreConfig := dc.config.GetIgnoreConfig()
+		dc.ignoreIsDeindex = ignoreConfig.IgnoreIsDeindex
+	} else {
+		dc.ignoreIsDeindex = true // default fallback
 	}
 
 	// Set hash workers from flags or keep current config value
