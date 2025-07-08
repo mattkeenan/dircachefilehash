@@ -10,6 +10,14 @@ import (
 
 // Update scans the directory and updates the index file using the new workflow
 func (dc *DirectoryCache) Update(shutdownChan <-chan struct{}, flags map[string]string, paths ...string) error {
+	// Apply flags before scanning
+	if err := dc.ApplyConfigOverrides(flags); err != nil {
+		// If no config loaded, apply symlink mode directly if provided
+		if symlinkMode, exists := flags["symlinks"]; exists {
+			dc.symlinkMode = symlinkMode
+		}
+	}
+	
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
 		return dc.updateFullRepository(shutdownChan)

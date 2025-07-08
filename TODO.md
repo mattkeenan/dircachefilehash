@@ -22,6 +22,10 @@ This file tracks upcoming development tasks for the dircachefilehash project.
 - [ ] Profile memory usage during large directory scans
 - [ ] Optimize skiplist operations for better cache locality
 - [ ] Benchmark vectorio vs traditional I/O patterns
+- [ ] Fix live locks during shutdown
+  - Monitor goroutines may spin while waiting for hash jobs to complete
+  - Need to add proper backoff or condition variables instead of busy waiting
+  - Ensure shutdown signals properly interrupt spinning loops
 
 ### Testing & Validation
 - [ ] Add comprehensive integration tests for edge cases

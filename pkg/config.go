@@ -33,7 +33,7 @@ type VerboseConfig struct {
 
 // SymlinkConfig represents symlink handling configuration
 type SymlinkConfig struct {
-	Mode string // Default symlink mode: all, contained, none
+	Mode string // Default symlink mode: all, internal, external, none (can append ,strict)
 }
 
 // PerformanceConfig represents performance-related configuration
@@ -133,7 +133,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to create symlink section: %w", err)
 	}
-	_, err = symlinkSection.NewKey("mode", "all")
+	_, err = symlinkSection.NewKey("mode", "none")
 	if err != nil {
 		return fmt.Errorf("failed to set default symlink mode: %w", err)
 	}
@@ -238,7 +238,7 @@ func (c *Config) GetVerboseConfig() *VerboseConfig {
 // GetSymlinkConfig returns the symlink configuration
 func (c *Config) GetSymlinkConfig() *SymlinkConfig {
 	symlinkConfig := &SymlinkConfig{
-		Mode: "all", // fallback default
+		Mode: "none", // fallback default
 	}
 
 	if c.ini.HasSection("symlink") {
@@ -463,12 +463,41 @@ func ValidateDebugFlags(debug string) error {
 
 // ValidateSymlinkMode validates that a symlink mode is supported
 func ValidateSymlinkMode(mode string) error {
-	switch strings.ToLower(mode) {
-	case "all", "contained", "none":
-		return nil
-	default:
-		return fmt.Errorf("unsupported symlink mode: %s (supported: all, contained, none)", mode)
+	// Parse mode to handle potential ,strict suffix
+	parts := strings.Split(strings.ToLower(mode), ",")
+	if len(parts) == 0 {
+		return fmt.Errorf("empty symlink mode")
 	}
+	
+	baseMode := strings.TrimSpace(parts[0])
+	
+	// Validate base mode
+	switch baseMode {
+	case "all", "internal", "external", "none":
+		// Valid base modes
+	case "contained":
+		// Legacy mode, still accepted but converted to "internal"
+	default:
+		return fmt.Errorf("unsupported symlink mode: %s (supported: all, internal, external, none)", baseMode)
+	}
+	
+	// Validate additional flags
+	for i := 1; i < len(parts); i++ {
+		flag := strings.TrimSpace(parts[i])
+		switch flag {
+		case "strict":
+			// Only valid with internal or external
+			if baseMode != "internal" && baseMode != "external" && baseMode != "contained" {
+				return fmt.Errorf("strict flag can only be used with internal or external modes, not with %s", baseMode)
+			}
+		case "":
+			// Ignore empty parts
+		default:
+			return fmt.Errorf("unsupported symlink mode flag: %s (supported: strict)", flag)
+		}
+	}
+	
+	return nil
 }
 
 // ValidateHashWorkers validates that the hash worker count is reasonable

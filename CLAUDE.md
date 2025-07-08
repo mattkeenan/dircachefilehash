@@ -86,6 +86,14 @@ go test -v ./pkg/...  # verbose output
 
 Global options: `--json`, `--verbose`, `--version`, `--dry-run`, `--hash-workers`, `--symlinks`
 
+**Symlink Modes** (`--symlinks`):
+- `none` - Don't follow any directory symlinks (default)
+- `all` - Follow all directory symlinks
+- `internal` - Only follow symlinks pointing inside the repository root
+- `external` - Only follow symlinks pointing outside the repository root  
+- `internal,strict` - Only follow if ALL symlinks in chain are internal
+- `external,strict` - Only follow if ALL symlinks in chain are external
+
 **Specialized Tooling (`dcfhfind`)**:
 ```bash
 dcfhfind [starting-points...] [expressions]

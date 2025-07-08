@@ -16,6 +16,14 @@ type DuplicateGroup struct {
 
 // FindDuplicates returns groups of files with identical hashes using the new workflow
 func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map[string]string) ([]DuplicateGroup, error) {
+	// Apply flags before scanning
+	if err := dc.ApplyConfigOverrides(flags); err != nil {
+		// If no config loaded, apply symlink mode directly if provided
+		if symlinkMode, exists := flags["symlinks"]; exists {
+			dc.symlinkMode = symlinkMode
+		}
+	}
+	
 	// Use the new cache update workflow to ensure we have current data
 	// We don't need the scan result for duplicates, so we ignore it
 	if _, err := dc.updateCacheIndexWithWorkflow(shutdownChan); err != nil {

@@ -1084,12 +1084,25 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 			return contextMatch && !entry.IsDeleted() && !entry.IsHashEmpty()
 		})
 	} else {
-		// Include all entries for cache index (including deleted ones) but exclude entries with empty hashes
+		// Include all entries for cache index (including deleted ones)
+		// BUT: preserve deleted entries even if they have empty hashes
 		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
-			// For cache index, include if has valid hash and either no context filter or matches context
+			// For cache index: always keep deleted entries (even with empty hash)
+			if entry.IsDeleted() {
+				// Apply context filter for deleted entries too
+				if context == "" {
+					return true
+				} else {
+					return entryContext != MainContext
+				}
+			}
+			
+			// For non-deleted entries, exclude if hash is empty
 			if entry.IsHashEmpty() {
 				return false
 			}
+			
+			// Apply context filter
 			if context == "" {
 				return true
 			} else {

@@ -245,6 +245,169 @@ func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool
 	return strings.HasPrefix(targetPath, containerWithSep)
 }
 
+// parseSymlinkMode parses the symlink mode string into base mode and strict flag
+func parseSymlinkMode(mode string) (baseMode string, strict bool) {
+	parts := strings.Split(mode, ",")
+	if len(parts) == 0 {
+		return "none", false
+	}
+	
+	baseMode = strings.TrimSpace(parts[0])
+	for i := 1; i < len(parts); i++ {
+		if strings.TrimSpace(parts[i]) == "strict" {
+			strict = true
+		}
+	}
+	
+	// Handle legacy "contained" mode by converting to "internal"
+	if baseMode == "contained" {
+		baseMode = "internal"
+	}
+	
+	return baseMode, strict
+}
+
+// checkSymlinkChain checks all symlinks in a chain and returns whether they are all internal or all external
+// Returns: isInternal, isExternal, error
+// If strict mode is not needed, this just checks the final target
+func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (allInternal, allExternal bool, err error) {
+	// Start with assumption that chain could be either
+	allInternal = true
+	allExternal = true
+	
+	currentPath := symlinkPath
+	visited := make(map[string]bool) // Prevent infinite loops
+	
+	for {
+		// Check if we've seen this path before (loop detection)
+		if visited[currentPath] {
+			return false, false, fmt.Errorf("symlink loop detected at %s", currentPath)
+		}
+		visited[currentPath] = true
+		
+		// Check if current path is a symlink
+		info, err := os.Lstat(currentPath)
+		if err != nil {
+			return false, false, err
+		}
+		
+		if info.Mode()&os.ModeSymlink == 0 {
+			// Not a symlink, we've reached the end
+			break
+		}
+		
+		// Read the symlink target
+		target, err := os.Readlink(currentPath)
+		if err != nil {
+			return false, false, err
+		}
+		
+		// Make target absolute if it's relative
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(currentPath), target)
+		}
+		
+		// Check if this link is internal or external
+		isInternal := dc.isPathContained(target, dc.RootDir)
+		
+		if strict {
+			// In strict mode, all links must be of the same type
+			if isInternal {
+				allExternal = false
+			} else {
+				allInternal = false
+			}
+			
+			// Early exit if we've determined the chain is mixed
+			if !allInternal && !allExternal {
+				return false, false, nil
+			}
+		}
+		
+		currentPath = target
+	}
+	
+	// For non-strict mode, only check the final target
+	if !strict {
+		finalTarget, err := filepath.EvalSymlinks(symlinkPath)
+		if err != nil {
+			return false, false, err
+		}
+		isInternal := dc.isPathContained(finalTarget, dc.RootDir)
+		return isInternal, !isInternal, nil
+	}
+	
+	return allInternal, allExternal, nil
+}
+
+// detectUnfollowedSymlinkDirs scans the index to find directories that are now unfollowed symlinks
+func (dc *DirectoryCache) detectUnfollowedSymlinkDirs(compareSkiplist *skiplistWrapper) map[string]bool {
+	unfollowedDirs := make(map[string]bool)
+	
+	// Parse current symlink mode
+	baseMode, _ := parseSymlinkMode(dc.symlinkMode)
+	
+	// If we're in "all" mode, no symlinks are unfollowed
+	if baseMode == "all" {
+		return unfollowedDirs
+	}
+	
+	// Scan through all entries in the comparison skiplist
+	current := compareSkiplist.skiplist.First()
+	for current != nil {
+		ref := current.Item()
+		entry := ref.GetBinaryEntry()
+		if entry != nil && !entry.IsDeleted() {
+			path := entry.RelativePath()
+			// Check each directory component in the path
+			dir := filepath.Dir(path)
+			for dir != "." && dir != "/" {
+				// Check if this directory is a symlink that we would not follow
+				fullPath := filepath.Join(dc.RootDir, dir)
+				if info, err := os.Lstat(fullPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					// This is a symlink - check if we would follow it
+					shouldFollow := dc.shouldFollowSymlink(fullPath)
+					if !shouldFollow {
+						unfollowedDirs[dir] = true
+						if IsDebugEnabled("symlinks") {
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Detected unfollowed symlink directory: %s\n", dir)
+						}
+					}
+				}
+				dir = filepath.Dir(dir)
+			}
+		}
+		current = current.Next()
+	}
+	
+	return unfollowedDirs
+}
+
+// shouldFollowSymlink checks if a symlink should be followed based on current mode
+func (dc *DirectoryCache) shouldFollowSymlink(symlinkPath string) bool {
+	baseMode, strict := parseSymlinkMode(dc.symlinkMode)
+	
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "shouldFollowSymlink: path=%s, mode=%s (base=%s, strict=%v)", symlinkPath, dc.symlinkMode, baseMode, strict)
+	}
+	
+	switch baseMode {
+	case "none":
+		return false
+	case "all":
+		return true
+	case "internal":
+		allInternal, _, err := dc.checkSymlinkChain(symlinkPath, strict)
+		return err == nil && allInternal
+	case "external":
+		_, allExternal, err := dc.checkSymlinkChain(symlinkPath, strict)
+		return err == nil && allExternal
+	default:
+		return true // Default to following for unknown modes
+	}
+}
+
+
 // scanPathRecursive recursively scans a path and streams results as they're found
 // This provides significant performance benefits:
 // 1. No memory buildup - results are streamed immediately
@@ -299,29 +462,82 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 
 			if targetInfo.IsDir() {
 				// This is a directory symlink - apply symlink mode logic
-				switch dc.symlinkMode {
+				baseMode, strict := parseSymlinkMode(dc.symlinkMode)
+				
+				switch baseMode {
 				case "none":
 					// Don't follow directory symlinks - skip them
+					if IsDebugEnabled("symlinks") {
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (mode=none): %s\n", currentPath)
+					}
 					continue
-				case "contained":
-					// Only follow if target directory is within rootDir
-					target, err := filepath.EvalSymlinks(currentPath)
+					
+				case "internal":
+					// Only follow if symlink chain is internal to rootDir
+					allInternal, _, err := dc.checkSymlinkChain(currentPath, strict)
 					if err != nil {
-						continue // Skip broken symlinks
+						if IsDebugEnabled("symlinks") {
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
+						}
+						continue // Skip problematic symlinks
 					}
-
-					// Check if target is within rootDir
-					if !dc.isPathContained(target, dc.RootDir) {
-						continue // Skip directory symlinks pointing outside rootDir
+					
+					if !allInternal {
+						if IsDebugEnabled("symlinks") {
+							finalTarget, _ := filepath.EvalSymlinks(currentPath)
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not internal): %s -> %s (root: %s, strict: %v)\n", 
+								currentPath, finalTarget, dc.RootDir, strict)
+						}
+						continue
 					}
-
-					// Use target info for the directory symlink (traverse into it)
+					
+					if IsDebugEnabled("symlinks") {
+						finalTarget, _ := filepath.EvalSymlinks(currentPath)
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following internal directory symlink: %s -> %s (root: %s, strict: %v)\n", 
+							currentPath, finalTarget, dc.RootDir, strict)
+					}
 					info = targetInfo
+					
+				case "external":
+					// Only follow if symlink chain is external to rootDir
+					_, allExternal, err := dc.checkSymlinkChain(currentPath, strict)
+					if err != nil {
+						if IsDebugEnabled("symlinks") {
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
+						}
+						continue // Skip problematic symlinks
+					}
+					
+					if !allExternal {
+						if IsDebugEnabled("symlinks") {
+							finalTarget, _ := filepath.EvalSymlinks(currentPath)
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not external): %s -> %s (root: %s, strict: %v)\n", 
+								currentPath, finalTarget, dc.RootDir, strict)
+						}
+						continue
+					}
+					
+					if IsDebugEnabled("symlinks") {
+						finalTarget, _ := filepath.EvalSymlinks(currentPath)
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following external directory symlink: %s -> %s (root: %s, strict: %v)\n", 
+							currentPath, finalTarget, dc.RootDir, strict)
+					}
+					info = targetInfo
+					
 				case "all":
-					// Follow all directory symlinks (current behaviour)
+					// Follow all directory symlinks
+					if IsDebugEnabled("symlinks") {
+						finalTarget, _ := filepath.EvalSymlinks(currentPath)
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following directory symlink (mode=all): %s -> %s\n", 
+							currentPath, finalTarget)
+					}
 					info = targetInfo
+					
 				default:
 					// Default to "all" for unknown modes
+					if IsDebugEnabled("symlinks") {
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Unknown mode '%s', defaulting to 'all'\n", baseMode)
+					}
 					info = targetInfo
 				}
 			}
@@ -481,6 +697,9 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 		}
 	}()
 	
+	// Track currently unfollowed symlink directory (only one at a time since paths are sorted)
+	var currentUnfollowedDir string
+	
 	var currentScanned *scannedPath
 	var scanChanOpen bool = true
 	currentIndex := compareSkiplist.skiplist.First()
@@ -530,6 +749,73 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			if indexEntry.IsDeleted() {
 				currentIndex = currentIndex.Next()
 				continue
+			}
+			
+			// Check if this path is under a currently unfollowed symlink directory
+			// Since paths are sorted, we only need to track one unfollowed dir at a time
+			if currentUnfollowedDir != "" && strings.HasPrefix(currentScanned.RelPath, currentUnfollowedDir+"/") {
+				// This file is under an unfollowed symlink - treat as deleted
+				// Don't submit for hashing, just mark as deleted
+				deletedEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
+				if err != nil {
+					return fmt.Errorf("failed to create deleted scan index entry: %w", err)
+				}
+				
+				// Mark as deleted and preserve existing hash
+				deletedEntry.SetDeleted()
+				copy(deletedEntry.Hash[:], indexEntry.Hash[:])
+				deletedEntry.HashType = indexEntry.HashType
+				
+				// Insert into scan skiplist
+				deletedRef := createBinaryEntryRef(deletedEntry, dc.currentScan)
+				scanSkiplist.Insert(deletedRef, ScanContext)
+				
+				// Advance both
+				if scanChanOpen {
+					currentScanned, scanChanOpen = <-scanChan
+				}
+				currentIndex = currentIndex.Next()
+				continue
+			} else if currentUnfollowedDir != "" && !strings.HasPrefix(currentScanned.RelPath, currentUnfollowedDir) {
+				// We've moved past the unfollowed directory - clear it
+				currentUnfollowedDir = ""
+			}
+			
+			// Check if this entry itself is a directory symlink that we no longer follow
+			if indexEntry.Mode&uint32(os.ModeSymlink) != 0 {
+				// Check if this is actually a symlink to a directory
+				symlinkPath := filepath.Join(dc.RootDir, indexEntry.RelativePath())
+				targetInfo, err := os.Stat(symlinkPath)
+				isSymlinkToDir := err == nil && targetInfo.IsDir()
+				
+				if isSymlinkToDir && !dc.shouldFollowSymlink(symlinkPath) {
+					// This is a directory symlink we're no longer following
+					currentUnfollowedDir = indexEntry.RelativePath()
+					if IsDebugEnabled("scan") {
+						VerboseLog(3, "Found unfollowed symlink dir: %s (symlink mode: %s)", currentUnfollowedDir, dc.symlinkMode)
+					}
+					
+					// Mark the symlink itself as present but not followed
+					scanEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
+					if err != nil {
+						return fmt.Errorf("failed to create scan index entry: %w", err)
+					}
+					
+					// Copy hash from existing entry (symlinks have their own hash)
+					copy(scanEntry.Hash[:], indexEntry.Hash[:])
+					scanEntry.HashType = indexEntry.HashType
+					
+					// Insert into scan skiplist
+					scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
+					scanSkiplist.Insert(scanRef, ScanContext)
+					
+					// Advance both
+					if scanChanOpen {
+						currentScanned, scanChanOpen = <-scanChan
+					}
+					currentIndex = currentIndex.Next()
+					continue
+				}
 			}
 
 			if dc.isFileChangedFromScanned(indexEntry, currentScanned) {
@@ -639,6 +925,39 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 			indexEntry := indexRef.GetBinaryEntry()
 			if indexEntry == nil {
 				return fmt.Errorf("GetBinaryEntry returned nil for index entry - this should never happen")
+			}
+			
+			// Get the relative path for checking
+			relPath := string([]byte(indexEntry.RelativePath()))
+			
+			// Check if this path is under the currently unfollowed symlink directory
+			if currentUnfollowedDir != "" && strings.HasPrefix(relPath, currentUnfollowedDir+"/") {
+				// This file is under an unfollowed symlink - skip it entirely
+				// No need to create a deleted entry since we never followed the symlink
+				currentIndex = currentIndex.Next()
+				continue
+			} else if currentUnfollowedDir != "" && !strings.HasPrefix(relPath, currentUnfollowedDir) {
+				// We've moved past the unfollowed directory - clear it
+				currentUnfollowedDir = ""
+			}
+			
+			// Check if this entry itself is a directory symlink that we no longer follow
+			if indexEntry.Mode&uint32(os.ModeSymlink) != 0 {
+				// Check if this is actually a symlink to a directory
+				symlinkPath := filepath.Join(dc.RootDir, relPath)
+				targetInfo, err := os.Stat(symlinkPath)
+				isSymlinkToDir := err == nil && targetInfo.IsDir()
+				
+				if isSymlinkToDir && !dc.shouldFollowSymlink(symlinkPath) {
+					// This is a directory symlink we're no longer following
+					currentUnfollowedDir = relPath
+					if IsDebugEnabled("scan") {
+						VerboseLog(3, "Found unfollowed symlink dir in deleted section: %s", currentUnfollowedDir)
+					}
+					// Skip the symlink itself and all its contents
+					currentIndex = currentIndex.Next()
+					continue
+				}
 			}
 
 			// Skip already deleted entries
