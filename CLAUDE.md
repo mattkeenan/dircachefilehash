@@ -306,6 +306,7 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - **Context-aware merging**: Different merge strategies for main/cache/scan contexts
 - **Hwang-Lin algorithm**: Efficient comparison of sorted file lists
 - **Pure file I/O**: No dependencies on external libraries for core operations
+- **Main Index Integrity**: Main index is ONLY updated on complete success - partial/interrupted operations accumulate in cache index to preserve work without compromising consistency
 
 ### Data Flow (New Scan Index Workflow)
 
@@ -317,6 +318,26 @@ This design ensures that index replacement is atomic and scan indices don't inte
 6. **Merge**: Combine with existing indices using context-aware operations
 7. **Write**: Atomic write via vectorio to temp file, then rename
 8. **Cleanup**: Remove scan index files after successful completion
+
+### Hash Worker Synchronization (v0.6.5+)
+
+**Shutdown Coordination**:
+- Hash workers track current job and send interruption signals on shutdown
+- Monitor goroutine blocks on channels without busy-waiting (no default case)
+- Shutdown sequence ensures all jobs are accounted for (completed or interrupted)
+- 60-second timeout prevents indefinite blocking during worker shutdown
+
+**Key Patterns**:
+1. **Worker Pattern**: Track `currentJob` and send completion signal even on interruption
+2. **Monitor Pattern**: No default case in select statement to avoid busy-waiting
+3. **Shutdown Pattern**: Close hash job channel, wait with timeout, then close completion channel
+4. **Timeout Pattern**: Use goroutine wrapper with `time.After()` for bounded waits
+
+**Design Principles**:
+- Workers must exit immediately on shutdown request
+- All jobs must be signaled as complete (success or interruption)
+- Workflows must continue even if workers don't exit cleanly
+- Channel closing serves as broadcast mechanism to multiple goroutines
 
 ### Scan Index Workflow Integration
 
@@ -374,6 +395,12 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - **Unsafe Data Access in Repair Tools**: Repair tools must assume data is corrupted. Always validate bounds, alignment, and reasonableness before accessing any field.
 - **Reimplementing Existing Functionality**: Before creating new functions (especially for core operations like index writing, checksum calculation, or file management), ALWAYS check if equivalent functionality already exists in the codebase. Use existing battle-tested functions instead of creating potentially buggy parallel implementations.
 - **Conflicting Implementations**: When new code requirements seem to conflict with existing functionality patterns, ASK THE USER for clarification rather than assuming a different approach is needed. The existing patterns are usually correct and should be followed.
+- **Goroutine Synchronization Errors**: 
+  - Never use busy-wait loops (default case in select with channels)
+  - Always signal job completion/interruption, even during shutdown
+  - Use bounded waits (timeouts) instead of indefinite blocking
+  - Track current work items in workers for proper cleanup signaling
+  - Close channels in proper sequence to avoid deadlocks
 
 **Critical Constraints (Must Be Enforced)**:
 1. **Single Entry Writing Path**: `AppendEntryToScanIndex()` is the ONLY function that writes binaryEntries to index files
@@ -479,3 +506,23 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - **Focused Responsibility**: Clear separation of concerns
 - **Easier Development**: Smaller, focused files for command implementation
 - **Better Testing**: Command-specific test organization
+
+### Hash Worker Live Lock Fix (v0.6.5+)
+**Status**: Complete
+**Description**: Fixed critical live lock issues during hash worker shutdown
+
+**Problems Solved**:
+- **Live Lock**: Monitor goroutines were spinning indefinitely waiting for hash jobs
+- **Missing Signals**: Workers exited without signaling job completion/interruption
+- **Indefinite Blocking**: `wg.Wait()` could block forever on stuck workers
+
+**Implementation**:
+- **Worker Tracking**: Hash workers track current job and send interruption signals
+- **Channel Coordination**: Proper channel closing sequence (jobs → wait → completions)
+- **60-Second Timeout**: Bounded wait prevents workflow from getting stuck
+- **No Busy-Wait**: Removed default case from monitor select statement
+
+**Impact**:
+- Graceful shutdown without CPU spinning
+- Workflows continue even with stuck workers
+- Consistent behavior across scan and update paths
