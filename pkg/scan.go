@@ -1068,6 +1068,8 @@ func (hjm *simpleHashManager) FinishSubmitting() {
 // hashWorker processes hash jobs and updates entries directly in scan index mmap
 func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
+	
+	var currentJob *hashJobStart // Track current job for interruption handling
 
 	for {
 		select {
@@ -1077,6 +1079,7 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 				return
 			}
 
+			currentJob = job
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Hashing file: %s (job %d)\n", job.ScannedPath.RelPath, job.JobID)
 			}
@@ -1114,9 +1117,19 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 
 			// Signal completion
 			hjm.callFinishChan <- job.JobID
+			currentJob = nil
 
 		case <-hjm.shutdownChan:
-			// Shutdown requested, exit immediately
+			// Shutdown requested
+			if currentJob != nil {
+				// We were processing a job - send interruption signal
+				// Use a special job ID (0) to indicate interruption
+				if IsDebugEnabled("scanning") {
+					fmt.Fprintf(os.Stderr, "[SCAN] Worker interrupted during job %d, sending interruption signal\n", currentJob.JobID)
+				}
+				// Send the actual job ID so monitor knows which job was interrupted
+				hjm.callFinishChan <- currentJob.JobID
+			}
 			return
 		}
 	}
@@ -1125,13 +1138,33 @@ func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 // Shutdown gracefully shuts down the hash manager
 func (hjm *simpleHashManager) Shutdown() {
 	hjm.closeMutex.Lock()
-	defer hjm.closeMutex.Unlock()
-
 	if !hjm.closed {
 		close(hjm.hashJobChan)
 		hjm.closed = true
 	}
-	hjm.wg.Wait()
+	hjm.closeMutex.Unlock()
+	
+	// Wait for all workers to exit with a timeout
+	done := make(chan struct{})
+	go func() {
+		hjm.wg.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// All workers exited normally
+		if IsDebugEnabled("scanning") {
+			fmt.Fprintf(os.Stderr, "[SCAN] All hash workers exited cleanly\n")
+		}
+	case <-time.After(60 * time.Second):
+		// Timeout - workers didn't exit in time
+		fmt.Fprintf(os.Stderr, "[WARNING] Hash workers did not exit within 60 seconds, proceeding anyway\n")
+	}
+	
+	// After workers have exited (or timed out), close the completion channel
+	// This signals to the monitor that no more completions will come
+	close(hjm.callFinishChan)
 }
 
 // updateBinaryEntryHash safely updates the hash in a binaryEntry
@@ -1177,7 +1210,15 @@ func (dc *DirectoryCache) monitorJobs(
 				fmt.Fprintf(os.Stderr, "[SCAN] Job %d started, pending jobs: %d\n", jobID, len(jobs))
 			}
 
-		case completedJobID := <-callFinishChan:
+		case completedJobID, ok := <-callFinishChan:
+			if !ok {
+				// Channel closed - no more completions will come
+				if IsDebugEnabled("scanning") {
+					fmt.Fprintf(os.Stderr, "[SCAN] Completion channel closed, %d jobs still pending\n", len(jobs))
+				}
+				return
+			}
+			
 			// Remove completed job from jobs slice
 			found := false
 			for i, id := range jobs {
@@ -1194,6 +1235,14 @@ func (dc *DirectoryCache) monitorJobs(
 					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed but not found in pending list, pending jobs: %d\n", completedJobID, len(jobs))
 				}
 			}
+			
+			// Check if we're done after processing a completion
+			if stopped && len(jobs) == 0 {
+				if IsDebugEnabled("scanning") {
+					fmt.Fprintf(os.Stderr, "[SCAN] Monitor exiting: stopped=true, pending jobs=0\n")
+				}
+				return
+			}
 
 		case <-collectionStop:
 			stopped = true
@@ -1208,6 +1257,13 @@ func (dc *DirectoryCache) monitorJobs(
 			if len(jobs) > 0 && stopTimer == nil {
 				stopTimer = time.NewTimer(5 * time.Second)
 			}
+			// Check if we're already done
+			if len(jobs) == 0 {
+				if IsDebugEnabled("scanning") {
+					fmt.Fprintf(os.Stderr, "[SCAN] Monitor exiting: stopped=true, pending jobs=0\n")
+				}
+				return
+			}
 
 		case <-timerChan:
 			if IsDebugEnabled("scanning") {
@@ -1218,14 +1274,6 @@ func (dc *DirectoryCache) monitorJobs(
 		case <-shutdownChan:
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Monitor received shutdown signal, exiting immediately with %d pending jobs\n", len(jobs))
-			}
-			return
-		}
-
-		// If stopped and no pending jobs, we're done
-		if stopped && len(jobs) == 0 {
-			if IsDebugEnabled("scanning") {
-				fmt.Fprintf(os.Stderr, "[SCAN] Monitor exiting: stopped=true, pending jobs=0\n")
 			}
 			return
 		}
