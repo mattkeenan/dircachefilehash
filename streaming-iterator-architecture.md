@@ -56,6 +56,57 @@ This transformation is essential because:
 
 ### Components
 
+#### 0. BinaryEntryInterface (Unified Data Access)
+**Purpose**: Unified interface for accessing binary entry data across all four data sources
+
+The architecture requires handling four distinct data sources:
+1. **Skiplist (mmap-backed)** - In-memory merged view using mmap'd data (e.g., main+cache indices)
+2. **Index file (read/write)** - Direct file access without skiplist creation
+3. **Index file (mmap + iterative skiplist)** - Mmap'd index with skiplist built during HwangLin
+4. **Scanning (mmap-backed)** - Ephemeral entries in scan index
+
+**Key architectural rules**:
+- **Skiplists**: Always use mmap() for zero-copy access
+- **Index without skiplist**: Use read()/write() for direct file access
+- **Index with iterative skiplist**: Use mmap() since skiplist is being built
+- **Scanning**: Always mmap() since entries are ephemeral and updated in-place
+
+**Interface Definition**:
+```go
+type BinaryEntryInterface interface {
+    // Field accessors (acquire read lock, can return errors for ephemeral entries)
+    Size() (uint32, error)
+    RelativePath() (string, error)
+    HashString() (string, error)
+    IsDeleted() (bool, error)
+    // ... other fields with error returns ...
+    
+    // Setters (acquire write lock, can return errors for ephemeral entries)
+    SetHash(hashBytes []byte, hashType uint16) error
+    SetDeleted(deleted bool) error
+    
+    // Manual locking for batch operations
+    RLock()
+    RUnlock()
+    Lock()
+    Unlock()
+    
+    // Entry lifecycle
+    IsValid() bool  // Quick check if entry is still accessible
+}
+```
+
+**Implementation Types**:
+- **SkiplistBinaryEntry**: mmap-backed entries in skiplist
+- **ReadWriteBinaryEntry**: Standard file I/O access
+- **IterativeSkiplistBinaryEntry**: mmap with iterative skiplist building
+- **ScanBinaryEntry**: Ephemeral mmap entries for hash coordination
+
+**Locking Strategy**: RWMutex-based cooperative locking
+- Read operations: Multiple readers allowed
+- Write operations: Exclusive access
+- Hash updates: Synchronous SetHash() with write lock
+
 #### 1. Enhanced Job Monitor
 **Current**: Tracks job completion, signals workflow completion  
 **Enhanced**: Maintains completed queue and signals iterator for in-order completions
@@ -85,15 +136,15 @@ type simpleHashManager struct {
 **Purpose**: Iterate through filesystem entries in sorted order with valid hashes
 
 ```go
-type FilesystemScanIterator struct {
+type EnhancedFilesystemScanIterator struct {
     // ... existing fields ...
     
     // Hash coordination
-    hashManager      *simpleHashManager
+    hashManager      *algorithmHashManager
     completionChan   chan uint64           // Receives completion notifications
-    pendingJobs      map[uint64]*binaryEntryRef // JobID → entry waiting for hash
+    pendingJobs      map[uint64]BinaryEntryInterface // JobID → entry waiting for hash
     currentJobID     uint64                // Next JobID we're waiting for
-    scanIndex        *mmapIndexFile        // Scan index containing entries
+    scanIndexFileName string               // Scan index file name
 }
 ```
 
@@ -101,6 +152,7 @@ type FilesystemScanIterator struct {
 1. **Initialize**: Register completion channel with job monitor
 2. **For each filesystem entry**:
    - Add entry to scan index (in sorted path order)
+   - Create ScanBinaryEntry with per-entry RWMutex
    - If entry needs hashing:
      - Submit hash job with JobID
      - Track JobID in pendingJobs map
@@ -108,23 +160,28 @@ type FilesystemScanIterator struct {
    - If entry has valid hash → return immediately
 3. **On completion notification**:
    - Remove from pendingJobs map
-   - Entry now has valid hash (updated in-place by hash worker)
-   - Return entry to caller
+   - Entry now has valid hash (updated via SetHash() by hash worker)
+   - Return BinaryEntryInterface to caller
 
 #### 3. Integration Points
 
-**Skiplist Integration**:
-- Unchanged entries from existing skiplist (already hashed)
-- Changed entries from scan index (hashed asynchronously)
+**Data Source Integration**:
+- **Skiplist entries**: SkiplistBinaryEntry (mmap-backed, unchanged entries, already hashed)
+- **Read/write index entries**: ReadWriteBinaryEntry (file I/O, direct access without skiplist)
+- **Iterative skiplist entries**: IterativeSkiplistBinaryEntry (mmap-backed, building skiplist during HwangLin)
+- **Scan entries**: ScanBinaryEntry (mmap-backed, ephemeral, hashed asynchronously)
+- **All sources**: Unified through BinaryEntryInterface with error handling
 
 **Hash Job Submission**:
 - Jobs submitted in sorted path order (JobID 1, 2, 3, ...)
 - Job monitor expects completions in this sequence
 - Out-of-order completions queued until their turn
+- Hash workers call SetHash() on ScanBinaryEntry with write lock
 
 **Memory Management**:
 - Scan index grows as files are discovered
-- Hash workers update entries in-place (mremap-safe)
+- Hash workers update entries in-place via SetHash() (mremap-safe)
+- Each interface implementation handles its own cleanup
 - Iterator releases entries after processing
 
 ## Detailed Flow
@@ -190,18 +247,22 @@ To ensure safe migration without disrupting existing operations, we will create 
 - **Streaming results**: No need to wait for complete scan
 - **Concurrent hashing**: Leverages existing proven system
 - **Reduced latency**: Results available as soon as hashed
+- **Interface overhead**: Negligible on modern processors, IO-bound operations dominate
 
 ### Reliability
 - **Proven concurrency**: Reuses existing hash job system
 - **Interrupt safety**: Inherits all existing safety mechanisms
 - **Ordered results**: Maintains Hwang-Lin algorithm requirements
 - **Error handling**: Leverages existing error propagation
+- **Concurrent safety**: RWMutex-based cooperative locking
 
 ### Architecture
-- **Unified interface**: Consistent with other iterators
+- **Unified interface**: BinaryEntryInterface works across all three data sources
 - **Minimal changes**: Builds on existing infrastructure
 - **Composable**: Works with any callback in unified algorithm
 - **Extensible**: Foundation for future streaming optimizations
+- **Backward compatible**: Coexists with existing binaryEntryRef during migration
+- **Flexible storage**: Handles mmap, memory, ephemeral data transparently
 
 ## Lessons Learned
 
