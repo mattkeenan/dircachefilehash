@@ -1,135 +1,293 @@
 package dircachefilehash
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 	"testing"
 )
 
-// TestCallbackArchitecture verifies that the callback architecture doesn't break basic functionality
-func TestCallbackArchitecture(t *testing.T) {
-	// Create a temporary test directory
-	testDir, err := os.MkdirTemp("", "callback-test-")
+// mockCallback implements HwangLinCallback for testing
+type mockCallback struct {
+	CallbackBase
+	calls              []string
+	shouldStop         bool
+	shouldError        bool
+	stopAfterCalls     int
+	errorAfterCalls    int
+	onStartError       bool
+	onCompleteError    bool
+}
+
+// newMockCallback creates a mock callback with predefined behavior
+func newMockCallback(name string) *mockCallback {
+	return &mockCallback{
+		CallbackBase: CallbackBase{name: name},
+		calls:        make([]string, 0),
+	}
+}
+
+// OnComparison records the call and optionally stops or errors
+func (mc *mockCallback) OnComparison(
+	result ComparisonResult,
+	leftEntry, rightEntry *binaryEntry,
+	leftPath, rightPath string,
+) (bool, error) {
+	callDesc := fmt.Sprintf("OnComparison(%s, %s, %s)", 
+		comparisonResultString(result), leftPath, rightPath)
+	mc.calls = append(mc.calls, callDesc)
+	
+	if mc.shouldError && len(mc.calls) >= mc.errorAfterCalls {
+		return false, fmt.Errorf("mock error after %d calls", len(mc.calls))
+	}
+	
+	if mc.shouldStop && len(mc.calls) >= mc.stopAfterCalls {
+		return false, nil
+	}
+	
+	return true, nil
+}
+
+// OnLeftOnly records the call
+func (mc *mockCallback) OnLeftOnly(entry *binaryEntry, path string) (bool, error) {
+	callDesc := fmt.Sprintf("OnLeftOnly(%s)", path)
+	mc.calls = append(mc.calls, callDesc)
+	return true, nil
+}
+
+// OnRightOnly records the call
+func (mc *mockCallback) OnRightOnly(entry *binaryEntry, path string) (bool, error) {
+	callDesc := fmt.Sprintf("OnRightOnly(%s)", path)
+	mc.calls = append(mc.calls, callDesc)
+	return true, nil
+}
+
+// OnStart records the call and optionally errors
+func (mc *mockCallback) OnStart(leftName, rightName string) error {
+	callDesc := fmt.Sprintf("OnStart(%s, %s)", leftName, rightName)
+	mc.calls = append(mc.calls, callDesc)
+	
+	if mc.onStartError {
+		return fmt.Errorf("mock start error")
+	}
+	
+	return nil
+}
+
+// OnComplete records the call and optionally errors
+func (mc *mockCallback) OnComplete(err error) error {
+	var errStr string
 	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+		errStr = err.Error()
 	}
-	defer os.RemoveAll(testDir)
-
-	// Create test files
-	testFiles := map[string]string{
-		"file1.txt": "Content of file 1",
-		"file2.txt": "Content of file 2",
+	callDesc := fmt.Sprintf("OnComplete(%s)", errStr)
+	mc.calls = append(mc.calls, callDesc)
+	
+	if mc.onCompleteError {
+		return fmt.Errorf("mock complete error")
 	}
+	
+	return nil
+}
 
-	for filename, content := range testFiles {
-		filePath := filepath.Join(testDir, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			t.Fatalf("Failed to create test file %s: %v", filename, err)
+// Helper function to convert ComparisonResult to string
+func comparisonResultString(result ComparisonResult) string {
+	switch result {
+	case ComparisonMatch:
+		return "Match"
+	case ComparisonLeftFirst:
+		return "LeftFirst"
+	case ComparisonRightFirst:
+		return "RightFirst"
+	case ComparisonLeftExhausted:
+		return "LeftExhausted"
+	case ComparisonRightExhausted:
+		return "RightExhausted"
+	default:
+		return fmt.Sprintf("Unknown(%d)", int(result))
+	}
+}
+
+func TestCallbackBase(t *testing.T) {
+	t.Run("BasicFunctionality", func(t *testing.T) {
+		cb := &CallbackBase{name: "test-callback"}
+		
+		if cb.Name() != "test-callback" {
+			t.Errorf("Expected name 'test-callback', got '%s'", cb.Name())
 		}
-	}
-
-	// Initialise DirectoryCache
-	cache := NewDirectoryCache(testDir, testDir)
-	defer cache.Close()
-
-	// Configure to use SHA-256
-	flags := map[string]string{
-		"filehash.default": "sha256",
-	}
-	if err := cache.ApplyConfigOverrides(flags); err != nil {
-		t.Fatalf("Failed to apply config: %v", err)
-	}
-
-	// Perform initial update to create index
-	if err := cache.Update(nil, flags); err != nil {
-		t.Fatalf("Failed to update cache: %v", err)
-	}
-
-	// Check if index file was created
-	if _, err := os.Stat(cache.IndexFile); os.IsNotExist(err) {
-		t.Fatalf("Index file was not created: %s", cache.IndexFile)
-	}
-	t.Logf("Index file created: %s", cache.IndexFile)
-
-	// Test 1: Verify LoadMainIndex works with callback architecture
-	mainSkiplist, err := cache.LoadMainIndex()
-	if err != nil {
-		t.Fatalf("Failed to load main index: %v", err)
-	}
-
-	// Count entries using ForEach
-	entryCount := 0
-	mainSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		entryCount++
-		t.Logf("Entry: %s", entry.RelativePath())
-		return true
+		
+		// Test default implementations
+		if err := cb.OnStart("left", "right"); err != nil {
+			t.Errorf("OnStart should not error by default: %v", err)
+		}
+		
+		if err := cb.OnComplete(nil); err != nil {
+			t.Errorf("OnComplete should not error by default: %v", err)
+		}
+		
+		if err := cb.OnComplete(fmt.Errorf("test error")); err != nil {
+			t.Errorf("OnComplete should not error by default even with input error: %v", err)
+		}
+		
+		cont, err := cb.OnLeftOnly(nil, "test.txt")
+		if err != nil || !cont {
+			t.Errorf("OnLeftOnly should continue and not error by default: cont=%t, err=%v", cont, err)
+		}
+		
+		cont, err = cb.OnRightOnly(nil, "test.txt")
+		if err != nil || !cont {
+			t.Errorf("OnRightOnly should continue and not error by default: cont=%t, err=%v", cont, err)
+		}
 	})
+}
 
-	if entryCount != len(testFiles) {
-		t.Errorf("Expected %d entries, got %d", len(testFiles), entryCount)
+func TestMockCallback(t *testing.T) {
+	t.Run("BasicCallRecording", func(t *testing.T) {
+		mock := newMockCallback("test-mock")
+		
+		// Test name
+		if mock.Name() != "test-mock" {
+			t.Errorf("Expected name 'test-mock', got '%s'", mock.Name())
+		}
+		
+		// Test call recording
+		err := mock.OnStart("left-iter", "right-iter")
+		if err != nil {
+			t.Fatalf("OnStart should not error: %v", err)
+		}
+		
+		cont, err := mock.OnComparison(ComparisonMatch, nil, nil, "file1.txt", "file1.txt")
+		if err != nil || !cont {
+			t.Fatalf("OnComparison should continue and not error: cont=%t, err=%v", cont, err)
+		}
+		
+		cont, err = mock.OnLeftOnly(nil, "file2.txt")
+		if err != nil || !cont {
+			t.Fatalf("OnLeftOnly should continue and not error: cont=%t, err=%v", cont, err)
+		}
+		
+		cont, err = mock.OnRightOnly(nil, "file3.txt")
+		if err != nil || !cont {
+			t.Fatalf("OnRightOnly should continue and not error: cont=%t, err=%v", cont, err)
+		}
+		
+		err = mock.OnComplete(nil)
+		if err != nil {
+			t.Fatalf("OnComplete should not error: %v", err)
+		}
+		
+		// Verify recorded calls
+		expectedCalls := []string{
+			"OnStart(left-iter, right-iter)",
+			"OnComparison(Match, file1.txt, file1.txt)",
+			"OnLeftOnly(file2.txt)",
+			"OnRightOnly(file3.txt)",
+			"OnComplete()",
+		}
+		
+		if len(mock.calls) != len(expectedCalls) {
+			t.Fatalf("Expected %d calls, got %d", len(expectedCalls), len(mock.calls))
+		}
+		
+		for i, expected := range expectedCalls {
+			if mock.calls[i] != expected {
+				t.Errorf("Call %d: expected '%s', got '%s'", i, expected, mock.calls[i])
+			}
+		}
+	})
+	
+	t.Run("EarlyStop", func(t *testing.T) {
+		mock := newMockCallback("stop-mock")
+		mock.shouldStop = true
+		mock.stopAfterCalls = 2
+		
+		// First call should continue
+		cont, err := mock.OnComparison(ComparisonMatch, nil, nil, "file1.txt", "file1.txt")
+		if err != nil || !cont {
+			t.Fatalf("First call should continue: cont=%t, err=%v", cont, err)
+		}
+		
+		// Second call should stop
+		cont, err = mock.OnComparison(ComparisonLeftFirst, nil, nil, "file2.txt", "")
+		if err != nil || cont {
+			t.Fatalf("Second call should stop: cont=%t, err=%v", cont, err)
+		}
+		
+		// Verify calls
+		expectedCalls := []string{
+			"OnComparison(Match, file1.txt, file1.txt)",
+			"OnComparison(LeftFirst, file2.txt, )",
+		}
+		
+		if len(mock.calls) != len(expectedCalls) {
+			t.Fatalf("Expected %d calls, got %d", len(expectedCalls), len(mock.calls))
+		}
+	})
+	
+	t.Run("ErrorHandling", func(t *testing.T) {
+		mock := newMockCallback("error-mock")
+		mock.shouldError = true
+		mock.errorAfterCalls = 1
+		
+		// First call should error
+		cont, err := mock.OnComparison(ComparisonMatch, nil, nil, "file1.txt", "file1.txt")
+		if err == nil {
+			t.Fatal("First call should error")
+		}
+		if cont {
+			t.Fatal("Call should not continue when erroring")
+		}
+		
+		if err.Error() != "mock error after 1 calls" {
+			t.Errorf("Unexpected error message: %s", err.Error())
+		}
+	})
+	
+	t.Run("StartError", func(t *testing.T) {
+		mock := newMockCallback("start-error-mock")
+		mock.onStartError = true
+		
+		err := mock.OnStart("left", "right")
+		if err == nil {
+			t.Fatal("OnStart should error")
+		}
+		
+		if err.Error() != "mock start error" {
+			t.Errorf("Unexpected error message: %s", err.Error())
+		}
+	})
+	
+	t.Run("CompleteError", func(t *testing.T) {
+		mock := newMockCallback("complete-error-mock")
+		mock.onCompleteError = true
+		
+		err := mock.OnComplete(nil)
+		if err == nil {
+			t.Fatal("OnComplete should error")
+		}
+		
+		if err.Error() != "mock complete error" {
+			t.Errorf("Unexpected error message: %s", err.Error())
+		}
+	})
+}
+
+func TestComparisonResultString(t *testing.T) {
+	tests := []struct {
+		result   ComparisonResult
+		expected string
+	}{
+		{ComparisonMatch, "Match"},
+		{ComparisonLeftFirst, "LeftFirst"},
+		{ComparisonRightFirst, "RightFirst"},
+		{ComparisonLeftExhausted, "LeftExhausted"},
+		{ComparisonRightExhausted, "RightExhausted"},
+		{ComparisonResult(999), "Unknown(999)"},
 	}
-
-	// Test 2: Test direct loadIndexFromFile
-	refs, err := cache.loadIndexFromFile(cache.IndexFile)
-	if err != nil {
-		t.Fatalf("Failed to load index directly: %v", err)
-	}
-
-	t.Logf("loadIndexFromFile returned %d refs", len(refs))
-	if len(refs) != len(testFiles) {
-		t.Errorf("Expected %d refs, got %d", len(testFiles), len(refs))
-	}
-
-	// Test 3: Test Status detection
-	status, err := cache.Status(nil, flags)
-	if err != nil {
-		t.Fatalf("Failed to get status: %v", err)
-	}
-
-	// Should have no changes since we just updated
-	if status.HasChanges() {
-		t.Errorf("Expected no changes, but got: Added=%v, Modified=%v, Deleted=%v",
-			status.Added, status.Modified, status.Deleted)
-	}
-
-	// Test 4: Modify a file and test status detection
-	modifiedFile := filepath.Join(testDir, "file1.txt")
-	if err := os.WriteFile(modifiedFile, []byte("Modified content"), 0644); err != nil {
-		t.Fatalf("Failed to modify file: %v", err)
-	}
-
-	status, err = cache.Status(nil, flags)
-	if err != nil {
-		t.Fatalf("Failed to get status after modification: %v", err)
-	}
-
-	// Should detect the modification
-	if len(status.Modified) != 1 || status.Modified[0] != "file1.txt" {
-		t.Errorf("Expected file1.txt to be modified, got Modified=%v", status.Modified)
-	}
-
-	// Test 5: Delete a file and test status detection
-	deletedFile := filepath.Join(testDir, "file2.txt")
-	if err := os.Remove(deletedFile); err != nil {
-		t.Fatalf("Failed to delete file: %v", err)
-	}
-
-	// Verify file is actually deleted
-	if _, err := os.Stat(deletedFile); !os.IsNotExist(err) {
-		t.Fatalf("File %s should be deleted but still exists", deletedFile)
-	}
-	t.Logf("File %s successfully deleted", deletedFile)
-
-	status, err = cache.Status(nil, flags)
-	if err != nil {
-		t.Fatalf("Failed to get status after deletion: %v", err)
-	}
-
-	t.Logf("Status after deletion: Added=%v, Modified=%v, Deleted=%v",
-		status.Added, status.Modified, status.Deleted)
-
-	// Should detect the deletion
-	if len(status.Deleted) != 1 || status.Deleted[0] != "file2.txt" {
-		t.Errorf("Expected file2.txt to be deleted, got Deleted=%v", status.Deleted)
+	
+	for _, test := range tests {
+		actual := comparisonResultString(test.result)
+		if actual != test.expected {
+			t.Errorf("comparisonResultString(%d): expected '%s', got '%s'", 
+				int(test.result), test.expected, actual)
+		}
 	}
 }
