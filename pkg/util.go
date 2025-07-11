@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"hash"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -52,6 +53,12 @@ type DirectoryCache struct {
 	lastScanResult *skiplistWrapper // Result from the last completed scan
 	lastScanError  error            // Error from the last completed scan
 	currentScan    *mmapIndexFile   // Current scan index file (single mmap, expanded with mremap)
+
+	// Index tracking for memory protection during hash calculations
+	mainIndex        *mmapIndexFile   // Main index file (if loaded)
+	cacheIndex       *mmapIndexFile   // Cache index file (if loaded)
+	scanIndices      []*mmapIndexFile // Scan index files (may be multiple)
+	indexLockTimeout int              // Timeout in seconds for index memory locks
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)
@@ -286,7 +293,7 @@ type binaryEntryRef struct {
 // GetBinaryEntry resolves the reference to get the actual binaryEntry pointer
 func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 	if ref.IndexFile == nil {
-		if IsDebugEnabled("scan") {
+		if IsDebugEnabled("load") {
 			VerboseLog(3, "GetBinaryEntry: IndexFile is nil")
 		}
 		return nil
@@ -297,13 +304,13 @@ func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 	defer ref.IndexFile.mutex.RUnlock()
 
 	if ref.IndexFile.Data == nil {
-		if IsDebugEnabled("scan") {
+		if IsDebugEnabled("load") {
 			VerboseLog(3, "GetBinaryEntry: IndexFile.Data is nil")
 		}
 		return nil
 	}
 
-	if IsDebugEnabled("scan") {
+	if IsDebugEnabled("load") {
 		VerboseLog(3, "GetBinaryEntry: offset=%d, data_size=%d", ref.Offset, len(ref.IndexFile.Data))
 	}
 
@@ -457,4 +464,42 @@ func ParseHumanSize(sizeStr string) (int, error) {
 	}
 
 	return int(result), nil
+}
+
+// FormatHumanSize formats bytes into human-readable format using bit operations
+func FormatHumanSize(bytes int64) string {
+	if bytes < 0 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	// Find the highest bit position to determine the unit
+	// bits.Len64 returns the bit length (position of highest 1 bit + 1)
+	bitLen := bits.Len64(uint64(bytes))
+	
+	// Each unit is 10 bits apart (2^10 = 1024)
+	// So we divide by 10 to get the unit index
+	unitIndex := (bitLen - 1) / 10
+	
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
+	if unitIndex >= len(units) {
+		unitIndex = len(units) - 1
+	}
+	
+	// Calculate the divisor as 1 << (unitIndex * 10)
+	divisor := float64(int64(1) << (unitIndex * 10))
+	value := float64(bytes) / divisor
+	
+	// Use integer format for bytes, decimal format for larger units
+	if unitIndex == 0 {
+		return fmt.Sprintf("%d %s", bytes, units[unitIndex])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unitIndex])
+}
+
+// FormatHumanRate formats bytes per second into human-readable format
+func FormatHumanRate(bytesPerSec float64) string {
+	return FormatHumanSize(int64(bytesPerSec)) + "/s"
 }

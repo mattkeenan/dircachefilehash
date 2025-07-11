@@ -27,6 +27,11 @@ This file tracks upcoming development tasks for the dircachefilehash project.
   - Fixed: Job submission checks for shutdown before adding new jobs
   - Fixed: Monitor goroutine no longer busy-waits (removed default case)
   - Ensured proper coordination between workers and monitor during shutdown
+- [x] Implement mutex protection for mmap'd memory during hash calculations
+  - Added RWMutex protection for all mmap'd index files (main, cache, scan)
+  - Configurable timeout via --index-lock-timeout flag and config file
+  - Prevents SIGSEGV crashes when mremap occurs during hash calculation
+  - Tracks all referenced indices and acquires locks in consistent order
 
 ### Testing & Validation
 - [ ] Add comprehensive integration tests for edge cases
@@ -37,6 +42,11 @@ This file tracks upcoming development tasks for the dircachefilehash project.
 - [ ] Update API documentation with current architecture
 - [ ] Add usage examples for library consumers
 - [ ] Document performance characteristics and tuning guidelines
+- [ ] Create CONFIG.md documenting all configuration settings
+  - Document all sections in .dcfh/config file (filehash, performance, symlink, etc.)
+  - Explain each setting with examples and valid values
+  - Show command-line flag equivalents
+  - Include precedence order (defaults → config file → command line)
 
 ## Medium Priority Tasks
 

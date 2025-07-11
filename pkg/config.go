@@ -43,8 +43,9 @@ type IgnoreConfig struct {
 
 // PerformanceConfig represents performance-related configuration
 type PerformanceConfig struct {
-	HashWorkers int    // Number of concurrent hash workers (default: 4)
-	HashBuffer  string // Hash buffer size for interruptible hashing (default: "2M")
+	HashWorkers      int    // Number of concurrent hash workers (default: 4)
+	HashBuffer       string // Hash buffer size for interruptible hashing (default: "2M")
+	IndexLockTimeout int    // Timeout in seconds for index memory locks (default: 5)
 }
 
 // SnapshotConfig represents snapshot retention policy configuration
@@ -161,6 +162,10 @@ func (c *Config) setDefaults() error {
 	_, err = performanceSection.NewKey("hash_workers", "4")
 	if err != nil {
 		return fmt.Errorf("failed to set default hash workers: %w", err)
+	}
+	_, err = performanceSection.NewKey("index_lock_timeout", "5")
+	if err != nil {
+		return fmt.Errorf("failed to set default index lock timeout: %w", err)
 	}
 
 	// Set default snapshot retention policy settings
@@ -287,8 +292,9 @@ func (c *Config) GetIgnoreConfig() *IgnoreConfig {
 // GetPerformanceConfig returns the performance configuration
 func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 	performanceConfig := &PerformanceConfig{
-		HashWorkers: 4,    // fallback default
-		HashBuffer:  "2M", // fallback default - 2MB buffer for interruptible hashing
+		HashWorkers:      4,    // fallback default
+		HashBuffer:       "2M", // fallback default - 2MB buffer for interruptible hashing
+		IndexLockTimeout: 5,    // fallback default - 5 seconds
 	}
 
 	if c.ini.HasSection("performance") {
@@ -301,6 +307,11 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 		if section.HasKey("hash_buffer") {
 			if bufferSize := section.Key("hash_buffer").String(); bufferSize != "" {
 				performanceConfig.HashBuffer = bufferSize
+			}
+		}
+		if section.HasKey("index_lock_timeout") {
+			if timeout, err := section.Key("index_lock_timeout").Int(); err == nil {
+				performanceConfig.IndexLockTimeout = timeout
 			}
 		}
 	}
@@ -410,6 +421,13 @@ func (c *Config) SetHashWorkers(workers int) error {
 	return c.Save()
 }
 
+// SetIndexLockTimeout sets the index lock timeout in seconds
+func (c *Config) SetIndexLockTimeout(timeout int) error {
+	section := c.ini.Section("performance")
+	section.Key("index_lock_timeout").SetValue(fmt.Sprintf("%d", timeout))
+	return c.Save()
+}
+
 // Save saves the configuration to disk
 func (c *Config) Save() error {
 	return c.ini.SaveTo(c.configPath)
@@ -452,8 +470,12 @@ func (c *Config) ApplyOverrides(overrides []string) error {
 			// performance.hash_workers override
 			section := c.ini.Section("performance")
 			section.Key("hash_workers").SetValue(value)
+		case "index_lock_timeout":
+			// performance.index_lock_timeout override
+			section := c.ini.Section("performance")
+			section.Key("index_lock_timeout").SetValue(value)
 		default:
-			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode, hash_workers)", key)
+			return fmt.Errorf("unsupported override key '%s' (supported: default, format, level, debug, mode, hash_workers, index_lock_timeout)", key)
 		}
 	}
 
@@ -540,6 +562,17 @@ func ValidateHashWorkers(workers int) error {
 	}
 	if workers > 64 {
 		return fmt.Errorf("hash workers should not exceed 64, got: %d", workers)
+	}
+	return nil
+}
+
+// ValidateIndexLockTimeout validates that the index lock timeout is reasonable
+func ValidateIndexLockTimeout(timeout int) error {
+	if timeout < 1 {
+		return fmt.Errorf("index lock timeout must be at least 1 second, got: %d", timeout)
+	}
+	if timeout > 300 {
+		return fmt.Errorf("index lock timeout should not exceed 300 seconds (5 minutes), got: %d", timeout)
 	}
 	return nil
 }

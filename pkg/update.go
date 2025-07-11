@@ -56,45 +56,36 @@ func (dc *DirectoryCache) updateFullRepository(shutdownChan <-chan struct{}) err
 				return fmt.Errorf("failed to merge partial scan results: %w", mergeErr)
 			}
 			
-			// Write to cache index (CacheContext here means "create a cache index file"
+			// Write to cache index atomically (CacheContext here means "create a cache index file"
 			// which excludes MainContext entries but keeps CacheContext + ScanContext entries)
-			tempCachePath := dc.generateTempFileName("cache")
-			if writeErr := dc.writeSkiplistWithVectorIO(comparisonSkiplist, tempCachePath, CacheContext); writeErr != nil {
-				os.Remove(tempCachePath)
+			if writeErr := dc.atomicWriteIndex(comparisonSkiplist, dc.CacheFile, CacheContext, false); writeErr != nil {
 				return fmt.Errorf("failed to save partial results to cache: %w", writeErr)
 			}
 			
-			// Cleanup scan index file before rename
+			// Cleanup scan index file after successful write
 			if cleanupErr := dc.cleanupCurrentScanFile(); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
 				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", cleanupErr)
-			}
-			
-			// Atomic replace cache file
-			if renameErr := os.Rename(tempCachePath, dc.CacheFile); renameErr != nil {
-				os.Remove(tempCachePath)
-				return fmt.Errorf("failed to update cache with partial results: %w", renameErr)
 			}
 		}
 		return fmt.Errorf("update interrupted: %w", err)
 	}
 
-	// Write everything to main index using vectorio (exclude deleted entries)
-	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.writeMainIndexWithVectorIO(scanSkiplist, tempIndexPath, ""); err != nil {
-		os.Remove(tempIndexPath)
-		return fmt.Errorf("failed to write new index: %w", err)
+	// For full repository update, merge scan results back into comparison skiplist
+	if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
+		if err := comparisonSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
+			return fmt.Errorf("failed to merge scan results: %w", err)
+		}
 	}
 
-	// Cleanup scan index file now that temp index is written
+	// Write the complete merged skiplist to main index atomically (exclude deleted entries)
+	if err := dc.atomicWriteIndex(comparisonSkiplist, dc.IndexFile, "", true); err != nil {
+		return fmt.Errorf("failed to write new main index: %w", err)
+	}
+
+	// Cleanup scan index file now that main index is written
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
 		// Non-fatal, but log the error
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
-	}
-
-	// Atomic replace main index
-	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
-		os.Remove(tempIndexPath) // Cleanup on failure
-		return fmt.Errorf("failed to rename index file: %w", err)
 	}
 
 	// Remove cache file since everything is now in main index
@@ -134,23 +125,15 @@ func (dc *DirectoryCache) updateSpecificPaths(shutdownChan <-chan struct{}, path
 				return fmt.Errorf("failed to merge partial scan results: %w", mergeErr)
 			}
 			
-			// Write to cache index (CacheContext here means "create a cache index file"
+			// Write to cache index atomically (CacheContext here means "create a cache index file"
 			// which excludes MainContext entries but keeps CacheContext + ScanContext entries)
-			tempCachePath := dc.generateTempFileName("cache")
-			if writeErr := dc.writeSkiplistWithVectorIO(comparisonSkiplist, tempCachePath, CacheContext); writeErr != nil {
-				os.Remove(tempCachePath)
+			if writeErr := dc.atomicWriteIndex(comparisonSkiplist, dc.CacheFile, CacheContext, false); writeErr != nil {
 				return fmt.Errorf("failed to save partial results to cache: %w", writeErr)
 			}
 			
-			// Cleanup scan index file before rename
+			// Cleanup scan index file after successful write
 			if cleanupErr := dc.cleanupCurrentScanFile(); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
 				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", cleanupErr)
-			}
-			
-			// Atomic replace cache file
-			if renameErr := os.Rename(tempCachePath, dc.CacheFile); renameErr != nil {
-				os.Remove(tempCachePath)
-				return fmt.Errorf("failed to update cache with partial results: %w", renameErr)
 			}
 		}
 		return fmt.Errorf("update interrupted: %w", err)
@@ -161,22 +144,15 @@ func (dc *DirectoryCache) updateSpecificPaths(shutdownChan <-chan struct{}, path
 		return fmt.Errorf("failed to merge scan results with main index: %w", err)
 	}
 
-	// Write new main index using vectorio (exclude deleted entries)
-	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.writeMainIndexWithVectorIO(mainSkiplist, tempIndexPath, MainContext); err != nil {
-		return fmt.Errorf("failed to write new index: %w", err)
+	// Write new main index atomically (exclude deleted entries)
+	if err := dc.atomicWriteIndex(mainSkiplist, dc.IndexFile, MainContext, true); err != nil {
+		return fmt.Errorf("failed to write new main index: %w", err)
 	}
 
-	// Cleanup scan index file now that temp index is written
+	// Cleanup scan index file now that main index is written
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
 		// Non-fatal, but log the error
 		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
-	}
-
-	// Atomic replace main index
-	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
-		os.Remove(tempIndexPath) // Cleanup on failure
-		return fmt.Errorf("failed to rename index file: %w", err)
 	}
 
 	// Update cache using the new workflow

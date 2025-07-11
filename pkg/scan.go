@@ -842,20 +842,13 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 				hashJobManager.SubmitHashJob(hashJob, callStartChan)
 
 			} else {
-				// File unchanged - copy existing entry to scan index and skiplist
-				scanEntry, err := dc.appendEntryToScanIndex(scanFileName, currentScanned)
-				if err != nil {
-					return fmt.Errorf("failed to create scan index entry: %w", err)
+				// File unchanged - DO NOT create scan entry
+				// The existing entry in main/cache index is already correct
+				// Just continue to next file
+				
+				if IsDebugEnabled("scan") {
+					VerboseLog(3, "hwangLinCompareToSkiplist: file unchanged, skipping: %s", currentScanned.RelPath)
 				}
-
-				// Copy hash from existing entry
-				copy(scanEntry.Hash[:], indexEntry.Hash[:])
-				scanEntry.HashType = indexEntry.HashType
-
-				// Insert into scan skiplist using binaryEntryRef, preserving original context
-				scanRef := createBinaryEntryRef(scanEntry, dc.currentScan)
-				originalContext := currentIndex.Context()
-				scanSkiplist.Insert(scanRef, originalContext)
 			}
 
 			// Advance both
@@ -1194,6 +1187,7 @@ func (dc *DirectoryCache) monitorJobs(
 	shutdownChan <-chan struct{},
 ) {
 	var jobs []uint64 // Track pending hash jobs
+	var preCompletions []uint64 // Queue for completions that arrived before their start
 	stopped := false
 	var stopTimer *time.Timer
 
@@ -1208,6 +1202,19 @@ func (dc *DirectoryCache) monitorJobs(
 			jobs = append(jobs, jobID)
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Job %d started, pending jobs: %d\n", jobID, len(jobs))
+			}
+			
+			// Check if this job already completed prematurely
+			for i, preCompletedID := range preCompletions {
+				if preCompletedID == jobID {
+					// Remove from jobs and preCompletions
+					jobs = remove(jobs, len(jobs)-1) // Remove the job we just added
+					preCompletions = remove(preCompletions, i)
+					if IsDebugEnabled("scanning") {
+						fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed prematurely, removing from pending\n", jobID)
+					}
+					break
+				}
 			}
 
 		case completedJobID, ok := <-callFinishChan:
@@ -1232,8 +1239,13 @@ func (dc *DirectoryCache) monitorJobs(
 				if found {
 					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed, pending jobs: %d\n", completedJobID, len(jobs))
 				} else {
-					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed but not found in pending list, pending jobs: %d\n", completedJobID, len(jobs))
+					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed prematurely, queuing completion\n", completedJobID)
 				}
+			}
+			
+			// If job not found, it completed before start signal - queue it
+			if !found {
+				preCompletions = append(preCompletions, completedJobID)
 			}
 			
 			// Check if we're done after processing a completion

@@ -3,8 +3,6 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
-
-	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
 // DuplicateGroup represents a group of files with the same hash
@@ -24,28 +22,24 @@ func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map
 		}
 	}
 	
-	// Use the new cache update workflow to ensure we have current data
-	// We don't need the scan result for duplicates, so we ignore it
-	if _, err := dc.updateCacheIndexWithWorkflow(shutdownChan); err != nil {
+	// Use the new cache update workflow which returns the scan result
+	// The scan result contains all current files (main + cache + new scan)
+	scanSkiplist, err := dc.updateCacheIndexWithWorkflow(shutdownChan)
+	if err != nil && scanSkiplist == nil {
+		// Only return error if we got no data at all
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 
-	// Load both main and cache indices
-	mainSkiplist, err := dc.LoadMainIndex()
+	// If we have partial data due to interruption, continue with what we have
 	if err != nil {
-		return nil, fmt.Errorf("failed to load main index: %w", err)
+		// Log the interruption but continue with partial data
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[DUPES] Scan interrupted but continuing with partial data (%d entries)\n", scanSkiplist.Length())
+		}
 	}
 
-	cacheSkiplist, err := dc.loadCacheIndex()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load cache index: %w", err)
-	}
-
-	// Create combined view: main index + cache for complete current state
-	workingSkiplist := mainSkiplist.Copy()
-	if err := workingSkiplist.Merge(cacheSkiplist, zcsl.MergeTheirs); err != nil {
-		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
-	}
+	// Use the scan skiplist directly - it already contains all files
+	workingSkiplist := scanSkiplist
 
 	duplicates := make(map[string][]*binaryEntry)
 

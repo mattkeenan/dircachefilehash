@@ -15,9 +15,15 @@ func (dc *DirectoryCache) LoadMainIndex() (*skiplistWrapper, error) {
 	}
 
 	// Load entries from file as binaryEntryRef instances
-	refs, err := dc.loadIndexFromFile(dc.IndexFile)
+	refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.IndexFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
+	}
+
+	// Register the main index file for tracking
+	if indexFile != nil {
+		indexFile.Type = "main"
+		dc.registerIndex("main", indexFile)
 	}
 
 	// Create skiplist and insert all entries with main context
@@ -36,9 +42,15 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	}
 
 	// Load entries from file as binaryEntryRef instances
-	refs, err := dc.loadIndexFromFile(dc.CacheFile)
+	refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.CacheFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
+	}
+
+	// Register the cache index file for tracking
+	if indexFile != nil {
+		indexFile.Type = "cache"
+		dc.registerIndex("cache", indexFile)
 	}
 
 	// Create skiplist and insert all entries with cache context
@@ -82,20 +94,30 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 	}
 
 	// Step 5: Create tmp index from scan using Hwang-Lin algorithm
-	scanSkiplist, err := dc.createTmpIndexFromScan(shutdownChan, workingSkiplist)
-	if err != nil && scanSkiplist == nil {
-		// Only return error if we got no data at all
-		return nil, fmt.Errorf("failed to create scan index: %w", err)
+	scanSkiplist, scanErr := dc.createTmpIndexFromScan(shutdownChan, workingSkiplist)
+	
+	// If we got absolutely no data, return error immediately
+	if scanErr != nil && scanSkiplist == nil {
+		return nil, fmt.Errorf("failed to create scan index: %w", scanErr)
 	}
-	// If we have partial data due to interruption, continue with what we have
-	if err != nil && IsDebugEnabled("scan") {
+	
+	// If we have partial data due to interruption, continue to save it
+	if scanErr != nil && IsDebugEnabled("scan") {
 		fmt.Fprintf(os.Stderr, "[WORKFLOW] Scan interrupted, continuing with partial data (%d entries)\n", scanSkiplist.Length())
+	}
+
+	// Merge scan results back into workingSkiplist to create complete state
+	// This ensures the returned skiplist contains all files (unchanged + changed)
+	if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
+		if err := workingSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
+			return nil, fmt.Errorf("failed to merge scan results: %w", err)
+		}
 	}
 
 	// Steps 6-8 are handled inside CreateTmpIndexFromScan (Hwang-Lin, hashing, waiting)
 
 	// Step 9: Filter cache entries (entries not in main context)
-	cacheOnlySkiplist := scanSkiplist.FilterNotByContext(MainContext)
+	cacheOnlySkiplist := workingSkiplist.FilterNotByContext(MainContext)
 
 	// If no cache entries, remove cache file
 	if cacheOnlySkiplist.IsEmpty() {
@@ -103,30 +125,22 @@ func (dc *DirectoryCache) updateCacheIndexWithWorkflow(shutdownChan <-chan struc
 			fmt.Fprintf(os.Stderr, "[WORKFLOW] No cache entries found, removing cache file\n")
 		}
 		os.Remove(dc.CacheFile)
-		return scanSkiplist, nil
+		// Return the complete working skiplist and the original scan error (if any)
+		return workingSkiplist, scanErr
 	}
 	
 	if IsDebugEnabled("scan") {
 		fmt.Fprintf(os.Stderr, "[WORKFLOW] Writing cache index with %d entries\n", cacheOnlySkiplist.Length())
 	}
 
-	// Step 10 & 11: Write cache index using vectorio with atomic rename
-	tempCachePath := dc.generateTempFileName("cache")
-
-	// Write cache using vectorio for efficient bulk writes (exclude MainContext entries)
-	if err := dc.writeSkiplistWithVectorIO(cacheOnlySkiplist, tempCachePath, CacheContext); err != nil {
-		os.Remove(tempCachePath)
-		return nil, fmt.Errorf("failed to write cache index: %w", err)
-	}
-
+	// Step 10 & 11: Write cache index atomically using vectorio
 	// Note: We defer cleanup of scan index file until after Status completes
 	// to avoid use-after-free when Status reads from scan skiplist
-
-	// Atomic replace cache file
-	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
-		os.Remove(tempCachePath) // Cleanup on failure
-		return nil, fmt.Errorf("failed to rename cache file: %w", err)
+	if writeErr := dc.atomicWriteIndex(cacheOnlySkiplist, dc.CacheFile, CacheContext, false); writeErr != nil {
+		// If we can't write the cache, at least return the complete working data we have
+		return workingSkiplist, fmt.Errorf("scan error: %v, cache write error: %w", scanErr, writeErr)
 	}
 
-	return scanSkiplist, nil
+	// Return the complete working skiplist and propagate the scan error (if any) so caller knows scan was interrupted
+	return workingSkiplist, scanErr
 }

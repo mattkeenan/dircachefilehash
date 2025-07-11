@@ -348,6 +348,107 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - `WriteSkiplistWithVectorIO()`: Final index writing with proper filtering
 - Hash workers: Direct updates to mmap'd scan index memory
 
+### Memory Protection and Locking Mechanism
+
+**CRITICAL: Preventing SIGSEGV from Concurrent Memory Access**
+
+The codebase uses RWMutex locks to protect mmap'd memory from concurrent access issues, particularly when `mremap()` might move memory during hash calculations. Here's how the multi-level locking works:
+
+**1. The Problem**:
+- Scan indices grow dynamically using `mremap()` which can relocate memory
+- Hash calculations (SHA1/SHA256/SHA512) read from mmap'd memory via IoVec pointers
+- If `mremap()` moves memory while a hash is being calculated → SIGSEGV crash
+- Multiple indices (main, cache, scan) can be referenced by a single skiplist
+
+**2. Two-Level Locking Design**:
+
+**Low-Level Protection (per-entry access)**:
+```go
+// In GetBinaryEntry() - protects individual entry access
+func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
+    ref.IndexFile.mutex.RLock()
+    defer ref.IndexFile.mutex.RUnlock()
+    // Safe to calculate pointer from offset
+    return (*binaryEntry)(unsafe.Pointer(entryPtr))
+}
+```
+- Every access to a binaryEntry acquires a read lock
+- Prevents memory from being moved during pointer calculation
+- Works for all entry access, not just during writes
+- Protects the offset-to-pointer conversion that would crash if memory moved
+
+**High-Level Protection (bulk operations)**:
+```go
+// In writeSkiplistWithVectorIOFiltered() - protects entire operation
+referencedIndices := dc.getAllReferencedIndices(skiplist)
+// Acquire locks on ALL indices in consistent order
+for _, idx := range sortedIndices {
+    idx.mutex.RLock()
+}
+defer func() {
+    for idx := range referencedIndices {
+        idx.mutex.RUnlock()
+    }
+}()
+```
+- Identifies ALL mmap'd indices referenced by skiplist entries
+- Acquires read locks in address order (prevents deadlock)
+- Holds locks for entire IoVec generation and hash calculation
+- Configurable timeout (default 5 seconds) to prevent hanging
+
+**3. Why Double Locking is Safe**:
+- Go's RWMutex allows multiple read locks from same goroutine (reentrant)
+- Provides defense in depth - protection at both levels
+- Low-level locks protect all code paths, not just writes
+- High-level locks prevent any mremap during critical sections
+
+**4. Index Tracking**:
+```go
+// DirectoryCache tracks all loaded indices
+mainIndex    *mmapIndexFile  // Main index if loaded
+cacheIndex   *mmapIndexFile  // Cache index if loaded  
+scanIndices  []*mmapIndexFile // All scan indices
+```
+- Indices are registered when loaded (`registerIndex()`)
+- Unregistered when cleaned up (`unregisterIndex()`)
+- Allows identification of which index contains each entry
+
+**5. Write Lock for mremap Operations**:
+```go
+// In appendEntryToNamedIndex() - write lock for memory expansion
+if newSize > (*indexInfo).Size {
+    (*indexInfo).mutex.Lock()  // Write lock
+    // Safe to mremap now - no readers can access
+    newMmap, err := unix.Mremap((*indexInfo).Data, newSize, unix.MREMAP_MAYMOVE)
+    (*indexInfo).Data = newMmap
+    (*indexInfo).mutex.Unlock()
+}
+```
+- Write locks exclude all readers during memory remapping
+- Ensures no hash calculations can be in progress
+- Updates Data pointer atomically under lock protection
+
+**6. Configuration**:
+- `--index-lock-timeout N`: Command line flag (seconds)
+- `.dcfh/config`: `[performance] index_lock_timeout = N`
+- Default: 5 seconds
+- Range: 1-300 seconds
+
+**7. What Happens on Timeout**:
+- Warning logged to stderr
+- Operation continues WITHOUT lock protection
+- Prevents deadlock but risks SIGSEGV if mremap occurs
+- Timeout should be rare in practice
+
+**8. Conceptual Summary**:
+The locking works like a readers-writers lock on a shared document:
+- Multiple readers (hash calculations) can access simultaneously
+- Writers (mremap operations) get exclusive access
+- Offset-based references remain valid across mremap operations
+- Pointer conversions only happen under read lock protection
+
+This design ensures safe concurrent access while maintaining performance through read-write separation and minimal lock holding times.
+
 ## Development Notes
 
 ### Branch Management and AI Tools

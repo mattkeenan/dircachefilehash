@@ -53,8 +53,13 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
 	}
 	// If we have partial data due to interruption, continue with what we have
-	if err != nil && IsDebugEnabled("scan") {
-		fmt.Fprintf(os.Stderr, "[STATUS] Cache update interrupted, continuing with partial data (%d entries)\n", currentSkiplist.Length())
+	if err != nil {
+		// Log the interruption but continue with partial data
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] Scan interrupted but cache saved, continuing with partial data (%d entries)\n", currentSkiplist.Length())
+		}
+		// Note: We continue with status reporting even though scan was interrupted
+		// The cache has been updated with partial results for next time
 	}
 
 	// Load both main and cache indices for comparison

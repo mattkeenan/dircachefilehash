@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 )
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
@@ -132,7 +133,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		IndexFile:     indexFile,
 		CacheFile:     cacheFile,
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
-		version:       0,
+		version:       1,
 		hasher:        sha1.New(),
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(dcfhDir),
@@ -175,12 +176,14 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	}
 	dc.config = config
 
-	// Initialise hash workers from config (default to 4 if no config)
+	// Initialise hash workers and index lock timeout from config (default to 4/5 if no config)
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
 		dc.hashWorkers = performanceConfig.HashWorkers
+		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
 	} else {
 		dc.hashWorkers = 4 // fallback default
+		dc.indexLockTimeout = 5 // fallback default (5 seconds)
 	}
 
 	// Check if index file exists, create empty one if not
@@ -245,6 +248,19 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
 		allOverrides = append(allOverrides, "hash_workers:"+hashWorkersStr)
 	}
 
+	// Set index lock timeout from flags or keep current config value
+	if indexLockTimeoutStr, exists := flags["index_lock_timeout"]; exists {
+		indexLockTimeout, err := strconv.Atoi(indexLockTimeoutStr)
+		if err != nil {
+			return fmt.Errorf("invalid index lock timeout value '%s': %w", indexLockTimeoutStr, err)
+		}
+		if err := ValidateIndexLockTimeout(indexLockTimeout); err != nil {
+			return fmt.Errorf("invalid index lock timeout configuration: %w", err)
+		}
+		dc.indexLockTimeout = indexLockTimeout
+		allOverrides = append(allOverrides, "index_lock_timeout:"+indexLockTimeoutStr)
+	}
+
 	// Apply all overrides
 	if len(allOverrides) > 0 {
 		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
@@ -291,6 +307,11 @@ func (dc *DirectoryCache) validateAllConfigs() error {
 
 	// Validate hash workers
 	if err := ValidateHashWorkers(allConfig.Performance.HashWorkers); err != nil {
+		return err
+	}
+
+	// Validate index lock timeout
+	if err := ValidateIndexLockTimeout(allConfig.Performance.IndexLockTimeout); err != nil {
 		return err
 	}
 
@@ -352,4 +373,99 @@ func dcfhDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(repoRoot, ".dcfh"), nil
+}
+
+// registerIndex tracks an mmap'd index file for memory protection
+func (dc *DirectoryCache) registerIndex(indexType string, indexFile *mmapIndexFile) {
+	if indexFile == nil {
+		return
+	}
+	
+	switch indexType {
+	case "main":
+		dc.mainIndex = indexFile
+	case "cache":
+		dc.cacheIndex = indexFile
+	case "scan":
+		// Scan indices are handled differently - add to the slice
+		dc.scanIndices = append(dc.scanIndices, indexFile)
+	}
+}
+
+// unregisterIndex removes tracking of an mmap'd index file
+func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndexFile) {
+	if indexFile == nil {
+		return
+	}
+	
+	switch indexType {
+	case "main":
+		if dc.mainIndex == indexFile {
+			dc.mainIndex = nil
+		}
+	case "cache":
+		if dc.cacheIndex == indexFile {
+			dc.cacheIndex = nil
+		}
+	case "scan":
+		// Remove from scan indices slice
+		for i, idx := range dc.scanIndices {
+			if idx == indexFile {
+				// Remove by swapping with last and truncating
+				dc.scanIndices[i] = dc.scanIndices[len(dc.scanIndices)-1]
+				dc.scanIndices = dc.scanIndices[:len(dc.scanIndices)-1]
+				break
+			}
+		}
+	}
+}
+
+// getIndexForEntry identifies which mmap'd index file contains the given entry
+func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
+	entryPtr := uintptr(unsafe.Pointer(entry))
+	
+	// Check main index
+	if dc.mainIndex != nil && dc.mainIndex.Data != nil {
+		dataStart := uintptr(unsafe.Pointer(&dc.mainIndex.Data[0]))
+		dataEnd := dataStart + uintptr(len(dc.mainIndex.Data))
+		if entryPtr >= dataStart && entryPtr < dataEnd {
+			return dc.mainIndex
+		}
+	}
+	
+	// Check cache index
+	if dc.cacheIndex != nil && dc.cacheIndex.Data != nil {
+		dataStart := uintptr(unsafe.Pointer(&dc.cacheIndex.Data[0]))
+		dataEnd := dataStart + uintptr(len(dc.cacheIndex.Data))
+		if entryPtr >= dataStart && entryPtr < dataEnd {
+			return dc.cacheIndex
+		}
+	}
+	
+	// Check scan indices
+	for _, scanIndex := range dc.scanIndices {
+		if scanIndex != nil && scanIndex.Data != nil {
+			dataStart := uintptr(unsafe.Pointer(&scanIndex.Data[0]))
+			dataEnd := dataStart + uintptr(len(scanIndex.Data))
+			if entryPtr >= dataStart && entryPtr < dataEnd {
+				return scanIndex
+			}
+		}
+	}
+	
+	return nil
+}
+
+// getAllReferencedIndices collects all unique indices referenced by entries in a skiplist
+func (dc *DirectoryCache) getAllReferencedIndices(skiplist *skiplistWrapper) map[*mmapIndexFile]bool {
+	indices := make(map[*mmapIndexFile]bool)
+	
+	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
+		if index := dc.getIndexForEntry(entry); index != nil {
+			indices[index] = true
+		}
+		return true // Continue iteration
+	})
+	
+	return indices
 }

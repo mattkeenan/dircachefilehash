@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/google/vectorio"
@@ -618,6 +619,135 @@ func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, 
 	return dc.loadIndexFromFileWithProcessor(filePath, DefaultEntryProcessor())
 }
 
+// loadIndexFromFileWithTracking loads an index file and returns both entries and the mmapIndexFile for tracking
+func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]binaryEntryRef, *mmapIndexFile, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
+	}
+
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	if stat.Size() < HeaderSize {
+		file.Close()
+		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+	}
+
+	// Memory map the file for reading
+	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	if err != nil {
+		file.Close()
+		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
+	}
+
+	// Create mmapIndexFile wrapper
+	indexFile := &mmapIndexFile{
+		File:     file,
+		Data:     data,
+		Size:     int(stat.Size()),
+		Type:     "loaded", // Will be updated by caller
+		FilePath: filePath,
+	}
+
+	// Get direct pointer to header in mmap'd memory (zero-copy)
+	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+
+	// Verify header using helper methods in logical order
+	if err := header.ValidateSignature(dc.signature); err != nil {
+		indexFile.Cleanup()
+		return nil, nil, err
+	}
+	if err := header.ValidateByteOrder(); err != nil {
+		indexFile.Cleanup()
+		return nil, nil, err
+	}
+	if err := header.ValidateVersion(dc.version); err != nil {
+		indexFile.Cleanup()
+		return nil, nil, err
+	}
+
+	// Check Clean flag to determine if we should trust the header checksum
+	isClean := (header.Flags & IndexFlagClean) != 0
+
+	if !isClean {
+		// File wasn't closed cleanly - header checksum is likely incorrect
+		// Skip checksum validation for recovery purposes
+		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
+	} else {
+		// File was closed cleanly - verify checksum from header
+		if err := dc.verifyHeaderChecksum(data, header); err != nil {
+			indexFile.Cleanup()
+			return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
+		}
+	}
+
+	// Parse entries
+	var refs []binaryEntryRef
+	offset := 0
+	entryData := data[HeaderSize:]
+
+	for i := uint32(0); i < header.EntryCount; i++ {
+		if offset >= len(entryData) {
+			indexFile.Cleanup()
+			return nil, nil, fmt.Errorf("unexpected end of data at entry %d", i)
+		}
+
+		// Get direct pointer to binaryEntry in mmap'd memory
+		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
+
+		// Validate binaryEntry chaining consistency
+		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
+			indexFile.Cleanup()
+			return nil, nil, fmt.Errorf("entry %d validation failed: %w", i, err)
+		}
+
+		// Perform extra validation if debug flag is enabled
+		if IsDebugEnabled("extravalidation") {
+			if err := entry.ValidateEntry(); err != nil {
+				indexFile.Cleanup()
+				return nil, nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
+			}
+		}
+
+		// Create binaryEntryRef wrapper using createBinaryEntryRef helper
+		ref := createBinaryEntryRef(entry, indexFile)
+		refs = append(refs, ref)
+
+		// Advance to next entry
+		nextOffset := offset + int(entry.Size)
+
+		// Validate that we're not going backwards or stuck
+		if nextOffset <= offset {
+			indexFile.Cleanup()
+			return nil, nil, fmt.Errorf("entry %d has invalid size %d (would not advance)", i, entry.Size)
+		}
+
+		// Debug output for entry chaining if requested
+		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
+			if nextOffset >= len(entryData) {
+				indexFile.Cleanup()
+				return nil, nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
+					i, entry.Size, offset, nextOffset, len(entryData))
+			}
+		}
+
+		offset = nextOffset
+	}
+
+	// Final validation: ensure we consumed exactly the expected amount of data
+	if offset != len(entryData) {
+		indexFile.Cleanup()
+		return nil, nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
+	}
+
+	return refs, indexFile, nil
+}
+
 // verifyHeaderChecksum verifies the checksum stored in the header
 func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader) error {
 	// Get the stored checksum from header
@@ -692,6 +822,7 @@ func (dc *DirectoryCache) Close() error {
 	// Check for orphaned index files first (ignore errors during check)
 	dc.checkForOrphanedIndexFiles()
 
+	// Clean up old mmapIndex if still present
 	if dc.mmapIndex != nil {
 		if err := unix.Munmap(dc.mmapIndex.data); err != nil {
 			return fmt.Errorf("failed to unmap: %w", err)
@@ -701,6 +832,39 @@ func (dc *DirectoryCache) Close() error {
 		}
 		dc.mmapIndex = nil
 	}
+
+	// Clean up tracked index files
+	if dc.mainIndex != nil {
+		if err := dc.mainIndex.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup main index: %w", err)
+		}
+		dc.mainIndex = nil
+	}
+
+	if dc.cacheIndex != nil {
+		if err := dc.cacheIndex.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup cache index: %w", err)
+		}
+		dc.cacheIndex = nil
+	}
+
+	if dc.currentScan != nil {
+		if err := dc.currentScan.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup current scan index: %w", err)
+		}
+		dc.currentScan = nil
+	}
+
+	// Clean up all scan indices
+	for _, scanIndex := range dc.scanIndices {
+		if scanIndex != nil {
+			if err := scanIndex.Cleanup(); err != nil {
+				return fmt.Errorf("failed to cleanup scan index: %w", err)
+			}
+		}
+	}
+	dc.scanIndices = nil
+
 	return nil
 }
 
@@ -923,6 +1087,9 @@ func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 		FilePath: scanFileName,
 	}
 
+	// Register the scan index for tracking
+	dc.registerIndex("scan", dc.currentScan)
+
 	return nil
 }
 
@@ -1045,6 +1212,9 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	// Get file path for deletion
 	filePath := dc.currentScan.FilePath
 
+	// Unregister from tracking before cleanup
+	dc.unregisterIndex("scan", dc.currentScan)
+
 	// Step 2 - Cleanup mmap and file descriptor
 	if err := dc.currentScan.Cleanup(); err != nil {
 		return fmt.Errorf("failed to cleanup scan index: %w", err)
@@ -1073,6 +1243,59 @@ func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *skiplistWrapper, 
 
 // writeSkiplistWithVectorIOFiltered writes a skiplist to temp index using pure vectorio (no mmap)
 func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
+	// Collect all unique indices referenced by the skiplist
+	referencedIndices := dc.getAllReferencedIndices(skiplist)
+	
+	// Acquire read locks on all referenced indices with timeout
+	lockAcquired := make(chan bool, 1)
+	lockTimeout := time.Duration(dc.indexLockTimeout) * time.Second
+	
+	go func() {
+		// Sort indices by address to avoid deadlock
+		var indices []*mmapIndexFile
+		for idx := range referencedIndices {
+			indices = append(indices, idx)
+		}
+		// Sort by pointer address for consistent lock ordering
+		for i := 0; i < len(indices); i++ {
+			for j := i + 1; j < len(indices); j++ {
+				if uintptr(unsafe.Pointer(indices[i])) > uintptr(unsafe.Pointer(indices[j])) {
+					indices[i], indices[j] = indices[j], indices[i]
+				}
+			}
+		}
+		
+		// Acquire all locks in order
+		VerboseLog(3, "Acquiring read locks on %d index files for hash calculation", len(indices))
+		for _, idx := range indices {
+			if idx != nil {
+				idx.mutex.RLock()
+				VerboseLog(3, "Acquired read lock on %s index", idx.Type)
+			}
+		}
+		lockAcquired <- true
+	}()
+	
+	// Wait for locks with timeout
+	select {
+	case <-lockAcquired:
+		// Locks acquired successfully
+		VerboseLog(3, "All index locks acquired successfully")
+	case <-time.After(lockTimeout):
+		// Timeout - log warning and continue without protection
+		fmt.Fprintf(os.Stderr, "Warning: Failed to acquire index locks within %v timeout, continuing without memory protection\n", lockTimeout)
+	}
+	
+	// Ensure we release locks when done
+	defer func() {
+		for idx := range referencedIndices {
+			if idx != nil {
+				idx.mutex.RUnlock()
+				VerboseLog(3, "Released read lock on %s index", idx.Type)
+			}
+		}
+	}()
+	
 	// Generate IoVec slices for the specified context
 	var entryIovecs []syscall.Iovec
 
@@ -1192,6 +1415,43 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 	// Sync to disk
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("failed to sync temp index: %w", err)
+	}
+
+	return nil
+}
+
+// atomicWriteIndex writes a skiplist to a target index file atomically via temp file + rename
+// This consolidates the common pattern of: write temp → rename → cleanup on error
+func (dc *DirectoryCache) atomicWriteIndex(skiplist *skiplistWrapper, targetPath string, context string, excludeDeleted bool) error {
+	// Generate temp file name based on target
+	var tempPath string
+	switch targetPath {
+	case dc.IndexFile:
+		tempPath = dc.generateTempFileName("index")
+	case dc.CacheFile:
+		tempPath = dc.generateTempFileName("cache")
+	default:
+		// For other targets, generate based on the base name
+		tempPath = dc.generateTempFileName(filepath.Base(targetPath))
+	}
+
+	// Write to temp file
+	var writeErr error
+	if excludeDeleted {
+		writeErr = dc.writeMainIndexWithVectorIO(skiplist, tempPath, context)
+	} else {
+		writeErr = dc.writeSkiplistWithVectorIO(skiplist, tempPath, context)
+	}
+	
+	if writeErr != nil {
+		os.Remove(tempPath) // Cleanup on write failure
+		return fmt.Errorf("failed to write index to temp file: %w", writeErr)
+	}
+
+	// Atomic rename temp file to target
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		os.Remove(tempPath) // Cleanup on rename failure
+		return fmt.Errorf("failed to atomically replace %s: %w", filepath.Base(targetPath), err)
 	}
 
 	return nil

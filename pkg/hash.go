@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // HashAlgorithm represents a hash algorithm configuration
@@ -65,6 +66,18 @@ func GetHashAlgorithmByType(typeID uint16) (*HashAlgorithm, error) {
 
 // HashFile calculates the hash of a file using the specified algorithm
 func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
+	// Start timing if debug=hash and verbose >= 3
+	var startTime time.Time
+	var fileSize int64
+	
+	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 {
+		startTime = time.Now()
+		// Get file size for rate calculation
+		if info, err := os.Stat(filePath); err == nil {
+			fileSize = info.Size()
+		}
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
@@ -72,11 +85,27 @@ func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
 	defer file.Close()
 
 	hasher := algorithm.NewFunc()
-	if _, err := io.Copy(hasher, file); err != nil {
+	written, err := io.Copy(hasher, file)
+	if err != nil {
 		return nil, fmt.Errorf("failed to hash file %s: %w", filePath, err)
 	}
 
-	return hasher.Sum(nil), nil
+	result := hasher.Sum(nil)
+
+	// Log timing information if enabled
+	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 && !startTime.IsZero() {
+		duration := time.Since(startTime)
+		if duration > 0 {
+			rate := float64(written) / duration.Seconds()
+			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n", 
+				filePath, 
+				FormatHumanSize(fileSize), 
+				duration,
+				FormatHumanRate(rate))
+		}
+	}
+
+	return result, nil
 }
 
 // HashFileToHexString calculates the hash of a file and returns it as a hex string
@@ -139,6 +168,18 @@ func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
 // HashFileInterruptible calculates the hash of a file using a configurable buffer size
 // and checks for shutdown signals between buffer reads for graceful interruption
 func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize int, shutdownChan <-chan struct{}) ([]byte, error) {
+	// Start timing if debug=hash and verbose >= 3
+	var startTime time.Time
+	var fileSize int64
+	
+	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 {
+		startTime = time.Now()
+		// Get file size for rate calculation
+		if info, err := os.Stat(filePath); err == nil {
+			fileSize = info.Size()
+		}
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
@@ -147,6 +188,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 
 	hasher := algorithm.NewFunc()
 	buffer := make([]byte, bufferSize)
+	var totalRead int64
 
 	for {
 		// Check for shutdown signal before each read
@@ -160,6 +202,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 		n, err := file.Read(buffer)
 		if n > 0 {
 			hasher.Write(buffer[:n])
+			totalRead += int64(n)
 		}
 
 		if err == io.EOF {
@@ -171,7 +214,22 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 		}
 	}
 
-	return hasher.Sum(nil), nil
+	result := hasher.Sum(nil)
+
+	// Log timing information if enabled
+	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 && !startTime.IsZero() {
+		duration := time.Since(startTime)
+		if duration > 0 {
+			rate := float64(totalRead) / duration.Seconds()
+			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n", 
+				filePath, 
+				FormatHumanSize(fileSize), 
+				duration,
+				FormatHumanRate(rate))
+		}
+	}
+
+	return result, nil
 }
 
 // HashFileInterruptibleToBytes is a convenience function that also returns the type ID
