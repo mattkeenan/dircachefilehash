@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestEnhancedFilesystemScanIterator(t *testing.T) {
@@ -452,28 +451,28 @@ func TestEnhancedFilesystemScanIteratorIntegration(t *testing.T) {
 	}
 	
 	// Verify duplicate detection worked
-	duplicates := dupesCallback.GetDuplicateGroups()
+	duplicates := dupesCallback.GetResults()
 	if len(duplicates) != 1 {
 		t.Errorf("Expected 1 duplicate group, got %d", len(duplicates))
 	}
 	
 	if len(duplicates) > 0 {
 		duplicateGroup := duplicates[0]
-		if len(duplicateGroup) != 2 {
-			t.Errorf("Expected 2 files in duplicate group, got %d", len(duplicateGroup))
+		if len(duplicateGroup.Files) != 2 {
+			t.Errorf("Expected 2 files in duplicate group, got %d", len(duplicateGroup.Files))
 		}
 		
 		// Verify it's the correct duplicate files
 		expectedFiles := []string{"duplicate1.txt", "duplicate2.txt"}
-		foundFiles := []string{duplicateGroup[0], duplicateGroup[1]}
+		foundFiles := duplicateGroup.Files
 		
 		// Sort for comparison
-		if foundFiles[0] > foundFiles[1] {
+		if len(foundFiles) >= 2 && foundFiles[0] > foundFiles[1] {
 			foundFiles[0], foundFiles[1] = foundFiles[1], foundFiles[0]
 		}
 		
 		for i, expected := range expectedFiles {
-			if foundFiles[i] != expected {
+			if i < len(foundFiles) && foundFiles[i] != expected {
 				t.Errorf("Expected duplicate file %s, got %s", expected, foundFiles[i])
 			}
 		}

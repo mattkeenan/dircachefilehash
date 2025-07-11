@@ -3,7 +3,6 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -201,17 +200,14 @@ func (efsi *EnhancedFilesystemScanIterator) addToScanIndex(scanned *scannedPath)
 	}
 	
 	// Add entry to scan index (similar to appendEntryToScanIndex)
-	binaryEntry, err := efsi.dc.appendEntryToScanIndex(efsi.scanIndexFileName, scanned)
+	_, err := efsi.dc.appendEntryToScanIndex(efsi.scanIndexFileName, scanned)
 	if err != nil {
 		return binaryEntryRef{}, fmt.Errorf("failed to append entry to scan index: %w", err)
 	}
 	
-	// Create entry reference from the binary entry
-	entryRef := binaryEntryRef{
-		// We need to create a proper reference from the binary entry
-		// For now, we'll store the pointer directly
-		// This is a simplified approach for the enhanced iterator
-	}
+	// Create entry reference - simplified for now
+	// TODO: Implement proper binaryEntryRef creation when interface is ready
+	entryRef := binaryEntryRef{}
 	
 	return entryRef, nil
 }
