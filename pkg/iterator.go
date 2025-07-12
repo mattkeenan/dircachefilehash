@@ -33,6 +33,29 @@ type PathEntryIterator interface {
 	Close() error
 }
 
+// BinaryEntryIterator abstracts the source of file entries using BinaryEntryInterface.
+// This is the enhanced iterator interface that works with the unified data access pattern.
+// All implementations MUST return entries in sorted path order for the Hwang-Lin algorithm.
+type BinaryEntryIterator interface {
+	// Next returns the next entry in sorted order as BinaryEntryInterface.
+	// Returns (nil, nil) when exhausted.
+	// Returns (nil, error) on error.
+	Next() (BinaryEntryInterface, error)
+	
+	// CurrentPath returns the path of the last entry returned by Next().
+	// Returns empty string if Next() hasn't been called or iterator is exhausted.
+	CurrentPath() string
+	
+	// HasNext returns true if there are more entries available.
+	HasNext() bool
+	
+	// Name returns a descriptive name for this iterator.
+	Name() string
+	
+	// Close releases any resources held by the iterator.
+	Close() error
+}
+
 // iteratorBase provides common functionality for iterator implementations
 type iteratorBase struct {
 	name        string
@@ -73,6 +96,19 @@ func (ib *iteratorBase) markClosed() {
 func (ib *iteratorBase) updateCurrentPath(entry *binaryEntry) {
 	if entry != nil {
 		ib.currentPath = entry.RelativePath()
+	} else {
+		ib.currentPath = ""
+	}
+}
+
+// updateCurrentPathFromInterface updates the current path from a BinaryEntryInterface
+func (ib *iteratorBase) updateCurrentPathFromInterface(entry BinaryEntryInterface) {
+	if entry != nil {
+		if path, err := entry.RelativePath(); err == nil {
+			ib.currentPath = path
+		} else {
+			ib.currentPath = ""
+		}
 	} else {
 		ib.currentPath = ""
 	}
