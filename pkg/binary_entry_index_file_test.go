@@ -9,12 +9,12 @@ import (
 	"unsafe"
 )
 
-// TestBEIndexFile runs the implementation-neutral test suite for BEIndexFile
-func TestBEIndexFile(t *testing.T) {
+// TestBEIndexFileIO runs the implementation-neutral test suite for BEIndexFileIO
+func TestBEIndexFileIO(t *testing.T) {
 	suite := &BinaryEntryTestSuite{
-		Name:               "BEIndexFile",
-		CreateEntry:        createBEIndexFile,
-		CleanupEntry:       cleanupBEIndexFile,
+		Name:               "BEIndexFileIO",
+		CreateEntry:        createBEIndexFileIO,
+		CleanupEntry:       cleanupBEIndexFileIO,
 		SupportsSetHash:    true,
 		SupportsSetDeleted: true,
 		IsEphemeral:        false, // File-based entries are stable
@@ -33,9 +33,9 @@ type indexFileTestCleanupInfo struct {
 	fileHandle *os.File
 }
 
-// createBEIndexFile creates a BEIndexFileEntry for testing
+// createBEIndexFileIO creates a BEIndexFileIOEntry for testing
 // This creates a temporary index file with the test entry data
-func createBEIndexFile(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
+func createBEIndexFileIO(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	// Create temporary directory for test
 	testDir, err := os.MkdirTemp("", "dcfh-index-file-test-*")
 	if err != nil {
@@ -96,9 +96,9 @@ func createBEIndexFile(t *testing.T, testData *TestEntryData) BinaryEntryInterfa
 	// Close and reopen for reading
 	indexFile.Close()
 	
-	// Create BEIndexFileEntry pointing to the entry (after header)
+	// Create BEIndexFileIOEntry pointing to the entry (after header)
 	fileOffset := int64(HeaderSize)
-	indexFileEntry := NewBEIndexFileEntry(indexFilePath, fileOffset, testData.Size)
+	indexFileEntry := NewBEIndexFileIOEntry(indexFilePath, fileOffset, testData.Size)
 	
 	// Store cleanup info with thread safety
 	cleanupMutex.Lock()
@@ -111,8 +111,8 @@ func createBEIndexFile(t *testing.T, testData *TestEntryData) BinaryEntryInterfa
 	return indexFileEntry
 }
 
-// cleanupBEIndexFile cleans up resources created during testing
-func cleanupBEIndexFile(t *testing.T, entry BinaryEntryInterface) {
+// cleanupBEIndexFileIO cleans up resources created during testing
+func cleanupBEIndexFileIO(t *testing.T, entry BinaryEntryInterface) {
 	cleanupMutex.Lock()
 	defer cleanupMutex.Unlock()
 	
@@ -128,17 +128,17 @@ func cleanupBEIndexFile(t *testing.T, entry BinaryEntryInterface) {
 	}
 }
 
-// TestBEIndexFileSpecific tests BEIndexFile-specific functionality
-func TestBEIndexFileSpecific(t *testing.T) {
-	t.Run("FileIOAccess", testBEIndexFileEntryFileIOAccess)
-	t.Run("FileHandleManagement", testBEIndexFileEntryFileHandleManagement)
-	t.Run("WriteOperations", testBEIndexFileEntryWriteOperations)
-	t.Run("ErrorHandling", testBEIndexFileEntryErrorHandling)
-	t.Run("ConcurrentFileAccess", testBEIndexFileEntryConcurrentFileAccess)
+// TestBEIndexFileIOSpecific tests BEIndexFile-specific functionality
+func TestBEIndexFileIOSpecific(t *testing.T) {
+	t.Run("FileIOAccess", testBEIndexFileIOEntryFileIOAccess)
+	t.Run("FileHandleManagement", testBEIndexFileIOEntryFileHandleManagement)
+	t.Run("WriteOperations", testBEIndexFileIOEntryWriteOperations)
+	t.Run("ErrorHandling", testBEIndexFileIOEntryErrorHandling)
+	t.Run("ConcurrentFileAccess", testBEIndexFileIOEntryConcurrentFileAccess)
 }
 
-// testBEIndexFileEntryFileIOAccess tests file I/O access patterns
-func testBEIndexFileEntryFileIOAccess(t *testing.T) {
+// testBEIndexFileIOEntryFileIOAccess tests file I/O access patterns
+func testBEIndexFileIOEntryFileIOAccess(t *testing.T) {
 	helper := &indexFileTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -165,8 +165,8 @@ func testBEIndexFileEntryFileIOAccess(t *testing.T) {
 	}
 }
 
-// testBEIndexFileEntryFileHandleManagement tests file handle lifecycle
-func testBEIndexFileEntryFileHandleManagement(t *testing.T) {
+// testBEIndexFileIOEntryFileHandleManagement tests file handle lifecycle
+func testBEIndexFileIOEntryFileHandleManagement(t *testing.T) {
 	helper := &indexFileTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -187,8 +187,8 @@ func testBEIndexFileEntryFileHandleManagement(t *testing.T) {
 	// (each uses its own file handle)
 }
 
-// testBEIndexFileEntryWriteOperations tests write operations
-func testBEIndexFileEntryWriteOperations(t *testing.T) {
+// testBEIndexFileIOEntryWriteOperations tests write operations
+func testBEIndexFileIOEntryWriteOperations(t *testing.T) {
 	helper := &indexFileTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -237,10 +237,10 @@ func testBEIndexFileEntryWriteOperations(t *testing.T) {
 	}
 }
 
-// testBEIndexFileEntryErrorHandling tests error handling
-func testBEIndexFileEntryErrorHandling(t *testing.T) {
+// testBEIndexFileIOEntryErrorHandling tests error handling
+func testBEIndexFileIOEntryErrorHandling(t *testing.T) {
 	// Test with non-existent file
-	invalidEntry := NewBEIndexFileEntry("/nonexistent/file.idx", HeaderSize, 128)
+	invalidEntry := NewBEIndexFileIOEntry("/nonexistent/file.idx", HeaderSize, 128)
 	
 	// Should not be valid
 	if invalidEntry.IsValid() {
@@ -270,8 +270,8 @@ func testBEIndexFileEntryErrorHandling(t *testing.T) {
 	}
 }
 
-// testBEIndexFileEntryConcurrentFileAccess tests concurrent file access
-func testBEIndexFileEntryConcurrentFileAccess(t *testing.T) {
+// testBEIndexFileIOEntryConcurrentFileAccess tests concurrent file access
+func testBEIndexFileIOEntryConcurrentFileAccess(t *testing.T) {
 	helper := &indexFileTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -313,28 +313,28 @@ type indexFileTestHelper struct {
 }
 
 // createTestEntry creates a test index file entry and returns it with a cleanup function
-func (h *indexFileTestHelper) createTestEntry(t *testing.T) (*BEIndexFileEntry, func()) {
+func (h *indexFileTestHelper) createTestEntry(t *testing.T) (*BEIndexFileIOEntry, func()) {
 	// Create test data
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 	
-	// Use the createBEIndexFile helper to set up the full infrastructure
-	entry := createBEIndexFile(t, testData).(*BEIndexFileEntry)
+	// Use the createBEIndexFileIO helper to set up the full infrastructure
+	entry := createBEIndexFileIO(t, testData).(*BEIndexFileIOEntry)
 	
 	// Return entry and cleanup function
 	cleanup := func() {
-		cleanupBEIndexFile(t, entry)
+		cleanupBEIndexFileIO(t, entry)
 	}
 	
 	return entry, cleanup
 }
 
 // Benchmark tests for BEIndexFile
-func BenchmarkBEIndexFile(b *testing.B) {
+func BenchmarkBEIndexFileIO(b *testing.B) {
 	// Create test entry once for all benchmarks
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
-	entry := createBEIndexFile(&testing.T{}, testData) // This is a hack, but works for benchmarks
+	entry := createBEIndexFileIO(&testing.T{}, testData) // This is a hack, but works for benchmarks
 	
 	defer func() {
 		// Cleanup

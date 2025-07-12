@@ -7,7 +7,7 @@ import (
 	"unsafe"
 )
 
-// BEIndexFileEntry implements BinaryEntryInterface for standard file I/O access to index files
+// BEIndexFileIOEntry implements BinaryEntryInterface for standard file I/O access to index files
 //
 // This implementation handles entries accessed via standard read/write operations:
 // - Uses standard file I/O instead of memory mapping
@@ -21,20 +21,20 @@ import (
 // - Thread-safe file access (each operation uses its own file handle)
 // - Error returns for all I/O operations
 // - Concurrent access safety through independent file handles
-type BEIndexFileEntry struct {
+type BEIndexFileIOEntry struct {
 	BinaryEntryBase
 	filePath   string // Path to the index file
 	fileOffset int64  // Absolute file offset to the entry
 	entrySize  uint32 // Size of the entry for bounds checking
 }
 
-// NewBEIndexFileEntry creates a new BEIndexFileEntry for standard file I/O access
+// NewBEIndexFileIOEntry creates a new BEIndexFileIOEntry for standard file I/O access
 // filePath: path to the index file
 // fileOffset: absolute position of the entry in the file
 // entrySize: size of the entry for bounds checking
-func NewBEIndexFileEntry(filePath string, fileOffset int64, entrySize uint32) *BEIndexFileEntry {
-	return &BEIndexFileEntry{
-		BinaryEntryBase: NewBinaryEntryBase(BEIndexFile),
+func NewBEIndexFileIOEntry(filePath string, fileOffset int64, entrySize uint32) *BEIndexFileIOEntry {
+	return &BEIndexFileIOEntry{
+		BinaryEntryBase: NewBinaryEntryBase(BEIndexFileIO),
 		filePath:        filePath,
 		fileOffset:      fileOffset,
 		entrySize:       entrySize,
@@ -44,7 +44,7 @@ func NewBEIndexFileEntry(filePath string, fileOffset int64, entrySize uint32) *B
 
 // readEntryData reads the binary entry data from the file
 // Each read operation uses its own file handle for thread safety
-func (ife *BEIndexFileEntry) readEntryData() (*binaryEntry, error) {
+func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 	// Open file for this specific read operation
 	file, err := os.Open(ife.filePath)
 	if err != nil {
@@ -80,7 +80,7 @@ func (ife *BEIndexFileEntry) readEntryData() (*binaryEntry, error) {
 
 // writeEntryData writes the binary entry data to the file
 // Each write operation uses its own file handle for thread safety
-func (ife *BEIndexFileEntry) writeEntryData(entry *binaryEntry) error {
+func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 	// Open file for this specific write operation
 	file, err := os.OpenFile(ife.filePath, os.O_RDWR, 0644)
 	if err != nil {
@@ -112,7 +112,7 @@ func (ife *BEIndexFileEntry) writeEntryData(entry *binaryEntry) error {
 }
 
 // IsValid performs a quick check if the entry is accessible
-func (ife *BEIndexFileEntry) IsValid() bool {
+func (ife *BEIndexFileIOEntry) IsValid() bool {
 	// Check if file exists and is accessible
 	if _, err := os.Stat(ife.filePath); err != nil {
 		return false
@@ -127,7 +127,7 @@ func (ife *BEIndexFileEntry) IsValid() bool {
 }
 
 // Size returns the entry size field
-func (ife *BEIndexFileEntry) Size() (uint32, error) {
+func (ife *BEIndexFileIOEntry) Size() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -140,7 +140,7 @@ func (ife *BEIndexFileEntry) Size() (uint32, error) {
 }
 
 // CTimeWall returns the creation time wall clock value
-func (ife *BEIndexFileEntry) CTimeWall() (uint64, error) {
+func (ife *BEIndexFileIOEntry) CTimeWall() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -153,7 +153,7 @@ func (ife *BEIndexFileEntry) CTimeWall() (uint64, error) {
 }
 
 // MTimeWall returns the modification time wall clock value
-func (ife *BEIndexFileEntry) MTimeWall() (uint64, error) {
+func (ife *BEIndexFileIOEntry) MTimeWall() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -166,7 +166,7 @@ func (ife *BEIndexFileEntry) MTimeWall() (uint64, error) {
 }
 
 // Dev returns the device ID
-func (ife *BEIndexFileEntry) Dev() (uint32, error) {
+func (ife *BEIndexFileIOEntry) Dev() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -179,7 +179,7 @@ func (ife *BEIndexFileEntry) Dev() (uint32, error) {
 }
 
 // Ino returns the inode number
-func (ife *BEIndexFileEntry) Ino() (uint32, error) {
+func (ife *BEIndexFileIOEntry) Ino() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -192,7 +192,7 @@ func (ife *BEIndexFileEntry) Ino() (uint32, error) {
 }
 
 // Mode returns the file mode
-func (ife *BEIndexFileEntry) Mode() (uint32, error) {
+func (ife *BEIndexFileIOEntry) Mode() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -205,7 +205,7 @@ func (ife *BEIndexFileEntry) Mode() (uint32, error) {
 }
 
 // UID returns the user ID
-func (ife *BEIndexFileEntry) UID() (uint32, error) {
+func (ife *BEIndexFileIOEntry) UID() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -218,7 +218,7 @@ func (ife *BEIndexFileEntry) UID() (uint32, error) {
 }
 
 // GID returns the group ID
-func (ife *BEIndexFileEntry) GID() (uint32, error) {
+func (ife *BEIndexFileIOEntry) GID() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -231,7 +231,7 @@ func (ife *BEIndexFileEntry) GID() (uint32, error) {
 }
 
 // FileSize returns the file size in bytes
-func (ife *BEIndexFileEntry) FileSize() (uint64, error) {
+func (ife *BEIndexFileIOEntry) FileSize() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -244,7 +244,7 @@ func (ife *BEIndexFileEntry) FileSize() (uint64, error) {
 }
 
 // HashType returns the hash algorithm type
-func (ife *BEIndexFileEntry) HashType() (uint16, error) {
+func (ife *BEIndexFileIOEntry) HashType() (uint16, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -257,7 +257,7 @@ func (ife *BEIndexFileEntry) HashType() (uint16, error) {
 }
 
 // Hash returns the file hash as a byte array
-func (ife *BEIndexFileEntry) Hash() ([20]byte, error) {
+func (ife *BEIndexFileIOEntry) Hash() ([20]byte, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -273,7 +273,7 @@ func (ife *BEIndexFileEntry) Hash() ([20]byte, error) {
 }
 
 // EntryFlags returns the entry flags
-func (ife *BEIndexFileEntry) EntryFlags() (uint32, error) {
+func (ife *BEIndexFileIOEntry) EntryFlags() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -286,7 +286,7 @@ func (ife *BEIndexFileEntry) EntryFlags() (uint32, error) {
 }
 
 // RelativePath returns the relative file path
-func (ife *BEIndexFileEntry) RelativePath() (string, error) {
+func (ife *BEIndexFileIOEntry) RelativePath() (string, error) {
 	ife.RLock()
 	defer ife.RUnlock()
 	
@@ -321,7 +321,7 @@ func (ife *BEIndexFileEntry) RelativePath() (string, error) {
 }
 
 // HashString returns the hash as a hexadecimal string
-func (ife *BEIndexFileEntry) HashString() (string, error) {
+func (ife *BEIndexFileIOEntry) HashString() (string, error) {
 	hash, err := ife.Hash()
 	if err != nil {
 		return "", err
@@ -331,7 +331,7 @@ func (ife *BEIndexFileEntry) HashString() (string, error) {
 }
 
 // IsDeleted returns true if the entry is marked as deleted
-func (ife *BEIndexFileEntry) IsDeleted() (bool, error) {
+func (ife *BEIndexFileIOEntry) IsDeleted() (bool, error) {
 	flags, err := ife.EntryFlags()
 	if err != nil {
 		return false, err
@@ -342,7 +342,7 @@ func (ife *BEIndexFileEntry) IsDeleted() (bool, error) {
 }
 
 // SetHash updates the entry's hash and hash type
-func (ife *BEIndexFileEntry) SetHash(hashBytes []byte, hashType uint16) error {
+func (ife *BEIndexFileIOEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	ife.Lock()
 	defer ife.Unlock()
 	
@@ -366,7 +366,7 @@ func (ife *BEIndexFileEntry) SetHash(hashBytes []byte, hashType uint16) error {
 }
 
 // SetDeleted updates the entry's deletion flag
-func (ife *BEIndexFileEntry) SetDeleted(deleted bool) error {
+func (ife *BEIndexFileIOEntry) SetDeleted(deleted bool) error {
 	ife.Lock()
 	defer ife.Unlock()
 	
