@@ -462,3 +462,33 @@ Based on the 6-phase migration plan in `new-architecture.md`:
 **Files Created**:
 - `pkg/binary_entry_scan.go`: Complete ScanBinaryEntry implementation (ephemeral mmap safety)
 - `pkg/binary_entry_scan_test.go`: Comprehensive test suite with cleanup infrastructure
+
+### Update - 2025-07-12T10:40:39Z
+
+**Summary**: Renamed interface implementations for consistent nomenclature (verb vs noun distinction)
+
+**Git Changes**:
+- Modified: pkg/binary_entry_interface.go, pkg/binary_entry_interface_test.go, pkg/binary_entry_scan.go, pkg/binary_entry_scan_test.go
+- Current branch: local-main (commit: 71110f5)
+
+**Todo Progress**: 16 completed, 1 in progress, 7 pending
+- ✓ Completed: Rename interface implementations and update BEScan (formerly ScanBinaryEntry)
+
+**Nomenclature Standardization**:
+- **Constants** (actions/processes): `BESkiplist`, `BEIndexFile`, `BEIndexFileWithSkiplist`, `BEScan`
+- **Structs** (objects/things): `BESkiplistEntry`, `BEIndexFileEntry`, `BEIndexFileWithSkiplistEntry`, `BEScanEntry`
+
+**Changes Made**:
+- Updated `BinaryEntryImplementationType` constants to use clear action names
+- Renamed `ScanBinaryEntry` struct to `BEScanEntry` (avoiding constant/type name conflict)
+- Updated all method receivers and function names consistently
+- Fixed test functions to use new naming convention
+- Verified all tests pass with new nomenclature
+
+**Technical Solutions**:
+- Resolved naming conflict between `BEScan` constant and struct type
+- Applied verb/noun distinction: scan (action) vs scanentry (object)
+- Maintained backward compatibility during renaming process
+- Ensured consistent pattern for future implementations
+
+**Next Phase Ready**: Implement BESkiplistEntry (mmap-backed entries in skiplist) - the easiest implementation since skiplist entries are stable and already in memory

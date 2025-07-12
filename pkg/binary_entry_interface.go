@@ -63,30 +63,30 @@ type BinaryEntryInterface interface {
 type BinaryEntryImplementationType int
 
 const (
-	// SkiplistImplementation - mmap-backed entries in skiplist
-	SkiplistImplementation BinaryEntryImplementationType = iota
+	// BESkiplist - mmap-backed entries in skiplist
+	BESkiplist BinaryEntryImplementationType = iota
 	
-	// ReadWriteImplementation - standard file I/O access
-	ReadWriteImplementation
+	// BEIndexFile - standard file I/O access
+	BEIndexFile
 	
-	// IterativeSkiplistImplementation - mmap with iterative skiplist building
-	IterativeSkiplistImplementation
+	// BEIndexFileWithSkiplist - mmap with iterative skiplist building
+	BEIndexFileWithSkiplist
 	
-	// ScanImplementation - ephemeral mmap entries for hash coordination
-	ScanImplementation
+	// BEScan - ephemeral mmap entries for hash coordination
+	BEScan
 )
 
 // String returns the string representation of the implementation type
 func (t BinaryEntryImplementationType) String() string {
 	switch t {
-	case SkiplistImplementation:
-		return "Skiplist"
-	case ReadWriteImplementation:
-		return "ReadWrite"
-	case IterativeSkiplistImplementation:
-		return "IterativeSkiplist"
-	case ScanImplementation:
-		return "Scan"
+	case BESkiplist:
+		return "BESkiplist"
+	case BEIndexFile:
+		return "BEIndexFile"
+	case BEIndexFileWithSkiplist:
+		return "BEIndexFileWithSkiplist"
+	case BEScan:
+		return "BEScan"
 	default:
 		return "Unknown"
 	}
@@ -133,7 +133,7 @@ func (base *BinaryEntryBase) ImplementationType() BinaryEntryImplementationType 
 
 // IsEphemeral returns true if this implementation type can have ephemeral entries
 func (base *BinaryEntryBase) IsEphemeral() bool {
-	return base.implementationType == ScanImplementation
+	return base.implementationType == BEScan
 }
 
 // Common error types for BinaryEntryInterface implementations

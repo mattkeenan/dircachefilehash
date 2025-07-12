@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// TestScanBinaryEntry runs the implementation-neutral test suite for ScanBinaryEntry
-func TestScanBinaryEntry(t *testing.T) {
+// TestBEScan runs the implementation-neutral test suite for BEScan
+func TestBEScan(t *testing.T) {
 	suite := &BinaryEntryTestSuite{
-		Name:               "ScanBinaryEntry",
-		CreateEntry:        createScanBinaryEntry,
-		CleanupEntry:       cleanupScanBinaryEntry,
+		Name:               "BEScan",
+		CreateEntry:        createBEScan,
+		CleanupEntry:       cleanupBEScan,
 		SupportsSetHash:    true,
 		SupportsSetDeleted: true,
 		IsEphemeral:        true,
@@ -29,9 +29,9 @@ type scanTestCleanupInfo struct {
 	dc      *DirectoryCache
 }
 
-// createScanBinaryEntry creates a ScanBinaryEntry for testing
+// createBEScan creates a BEScan for testing
 // This sets up a temporary scan index and adds a test entry
-func createScanBinaryEntry(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
+func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	// Create temporary directory for test
 	testDir, err := os.MkdirTemp("", "dcfh-scan-test-*")
 	if err != nil {
@@ -104,8 +104,8 @@ func createScanBinaryEntry(t *testing.T, testData *TestEntryData) BinaryEntryInt
 		IndexFile: dc.currentScan,
 	}
 	
-	// Create and return ScanBinaryEntry
-	scanEntry := NewScanBinaryEntry(entryRef)
+	// Create and return BEScanEntry
+	scanEntry := NewBEScanEntry(entryRef)
 	
 	// Store cleanup info in global map
 	testCleanupData[scanEntry] = &scanTestCleanupInfo{
@@ -116,8 +116,8 @@ func createScanBinaryEntry(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	return scanEntry
 }
 
-// cleanupScanBinaryEntry cleans up resources created during testing
-func cleanupScanBinaryEntry(t *testing.T, entry BinaryEntryInterface) {
+// cleanupBEScan cleans up resources created during testing
+func cleanupBEScan(t *testing.T, entry BinaryEntryInterface) {
 	// Look up cleanup info from global map
 	if cleanupInfo, exists := testCleanupData[entry]; exists {
 		// Clean up test directory
@@ -133,16 +133,16 @@ func cleanupScanBinaryEntry(t *testing.T, entry BinaryEntryInterface) {
 }
 
 
-// TestScanBinaryEntrySpecific tests ScanBinaryEntry-specific functionality
-func TestScanBinaryEntrySpecific(t *testing.T) {
-	t.Run("EphemeralBehavior", testScanBinaryEntryEphemeralBehavior)
-	t.Run("HashWorkerUpdates", testScanBinaryEntryHashWorkerUpdates)
-	t.Run("ConcurrentMremapSafety", testScanBinaryEntryConcurrentMremapSafety)
-	t.Run("InvalidEntryHandling", testScanBinaryEntryInvalidHandling)
+// TestBEScanSpecific tests BEScan-specific functionality
+func TestBEScanSpecific(t *testing.T) {
+	t.Run("EphemeralBehavior", testBEScanEphemeralBehavior)
+	t.Run("HashWorkerUpdates", testBEScanHashWorkerUpdates)
+	t.Run("ConcurrentMremapSafety", testBEScanConcurrentMremapSafety)
+	t.Run("InvalidEntryHandling", testBEScanInvalidHandling)
 }
 
-// testScanBinaryEntryEphemeralBehavior tests ephemeral entry behavior
-func testScanBinaryEntryEphemeralBehavior(t *testing.T) {
+// testBEScanEphemeralBehavior tests ephemeral entry behavior
+func testBEScanEphemeralBehavior(t *testing.T) {
 	helper := &scanTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -167,8 +167,8 @@ func testScanBinaryEntryEphemeralBehavior(t *testing.T) {
 	}
 }
 
-// testScanBinaryEntryHashWorkerUpdates tests hash worker update functionality
-func testScanBinaryEntryHashWorkerUpdates(t *testing.T) {
+// testBEScanHashWorkerUpdates tests hash worker update functionality
+func testBEScanHashWorkerUpdates(t *testing.T) {
 	helper := &scanTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -195,8 +195,8 @@ func testScanBinaryEntryHashWorkerUpdates(t *testing.T) {
 	}
 }
 
-// testScanBinaryEntryConcurrentMremapSafety tests concurrent access during potential mremap
-func testScanBinaryEntryConcurrentMremapSafety(t *testing.T) {
+// testBEScanConcurrentMremapSafety tests concurrent access during potential mremap
+func testBEScanConcurrentMremapSafety(t *testing.T) {
 	helper := &scanTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
@@ -235,15 +235,15 @@ func testScanBinaryEntryConcurrentMremapSafety(t *testing.T) {
 	}
 }
 
-// testScanBinaryEntryInvalidHandling tests handling of invalid entries
-func testScanBinaryEntryInvalidHandling(t *testing.T) {
+// testBEScanInvalidHandling tests handling of invalid entries
+func testBEScanInvalidHandling(t *testing.T) {
 	// Create an invalid entry (nil IndexFile)
 	invalidRef := binaryEntryRef{
 		Offset:    0,
 		IndexFile: nil,
 	}
 	
-	invalidEntry := NewScanBinaryEntry(invalidRef)
+	invalidEntry := NewBEScanEntry(invalidRef)
 	
 	// Should not be valid
 	if invalidEntry.IsValid() {
@@ -271,7 +271,7 @@ type scanTestHelper struct {
 }
 
 // createTestEntry creates a test scan entry and returns it with a cleanup function
-func (h *scanTestHelper) createTestEntry(t *testing.T) (*ScanBinaryEntry, func()) {
+func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 	// Create temporary directory
 	testDir, err := os.MkdirTemp("", "dcfh-scan-specific-test-*")
 	if err != nil {
@@ -334,8 +334,8 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*ScanBinaryEntry, func()
 		IndexFile: h.dc.currentScan,
 	}
 	
-	// Create ScanBinaryEntry
-	scanEntry := NewScanBinaryEntry(entryRef)
+	// Create BEScanEntry
+	scanEntry := NewBEScanEntry(entryRef)
 	
 	// Return entry and cleanup function
 	cleanup := func() {
@@ -351,8 +351,8 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*ScanBinaryEntry, func()
 }
 
 
-// Benchmark tests for ScanBinaryEntry
-func BenchmarkScanBinaryEntry(b *testing.B) {
+// Benchmark tests for BEScan
+func BenchmarkBEScan(b *testing.B) {
 	helper := &scanTestHelper{}
 	
 	createFn := func() BinaryEntryInterface {
@@ -361,7 +361,7 @@ func BenchmarkScanBinaryEntry(b *testing.B) {
 	}
 	
 	cleanupFn := func(entry BinaryEntryInterface) {
-		if _, ok := entry.(*ScanBinaryEntry); ok {
+		if _, ok := entry.(*BEScanEntry); ok {
 			// Manually cleanup - this is a limitation of the benchmark approach
 			if helper.dc != nil {
 				helper.dc.cleanupCurrentScanFile()

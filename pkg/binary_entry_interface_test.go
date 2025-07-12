@@ -32,22 +32,22 @@ func TestFrameworkCompilation(t *testing.T) {
 	}
 	
 	// Test implementation type enum
-	if SkiplistImplementation.String() != "Skiplist" {
-		t.Errorf("Expected SkiplistImplementation.String() = 'Skiplist', got %q", SkiplistImplementation.String())
+	if BESkiplist.String() != "BESkiplist" {
+		t.Errorf("Expected BESkiplist.String() = 'BESkiplist', got %q", BESkiplist.String())
 	}
 	
-	if ScanImplementation.String() != "Scan" {
-		t.Errorf("Expected ScanImplementation.String() = 'Scan', got %q", ScanImplementation.String())
+	if BEScan.String() != "BEScan" {
+		t.Errorf("Expected BEScan.String() = 'BEScan', got %q", BEScan.String())
 	}
 	
 	// Test BinaryEntryBase
-	base := NewBinaryEntryBase(ScanImplementation)
-	if base.ImplementationType() != ScanImplementation {
-		t.Errorf("Expected implementation type %v, got %v", ScanImplementation, base.ImplementationType())
+	base := NewBinaryEntryBase(BEScan)
+	if base.ImplementationType() != BEScan {
+		t.Errorf("Expected implementation type %v, got %v", BEScan, base.ImplementationType())
 	}
 	
 	if !base.IsEphemeral() {
-		t.Error("Expected ScanImplementation to be ephemeral")
+		t.Error("Expected BEScan to be ephemeral")
 	}
 	
 	// Test locking doesn't panic

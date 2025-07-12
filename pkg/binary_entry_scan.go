@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-// ScanBinaryEntry implements BinaryEntryInterface for ephemeral mmap entries in scan indices
+// BEScanEntry implements BinaryEntryInterface for ephemeral mmap entries in scan indices
 //
 // This is the most complex implementation because scan entries are ephemeral:
 // - They exist in memory-mapped scan index files that can be remapped (mremap)
@@ -18,16 +18,16 @@ import (
 // - RWMutex locking to coordinate with mremap operations
 // - Quick validity checks to detect unmapped memory
 // - Error returns for all operations that can fail due to ephemeral nature
-type ScanBinaryEntry struct {
+type BEScanEntry struct {
 	BinaryEntryBase
 	entryRef binaryEntryRef // Reference to mmap'd scan index entry
 }
 
-// NewScanBinaryEntry creates a new ScanBinaryEntry from a binaryEntryRef
+// NewBEScanEntry creates a new BEScanEntry from a binaryEntryRef
 // The reference must point to a valid entry in a scan index file
-func NewScanBinaryEntry(entryRef binaryEntryRef) *ScanBinaryEntry {
-	return &ScanBinaryEntry{
-		BinaryEntryBase: NewBinaryEntryBase(ScanImplementation),
+func NewBEScanEntry(entryRef binaryEntryRef) *BEScanEntry {
+	return &BEScanEntry{
+		BinaryEntryBase: NewBinaryEntryBase(BEScan),
 		entryRef:        entryRef,
 	}
 }
@@ -35,7 +35,7 @@ func NewScanBinaryEntry(entryRef binaryEntryRef) *ScanBinaryEntry {
 // getBinaryEntry safely resolves the entry reference with proper locking
 // Returns the entry pointer and nil error if successful
 // Returns nil and error if the entry has been invalidated
-func (sbe *ScanBinaryEntry) getBinaryEntry() (*binaryEntry, error) {
+func (sbe *BEScanEntry) getBinaryEntry() (*binaryEntry, error) {
 	// Quick validity check without acquiring locks
 	if !sbe.IsValid() {
 		return nil, ErrEntryInvalidated
@@ -60,7 +60,7 @@ func (sbe *ScanBinaryEntry) getBinaryEntry() (*binaryEntry, error) {
 // IsValid performs a quick check if the entry is still accessible
 // This doesn't guarantee the entry won't become invalid immediately after,
 // but provides a fast path for obviously invalid entries
-func (sbe *ScanBinaryEntry) IsValid() bool {
+func (sbe *BEScanEntry) IsValid() bool {
 	return sbe.entryRef.IndexFile != nil && 
 		   sbe.entryRef.IndexFile.Data != nil &&
 		   sbe.entryRef.Offset >= 0 &&
@@ -68,7 +68,7 @@ func (sbe *ScanBinaryEntry) IsValid() bool {
 }
 
 // Size returns the entry size field
-func (sbe *ScanBinaryEntry) Size() (uint32, error) {
+func (sbe *BEScanEntry) Size() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -81,7 +81,7 @@ func (sbe *ScanBinaryEntry) Size() (uint32, error) {
 }
 
 // CTimeWall returns the creation time wall clock value
-func (sbe *ScanBinaryEntry) CTimeWall() (uint64, error) {
+func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -94,7 +94,7 @@ func (sbe *ScanBinaryEntry) CTimeWall() (uint64, error) {
 }
 
 // MTimeWall returns the modification time wall clock value
-func (sbe *ScanBinaryEntry) MTimeWall() (uint64, error) {
+func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -107,7 +107,7 @@ func (sbe *ScanBinaryEntry) MTimeWall() (uint64, error) {
 }
 
 // Dev returns the device ID
-func (sbe *ScanBinaryEntry) Dev() (uint32, error) {
+func (sbe *BEScanEntry) Dev() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -120,7 +120,7 @@ func (sbe *ScanBinaryEntry) Dev() (uint32, error) {
 }
 
 // Ino returns the inode number
-func (sbe *ScanBinaryEntry) Ino() (uint32, error) {
+func (sbe *BEScanEntry) Ino() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -133,7 +133,7 @@ func (sbe *ScanBinaryEntry) Ino() (uint32, error) {
 }
 
 // Mode returns the file mode
-func (sbe *ScanBinaryEntry) Mode() (uint32, error) {
+func (sbe *BEScanEntry) Mode() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -146,7 +146,7 @@ func (sbe *ScanBinaryEntry) Mode() (uint32, error) {
 }
 
 // UID returns the user ID
-func (sbe *ScanBinaryEntry) UID() (uint32, error) {
+func (sbe *BEScanEntry) UID() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -159,7 +159,7 @@ func (sbe *ScanBinaryEntry) UID() (uint32, error) {
 }
 
 // GID returns the group ID
-func (sbe *ScanBinaryEntry) GID() (uint32, error) {
+func (sbe *BEScanEntry) GID() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -172,7 +172,7 @@ func (sbe *ScanBinaryEntry) GID() (uint32, error) {
 }
 
 // FileSize returns the file size in bytes
-func (sbe *ScanBinaryEntry) FileSize() (uint64, error) {
+func (sbe *BEScanEntry) FileSize() (uint64, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -185,7 +185,7 @@ func (sbe *ScanBinaryEntry) FileSize() (uint64, error) {
 }
 
 // HashType returns the hash algorithm type
-func (sbe *ScanBinaryEntry) HashType() (uint16, error) {
+func (sbe *BEScanEntry) HashType() (uint16, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -198,7 +198,7 @@ func (sbe *ScanBinaryEntry) HashType() (uint16, error) {
 }
 
 // Hash returns the file hash as a byte array
-func (sbe *ScanBinaryEntry) Hash() ([20]byte, error) {
+func (sbe *BEScanEntry) Hash() ([20]byte, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -214,7 +214,7 @@ func (sbe *ScanBinaryEntry) Hash() ([20]byte, error) {
 }
 
 // EntryFlags returns the entry flags
-func (sbe *ScanBinaryEntry) EntryFlags() (uint32, error) {
+func (sbe *BEScanEntry) EntryFlags() (uint32, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -227,7 +227,7 @@ func (sbe *ScanBinaryEntry) EntryFlags() (uint32, error) {
 }
 
 // RelativePath returns the relative file path
-func (sbe *ScanBinaryEntry) RelativePath() (string, error) {
+func (sbe *BEScanEntry) RelativePath() (string, error) {
 	sbe.RLock()
 	defer sbe.RUnlock()
 	
@@ -257,7 +257,7 @@ func (sbe *ScanBinaryEntry) RelativePath() (string, error) {
 }
 
 // HashString returns the hash as a hexadecimal string
-func (sbe *ScanBinaryEntry) HashString() (string, error) {
+func (sbe *BEScanEntry) HashString() (string, error) {
 	hash, err := sbe.Hash()
 	if err != nil {
 		return "", err
@@ -267,7 +267,7 @@ func (sbe *ScanBinaryEntry) HashString() (string, error) {
 }
 
 // IsDeleted returns true if the entry is marked as deleted
-func (sbe *ScanBinaryEntry) IsDeleted() (bool, error) {
+func (sbe *BEScanEntry) IsDeleted() (bool, error) {
 	flags, err := sbe.EntryFlags()
 	if err != nil {
 		return false, err
@@ -279,7 +279,7 @@ func (sbe *ScanBinaryEntry) IsDeleted() (bool, error) {
 
 // SetHash updates the entry's hash and hash type
 // This is used by hash workers to update entries in-place during scanning
-func (sbe *ScanBinaryEntry) SetHash(hashBytes []byte, hashType uint16) error {
+func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	sbe.Lock()
 	defer sbe.Unlock()
 	
@@ -301,7 +301,7 @@ func (sbe *ScanBinaryEntry) SetHash(hashBytes []byte, hashType uint16) error {
 }
 
 // SetDeleted updates the entry's deletion flag
-func (sbe *ScanBinaryEntry) SetDeleted(deleted bool) error {
+func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
 	sbe.Lock()
 	defer sbe.Unlock()
 	
