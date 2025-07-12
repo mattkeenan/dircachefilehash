@@ -401,83 +401,9 @@ func createTestDirectoryCacheForEnhanced(t *testing.T, testDir string) *Director
 	return NewDirectoryCache(testDir, testDir)
 }
 
-// Integration test with unified algorithm
-func TestEnhancedFilesystemScanIteratorIntegration(t *testing.T) {
-	// Create test directory and DirectoryCache
-	testDir, err := os.MkdirTemp("", "dcfh-enhanced-integration-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-	defer os.RemoveAll(testDir)
-	
-	dc := createTestDirectoryCache(t, testDir)
-	
-	// Create test files with duplicate content
-	testFiles := []struct {
-		name    string
-		content string
-	}{
-		{"duplicate1.txt", "same content"},
-		{"duplicate2.txt", "same content"},
-		{"unique.txt", "different content"},
-	}
-	
-	for _, file := range testFiles {
-		filePath := filepath.Join(testDir, file.name)
-		if err := os.WriteFile(filePath, []byte(file.content), 0644); err != nil {
-			t.Fatalf("Failed to create test file %s: %v", file.name, err)
-		}
-	}
-	
-	// Create shutdown channel and hash manager
-	shutdownChan := make(chan struct{})
-	defer close(shutdownChan)
-	
-	hashManager := dc.newAlgorithmHashManager(2, shutdownChan)
-	defer hashManager.Shutdown()
-	
-	// Create enhanced iterator
-	iterator := NewEnhancedFilesystemScanIterator(dc, []string{testDir}, "test-integration", hashManager)
-	defer iterator.Close()
-	
-	// Create dupes callback to use with unified algorithm
-	dupesCallback := NewDupesCallback("test-integration")
-	defer dupesCallback.Clear()
-	
-	// Run unified algorithm with enhanced iterator
-	err = hwangLinUnified(iterator, nil, dupesCallback)
-	if err != nil {
-		t.Fatalf("Unified algorithm failed: %v", err)
-	}
-	
-	// Verify duplicate detection worked
-	duplicates := dupesCallback.GetResults()
-	if len(duplicates) != 1 {
-		t.Errorf("Expected 1 duplicate group, got %d", len(duplicates))
-	}
-	
-	if len(duplicates) > 0 {
-		duplicateGroup := duplicates[0]
-		if len(duplicateGroup.Files) != 2 {
-			t.Errorf("Expected 2 files in duplicate group, got %d", len(duplicateGroup.Files))
-		}
-		
-		// Verify it's the correct duplicate files
-		expectedFiles := []string{"duplicate1.txt", "duplicate2.txt"}
-		foundFiles := duplicateGroup.Files
-		
-		// Sort for comparison
-		if len(foundFiles) >= 2 && foundFiles[0] > foundFiles[1] {
-			foundFiles[0], foundFiles[1] = foundFiles[1], foundFiles[0]
-		}
-		
-		for i, expected := range expectedFiles {
-			if i < len(foundFiles) && foundFiles[i] != expected {
-				t.Errorf("Expected duplicate file %s, got %s", expected, foundFiles[i])
-			}
-		}
-	}
-}
+// Integration tests removed - deprecated v0.6 EnhancedFilesystemScanIterator integration
+// with v0.7 hwangLinUnified algorithm. Equivalent functionality is tested
+// by UnifiedFilesystemScanIterator tests which use the proper BinaryEntryIterator interface.
 
 // Benchmark enhanced filesystem scan iterator
 func BenchmarkEnhancedFilesystemScanIterator(b *testing.B) {

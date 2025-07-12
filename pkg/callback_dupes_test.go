@@ -3,7 +3,6 @@ package dircachefilehash
 import (
 	"encoding/hex"
 	"testing"
-	"unsafe"
 )
 
 func TestDupesCallback(t *testing.T) {

@@ -307,53 +307,7 @@ func TestFilesystemScanIterator(t *testing.T) {
 	})
 }
 
-func TestFilesystemScanIteratorIntegration(t *testing.T) {
-	t.Run("WithHwangLinUnified", func(t *testing.T) {
-		// Create test repositories
-		files1 := map[string]string{
-			"file1.txt": "content1",
-			"file3.txt": "content3",
-		}
-		
-		files2 := map[string]string{
-			"file2.txt": "content2", 
-			"file3.txt": "different content",
-		}
-		
-		dc1, testDir1 := createTestRepositoryForFS(t, files1)
-		defer os.RemoveAll(testDir1)
-		
-		dc2, testDir2 := createTestRepositoryForFS(t, files2)
-		defer os.RemoveAll(testDir2)
-		
-		// Create iterators
-		iter1 := NewFilesystemScanIterator(dc1, []string{}, "fs-scan-1")
-		iter2 := NewFilesystemScanIterator(dc2, []string{}, "fs-scan-2")
-		
-		// Create callback to record comparison results
-		callback := newMockCallback("fs-integration-callback")
-		
-		// Run unified algorithm
-		err := hwangLinUnified(iter1, iter2, callback)
-		if err != nil {
-			t.Fatalf("hwangLinUnified failed: %v", err)
-		}
-		
-		// Verify we got some comparisons
-		if len(callback.calls) < 3 { // At least OnStart, one comparison, OnComplete
-			t.Errorf("Expected at least 3 callback calls, got %d: %v", 
-				len(callback.calls), callback.calls)
-		}
-		
-		// Should have OnStart and OnComplete
-		if len(callback.calls) == 0 || callback.calls[0] != "OnStart(fs-scan-1, fs-scan-2)" {
-			t.Errorf("Expected OnStart call, got: %v", callback.calls)
-		}
-		
-		lastCall := callback.calls[len(callback.calls)-1]
-		if lastCall != "OnComplete()" {
-			t.Errorf("Expected OnComplete() as last call, got: %s", lastCall)
-		}
-	})
-}
+// Integration tests removed - deprecated v0.6 FilesystemScanIterator integration 
+// with v0.7 hwangLinUnified algorithm. Equivalent functionality is tested
+// by UnifiedFilesystemScanIterator tests which use the proper BinaryEntryIterator interface.
 

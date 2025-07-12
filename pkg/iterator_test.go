@@ -3,7 +3,6 @@ package dircachefilehash
 import (
 	"fmt"
 	"testing"
-	"unsafe"
 )
 
 // mockIterator implements BinaryEntryIterator for testing
@@ -292,8 +291,12 @@ func TestBinaryEntryPath(t *testing.T) {
 	
 	for _, path := range testPaths {
 		entry := createMockBinaryEntry(path)
-		if entry.RelativePath() != path {
-			t.Errorf("Expected path '%s', got '%s'", path, entry.RelativePath())
+		actualPath, err := entry.RelativePath()
+		if err != nil {
+			t.Fatalf("Failed to get relative path: %v", err)
+		}
+		if actualPath != path {
+			t.Errorf("Expected path '%s', got '%s'", path, actualPath)
 		}
 	}
 }
