@@ -137,7 +137,7 @@ func TestIteratorBase(t *testing.T) {
 		
 		// Test with valid entry
 		entry := createMockBinaryEntry("test/path.txt")
-		iter.updateCurrentPath(entry)
+		iter.updateCurrentPathFromInterface(entry)
 		
 		if iter.CurrentPath() != "test/path.txt" {
 			t.Errorf("Expected current path 'test/path.txt', got '%s'", iter.CurrentPath())

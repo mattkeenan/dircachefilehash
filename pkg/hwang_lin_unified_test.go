@@ -276,8 +276,8 @@ func TestHwangLinUnifiedWithSkiplists(t *testing.T) {
 		leftPaths := []string{"file1.txt", "file3.txt", "file5.txt"}
 		rightPaths := []string{"file2.txt", "file3.txt", "file4.txt"}
 		
-		leftSkiplist := createTestSkiplist(leftPaths)
-		rightSkiplist := createTestSkiplist(rightPaths)
+		leftSkiplist := createTestSkiplistWrapper(leftPaths)
+		rightSkiplist := createTestSkiplistWrapper(rightPaths)
 		
 		// Create skiplist iterators
 		leftIter := NewSkiplistIterator(leftSkiplist, "left-skiplist")
