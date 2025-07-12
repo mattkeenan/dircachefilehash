@@ -37,17 +37,17 @@ type HwangLinCallback interface {
 	// - error: any error that occurred during processing
 	OnComparison(
 		result ComparisonResult,
-		leftEntry, rightEntry *binaryEntry,
+		leftEntry, rightEntry BinaryEntryInterface,
 		leftPath, rightPath string,
 	) (continueProcessing bool, err error)
 	
 	// OnLeftOnly is called when the left iterator has entries but right is exhausted.
 	// This is a convenience method for handling remaining entries from one side.
-	OnLeftOnly(entry *binaryEntry, path string) (continueProcessing bool, err error)
+	OnLeftOnly(entry BinaryEntryInterface, path string) (continueProcessing bool, err error)
 	
 	// OnRightOnly is called when the right iterator has entries but left is exhausted.
 	// This is a convenience method for handling remaining entries from one side.
-	OnRightOnly(entry *binaryEntry, path string) (continueProcessing bool, err error)
+	OnRightOnly(entry BinaryEntryInterface, path string) (continueProcessing bool, err error)
 	
 	// OnStart is called before the algorithm begins processing.
 	// This allows callbacks to initialize state, validate inputs, etc.
@@ -83,11 +83,11 @@ func (cb *CallbackBase) OnComplete(err error) error {
 }
 
 // OnLeftOnly provides a default implementation that continues processing
-func (cb *CallbackBase) OnLeftOnly(entry *binaryEntry, path string) (bool, error) {
+func (cb *CallbackBase) OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	return true, nil
 }
 
 // OnRightOnly provides a default implementation that continues processing
-func (cb *CallbackBase) OnRightOnly(entry *binaryEntry, path string) (bool, error) {
+func (cb *CallbackBase) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	return true, nil
 }

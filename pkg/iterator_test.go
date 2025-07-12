@@ -6,16 +6,16 @@ import (
 	"unsafe"
 )
 
-// mockIterator implements PathEntryIterator for testing
+// mockIterator implements BinaryEntryIterator for testing
 type mockIterator struct {
 	iteratorBase
-	entries []*binaryEntry
+	entries []BinaryEntryInterface
 	index   int
 	closeError error
 }
 
 // newMockIterator creates a mock iterator with predefined entries
-func newMockIterator(name string, entries []*binaryEntry) *mockIterator {
+func newMockIterator(name string, entries []BinaryEntryInterface) *mockIterator {
 	return &mockIterator{
 		iteratorBase: iteratorBase{name: name},
 		entries:      entries,
@@ -24,7 +24,7 @@ func newMockIterator(name string, entries []*binaryEntry) *mockIterator {
 }
 
 // Next returns the next entry
-func (mi *mockIterator) Next() (*binaryEntry, error) {
+func (mi *mockIterator) Next() (BinaryEntryInterface, error) {
 	if err := mi.checkClosed(); err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (mi *mockIterator) Next() (*binaryEntry, error) {
 	
 	entry := mi.entries[mi.index]
 	mi.index++
-	mi.updateCurrentPath(entry)
+	mi.updateCurrentPathFromInterface(entry)
 	
 	return entry, nil
 }
@@ -47,25 +47,32 @@ func (mi *mockIterator) Close() error {
 	return mi.closeError
 }
 
-// Helper function to create a binaryEntry with a specific path
+// Helper function to create a BinaryEntryInterface with a specific path
 // This creates a proper memory layout that RelativePath() can handle
-func createMockBinaryEntry(path string) *binaryEntry {
-	// Create a properly sized buffer like the real system would
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(path) + 1
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
+func createMockBinaryEntry(path string) BinaryEntryInterface {
+	// Use the existing test infrastructure
+	testData := &TestEntryData{
+		RelativePath: path,
+		Size:         128,
+		CTimeWall:    encodeWallTime(1234567890, 0),
+		MTimeWall:    encodeWallTime(1234567900, 0),
+		Dev:          1,
+		Ino:          123,
+		Mode:         0644,
+		UID:          1000,
+		GID:          1000,
+		FileSize:     100,
+		HashType:     uint16(HashTypeSHA1),
+		EntryFlags:   0,
+		IsDeleted:    false,
+	}
 	
-	data := make([]byte, entrySize)
-	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-	entry.Size = uint32(entrySize)
+	// Set a simple hash pattern
+	for i := 0; i < 20; i++ {
+		testData.Hash[i] = byte(i + len(path)%20)
+	}
 	
-	// The path is stored AFTER the binaryEntry struct, not within it
-	pathOffset := baseSize
-	copy(data[pathOffset:], path)
-	data[pathOffset+len(path)] = 0 // null terminator
-	
-	return entry
+	return createBESkiplist(&testing.T{}, testData)
 }
 
 func TestIteratorBase(t *testing.T) {
@@ -147,7 +154,7 @@ func TestIteratorBase(t *testing.T) {
 
 func TestMockIterator(t *testing.T) {
 	// Create test entries
-	entries := []*binaryEntry{
+	entries := []BinaryEntryInterface{
 		createMockBinaryEntry("file1.txt"),
 		createMockBinaryEntry("file2.txt"),
 		createMockBinaryEntry("subdir/file3.txt"),
@@ -209,7 +216,7 @@ func TestMockIterator(t *testing.T) {
 	})
 	
 	t.Run("EmptyIterator", func(t *testing.T) {
-		iter := newMockIterator("empty-mock", []*binaryEntry{})
+		iter := newMockIterator("empty-mock", []BinaryEntryInterface{})
 		defer iter.Close()
 		
 		// Should be immediately exhausted

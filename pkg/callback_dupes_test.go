@@ -126,7 +126,7 @@ func TestDupesCallback(t *testing.T) {
 		entry1 := createTestBinaryEntry("file1.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
 		entry2 := createTestBinaryEntry("file2.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2") // Same hash
 		entry3 := createTestBinaryEntry("deleted.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2") // Same hash but deleted
-		entry3.SetDeleted() // Mark as deleted
+		entry3.SetDeleted(true) // Mark as deleted
 		
 		err := callback.OnStart("left", "right")
 		if err != nil {
@@ -319,11 +319,12 @@ func TestDupesCallback(t *testing.T) {
 		}
 		
 		// Add all entries
-		entries := []*binaryEntry{entry1a, entry1b, entry1c, entry2a, entry2b, entry3}
+		entries := []BinaryEntryInterface{entry1a, entry1b, entry1c, entry2a, entry2b, entry3}
 		for _, entry := range entries {
-			_, err = callback.OnComparison(ComparisonRightFirst, nil, entry, "", entry.RelativePath())
+			path, _ := entry.RelativePath()
+			_, err = callback.OnComparison(ComparisonRightFirst, nil, entry, "", path)
 			if err != nil {
-				t.Fatalf("OnComparison failed for entry %s: %v", entry.RelativePath(), err)
+				t.Fatalf("OnComparison failed for entry %s: %v", path, err)
 			}
 		}
 		
@@ -446,12 +447,12 @@ func TestDupesCallback(t *testing.T) {
 func TestDupesCallbackIntegration(t *testing.T) {
 	t.Run("WithUnifiedAlgorithm", func(t *testing.T) {
 		// Create mock iterators with duplicate files
-		leftIter := newMockIterator("left-iter", []*binaryEntry{
+		leftIter := newMockIterator("left-iter", []BinaryEntryInterface{
 			createTestBinaryEntry("old1.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"),
 			createTestBinaryEntry("old2.txt", "f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2"),
 		})
 		
-		rightIter := newMockIterator("right-iter", []*binaryEntry{
+		rightIter := newMockIterator("right-iter", []BinaryEntryInterface{
 			createTestBinaryEntry("new1.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"), // Same hash as old1.txt
 			createTestBinaryEntry("new2.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"), // Same hash as old1.txt & new1.txt
 			createTestBinaryEntry("new3.txt", "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b"), // Different hash
@@ -513,56 +514,50 @@ func TestDupesCallbackIntegration(t *testing.T) {
 }
 
 // Helper function to create test binary entries with specific paths and hashes
-func createTestBinaryEntry(relativePath, hashStr string) *binaryEntry {
-	// Create a minimal test entry with the specified path and hash
-	pathBytes := []byte(relativePath)
-	
-	// Calculate entry size with 8-byte alignment
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(pathBytes) + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
-	
-	// Allocate memory for the entry
-	data := make([]byte, entrySize)
-	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-	
-	// Set basic fields
-	entry.Size = uint32(entrySize)
-	entry.HashType = uint16(HashTypeSHA1)
-	entry.FileSize = 100 // Arbitrary test file size
-	entry.EntryFlags = 0 // Not deleted
+func createTestBinaryEntry(relativePath, hashStr string) BinaryEntryInterface {
+	// Create test data using the standard test framework
+	testData := &TestEntryData{
+		RelativePath: relativePath,
+		Size:         128,
+		CTimeWall:    encodeWallTime(1234567890, 0),
+		MTimeWall:    encodeWallTime(1234567900, 0),
+		Dev:          1,
+		Ino:          123,
+		Mode:         0644,
+		UID:          1000,
+		GID:          1000,
+		FileSize:     100,
+		HashType:     uint16(HashTypeSHA1),
+		EntryFlags:   0, // Not deleted
+		IsDeleted:    false,
+	}
 	
 	// Set hash - decode hex string to binary
-	for i := range entry.Hash {
-		entry.Hash[i] = 0 // Clear all bytes first
+	for i := range testData.Hash {
+		testData.Hash[i] = 0 // Clear all bytes first
 	}
 	
 	// If hashStr looks like a hex string, decode it
 	if len(hashStr) > 0 {
-		if len(hashStr)%2 == 0 && len(hashStr) <= 128 { // Valid hex length, max 64 bytes = 128 hex chars
+		if len(hashStr)%2 == 0 && len(hashStr) <= 40 { // SHA1 is 20 bytes = 40 hex chars
 			hashBytes, err := hex.DecodeString(hashStr)
-			if err == nil && len(hashBytes) <= 64 {
+			if err == nil && len(hashBytes) <= 20 {
 				// Successfully decoded hex string
-				copy(entry.Hash[:], hashBytes)
+				copy(testData.Hash[:], hashBytes)
 			} else {
 				// Fallback: create pattern from string
 				for i := 0; i < 20 && i < len(hashStr); i++ {
-					entry.Hash[i] = hashStr[i%len(hashStr)]
+					testData.Hash[i] = hashStr[i%len(hashStr)]
 				}
 			}
 		} else {
 			// Create pattern from string for non-hex input
 			for i := 0; i < 20 && i < len(hashStr); i++ {
-				entry.Hash[i] = hashStr[i%len(hashStr)]
+				testData.Hash[i] = hashStr[i%len(hashStr)]
 			}
 		}
 	}
 	
-	// Copy path after the struct
-	pathOffset := baseSize
-	copy(data[pathOffset:], pathBytes)
-	data[pathOffset+len(pathBytes)] = 0 // null terminator
-	
-	return entry
+	// Use the existing test infrastructure
+	return createBESkiplist(&testing.T{}, testData)
 }

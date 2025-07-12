@@ -7,13 +7,13 @@ import (
 func TestHwangLinUnified(t *testing.T) {
 	t.Run("BasicComparison", func(t *testing.T) {
 		// Create two sets of test entries
-		leftEntries := []*binaryEntry{
+		leftEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file3.txt"),
 			createMockBinaryEntry("file5.txt"),
 		}
 		
-		rightEntries := []*binaryEntry{
+		rightEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file2.txt"),
 			createMockBinaryEntry("file3.txt"),
 			createMockBinaryEntry("file4.txt"),
@@ -55,8 +55,8 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("EmptyIterators", func(t *testing.T) {
-		leftIter := newMockIterator("empty-left", []*binaryEntry{})
-		rightIter := newMockIterator("empty-right", []*binaryEntry{})
+		leftIter := newMockIterator("empty-left", []BinaryEntryInterface{})
+		rightIter := newMockIterator("empty-right", []BinaryEntryInterface{})
 		callback := newMockCallback("empty-callback")
 		
 		err := hwangLinUnified(leftIter, rightIter, callback)
@@ -81,13 +81,13 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("LeftOnlyEntries", func(t *testing.T) {
-		leftEntries := []*binaryEntry{
+		leftEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 		}
 		
 		leftIter := newMockIterator("left-iter", leftEntries)
-		rightIter := newMockIterator("empty-right", []*binaryEntry{})
+		rightIter := newMockIterator("empty-right", []BinaryEntryInterface{})
 		callback := newMockCallback("left-only-callback")
 		
 		err := hwangLinUnified(leftIter, rightIter, callback)
@@ -114,12 +114,12 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("RightOnlyEntries", func(t *testing.T) {
-		rightEntries := []*binaryEntry{
+		rightEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 		}
 		
-		leftIter := newMockIterator("empty-left", []*binaryEntry{})
+		leftIter := newMockIterator("empty-left", []BinaryEntryInterface{})
 		rightIter := newMockIterator("right-iter", rightEntries)
 		callback := newMockCallback("right-only-callback")
 		
@@ -147,13 +147,13 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("EarlyStopFromCallback", func(t *testing.T) {
-		leftEntries := []*binaryEntry{
+		leftEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 			createMockBinaryEntry("file3.txt"),
 		}
 		
-		rightEntries := []*binaryEntry{
+		rightEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 			createMockBinaryEntry("file3.txt"),
@@ -193,12 +193,12 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("CallbackError", func(t *testing.T) {
-		leftEntries := []*binaryEntry{
+		leftEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 		}
 		
-		rightEntries := []*binaryEntry{
+		rightEntries := []BinaryEntryInterface{
 			createMockBinaryEntry("file1.txt"),
 			createMockBinaryEntry("file2.txt"),
 		}
@@ -229,8 +229,8 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("StartError", func(t *testing.T) {
-		leftIter := newMockIterator("left-iter", []*binaryEntry{})
-		rightIter := newMockIterator("right-iter", []*binaryEntry{})
+		leftIter := newMockIterator("left-iter", []BinaryEntryInterface{})
+		rightIter := newMockIterator("right-iter", []BinaryEntryInterface{})
 		callback := newMockCallback("start-error-callback")
 		
 		callback.onStartError = true
@@ -246,8 +246,8 @@ func TestHwangLinUnified(t *testing.T) {
 	})
 	
 	t.Run("NilParameters", func(t *testing.T) {
-		leftIter := newMockIterator("left-iter", []*binaryEntry{})
-		rightIter := newMockIterator("right-iter", []*binaryEntry{})
+		leftIter := newMockIterator("left-iter", []BinaryEntryInterface{})
+		rightIter := newMockIterator("right-iter", []BinaryEntryInterface{})
 		callback := newMockCallback("callback")
 		
 		// Test nil left iterator

@@ -28,7 +28,7 @@ func newMockCallback(name string) *mockCallback {
 // OnComparison records the call and optionally stops or errors
 func (mc *mockCallback) OnComparison(
 	result ComparisonResult,
-	leftEntry, rightEntry *binaryEntry,
+	leftEntry, rightEntry BinaryEntryInterface,
 	leftPath, rightPath string,
 ) (bool, error) {
 	callDesc := fmt.Sprintf("OnComparison(%s, %s, %s)", 
@@ -47,14 +47,14 @@ func (mc *mockCallback) OnComparison(
 }
 
 // OnLeftOnly records the call
-func (mc *mockCallback) OnLeftOnly(entry *binaryEntry, path string) (bool, error) {
+func (mc *mockCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	callDesc := fmt.Sprintf("OnLeftOnly(%s)", path)
 	mc.calls = append(mc.calls, callDesc)
 	return true, nil
 }
 
 // OnRightOnly records the call
-func (mc *mockCallback) OnRightOnly(entry *binaryEntry, path string) (bool, error) {
+func (mc *mockCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	callDesc := fmt.Sprintf("OnRightOnly(%s)", path)
 	mc.calls = append(mc.calls, callDesc)
 	return true, nil

@@ -6,7 +6,7 @@ import (
 )
 
 // hwangLinUnified implements the unified Hwang-Lin algorithm that works with
-// any combination of PathEntryIterators and HwangLinCallbacks.
+// any combination of BinaryEntryIterators and HwangLinCallbacks.
 //
 // This replaces the various specialized Hwang-Lin implementations throughout
 // the codebase with a single, flexible algorithm that can handle:
@@ -18,7 +18,7 @@ import (
 // The algorithm maintains the same O(n+m) efficiency as the original
 // Hwang-Lin algorithm while providing composable, testable components.
 func hwangLinUnified(
-	leftIter, rightIter PathEntryIterator,
+	leftIter, rightIter BinaryEntryIterator,
 	callback HwangLinCallback,
 ) error {
 	if leftIter == nil || rightIter == nil || callback == nil {
@@ -57,10 +57,14 @@ func hwangLinUnified(
 		
 		// Get paths safely (handle nil entries)
 		if leftEntry != nil {
-			leftPath = leftEntry.RelativePath()
+			if path, err := leftEntry.RelativePath(); err == nil {
+				leftPath = path
+			}
 		}
 		if rightEntry != nil {
-			rightPath = rightEntry.RelativePath()
+			if path, err := rightEntry.RelativePath(); err == nil {
+				rightPath = path
+			}
 		}
 		
 		// Determine comparison result

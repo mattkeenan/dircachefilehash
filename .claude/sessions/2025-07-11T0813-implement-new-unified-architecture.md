@@ -618,3 +618,130 @@ Based on the 6-phase migration plan in `new-architecture.md`:
 **Issue Encountered**: Interface mismatch between BinaryEntryIterator (returns BinaryEntryInterface) and hwangLinUnified (expects PathEntryIterator returning *binaryEntry)
 
 **Next Step**: Create version of unified algorithm that works with BinaryEntryInterface to complete the streaming architecture implementation
+
+### Update - 2025-07-12T14:05:40Z
+
+**Summary**: Discovered critical architectural duplication issue and documented unified solution
+
+**Architectural Discovery**: Found bifurcated iterator hierarchy causing major technical debt:
+
+**Problem Identified**:
+- **Two parallel iterator interfaces**: `PathEntryIterator` (returns `*binaryEntry`) vs `BinaryEntryIterator` (returns `BinaryEntryInterface`)
+- **Violates "best part is no part"** - duplicate patterns doing essentially the same thing
+- **Splits codebase** - existing `hwangLinUnified()` can't use new `BinaryEntryInterface` iterators
+- **Prevents unified algorithm adoption** across all data sources
+
+**Root Cause Analysis**:
+1. `PathEntryIterator` created first for unified algorithm proof-of-concept
+2. `BinaryEntryInterface` designed later for unified data access across four data sources  
+3. `BinaryEntryIterator` created as separate hierarchy instead of unification
+4. No architectural consolidation resulted in bifurcated system
+
+**Solution Chosen**: Unified Single Iterator Interface
+- **Converge on `BinaryEntryInterface`** as universal data access pattern
+- **Single `EntryIterator` interface** - all iterators return `BinaryEntryInterface`
+- **Universal algorithm compatibility** - `hwangLinUnified()` works with all data sources
+- **Legacy compatibility** via `interface.GetUnderlyingEntry()` when needed
+
+**Documentation Updated**:
+- Added comprehensive "Architectural Discovery" section to new-architecture.md
+- Detailed problem analysis, root cause, solution rationale, and migration strategy
+- Established technical and architectural benefits of unified approach
+
+**Next Steps**: Implement unified iterator interface migration:
+1. Update all iterator implementations to return `BinaryEntryInterface`
+2. Update `hwangLinUnified()` to use `BinaryEntryInterface`
+3. Gradually migrate existing callers
+4. Remove deprecated `PathEntryIterator` interface
+
+**Impact**: This architectural unification is essential for eliminating technical debt and achieving full streaming benefits across the entire codebase
+
+### Update - 2025-07-12T14:25:26Z
+
+**Summary**: Completed architecture document versioning and refined unified iterator interface decision
+
+**Git Changes**:
+- Modified: .claude/sessions/2025-07-11T0813-implement-new-unified-architecture.md, architecture-v0.7.md
+- Current branch: local-main (commit: 7ae4f3d)
+
+**Todo Progress**: 21 completed, 0 in progress, 3 pending
+- No new tasks completed (focused on documentation cleanup)
+
+**Major Documentation Reorganization**:
+- **Problem Identified**: Mixed up architecture documents causing confusion between v0.6 and v0.7 approaches
+- **Solution Implemented**: Clean versioned architecture documentation
+  - `architecture-v0.6.md`: Original unified algorithm approach (from commit 10ed599)
+  - `architecture-v0.7.md`: BinaryEntryInterface unified data access approach
+  - Removed confusing `new-architecture.md` file
+
+**Architectural Decision Refinement**:
+- **Key Insight**: Don't rename `BinaryEntryIterator` to `EntryIterator` 
+- **Rationale**: `BinaryEntryIterator` is perfectly descriptive (we ARE iterating over binary entries)
+- **Solution**: Keep `BinaryEntryIterator` name, eliminate `PathEntryIterator` interface
+- **Benefits**: Follows "best part is no part" - no unnecessary renaming
+
+**Documentation Updates**:
+- Updated architecture-v0.7.md with correct interface naming decision
+- Emphasized that the problem was dual hierarchy, not naming
+- Clarified migration strategy focuses on removing `PathEntryIterator`
+- Updated completion criteria to reflect correct interface names
+
+**Next Steps Clarified**: 
+1. Update `hwangLinUnified()` to use `BinaryEntryIterator` and `BinaryEntryInterface`
+2. Migrate all iterator implementations to implement `BinaryEntryIterator`  
+3. Remove deprecated `PathEntryIterator` interface
+
+**Impact**: Clear architectural documentation with proper versioning provides solid foundation for implementing the unified iterator interface approach without unnecessary complexity
+
+### Update - 2025-07-12T14:54:39Z
+
+**Summary**: Completed unified iterator interface migration by updating hwangLinUnified() to use BinaryEntryIterator and BinaryEntryInterface
+
+**Git Changes**:
+- Modified: .claude/sessions/2025-07-11T0813-implement-new-unified-architecture.md, architecture-v0.7.md, pkg/callback.go, pkg/callback_dupes.go, pkg/callback_dupes_test.go, pkg/callback_test.go, pkg/hwang_lin_unified.go, pkg/hwang_lin_unified_test.go, pkg/iterator_skiplist.go, pkg/iterator_test.go
+- Current branch: local-main (commit: 7ae4f3d)
+
+**Todo Progress**: 22 completed, 0 in progress, 3 pending
+- ✓ Completed: Update hwangLinUnified() to use BinaryEntryIterator and BinaryEntryInterface
+
+**Major Achievement**: Successfully eliminated bifurcated iterator hierarchy (PathEntryIterator vs BinaryEntryIterator) by converging on unified BinaryEntryIterator interface
+
+**Technical Implementation**:
+- **Updated Core Algorithm**: hwangLinUnified() now uses BinaryEntryIterator instead of PathEntryIterator
+- **Updated Callback Interface**: HwangLinCallback methods use BinaryEntryInterface instead of *binaryEntry
+- **Updated Test Infrastructure**: Mock iterators and callbacks converted to unified interfaces
+- **Created Temporary Bridge**: legacyBinaryEntryWrapper provides BinaryEntryInterface wrapper for existing *binaryEntry objects
+- **Fixed Type Mismatches**: Hash array ([64]byte → [20]byte) and flags (uint16 → uint32) conversions
+
+**Architecture Decision Applied**: Kept descriptive "BinaryEntryIterator" name instead of renaming to "EntryIterator", following "best part is no part" principle
+
+**User Feedback Received**: Questioned need for legacyBinaryEntryWrapper since v0.6 architecture will be removed - suggests removing temporary translation layers and using real BinaryEntryInterface implementations directly
+
+**Next Decision Required**: Remove legacyBinaryEntryWrapper and implement proper integration with existing BESkiplistEntry, BEScanEntry, etc. implementations
+
+**Architectural Decision for Next Context**: 
+**REMOVE LEGACY WRAPPER - Implement Direct Integration**
+
+Following "the best part is no part" principle, we should NOT create temporary legacy bridges that will be removed later. Instead:
+
+**Tasks for Next Implementation Session**:
+1. **Remove legacyBinaryEntryWrapper** - Delete the temporary bridge wrapper entirely
+2. **Update SkiplistIterator.Next()** - Return proper BESkiplistEntry objects using createBinaryEntryRef() and NewBESkiplistEntry()
+3. **Update FilesystemScanIterator** - Return BEScanEntry objects for ephemeral mmap entries
+4. **Update other iterators** - Use appropriate BinaryEntryInterface implementations (BEIndexFileEntry, etc.)
+5. **Remove PathEntryIterator interface** - Complete elimination of duplicate iterator hierarchy
+
+**Rationale**: Since v0.6 architecture will be completely removed, temporary translation layers add unnecessary complexity. Use the battle-tested BinaryEntryInterface implementations that are already complete and tested.
+
+**Integration Pattern**: 
+- SkiplistIterator: `*binaryEntry` → `binaryEntryRef` → `BESkiplistEntry`
+- FilesystemScanIterator: scan index → `BEScanEntry` 
+- Other iterators: Use appropriate BE* implementation based on data source type
+
+**Files to Update**:
+- pkg/iterator_skiplist.go (remove wrapper, use BESkiplistEntry)
+- pkg/iterator_filesystem.go (use BEScanEntry)
+- pkg/iterator_filesystem_enhanced.go (use BEScanEntry)
+- Remove all PathEntryIterator references
+
+This completes the unified iterator interface migration without temporary scaffolding.

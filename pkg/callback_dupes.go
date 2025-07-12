@@ -10,8 +10,8 @@ import (
 type DupesCallback struct {
 	CallbackBase
 	
-	// Hash map storing entries by their hash value
-	hashMap map[string][]*binaryEntry
+	// Hash map storing file paths by their hash value
+	hashMap map[string][]string
 	
 	// Mutex to protect concurrent access to hashMap
 	mutex sync.Mutex
@@ -24,7 +24,7 @@ type DupesCallback struct {
 func NewDupesCallback(name string) *DupesCallback {
 	return &DupesCallback{
 		CallbackBase: CallbackBase{name: name},
-		hashMap:      make(map[string][]*binaryEntry),
+		hashMap:      make(map[string][]string),
 		results:      nil,
 	}
 }
@@ -32,7 +32,7 @@ func NewDupesCallback(name string) *DupesCallback {
 // OnComparison processes each comparison result and adds entries to the hash map
 func (dc *DupesCallback) OnComparison(
 	result ComparisonResult,
-	leftEntry, rightEntry *binaryEntry,
+	leftEntry, rightEntry BinaryEntryInterface,
 	leftPath, rightPath string,
 ) (bool, error) {
 	dc.mutex.Lock()
@@ -42,9 +42,12 @@ func (dc *DupesCallback) OnComparison(
 	case ComparisonMatch:
 		// Both entries exist - add the right entry (current filesystem state)
 		// Skip the left entry as it represents older state
-		if rightEntry != nil && !rightEntry.IsDeleted() {
-			hashStr := rightEntry.HashString()
-			dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightEntry)
+		if rightEntry != nil {
+			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
+				if hashStr, err := rightEntry.HashString(); err == nil {
+					dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightPath)
+				}
+			}
 		}
 		
 	case ComparisonLeftFirst:
@@ -53,16 +56,22 @@ func (dc *DupesCallback) OnComparison(
 		
 	case ComparisonRightFirst:
 		// Right entry exists but not on left - this is a new/added file
-		if rightEntry != nil && !rightEntry.IsDeleted() {
-			hashStr := rightEntry.HashString()
-			dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightEntry)
+		if rightEntry != nil {
+			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
+				if hashStr, err := rightEntry.HashString(); err == nil {
+					dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightPath)
+				}
+			}
 		}
 		
 	case ComparisonLeftExhausted:
 		// Only right entries remain - these are all new/added files
-		if rightEntry != nil && !rightEntry.IsDeleted() {
-			hashStr := rightEntry.HashString()
-			dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightEntry)
+		if rightEntry != nil {
+			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
+				if hashStr, err := rightEntry.HashString(); err == nil {
+					dc.hashMap[hashStr] = append(dc.hashMap[hashStr], rightPath)
+				}
+			}
 		}
 		
 	case ComparisonRightExhausted:
@@ -74,18 +83,21 @@ func (dc *DupesCallback) OnComparison(
 }
 
 // OnLeftOnly handles remaining entries from the left iterator (deleted files)
-func (dc *DupesCallback) OnLeftOnly(entry *binaryEntry, path string) (bool, error) {
+func (dc *DupesCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	// Left-only entries represent deleted files, don't add to duplicates map
 	return true, nil
 }
 
 // OnRightOnly handles remaining entries from the right iterator (new files)
-func (dc *DupesCallback) OnRightOnly(entry *binaryEntry, path string) (bool, error) {
-	if entry != nil && !entry.IsDeleted() {
-		dc.mutex.Lock()
-		hashStr := entry.HashString()
-		dc.hashMap[hashStr] = append(dc.hashMap[hashStr], entry)
-		dc.mutex.Unlock()
+func (dc *DupesCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
+	if entry != nil {
+		if isDeleted, err := entry.IsDeleted(); err == nil && !isDeleted {
+			dc.mutex.Lock()
+			if hashStr, err := entry.HashString(); err == nil {
+				dc.hashMap[hashStr] = append(dc.hashMap[hashStr], path)
+			}
+			dc.mutex.Unlock()
+		}
 	}
 	return true, nil
 }
@@ -99,13 +111,8 @@ func (dc *DupesCallback) OnComplete(err error) error {
 	// Only include hashes that have more than one file
 	dc.results = make([]DuplicateGroup, 0)
 	
-	for hash, entries := range dc.hashMap {
-		if len(entries) > 1 {
-			files := make([]string, len(entries))
-			for i, entry := range entries {
-				files[i] = entry.RelativePath()
-			}
-			
+	for hash, files := range dc.hashMap {
+		if len(files) > 1 {
 			dc.results = append(dc.results, DuplicateGroup{
 				Hash:  hash,
 				Files: files,
@@ -137,9 +144,9 @@ func (dc *DupesCallback) GetHashMapStats() (totalHashes int, totalEntries int, d
 	totalHashes = len(dc.hashMap)
 	duplicateHashes = 0
 	
-	for _, entries := range dc.hashMap {
-		totalEntries += len(entries)
-		if len(entries) > 1 {
+	for _, files := range dc.hashMap {
+		totalEntries += len(files)
+		if len(files) > 1 {
 			duplicateHashes++
 		}
 	}
@@ -152,6 +159,6 @@ func (dc *DupesCallback) Clear() {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 	
-	dc.hashMap = make(map[string][]*binaryEntry)
+	dc.hashMap = make(map[string][]string)
 	dc.results = nil
 }
