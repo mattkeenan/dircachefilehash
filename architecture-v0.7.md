@@ -25,6 +25,40 @@ The unified HwangLin architecture needs to handle **four distinct data sources**
 - **Index with iterative skiplist**: Use mmap() since skiplist is being built
 - **Scanning**: Always mmap() since entries are ephemeral and updated in-place
 
+## Architectural Decision: Unified Iterator Interface
+
+**Critical Discovery**: During implementation, we identified a bifurcated iterator architecture that violated "best part is no part":
+
+### Problem: Dual Iterator Hierarchies
+1. **`PathEntryIterator`** (returns `*binaryEntry`) - Used by existing `hwangLinUnified()`
+2. **`BinaryEntryIterator`** (returns `BinaryEntryInterface`) - Used by new streaming architecture
+
+**Issues**:
+- Duplicate iterator patterns doing the same thing
+- Algorithm/iterator incompatibility
+- Maintenance burden of parallel hierarchies
+- Architectural confusion
+
+### Solution: Unified Interface
+**Decision**: Converge on `BinaryEntryInterface` as the universal data access pattern.
+
+```go
+// Single iterator interface for all use cases
+type EntryIterator interface {
+    Next() (BinaryEntryInterface, error)  // Always returns unified interface
+    CurrentPath() string
+    HasNext() bool
+    Name() string
+    Close() error
+}
+```
+
+**Benefits**:
+- Single source of truth eliminates duplication
+- Universal algorithm compatibility across all data sources
+- Streaming benefits throughout the codebase
+- Consistent error handling for ephemeral entries
+
 ## Current Problem
 
 The existing `binaryEntryRef` assumes everything comes from mmap'd index files with offset-based references. This doesn't handle:
