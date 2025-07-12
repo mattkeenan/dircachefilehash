@@ -35,6 +35,32 @@ func (dc *DirectoryCache) LoadMainIndex() (*skiplistWrapper, error) {
 	return skiplist, nil
 }
 
+// LoadMergedMainCacheIndex loads main index and merges cache index for unified architecture operations
+// This provides a reusable pattern for operations that need complete existing file state without scanning
+func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
+	// Load main index as base
+	mergedSkiplist, err := dc.LoadMainIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load main index: %w", err)
+	}
+	
+	// Load cache index and merge into the merged skiplist (avoid .Copy() - merge directly)
+	cacheSkiplist, err := dc.loadCacheIndex()
+	if err != nil {
+		// Cache index might not exist, continue with just main index
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to load cache index: %w", err)
+		}
+	} else {
+		// Merge cache into the merged skiplist (name reflects its actual purpose)
+		if err := mergedSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
+			return nil, fmt.Errorf("failed to merge cache index: %w", err)
+		}
+	}
+	
+	return mergedSkiplist, nil
+}
+
 // LoadCacheIndex loads the cache index file into a skiplist with "cache" context
 func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
