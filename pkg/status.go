@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 )
 
 // FileStatus represents the status of a file
@@ -119,24 +118,32 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		}
 	}
 
-	// Use Hwang-Lin merge algorithm to compare states
+	// Use unified Hwang-Lin algorithm with StatusCallback
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
 		VerboseLog(3, "Status: currentSkiplist length = %d", currentSkiplist.Length())
 	}
-	dc.hwangLinStatus(mainSkiplist, currentSkiplist, func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry) {
-		if IsDebugEnabled("scan") {
-			VerboseLog(3, "Status callback: %s -> %d", path, int(status))
-		}
-		switch status {
-		case StatusModified:
-			result.Modified = append(result.Modified, path)
-		case StatusAdded:
-			result.Added = append(result.Added, path)
-		case StatusDeleted:
-			result.Deleted = append(result.Deleted, path)
-		}
-	})
+	
+	// Create iterators for both skiplists
+	mainIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "main-index")
+	defer mainIterator.Close()
+	
+	currentIterator := NewBinaryEntrySkiplistIterator(currentSkiplist, "current-scan")
+	defer currentIterator.Close()
+	
+	// Create status callback
+	statusCallback := NewStatusCallback("status-check", dc)
+	
+	// Execute unified algorithm
+	if err := hwangLinUnified(mainIterator, currentIterator, statusCallback); err != nil {
+		return nil, fmt.Errorf("failed to compare main and current state: %w", err)
+	}
+	
+	// Get results from callback and merge with existing result
+	statusResult := statusCallback.GetResult()
+	result.Modified = statusResult.Modified
+	result.Added = statusResult.Added
+	result.Deleted = statusResult.Deleted
 
 	// Now that Status comparison is complete, cleanup scan index file
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
@@ -147,142 +154,11 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	return result, nil
 }
 
-// hwangLinStatus implements the Hwang-Lin merge algorithm using direct skiplist iteration (zero-copy)
-func (dc *DirectoryCache) hwangLinStatus(mainSkiplist, scanSkiplist *skiplistWrapper,
-	callback func(status FileStatus, path string, indexEntry, diskEntry *binaryEntry)) {
+// hwangLinStatus function removed - migrated to use hwangLinUnified with StatusCallback
+// This eliminates the duplicate Hwang-Lin implementation in favor of the unified architecture
 
-	// Use direct iteration instead of creating slices
-	indexCurrent := mainSkiplist.skiplist.First()
-	diskCurrent := scanSkiplist.skiplist.First()
-
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "hwangLinStatus: starting, indexCurrent=%v, diskCurrent=%v", indexCurrent != nil, diskCurrent != nil)
-	}
-
-	for indexCurrent != nil && diskCurrent != nil {
-		indexRef := indexCurrent.Item()
-		diskRef := diskCurrent.Item()
-
-		indexEntry := indexRef.GetBinaryEntry()
-		diskEntry := diskRef.GetBinaryEntry()
-
-		if indexEntry == nil {
-			// This should never happen - indicates a serious bug
-			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for index entry - this should never happen\n")
-			indexCurrent = indexCurrent.Next()
-			continue
-		}
-		if diskEntry == nil {
-			// This should never happen - indicates a serious bug
-			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for disk entry - this should never happen\n")
-			diskCurrent = diskCurrent.Next()
-			continue
-		}
-
-		// Skip deleted entries from index
-		if indexEntry.IsDeleted() {
-			indexCurrent = indexCurrent.Next()
-			continue
-		}
-
-		cmp := strings.Compare(indexEntry.RelativePath(), diskEntry.RelativePath())
-
-		if cmp == 0 {
-			// Same file - check if deleted or modified
-			// Create string copy to avoid use-after-free when scan memory is unmapped
-			pathCopy := string([]byte(indexEntry.RelativePath()))
-
-			// Check if the disk/cache entry is marked as deleted
-			if diskEntry.IsDeleted() {
-				callback(StatusDeleted, pathCopy, indexEntry, diskEntry)
-			} else if dc.isFileModified(indexEntry, diskEntry) {
-				callback(StatusModified, pathCopy, indexEntry, diskEntry)
-			} else {
-				callback(StatusUnchanged, pathCopy, indexEntry, diskEntry)
-			}
-			indexCurrent = indexCurrent.Next()
-			diskCurrent = diskCurrent.Next()
-		} else if cmp < 0 {
-			// File exists in index but not on disk - deleted
-			// Create string copy to avoid use-after-free when scan memory is unmapped
-			pathCopy := string([]byte(indexEntry.RelativePath()))
-			callback(StatusDeleted, pathCopy, indexEntry, nil)
-			indexCurrent = indexCurrent.Next()
-		} else {
-			// File exists on disk but not in index - added
-			// Create string copy to avoid use-after-free when scan memory is unmapped
-			pathCopy := string([]byte(diskEntry.RelativePath()))
-			callback(StatusAdded, pathCopy, nil, diskEntry)
-			diskCurrent = diskCurrent.Next()
-		}
-	}
-
-	// Handle remaining entries from index (all deleted)
-	for indexCurrent != nil {
-		indexRef := indexCurrent.Item()
-		indexEntry := indexRef.GetBinaryEntry()
-		if indexEntry != nil && !indexEntry.IsDeleted() {
-			// Create string copy to avoid use-after-free when scan memory is unmapped
-			pathCopy := string([]byte(indexEntry.RelativePath()))
-			callback(StatusDeleted, pathCopy, indexEntry, nil)
-		}
-		indexCurrent = indexCurrent.Next()
-	}
-
-	// Handle remaining entries from disk (all added)
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "hwangLinStatus: processing remaining disk entries, diskCurrent=%v", diskCurrent != nil)
-	}
-	for diskCurrent != nil {
-		diskRef := diskCurrent.Item()
-		diskEntry := diskRef.GetBinaryEntry()
-		if IsDebugEnabled("scan") {
-			if diskEntry != nil {
-				// Don't access RelativePath() in debug log - it might be freed memory
-				VerboseLog(3, "hwangLinStatus: processing disk entry")
-			} else {
-				VerboseLog(3, "hwangLinStatus: diskEntry is nil")
-			}
-		}
-		if diskEntry != nil {
-			// Create string copy to avoid use-after-free when scan memory is unmapped
-			pathCopy := string([]byte(diskEntry.RelativePath()))
-			callback(StatusAdded, pathCopy, nil, diskEntry)
-		} else {
-			// This should never happen - indicates a serious bug
-			fmt.Fprintf(os.Stderr, "[ERROR] GetBinaryEntry returned nil for remaining disk entry - this should never happen\n")
-		}
-		diskCurrent = diskCurrent.Next()
-	}
-}
-
-// isFileModified checks if a file has been modified using fast metadata comparison
-func (dc *DirectoryCache) isFileModified(indexEntry, diskEntry *binaryEntry) bool {
-	// Quick size check
-	if indexEntry.FileSize != diskEntry.FileSize {
-		return true
-	}
-
-	// Check ownership
-	if indexEntry.UID != diskEntry.UID || indexEntry.GID != diskEntry.GID {
-		return true
-	}
-
-	// Check timestamps using wall time
-	indexCTime := timeFromWall(indexEntry.CTimeWall)
-	diskCTime := timeFromWall(diskEntry.CTimeWall)
-	if indexCTime.Unix() != diskCTime.Unix() || indexCTime.Nanosecond() != diskCTime.Nanosecond() {
-		return true
-	}
-
-	indexMTime := timeFromWall(indexEntry.MTimeWall)
-	diskMTime := timeFromWall(diskEntry.MTimeWall)
-	if indexMTime.Unix() != diskMTime.Unix() || indexMTime.Nanosecond() != diskMTime.Nanosecond() {
-		return true
-	}
-
-	return false
-}
+// isFileModified function removed - migrated to use isFileModifiedInterface in StatusCallback
+// This eliminates duplicate file modification checking logic
 
 // HasChanges returns true if there are any changes
 func (sr *StatusResult) HasChanges() bool {

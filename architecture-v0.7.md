@@ -113,10 +113,10 @@ type BinaryEntryInterface interface {
 
 ### Implementation Types
 
-#### 1. SkiplistBinaryEntry (mmap-backed)
+#### 1. BESkiplist (mmap-backed)
 ```go
-// SkiplistBinaryEntry - mmap-backed entries in skiplist
-type SkiplistBinaryEntry struct {
+// BESkiplistEntry - mmap-backed entries in skiplist
+type BESkiplistEntry struct {
     ref   binaryEntryRef // mmap reference with offset
     mutex sync.RWMutex   // Per-entry locking for concurrent access
 }
@@ -127,10 +127,10 @@ type SkiplistBinaryEntry struct {
 **Memory management**: Managed by skiplist lifecycle, uses existing `mmapIndexFile` cleanup
 **Error handling**: Can fail if underlying mmap is unmapped
 
-#### 2. ReadWriteBinaryEntry (file I/O)
+#### 2. BEIndexFileIO (file I/O)
 ```go
-// ReadWriteBinaryEntry - standard file I/O access
-type ReadWriteBinaryEntry struct {
+// BEIndexFileIOEntry - standard file I/O access
+type BEIndexFileIOEntry struct {
     entry *binaryEntry   // Copy of data in memory
     mutex sync.RWMutex   // Per-entry locking
 }
@@ -141,10 +141,10 @@ type ReadWriteBinaryEntry struct {
 **Memory management**: Entry data owned by this structure
 **Error handling**: Standard I/O errors, no ephemeral failures
 
-#### 3. IterativeSkiplistBinaryEntry (mmap-backed)
+#### 3. BEIndexFileMmap (mmap-backed)
 ```go
-// IterativeSkiplistBinaryEntry - mmap with iterative skiplist building
-type IterativeSkiplistBinaryEntry struct {
+// BEIndexFileMmapEntry - mmap with iterative skiplist building
+type BEIndexFileMmapEntry struct {
     ref   binaryEntryRef // mmap reference with offset
     mutex sync.RWMutex   // Per-entry locking
 }
@@ -155,10 +155,10 @@ type IterativeSkiplistBinaryEntry struct {
 **Memory management**: Managed by iterative skiplist process
 **Error handling**: Can fail if underlying mmap is unmapped
 
-#### 4. ScanBinaryEntry (mmap-backed, ephemeral)
+#### 4. BEScan (mmap-backed, ephemeral)
 ```go
-// ScanBinaryEntry - ephemeral mmap entries for hash coordination
-type ScanBinaryEntry struct {
+// BEScanEntry - ephemeral mmap entries for hash coordination
+type BEScanEntry struct {
     ref   binaryEntryRef // mmap reference with offset (can change/disappear)
     mutex sync.RWMutex   // Per-entry locking for hash worker coordination
 }
@@ -178,31 +178,44 @@ type ScanBinaryEntry struct {
 
 ```go
 // Reading (multiple readers allowed)
-func (e *ScanBinaryEntry) HashString() string {
+func (e *BEScanEntry) HashString() (string, error) {
     e.mutex.RLock()
     defer e.mutex.RUnlock()
-    return hex.EncodeToString(e.hash[:])
+    hash, err := e.Hash()
+    if err != nil {
+        return "", err
+    }
+    return hex.EncodeToString(hash[:]), nil
 }
 
 // Writing (exclusive access)
-func (e *ScanBinaryEntry) SetHash(hashBytes []byte, hashType uint16) error {
+func (e *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
     e.mutex.Lock()
     defer e.mutex.Unlock()
-    copy(e.hash[:], hashBytes)
-    e.hashType = hashType
-    return nil
+    // Update hash in mmap'd memory
+    return e.updateHashInMmap(hashBytes, hashType)
 }
 
 // Batch operations (manual locking)
-func processEntry(entry BinaryEntryInterface) {
+func processEntry(entry BinaryEntryInterface) error {
     entry.RLock()
     defer entry.RUnlock()
     
     // Multiple field accesses without re-locking
-    path := entry.RelativePath()
-    hash := entry.HashString()
-    size := entry.FileSize()
+    path, err := entry.RelativePath()
+    if err != nil {
+        return err
+    }
+    hash, err := entry.HashString()
+    if err != nil {
+        return err
+    }
+    size, err := entry.FileSize()
+    if err != nil {
+        return err
+    }
     // ... process data
+    return nil
 }
 ```
 
@@ -217,33 +230,34 @@ func processEntry(entry BinaryEntryInterface) {
 ### Memory Management
 
 **Each implementation handles its own cleanup**:
-- **DirectBinaryEntry**: No cleanup needed
-- **MmapBinaryEntry**: Uses existing `mmapIndexFile` cleanup mechanisms
-- **SkiplistBinaryEntry**: Managed by skiplist lifecycle
-- **ScanBinaryEntry**: Uses existing scan index cleanup (`cleanupCurrentScanFile()`)
+- **BEIndexFileIOEntry**: No cleanup needed (data copied to memory)
+- **BEIndexFileMmapEntry**: Uses existing `mmapIndexFile` cleanup mechanisms
+- **BESkiplistEntry**: Managed by skiplist lifecycle
+- **BEScanEntry**: Uses existing scan index cleanup (`cleanupCurrentScanFile()`)
 
 No new lifecycle methods needed - existing patterns are sufficient.
 
 ## Migration Strategy
 
-### Phase 1: Unified Interface Implementation (Current)
+### Phase 1: Unified Interface Implementation (COMPLETED)
 - [x] Implement `BinaryEntryInterface` with four data source types
 - [x] Implement comprehensive test framework
 - [x] Design unified `BinaryEntryIterator` interface (eliminate `PathEntryIterator`)
-- [ ] Update `hwangLinUnified()` to use `BinaryEntryIterator` and `BinaryEntryInterface`
-- [ ] Update all iterator implementations to implement `BinaryEntryIterator`
+- [x] Update `hwangLinUnified()` to use `BinaryEntryIterator` and `BinaryEntryInterface`
+- [x] Update all iterator implementations to implement `BinaryEntryIterator`
 
-### Phase 2: Algorithm Integration
-- [ ] Migrate existing `hwangLinUnified()` to use unified interface
-- [ ] Update all callback implementations to use `BinaryEntryInterface`
-- [ ] Integration testing with unified algorithm and iterators
+### Phase 2: Algorithm Integration (COMPLETED)
+- [x] Migrate existing `hwangLinUnified()` to use unified interface
+- [x] Update all callback implementations to use `BinaryEntryInterface`
+- [x] Integration testing with unified algorithm and iterators
+- [x] Remove legacyBinaryEntryWrapper and implement direct BESkiplistEntry integration
 
-### Phase 3: Operation Migration
-- [ ] Migrate `FindDuplicatesUnified` to complete implementation
+### Phase 3: Operation Migration (IN PROGRESS)
+- [x] Migrate `FindDuplicatesUnified` to complete implementation
 - [ ] Migrate `Status` command to use unified approach
 - [ ] Migrate `Update` operations to use unified approach
 
-### Phase 4: Legacy Cleanup
+### Phase 4: Legacy Cleanup (PENDING)
 - [ ] Remove deprecated `PathEntryIterator` interface completely
 - [ ] Remove old iterator implementations that don't implement `BinaryEntryIterator`
 - [ ] Remove old specialized hwangLin implementations (hwangLinStatus, hwangLinCompareToSkiplist)
@@ -263,9 +277,9 @@ No new lifecycle methods needed - existing patterns are sufficient.
 
 ### Status Command (main+cache merge)
 ```go
-// Load main index → skiplist → SkiplistBinaryEntry
+// Load main index → skiplist → BESkiplistEntry
 mainSkiplist := loadMainIndexToSkiplist()
-// Load cache index → skiplist → SkiplistBinaryEntry  
+// Load cache index → skiplist → BESkiplistEntry  
 cacheSkiplist := loadCacheIndexToSkiplist()
 // Merge into single skiplist
 mergedSkiplist := mergeSkiplists(mainSkiplist, cacheSkiplist)
@@ -274,9 +288,9 @@ mergedSkiplist := mergeSkiplists(mainSkiplist, cacheSkiplist)
 
 ### Streaming Duplicate Detection
 ```go
-// Scan entries → ScanBinaryEntry (ephemeral, with locking)
-scanIterator := NewEnhancedFilesystemScanIterator(...)
-// Existing main index → MmapBinaryEntry (direct mmap access)
+// Scan entries → BEScanEntry (ephemeral, with locking)
+scanIterator := NewUnifiedFilesystemScanIterator(...)
+// Existing main index → BEIndexFileMmapEntry (direct mmap access)
 mainIterator := NewIndexFileIterator(...)
 // No skiplist creation needed → memory efficient
 hwangLinUnified(scanIterator, mainIterator, dupesCallback)
@@ -284,7 +298,7 @@ hwangLinUnified(scanIterator, mainIterator, dupesCallback)
 
 ### Recovery Operations
 ```go
-// Multiple index files → individual MmapBinaryEntry iterators
+// Multiple index files → individual BEIndexFileMmapEntry iterators
 for _, indexFile := range corruptedFiles {
     iterator := NewIndexFileIterator(indexFile)
     // Process without creating full merged view
@@ -309,12 +323,14 @@ for _, indexFile := range corruptedFiles {
 
 ## Implementation Files
 
-- `pkg/binary_entry_interface.go` - Interface definition
-- `pkg/binary_entry_direct.go` - DirectBinaryEntry implementation
-- `pkg/binary_entry_mmap.go` - MmapBinaryEntry implementation
-- `pkg/binary_entry_skiplist.go` - SkiplistBinaryEntry implementation
-- `pkg/binary_entry_scan.go` - ScanBinaryEntry implementation
+- `pkg/binary_entry_interface.go` - Interface definition and common patterns
+- `pkg/binary_entry_skip.go` - BESkiplistEntry implementation (mmap-backed)
+- `pkg/binary_entry_indexfile_io.go` - BEIndexFileIOEntry implementation (file I/O)
+- `pkg/binary_entry_indexfile_mmap.go` - BEIndexFileMmapEntry implementation (mmap-backed)
+- `pkg/binary_entry_scan.go` - BEScanEntry implementation (ephemeral mmap)
 - `pkg/binary_entry_interface_test.go` - Comprehensive tests
+- `pkg/iterator_filesystem_unified.go` - UnifiedFilesystemScanIterator
+- `pkg/hwang_lin_unified.go` - Unified algorithm using BinaryEntryIterator
 
 ## Documentation Updates
 
@@ -327,12 +343,13 @@ for _, indexFile := range corruptedFiles {
 
 - [x] All four BinaryEntryInterface implementations working correctly
 - [x] `BinaryEntryIterator` interface designed and documented (keep descriptive name)
-- [ ] Single `hwangLinUnified()` algorithm updated to use `BinaryEntryIterator`
+- [x] Single `hwangLinUnified()` algorithm updated to use `BinaryEntryIterator`
 - [x] Comprehensive test coverage for interface implementations
 - [x] Documentation updated with unified approach
-- [ ] Performance benchmarks showing streaming benefits achieved
+- [x] Legacy wrapper removal and direct integration implemented
 - [x] Memory management validation
 - [x] Concurrent access validation
+- [ ] Performance benchmarks showing streaming benefits achieved
 - [ ] `PathEntryIterator` interface removal completed
 
 This unified architecture eliminates duplicate iterator patterns, provides universal algorithm compatibility across all data sources, and enables the full streaming performance benefits (20-40x memory reduction, 3-5x speed improvements) while maintaining the robust error handling and concurrent safety required for production use.
