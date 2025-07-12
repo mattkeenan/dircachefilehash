@@ -319,3 +319,8 @@ func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
 	
 	return nil
 }
+
+// GetBinaryEntryRef returns the underlying binaryEntryRef for skiplist building
+func (sbe *BEScanEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
+	return sbe.entryRef, true
+}

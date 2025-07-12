@@ -57,6 +57,10 @@ type BinaryEntryInterface interface {
 	
 	// Entry lifecycle
 	IsValid() bool  // Quick check if entry is still accessible (for ephemeral entries)
+	
+	// Skiplist building capabilities
+	SupportsSkiplistBuilding() bool                    // Can entries be used to build skiplist?
+	GetBinaryEntryRef() (binaryEntryRef, bool)        // Get ref if available for skiplist building
 }
 
 // BinaryEntryImplementationType identifies the type of implementation
@@ -66,11 +70,11 @@ const (
 	// BESkiplist - mmap-backed entries in skiplist
 	BESkiplist BinaryEntryImplementationType = iota
 	
-	// BEIndexFile - standard file I/O access
-	BEIndexFile
+	// BEIndexFileIO - standard file I/O access
+	BEIndexFileIO
 	
-	// BEIndexFileWithSkiplist - mmap with iterative skiplist building
-	BEIndexFileWithSkiplist
+	// BEIndexFileMmap - mmap with iterative skiplist building
+	BEIndexFileMmap
 	
 	// BEScan - ephemeral mmap entries for hash coordination
 	BEScan
@@ -81,10 +85,10 @@ func (t BinaryEntryImplementationType) String() string {
 	switch t {
 	case BESkiplist:
 		return "BESkiplist"
-	case BEIndexFile:
-		return "BEIndexFile"
-	case BEIndexFileWithSkiplist:
-		return "BEIndexFileWithSkiplist"
+	case BEIndexFileIO:
+		return "BEIndexFileIO"
+	case BEIndexFileMmap:
+		return "BEIndexFileMmap"
 	case BEScan:
 		return "BEScan"
 	default:
@@ -95,14 +99,19 @@ func (t BinaryEntryImplementationType) String() string {
 // BinaryEntryBase provides common functionality for BinaryEntryInterface implementations
 // This can be embedded in concrete implementations to provide standard locking behavior
 type BinaryEntryBase struct {
-	mutex sync.RWMutex
+	mutex              sync.RWMutex
 	implementationType BinaryEntryImplementationType
+	supportsSkiplist   bool  // Whether this implementation supports skiplist building
 }
 
 // NewBinaryEntryBase creates a new BinaryEntryBase with the specified implementation type
 func NewBinaryEntryBase(implType BinaryEntryImplementationType) BinaryEntryBase {
+	// Determine skiplist support based on implementation type
+	supportsSkiplist := (implType == BESkiplist || implType == BEIndexFileMmap || implType == BEScan)
+	
 	return BinaryEntryBase{
 		implementationType: implType,
+		supportsSkiplist:   supportsSkiplist,
 	}
 }
 
@@ -124,6 +133,17 @@ func (base *BinaryEntryBase) Lock() {
 // Unlock releases a write lock
 func (base *BinaryEntryBase) Unlock() {
 	base.mutex.Unlock()
+}
+
+// SupportsSkiplistBuilding returns whether this implementation supports skiplist building
+func (base *BinaryEntryBase) SupportsSkiplistBuilding() bool {
+	return base.supportsSkiplist
+}
+
+// GetBinaryEntryRef returns a binaryEntryRef if available (default: not supported)
+// Implementations that support this should override this method
+func (base *BinaryEntryBase) GetBinaryEntryRef() (binaryEntryRef, bool) {
+	return binaryEntryRef{}, false
 }
 
 // ImplementationType returns the implementation type
