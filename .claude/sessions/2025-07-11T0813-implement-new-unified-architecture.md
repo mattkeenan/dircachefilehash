@@ -832,3 +832,43 @@ All major components are in place:
 - ✅ Update command migration complete
 
 The next phase will focus on optimizing remaining duplicate code and investigating pre-existing test issues.
+
+### Update - 2025-07-12T20:04:41Z
+
+**Summary**: Critical performance bug discovery and fix - needsHashing() placeholder causing 3M+ file re-hashing
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/callback_update.go, pkg/callback_update_test.go
+- Modified: pkg/iterator_filesystem_enhanced.go, pkg/iterator_filesystem_unified.go
+- Modified: pkg/status.go, pkg/update.go
+- Current branch: local-main (commit: fb577b8)
+
+**Todo Progress**: 1 in progress, 3 pending
+- 🔄 In Progress: Search for placeholder code in v0.7 architecture - FIXED needsHashing() critical bug
+- ⏳ Pending: Convert writeSkiplistWithVectorIOFiltered to use BinaryEntryInterface (NEW - mremap safety)
+- ⏳ Pending: Eliminate duplicate scanning in updateSpecificPaths function
+- ⏳ Pending: Investigate remaining symlink test failures
+
+**Critical Discovery**: User reported Status command consuming 22GB RAM and re-hashing all 3M files in repository instead of only changed files. Root cause: placeholder `needsHashing()` functions always returned `true`.
+
+**Architecture Understanding**: Learned that Status command DOES hash files (not metadata-only as initially thought) but caches results in `cache.idx` for performance. Both Status and Update need same optimization.
+
+**Solutions Implemented**:
+1. **Created needsHash() function**: Uses proven `isFileChangedFromScanned` logic with proper null checks
+2. **Two-phase architecture**: Iterator collects metadata, callback makes hashing decisions using both existing and scanned entries
+3. **Removed inefficient index reloading**: Eliminated per-file `LoadMainIndex()` calls causing memory explosion
+4. **Updated architecture docs**: Added comprehensive section explaining Status vs Update workflows and IoVec filtering differences
+
+**Key Insights**:
+- Status and Update both hash files but write to different destinations (cache.idx vs main.idx)
+- Status caches hash work for future operations (performance optimization)
+- Different filtering needed: Status excludes MainContext entries, Update excludes deleted entries
+- "Best part is no part" - avoid loading same index 3M times
+
+**Lessons Learned**:
+- Always check git history and existing implementations before making architectural claims
+- Evidence-based debugging - demand files and line numbers for assertions
+- Look for placeholder code patterns ("For now", "assume all", TODO comments)
+- Consider efficiency at system level, not just local function level
+
+**Next Priority**: Implement needsHash() calls in callbacks and test performance improvement on large repository.

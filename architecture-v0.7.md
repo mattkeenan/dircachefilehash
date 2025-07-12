@@ -352,6 +352,64 @@ for _, indexFile := range corruptedFiles {
 - **Correctness priority**: Architectural benefits outweigh theoretical performance concerns
 - **Batch operations**: Manual locking available for performance-critical paths
 
+## Critical Performance Optimization: needsHash() Function
+
+### Problem Identified
+During v0.7 implementation, a critical performance bug was discovered where Status and Update operations were hashing ALL files instead of only changed files. This caused operations on large repositories (3M+ files) to take hours instead of seconds.
+
+### Root Cause
+Iterator implementations initially used placeholder `needsHashing()` functions that always returned `true`, causing every file to be submitted for hashing regardless of whether it had actually changed.
+
+### Solution: Two-Phase Architecture
+**Phase 1: Iterator (Metadata Collection)**
+- Iterators scan filesystem and create entries with complete metadata (size, timestamps, ownership)
+- NO hashing decisions made at iterator level
+- Entries returned immediately to Hwang-Lin algorithm with empty hash placeholder
+
+**Phase 2: Callback (Intelligent Hashing)**
+- Callbacks receive both existing entry (from index) and new entry (from filesystem)
+- Use `needsHash(existingEntry, scannedPath)` function to compare metadata
+- Only submit hash jobs if metadata differs (size, mtime, ctime, uid, gid, mode)
+- Implements git-style efficiency: "not rehashing files that have the same name, size, mtime/ctime, uid & gid"
+
+### Status vs Update: Different Destinations, Same Optimization
+
+Both Status and Update operations follow identical workflows but differ in where results are written:
+
+**Status Command:**
+- Scans filesystem → compares with existing entries → hashes only changed files
+- Results written to temporary index → atomically renamed to `cache.idx`
+- **Purpose**: Cache hash work for future operations (performance optimization)
+- **Filter**: Include entries with context ≠ MainContext (exclude main index entries)
+
+**Update Command:**
+- Scans filesystem → compares with existing entries → hashes only changed files  
+- Results written to temporary index → atomically renamed to `main.idx`
+- **Purpose**: Update canonical state with latest changes
+- **Filter**: Exclude entries with deleted flag (remove deleted files from main index)
+
+### IoVec Writing with Context-Aware Filtering
+
+Final index writing uses vectorio with callback-based filtering:
+
+```go
+// Status: Write cache index (exclude main context entries)
+writeSkiplistWithVectorIOFiltered(cacheSkiplist, cacheFile, func(entry *binaryEntry, context string) bool {
+    return context != MainContext  // Include cache and scan contexts only
+})
+
+// Update: Write main index (exclude deleted entries)  
+writeSkiplistWithVectorIOFiltered(mainSkiplist, mainFile, func(entry *binaryEntry, context string) bool {
+    return !entry.IsDeleted()  // Include non-deleted entries only
+})
+```
+
+### Performance Impact
+- **Before**: All files hashed on every operation (O(n) where n = total files)
+- **After**: Only changed files hashed (O(m) where m = changed files)
+- **Expected improvement**: 10-100x faster on repositories with mostly unchanged files
+- **Cache benefit**: Status command preserves hash work, making subsequent operations faster
+
 ## Testing Strategy
 
 1. **Unit tests** for each implementation type

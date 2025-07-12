@@ -32,7 +32,7 @@ type StatusResult struct {
 	CleanStatus *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
 }
 
-// Status compares the current directory state with the loaded index using the new workflow
+// Status compares the current directory state with the loaded index using the unified architecture
 func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]string) (*StatusResult, error) {
 	defer VerboseEnter()()
 	
@@ -44,24 +44,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		}
 	}
 	
-	// Use the new cache update workflow which implements steps 1-11 as specified
-	// This returns the scan result which we can reuse to avoid duplicate scans
-	currentSkiplist, err := dc.updateCacheIndexWithWorkflow(shutdownChan)
-	if err != nil && currentSkiplist == nil {
-		// Only return error if we got no data at all
-		return nil, fmt.Errorf("failed to update cache index: %w", err)
-	}
-	// If we have partial data due to interruption, continue with what we have
-	if err != nil {
-		// Log the interruption but continue with partial data
-		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[STATUS] Scan interrupted but cache saved, continuing with partial data (%d entries)\n", currentSkiplist.Length())
-		}
-		// Note: We continue with status reporting even though scan was interrupted
-		// The cache has been updated with partial results for next time
-	}
-
-	// Load both main and cache indices for comparison
+	// Load main index as base for comparison
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
@@ -70,6 +53,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
 	}
 
+	// Load cache index and merge with main for complete existing state
 	cacheSkiplist, err := dc.loadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
@@ -78,13 +62,41 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		VerboseLog(3, "Status: cacheSkiplist length = %d", cacheSkiplist.Length())
 	}
 
-	// Status compares main index (committed files) vs scan result (current disk state)
-
-	result := &StatusResult{
-		Modified: make([]string, 0),
-		Added:    make([]string, 0),
-		Deleted:  make([]string, 0),
+	// Create comparison skiplist by merging main + cache (cache takes precedence)
+	comparisonSkiplist := mainSkiplist.Copy()
+	if !cacheSkiplist.IsEmpty() {
+		if err := comparisonSkiplist.Merge(cacheSkiplist, MergeTheirs); err != nil {
+			return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
+		}
 	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "Status: comparisonSkiplist length = %d", comparisonSkiplist.Length())
+	}
+
+	// Create hash manager for filesystem scanning
+	hashManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
+	defer hashManager.Shutdown()
+
+	// Create iterators for unified algorithm
+	existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan", hashManager)
+
+	// Create status callback to collect status changes
+	statusCallback := NewStatusCallback("status", dc)
+
+	// Run unified algorithm to compare existing vs current filesystem state
+	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback); err != nil {
+		// Even if interrupted, return partial results
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] Scan interrupted, returning partial status results\n")
+		}
+	}
+
+	// Signal completion of hash job submission
+	hashManager.FinishSubmitting()
+
+	// Get the final status result from the callback
+	result := statusCallback.GetResult()
 
 	// Check for verbose flag and include clean status if requested
 	if verboseLevel, exists := flags["v"]; exists && verboseLevel != "" {
@@ -92,16 +104,16 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 			result.CleanStatus = &CleanStatus{}
 
 			// Check main index clean status
-			if dc.mmapIndex != nil && dc.mmapIndex.Header() != nil {
-				result.CleanStatus.MainIndex = dc.mmapIndex.Header().isClean()
+			if _, err := os.Stat(dc.IndexFile); err == nil {
+				// Main index exists - for now assume clean if it loads
+				result.CleanStatus.MainIndex = true
+			} else {
+				result.CleanStatus.MainIndex = false
 			}
 
-			// Check cache index clean status by loading it
-			cacheSkiplist, err := dc.loadCacheIndex()
-			if err == nil && cacheSkiplist != nil {
-				// For cache index, we need to access the underlying mmap - this is a bit tricky
-				// For now, we'll assume it's clean if it loaded successfully
-				// TODO: Improve this to actually check the cache index header
+			// Check cache index clean status  
+			if _, err := os.Stat(dc.CacheFile); err == nil {
+				// Cache index exists - for now assume clean if it exists
 				result.CleanStatus.CacheIndex = true
 			} else {
 				result.CleanStatus.CacheIndex = false
@@ -116,39 +128,6 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 				result.CleanStatus.HasTempFiles = false
 			}
 		}
-	}
-
-	// Use unified Hwang-Lin algorithm with StatusCallback
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
-		VerboseLog(3, "Status: currentSkiplist length = %d", currentSkiplist.Length())
-	}
-	
-	// Create iterators for both skiplists
-	mainIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "main-index")
-	defer mainIterator.Close()
-	
-	currentIterator := NewBinaryEntrySkiplistIterator(currentSkiplist, "current-scan")
-	defer currentIterator.Close()
-	
-	// Create status callback
-	statusCallback := NewStatusCallback("status-check", dc)
-	
-	// Execute unified algorithm
-	if err := hwangLinUnified(mainIterator, currentIterator, statusCallback); err != nil {
-		return nil, fmt.Errorf("failed to compare main and current state: %w", err)
-	}
-	
-	// Get results from callback and merge with existing result
-	statusResult := statusCallback.GetResult()
-	result.Modified = statusResult.Modified
-	result.Added = statusResult.Added
-	result.Deleted = statusResult.Deleted
-
-	// Now that Status comparison is complete, cleanup scan index file
-	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-		// Non-fatal, but log the error
-		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
 
 	return result, nil

@@ -13,18 +13,14 @@ type UpdateCallback struct {
 	resultSkiplist  *skiplistWrapper
 	scanFileName    string
 	dc              *DirectoryCache
-	hashJobManager  *algorithmHashManager
-	jobIDCounter    uint64
 }
 
 // NewUpdateCallback creates a new UpdateCallback that matches the existing update logic
-func NewUpdateCallback(dc *DirectoryCache, scanFileName string, hashJobManager *algorithmHashManager) *UpdateCallback {
+func NewUpdateCallback(dc *DirectoryCache, scanFileName string) *UpdateCallback {
 	return &UpdateCallback{
 		resultSkiplist: NewSkiplistWrapper(16, ScanContext),
 		scanFileName:   scanFileName,
 		dc:             dc,
-		hashJobManager: hashJobManager,
-		jobIDCounter:   1,
 	}
 }
 
@@ -90,43 +86,23 @@ func (uc *UpdateCallback) OnComparison(
 	return true, nil // Continue processing
 }
 
-// createScanEntryAndHash creates a scan entry and submits it for hashing (matches hwangLinCompareToSkiplist logic)
+// createScanEntryAndHash collects a scan entry that has been processed by the iterator (matches hwangLinCompareToSkiplist logic)
 func (uc *UpdateCallback) createScanEntryAndHash(scanEntry BinaryEntryInterface) error {
-	// For the unified architecture, we expect the scan entry to already be properly created
-	// We just need to add it to our result skiplist and submit for hashing
+	// For the unified architecture, the UnifiedFilesystemScanIterator handles hashing internally
+	// We just need to add the already-processed entry to our result skiplist
 	
 	ref, ok := scanEntry.GetBinaryEntryRef()
 	if !ok {
 		return fmt.Errorf("scan entry does not support binaryEntryRef for update")
 	}
 	
-	// Insert into result skiplist
+	// Insert into result skiplist - entry should already be hashed by the iterator
 	uc.resultSkiplist.Insert(ref, ScanContext)
 	
-	// Submit for hashing using the hash manager
-	relPath, err := scanEntry.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get relative path for hashing: %w", err)
-	}
-	
-	absPath := filepath.Join(uc.dc.RootDir, relPath)
-	
-	// Submit hash job
-	jobID := uc.jobIDCounter
-	uc.jobIDCounter++
-	
 	if IsDebugEnabled("scanning") {
-		fmt.Fprintf(os.Stderr, "[UPDATE] Submitting hash job %d for file: %s\n", jobID, relPath)
+		relPath, _ := scanEntry.RelativePath()
+		fmt.Fprintf(os.Stderr, "[UPDATE] Collected scan entry for file: %s\n", relPath)
 	}
-	
-	// Submit to hash manager - create hash job in correct format
-	hashJob := &hashJobStart{
-		JobID:       jobID,
-		FilePath:    absPath,
-		IndexEntry:  ref,
-		ScannedPath: nil, // Not needed for unified architecture
-	}
-	uc.hashJobManager.SubmitHashJob(hashJob)
 	
 	return nil
 }

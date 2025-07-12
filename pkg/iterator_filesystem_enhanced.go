@@ -117,19 +117,8 @@ func (efsi *EnhancedFilesystemScanIterator) Next() (*binaryEntry, error) {
 		return nil, fmt.Errorf("failed to add to scan index: %w", err)
 	}
 	
-	// Check if entry needs hashing
-	if efsi.needsHashing(scanned) {
-		// Submit hash job and wait for completion
-		jobID := efsi.getNextJobID()
-		if err := efsi.submitHashJob(jobID, scanned, entryRef); err != nil {
-			return nil, fmt.Errorf("failed to submit hash job: %w", err)
-		}
-		
-		// Wait for hash completion
-		if err := efsi.waitForHashCompletion(jobID); err != nil {
-			return nil, fmt.Errorf("failed to wait for hash completion: %w", err)
-		}
-	}
+	// Phase 1: Iterator just creates entries with metadata (no hashing decisions here)
+	// The Hwang-Lin callback will decide whether to hash based on comparison with existing entries
 	
 	// Get the final entry (now with valid hash if needed)
 	entry := entryRef.GetBinaryEntry()
@@ -225,91 +214,7 @@ func (efsi *EnhancedFilesystemScanIterator) createScanIndex() (string, error) {
 	return scanFileName, nil
 }
 
-// needsHashing determines if the scanned file needs hashing
-func (efsi *EnhancedFilesystemScanIterator) needsHashing(scanned *scannedPath) bool {
-	// Quick optimization: Check if we can find an existing entry with matching metadata
-	// This implements the git-style shortcut described in design.md:
-	// "not rehashing files that have the same name (path), size, mtime/ctime, uid & gid"
-	
-	if efsi.dc == nil {
-		return true // No directory cache, must hash
-	}
-	
-	// Try to find existing entry in main index first
-	if existingEntry := efsi.findExistingEntry(scanned.RelPath); existingEntry != nil {
-		// Compare metadata to see if file might be unchanged
-		if efsi.metadataMatches(existingEntry, scanned) {
-			// Metadata matches - file likely unchanged, no hashing needed
-			return false
-		}
-	}
-	
-	// Either no existing entry found or metadata differs - need to hash
-	return true
-}
-
-// findExistingEntry attempts to find an existing entry for the given path
-func (efsi *EnhancedFilesystemScanIterator) findExistingEntry(relativePath string) *binaryEntry {
-	// Load main index to check for existing entry
-	mainSkiplist, err := efsi.dc.LoadMainIndex()
-	if err != nil {
-		return nil // Error loading index, assume needs hashing
-	}
-	
-	// Try to find entry in main index
-	if entry, _ := mainSkiplist.Find(relativePath); entry != nil {
-		return entry
-	}
-	
-	// Also check cache index for more recent changes
-	cacheSkiplist, err := efsi.dc.loadCacheIndex()
-	if err != nil {
-		return nil // Error loading cache, fall back to main result
-	}
-	
-	// Try to find entry in cache index (more recent than main)
-	if entry, _ := cacheSkiplist.Find(relativePath); entry != nil {
-		return entry
-	}
-	
-	return nil // No existing entry found
-}
-
-// metadataMatches compares filesystem metadata with index entry metadata
-func (efsi *EnhancedFilesystemScanIterator) metadataMatches(indexEntry *binaryEntry, scanned *scannedPath) bool {
-	// Compare file size - get from Info.Size()
-	if indexEntry.FileSize != uint64(scanned.Info.Size()) {
-		return false
-	}
-	
-	// Compare ownership - get from StatInfo
-	if scanned.StatInfo == nil {
-		return false // Can't compare without stat info
-	}
-	if indexEntry.UID != scanned.StatInfo.Uid || indexEntry.GID != scanned.StatInfo.Gid {
-		return false
-	}
-	
-	// Compare timestamps - use wall time format for consistency
-	indexCTime := timeFromWall(indexEntry.CTimeWall)
-	indexMTime := timeFromWall(indexEntry.MTimeWall)
-	
-	// Extract timestamps from scanned file's StatInfo - use same format as encodeWallTime
-	scannedCTime := time.Unix(scanned.StatInfo.Ctim.Sec, scanned.StatInfo.Ctim.Nsec)
-	scannedMTime := time.Unix(scanned.StatInfo.Mtim.Sec, scanned.StatInfo.Mtim.Nsec)
-	
-	// Compare timestamps (seconds and nanoseconds)
-	if indexCTime.Unix() != scannedCTime.Unix() || indexCTime.Nanosecond() != scannedCTime.Nanosecond() {
-		return false
-	}
-	
-	if indexMTime.Unix() != scannedMTime.Unix() || indexMTime.Nanosecond() != scannedMTime.Nanosecond() {
-		return false
-	}
-	
-	// All metadata matches - file likely unchanged
-	return true
-}
+// Note: needsHash function moved to package level for reuse between iterators
 
 // getNextJobID returns the next JobID in sequence
 func (efsi *EnhancedFilesystemScanIterator) getNextJobID() uint64 {

@@ -116,19 +116,8 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 		return nil, fmt.Errorf("failed to create scan entry: %w", err)
 	}
 	
-	// Check if entry needs hashing
-	if ufsi.needsHashing(scanned) {
-		// Submit hash job and wait for completion
-		jobID := ufsi.getNextJobID()
-		if err := ufsi.submitHashJob(jobID, scanned, scanEntry); err != nil {
-			return nil, fmt.Errorf("failed to submit hash job: %w", err)
-		}
-		
-		// Wait for hash completion
-		if err := ufsi.waitForHashCompletion(jobID); err != nil {
-			return nil, fmt.Errorf("failed to wait for hash completion: %w", err)
-		}
-	}
+	// Phase 1: Iterator just creates entries with metadata (no hashing decisions here)
+	// The Hwang-Lin callback will decide whether to hash based on comparison with existing entries
 	
 	// Update current path and return the interface
 	ufsi.updateCurrentPathFromInterface(scanEntry)
@@ -220,90 +209,41 @@ func (ufsi *UnifiedFilesystemScanIterator) createScanIndex() (string, error) {
 	return scanFileName, nil
 }
 
-// needsHashing determines if the scanned file needs hashing
-func (ufsi *UnifiedFilesystemScanIterator) needsHashing(scanned *scannedPath) bool {
-	// Quick optimization: Check if we can find an existing entry with matching metadata
-	// This implements the git-style shortcut described in design.md:
-	// "not rehashing files that have the same name (path), size, mtime/ctime, uid & gid"
-	
-	if ufsi.dc == nil {
-		return true // No directory cache, must hash
+// needsHash determines if the scanned file needs hashing by comparing with existing entry
+// Uses the same proven logic as isFileChangedFromScanned but with proper null checks
+func needsHash(existingEntry *binaryEntry, scanned *scannedPath) bool {
+	// If no existing entry, file is new and needs hashing
+	if existingEntry == nil {
+		return true
 	}
 	
-	// Try to find existing entry in main index first
-	if existingEntry := ufsi.findExistingEntry(scanned.RelPath); existingEntry != nil {
-		// Compare metadata to see if file might be unchanged
-		if ufsi.metadataMatches(existingEntry, scanned) {
-			// Metadata matches - file likely unchanged, no hashing needed
-			return false
-		}
+	// If no scanned info, assume needs hashing
+	if scanned == nil || scanned.StatInfo == nil {
+		return true
 	}
 	
-	// Either no existing entry found or metadata differs - need to hash
-	return true
-}
-
-// findExistingEntry attempts to find an existing entry for the given path
-func (ufsi *UnifiedFilesystemScanIterator) findExistingEntry(relativePath string) *binaryEntry {
-	// Load main index to check for existing entry
-	mainSkiplist, err := ufsi.dc.LoadMainIndex()
-	if err != nil {
-		return nil // Error loading index, assume needs hashing
+	stat := scanned.StatInfo
+	
+	// Quick size check
+	if existingEntry.FileSize != uint64(scanned.Info.Size()) {
+		return true
 	}
 	
-	// Try to find entry in main index
-	if entry, _ := mainSkiplist.Find(relativePath); entry != nil {
-		return entry
+	// Check ownership
+	if existingEntry.UID != stat.Uid || existingEntry.GID != stat.Gid {
+		return true
 	}
 	
-	// Also check cache index for more recent changes
-	cacheSkiplist, err := ufsi.dc.loadCacheIndex()
-	if err != nil {
-		return nil // Error loading cache, fall back to main result
+	// Check mode
+	if existingEntry.Mode != uint32(scanned.Info.Mode()) {
+		return true
 	}
 	
-	// Try to find entry in cache index (more recent than main)
-	if entry, _ := cacheSkiplist.Find(relativePath); entry != nil {
-		return entry
-	}
+	// Check timestamps using wall time encoding
+	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
+	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
 	
-	return nil // No existing entry found
-}
-
-// metadataMatches compares filesystem metadata with index entry metadata
-func (ufsi *UnifiedFilesystemScanIterator) metadataMatches(indexEntry *binaryEntry, scanned *scannedPath) bool {
-	// Compare file size - get from Info.Size()
-	if indexEntry.FileSize != uint64(scanned.Info.Size()) {
-		return false
-	}
-	
-	// Compare ownership - get from StatInfo
-	if scanned.StatInfo == nil {
-		return false // Can't compare without stat info
-	}
-	if indexEntry.UID != scanned.StatInfo.Uid || indexEntry.GID != scanned.StatInfo.Gid {
-		return false
-	}
-	
-	// Compare timestamps - use wall time format for consistency
-	indexCTime := timeFromWall(indexEntry.CTimeWall)
-	indexMTime := timeFromWall(indexEntry.MTimeWall)
-	
-	// Extract timestamps from scanned file's StatInfo - use same format as encodeWallTime
-	scannedCTime := time.Unix(scanned.StatInfo.Ctim.Sec, scanned.StatInfo.Ctim.Nsec)
-	scannedMTime := time.Unix(scanned.StatInfo.Mtim.Sec, scanned.StatInfo.Mtim.Nsec)
-	
-	// Compare timestamps (seconds and nanoseconds)
-	if indexCTime.Unix() != scannedCTime.Unix() || indexCTime.Nanosecond() != scannedCTime.Nanosecond() {
-		return false
-	}
-	
-	if indexMTime.Unix() != scannedMTime.Unix() || indexMTime.Nanosecond() != scannedMTime.Nanosecond() {
-		return false
-	}
-	
-	// All metadata matches - file likely unchanged
-	return true
+	return existingEntry.CTimeWall != currentCTime || existingEntry.MTimeWall != currentMTime
 }
 
 // getNextJobID returns the next JobID in sequence
