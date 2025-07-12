@@ -254,8 +254,47 @@ No new lifecycle methods needed - existing patterns are sufficient.
 
 ### Phase 3: Operation Migration (IN PROGRESS)
 - [x] Migrate `FindDuplicatesUnified` to complete implementation
-- [ ] Migrate `Status` command to use unified approach
+- [x] Migrate `Status` command to use unified approach
 - [ ] Migrate `Update` operations to use unified approach
+
+#### Update Command Migration Strategy
+
+The Update command migration follows the "best part is no part" principle by replacing the complex `performHwangLinScanToSkiplist` function (300+ lines) with the unified `hwangLinUnified` infrastructure:
+
+**Current Update Workflow:**
+1. Load main + cache indices → create `comparisonSkiplist` for change detection
+2. Call `performHwangLinScanToSkiplist(shutdownChan, paths, comparisonSkiplist)`
+   - Internally: filesystem scan + Hwang-Lin comparison + scan index building
+   - Returns `scanSkiplist` with only changed/new/deleted entries
+3. Merge `scanSkiplist` back into `comparisonSkiplist` for complete state
+4. Write final result to main index atomically
+
+**Unified Architecture Adaptation:**
+1. **Same:** Load main + cache indices → create `comparisonSkiplist`
+2. **Replace complex scan:** Instead of `performHwangLinScanToSkiplist`:
+   ```go
+   // Create iterators
+   existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist)
+   scanIterator := NewEnhancedFilesystemScanIterator(dc, paths, shutdownChan, hashManager)
+   
+   // Create update callback with same logic as hwangLinCompareToSkiplist
+   updateCallback := NewUpdateCallback(dc, scanFileName, hashManager)
+   
+   // Run unified algorithm (reuses existing infrastructure)
+   err := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
+   
+   // Get result (same as before)
+   scanSkiplist := updateCallback.GetResultSkiplist()
+   ```
+3. **Same:** Merge `scanSkiplist` back into `comparisonSkiplist`
+4. **Same:** Write final result to main index
+
+**Key Benefits:**
+- **Eliminates 300+ lines** of duplicate Hwang-Lin algorithm code
+- **Preserves exact behavior** through UpdateCallback that replicates `hwangLinCompareToSkiplist` logic
+- **Maintains performance** - streaming, concurrent hashing, memory efficiency unchanged
+- **Same error handling** - interruption handling, partial results work identically
+- **Reuses battle-tested infrastructure** - iterators, hash management, unified algorithm
 
 ### Phase 4: Legacy Cleanup (PENDING)
 - [ ] Remove deprecated `PathEntryIterator` interface completely
