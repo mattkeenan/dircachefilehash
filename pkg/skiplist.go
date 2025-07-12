@@ -128,6 +128,18 @@ func (sw *skiplistWrapper) ForEachContext(context string, callback func(*binaryE
 	})
 }
 
+// ForEachRef iterates through binaryEntryRef instances directly
+// This is useful for BinaryEntryInterface implementations that need the ref
+func (sw *skiplistWrapper) ForEachRef(callback func(binaryEntryRef, string) bool) {
+	for current := sw.skiplist.First(); current != nil; current = current.Next() {
+		context := current.Context()
+		ref := current.Item()
+		if !callback(*ref, context) {
+			break
+		}
+	}
+}
+
 // Merge merges another skiplist into this skiplist
 func (sw *skiplistWrapper) Merge(other *skiplistWrapper, strategy zcsl.MergeStrategy) error {
 	if other == nil {
