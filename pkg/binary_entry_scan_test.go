@@ -29,7 +29,7 @@ type scanTestCleanupInfo struct {
 	dc      *DirectoryCache
 }
 
-// createBEScan creates a BEScan for testing
+// createBEScan creates a BEScanEntry for testing
 // This sets up a temporary scan index and adds a test entry
 func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	// Create temporary directory for test

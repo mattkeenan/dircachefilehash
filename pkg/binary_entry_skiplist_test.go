@@ -8,12 +8,12 @@ import (
 	"unsafe"
 )
 
-// TestBESkiplistEntry runs the implementation-neutral test suite for BESkiplistEntry
-func TestBESkiplistEntry(t *testing.T) {
+// TestBESkiplist runs the implementation-neutral test suite for BESkiplist
+func TestBESkiplist(t *testing.T) {
 	suite := &BinaryEntryTestSuite{
-		Name:               "BESkiplistEntry",
-		CreateEntry:        createBESkiplistEntry,
-		CleanupEntry:       cleanupBESkiplistEntry,
+		Name:               "BESkiplist",
+		CreateEntry:        createBESkiplist,
+		CleanupEntry:       cleanupBESkiplist,
 		SupportsSetHash:    true,
 		SupportsSetDeleted: true,
 		IsEphemeral:        false, // Skiplist entries are stable
@@ -65,9 +65,9 @@ func createMockBinaryEntryFromTestData(testData *TestEntryData) *binaryEntry {
 	return entry
 }
 
-// createBESkiplistEntry creates a BESkiplistEntry for testing
+// createBESkiplist creates a BESkiplistEntry for testing
 // This creates a mock entry similar to how existing skiplist tests work
-func createBESkiplistEntry(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
+func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	// Update the expected size to match what will be created
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 	entrySize := int(testData.Size)
@@ -124,8 +124,8 @@ func createBESkiplistEntry(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	return skiplistEntry
 }
 
-// cleanupBESkiplistEntry cleans up resources created during testing
-func cleanupBESkiplistEntry(t *testing.T, entry BinaryEntryInterface) {
+// cleanupBESkiplist cleans up resources created during testing
+func cleanupBESkiplist(t *testing.T, entry BinaryEntryInterface) {
 	// Look up cleanup info from global map
 	if cleanupInfo, exists := testCleanupDataSkiplist[entry]; exists {
 		// Clean up directory if any was created
@@ -138,8 +138,8 @@ func cleanupBESkiplistEntry(t *testing.T, entry BinaryEntryInterface) {
 	}
 }
 
-// TestBESkiplistEntrySpecific tests BESkiplistEntry-specific functionality
-func TestBESkiplistEntrySpecific(t *testing.T) {
+// TestBESkiplistSpecific tests BESkiplist-specific functionality
+func TestBESkiplistSpecific(t *testing.T) {
 	t.Run("StableBehavior", testBESkiplistEntryStableBehavior)
 	t.Run("ReadOnlyPattern", testBESkiplistEntryReadOnlyPattern)
 	t.Run("ConcurrentAccess", testBESkiplistEntryConcurrentAccess)
@@ -311,23 +311,23 @@ func (h *skiplistTestHelper) createTestEntry(t *testing.T) (*BESkiplistEntry, fu
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 	
-	// Use the createBESkiplistEntry helper to set up the full infrastructure
-	entry := createBESkiplistEntry(t, testData).(*BESkiplistEntry)
+	// Use the createBESkiplist helper to set up the full infrastructure
+	entry := createBESkiplist(t, testData).(*BESkiplistEntry)
 	
 	// Return entry and cleanup function
 	cleanup := func() {
-		cleanupBESkiplistEntry(t, entry)
+		cleanupBESkiplist(t, entry)
 	}
 	
 	return entry, cleanup
 }
 
-// Benchmark tests for BESkiplistEntry
-func BenchmarkBESkiplistEntry(b *testing.B) {
+// Benchmark tests for BESkiplist
+func BenchmarkBESkiplist(b *testing.B) {
 	// Create test entry once for all benchmarks
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
-	entry := createBESkiplistEntry(&testing.T{}, testData) // This is a hack, but works for benchmarks
+	entry := createBESkiplist(&testing.T{}, testData) // This is a hack, but works for benchmarks
 	
 	defer func() {
 		// Cleanup
