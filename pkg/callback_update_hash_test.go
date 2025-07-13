@@ -21,7 +21,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 	defer dc.Close()
 	
 	// Create update callback
-	callback := NewUpdateCallback(dc, "test-scan")
+	callback := NewUpdateCallback(dc, "test-scan", nil)
 	
 	t.Run("ModifiedFileRequestsHash", func(t *testing.T) {
 		// Create a modified file scenario

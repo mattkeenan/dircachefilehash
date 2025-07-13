@@ -56,6 +56,7 @@ type processedEntry struct {
 // hashJobStart represents a hash job being started
 type hashJobStart struct {
 	JobID       uint64
+	Cookie      uint64         // External cookie for caller tracking
 	FilePath    string
 	IndexEntry  binaryEntryRef // Entry to update with hash (mremap-safe)
 	ScannedPath *scannedPath

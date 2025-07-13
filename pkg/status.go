@@ -82,7 +82,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 
 	// Create status callback to collect status changes
-	statusCallback := NewStatusCallback("status", dc)
+	statusCallback := NewStatusCallback("status", dc, hashManager)
 
 	// Run unified algorithm to compare existing vs current filesystem state
 	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback); err != nil {
@@ -94,6 +94,33 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 
 	// Signal completion of hash job submission
 	hashManager.FinishSubmitting()
+
+	// CRITICAL: Status command MUST write hashed results to cache.idx for performance optimization
+	hashingEntries := statusCallback.GetHashingEntries()
+	if len(hashingEntries) > 0 {
+		// Create a skiplist with the hashed entries
+		cacheSkiplist := NewSkiplistWrapper(16, CacheContext)
+		for _, entry := range hashingEntries {
+			if ref, ok := entry.GetBinaryEntryRef(); ok {
+				cacheSkiplist.Insert(ref, CacheContext)
+			} else {
+				if IsDebugEnabled("scan") {
+					fmt.Fprintf(os.Stderr, "[STATUS] Warning: entry does not support skiplist building\n")
+				}
+			}
+		}
+		
+		// Write the cache skiplist to cache.idx atomically
+		if err := dc.atomicWriteIndex(cacheSkiplist, dc.CacheFile, CacheContext, false); err != nil {
+			if IsDebugEnabled("scan") {
+				fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to write cache index: %v\n", err)
+			}
+		} else {
+			if IsDebugEnabled("scan") {
+				fmt.Fprintf(os.Stderr, "[STATUS] Wrote %d hashed entries to cache.idx\n", len(hashingEntries))
+			}
+		}
+	}
 
 	// Get the final status result from the callback
 	result := statusCallback.GetResult()

@@ -6,6 +6,12 @@ import (
 	"sync"
 )
 
+// hashJobCompletion represents a completed hash job with both system JobID and caller Cookie
+type hashJobCompletion struct {
+	JobID  uint64 // System job ID
+	Cookie uint64 // Caller's cookie (echoed back)
+}
+
 // algorithmHashManager extends simpleHashManager with ordered completion notifications
 // for streaming iterators. It maintains a completed queue to ensure notifications
 // are sent to iterators in JobID order, even though hash jobs complete out of order.
@@ -24,6 +30,10 @@ type algorithmHashManager struct {
 	iteratorNotifyChans []chan<- uint64        // Channels to signal iterators
 	queueMutex          sync.Mutex             // Protect completed queue and iterator channels
 	
+	// Cookie tracking for external callers
+	jobIDToCookie       map[uint64]uint64      // Maps JobID to caller's Cookie
+	externalCompletionChan chan hashJobCompletion // External completion notifications with cookies
+	
 	// Internal coordination
 	completionChan chan uint64            // Internal channel for processing completions
 	processorWg    sync.WaitGroup         // Wait group for completion processor
@@ -38,7 +48,9 @@ func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <
 		completedQueue:      make([]uint64, 0),
 		nextExpectedJobID:   1, // JobIDs start at 1
 		iteratorNotifyChans: make([]chan<- uint64, 0),
-		completionChan: make(chan uint64, 100),
+		jobIDToCookie:       make(map[uint64]uint64),
+		externalCompletionChan: make(chan hashJobCompletion, 100),
+		completionChan:      make(chan uint64, 100),
 	}
 	
 	// Start hash workers (same as simpleHashManager)
@@ -156,12 +168,13 @@ func (ahm *algorithmHashManager) flushCompletedQueue() {
 	}
 }
 
-// signalIterators sends a completion notification to all registered iterators
+// signalIterators sends a completion notification to all registered iterators and external completion channel
 func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 	if IsDebugEnabled("algorithm") {
 		fmt.Fprintf(os.Stderr, "[ALGORITHM] Signaling JobID %d to %d iterators\n", jobID, len(ahm.iteratorNotifyChans))
 	}
 	
+	// Send to iterator notification channels (existing behavior)
 	for _, ch := range ahm.iteratorNotifyChans {
 		select {
 		case ch <- jobID:
@@ -172,6 +185,31 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 				fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Failed to notify iterator (channel full/closed)\n")
 			}
 		}
+	}
+	
+	// Send to external completion channel with both JobID and Cookie
+	cookie, hasCookie := ahm.jobIDToCookie[jobID]
+	if hasCookie {
+		completion := hashJobCompletion{
+			JobID:  jobID,
+			Cookie: cookie,
+		}
+		
+		select {
+		case ahm.externalCompletionChan <- completion:
+			// Successfully sent external completion notification
+			if IsDebugEnabled("algorithm") {
+				fmt.Fprintf(os.Stderr, "[ALGORITHM] Sent external completion: JobID %d, Cookie %d\n", jobID, cookie)
+			}
+		default:
+			// Channel full - skip this notification
+			if IsDebugEnabled("algorithm") {
+				fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Failed to send external completion (channel full)\n")
+			}
+		}
+		
+		// Remove the mapping since the job is completed
+		delete(ahm.jobIDToCookie, jobID)
 	}
 }
 
@@ -187,8 +225,20 @@ func (ahm *algorithmHashManager) IsShuttingDown() bool {
 
 // SubmitHashJob submits a hash job for processing
 func (ahm *algorithmHashManager) SubmitHashJob(job *hashJobStart) {
+	// Track the mapping from JobID to Cookie for completion notifications
+	if job.Cookie != 0 {
+		ahm.queueMutex.Lock()
+		ahm.jobIDToCookie[job.JobID] = job.Cookie
+		ahm.queueMutex.Unlock()
+	}
+	
 	ahm.hashJobChan <- job
 	// Note: We don't send to callStartChan here as that's handled by the processor
+}
+
+// CompletionChannel returns a channel that provides completion notifications with both JobID and Cookie
+func (ahm *algorithmHashManager) CompletionChannel() <-chan hashJobCompletion {
+	return ahm.externalCompletionChan
 }
 
 // FinishSubmitting signals that no more hash jobs will be submitted
@@ -291,6 +341,9 @@ func (ahm *algorithmHashManager) Shutdown() {
 	// Close completion processor
 	close(ahm.completionChan)
 	ahm.processorWg.Wait()
+	
+	// Close external completion channel
+	close(ahm.externalCompletionChan)
 	
 	if IsDebugEnabled("algorithm") {
 		fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash manager shutdown complete\n")

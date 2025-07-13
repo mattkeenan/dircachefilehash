@@ -10,17 +10,35 @@ import (
 // UpdateCallback implements HwangLinCallback to perform index update operations using the same logic as hwangLinCompareToSkiplist
 // This replicates the exact update behavior but uses the unified algorithm infrastructure
 type UpdateCallback struct {
+	// Original fields
 	resultSkiplist  *skiplistWrapper
 	scanFileName    string
 	dc              *DirectoryCache
+	
+	// Hash coordination with existing hashJobManager (avoid maps where simple counter works)
+	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
+	entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
+	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
+	nextFlushIndex   uint64                  // Next counter position to check for flushing
+	
+	// Index writing - in-order entry processing
+	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
 }
 
 // NewUpdateCallback creates a new UpdateCallback that matches the existing update logic
-func NewUpdateCallback(dc *DirectoryCache, scanFileName string) *UpdateCallback {
+func NewUpdateCallback(dc *DirectoryCache, scanFileName string, hashManager *algorithmHashManager) *UpdateCallback {
 	return &UpdateCallback{
+		// Original fields
 		resultSkiplist: NewSkiplistWrapper(16, ScanContext),
 		scanFileName:   scanFileName,
 		dc:             dc,
+		
+		// Hash coordination
+		hashJobManager: hashManager,
+		entryCounter:   0,
+		pendingEntries: make([]BinaryEntryInterface, 0),
+		nextFlushIndex: 0,
+		backlog:        make([]BinaryEntryInterface, 0),
 	}
 }
 
@@ -52,14 +70,14 @@ func (uc *UpdateCallback) OnComparison(
 
 			// Check if the file needs hashing (has changed)
 			if needsHash(leftEntry, rightEntry) {
-				// Request hashing for the changed file (rightEntry is the current filesystem state)
-				if err := rightEntry.RequestHash(); err != nil {
+				// File changed - submit hash job for current state
+				if err := uc.submitHashJobToManager(rightEntry); err != nil {
 					return false, err
 				}
-				// File was modified - create scan entry
-				return true, uc.createScanEntryAndHash(rightEntry)
+			} else {
+				// File unchanged - append existing entry to backlog immediately
+				uc.appendToBacklog(leftEntry)
 			}
-			// File unchanged - no need to create scan entry
 		}
 		
 	case ComparisonRightFirst:
@@ -105,6 +123,14 @@ func (uc *UpdateCallback) OnComparison(
 			// Create deleted entry
 			return true, uc.createDeletedEntry(leftEntry)
 		}
+	}
+	
+	// Check completion queue from hashJobManager and merge completed entries to backlog
+	uc.processCompletedHashJobs()
+	
+	// Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
+	if err := uc.flushInOrderEntries(); err != nil {
+		return false, err
 	}
 	
 	return true, nil // Continue processing
@@ -271,4 +297,95 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 // Name returns the name of this callback for debugging
 func (uc *UpdateCallback) Name() string {
 	return "update"
+}
+
+// submitHashJobToManager submits a hash job using the cookie-based tracking system
+func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
+	// Get the binaryEntryRef for hash job submission
+	// This assumes the entry supports GetBinaryEntryRef() - need to add this to interface
+	// For now, request hash through the existing interface
+	if err := entry.RequestHash(); err != nil {
+		return err
+	}
+	
+	// TODO: Implement direct hash job submission with cookie when GetBinaryEntryRef() is available
+	// Increment counter for this entry (used as external cookie)
+	uc.entryCounter++
+	cookie := uc.entryCounter
+	
+	// Store entry at cookie position for completion tracking
+	if int(cookie) > len(uc.pendingEntries) {
+		// Expand slice to accommodate new cookie position
+		newSlice := make([]BinaryEntryInterface, cookie)
+		copy(newSlice, uc.pendingEntries)
+		uc.pendingEntries = newSlice
+	}
+	uc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
+	
+	// TODO: Submit to hash manager when direct submission is available
+	// uc.hashJobManager.SubmitHashJob(&hashJobStart{
+	//     FilePath:    rightPath,
+	//     IndexEntry:  ref,
+	//     Cookie:      cookie,
+	// })
+	
+	return nil
+}
+
+// processCompletedHashJobs checks for completed jobs and marks them as ready
+func (uc *UpdateCallback) processCompletedHashJobs() {
+	if uc.hashJobManager == nil {
+		return
+	}
+	
+	// Non-blocking check for completed jobs from existing hashJobManager
+	for {
+		select {
+		case completion := <-uc.hashJobManager.CompletionChannel():
+			// completion now contains both JobID and Cookie
+			cookie := completion.Cookie
+			
+			if cookie > 0 && int(cookie) <= len(uc.pendingEntries) {
+				// Mark entry as completed by setting to nil (ready for flush)
+				uc.pendingEntries[cookie-1] = nil
+			}
+		default:
+			return // No more completed jobs available
+		}
+	}
+}
+
+// appendToBacklog adds an entry to the ready-to-write backlog
+func (uc *UpdateCallback) appendToBacklog(entry BinaryEntryInterface) {
+	uc.backlog = append(uc.backlog, entry)
+}
+
+// flushInOrderEntries processes backlog and pending entries for ordered writing
+func (uc *UpdateCallback) flushInOrderEntries() error {
+	// For now, just process the backlog directly into the result skiplist
+	// This maintains compatibility until the full IoVec writing is implemented
+	for len(uc.backlog) > 0 {
+		entry := uc.backlog[0]
+		
+		// Add entry to result skiplist (existing behavior)
+		if ref, ok := entry.GetBinaryEntryRef(); ok {
+			uc.resultSkiplist.Insert(ref, ScanContext)
+		} else {
+			return fmt.Errorf("entry does not support skiplist building")
+		}
+		
+		uc.backlog = uc.backlog[1:] // Remove from backlog
+	}
+	
+	// Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
+	for int(uc.nextFlushIndex) < len(uc.pendingEntries) {
+		if uc.pendingEntries[uc.nextFlushIndex] != nil {
+			// Hit a non-completed entry - stop to maintain order
+			break
+		}
+		// Entry is nil (completed) - can skip it in flush sequence
+		uc.nextFlushIndex++
+	}
+	
+	return nil
 }
