@@ -209,42 +209,6 @@ func (ufsi *UnifiedFilesystemScanIterator) createScanIndex() (string, error) {
 	return scanFileName, nil
 }
 
-// needsHash determines if the scanned file needs hashing by comparing with existing entry
-// Uses the same proven logic as isFileChangedFromScanned but with proper null checks
-func needsHash(existingEntry *binaryEntry, scanned *scannedPath) bool {
-	// If no existing entry, file is new and needs hashing
-	if existingEntry == nil {
-		return true
-	}
-	
-	// If no scanned info, assume needs hashing
-	if scanned == nil || scanned.StatInfo == nil {
-		return true
-	}
-	
-	stat := scanned.StatInfo
-	
-	// Quick size check
-	if existingEntry.FileSize != uint64(scanned.Info.Size()) {
-		return true
-	}
-	
-	// Check ownership
-	if existingEntry.UID != stat.Uid || existingEntry.GID != stat.Gid {
-		return true
-	}
-	
-	// Check mode
-	if existingEntry.Mode != uint32(scanned.Info.Mode()) {
-		return true
-	}
-	
-	// Check timestamps using wall time encoding
-	currentCTime := encodeWallTime(stat.Ctim.Sec, stat.Ctim.Nsec)
-	currentMTime := encodeWallTime(stat.Mtim.Sec, stat.Mtim.Nsec)
-	
-	return existingEntry.CTimeWall != currentCTime || existingEntry.MTimeWall != currentMTime
-}
 
 // getNextJobID returns the next JobID in sequence
 func (ufsi *UnifiedFilesystemScanIterator) getNextJobID() uint64 {

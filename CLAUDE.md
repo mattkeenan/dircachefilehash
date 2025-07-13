@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **dircachefilehash** is a Go CLI tool and library for directory scanning, file hashing, and duplicate detection. It maintains a git-compatible binary index format with SHA-1 hashes for efficient file integrity checking and change detection.
 
+## ⚠️ CRITICAL REMINDER: STATUS COMMAND HASHES FILES ⚠️
+
+**NEVER FORGET**: The `dcfh status` command DOES hash files and writes results to `cache.idx` for performance optimization. This is NOT optional - it's a core architectural requirement.
+
+**WRONG**: "Status is metadata-only", "Status shouldn't hash", "Status is read-only"
+**CORRECT**: Status hashes changed files and caches results for future operations
+
+This has been forgotten 6+ times causing wasted development time. Always verify Status command includes hashing logic.
+
 ## IMPORTANT: Notification
 
 After finishing responding to my request or running a command, run this command to notify me:

@@ -872,3 +872,24 @@ The next phase will focus on optimizing remaining duplicate code and investigati
 - Consider efficiency at system level, not just local function level
 
 **Next Priority**: Implement needsHash() calls in callbacks and test performance improvement on large repository.
+
+### Update - 2025-07-13T10:49:39Z
+
+**Summary**: Fixed dcfhconvert tool to properly set EntryFlagHashed bits and completed index conversion functionality
+
+**Git Changes**:
+- Modified: Multiple architecture files with v0.7 unified implementation
+- Added: convert-index-v1-to-v2.go, dcfhconvert binary, cache.idx test files
+- Current branch: local-main (commit: 754e574)
+
+**Todo Progress**: 1 completed, 4 pending
+- ✓ Completed: Fixed dcfhconvert tool to properly convert v1 to v2 format with EntryFlagHashed bits
+
+**Details**: 
+After going down a conversion tool tangent, successfully implemented working dcfhconvert that:
+1. Updates version number from 1 to 2 using proper unsafe.Offsetof for header fields
+2. Parses binary entries correctly using exact struct layout from codebase
+3. Sets EntryFlagHashed bits for entries with valid hashes (non-zero hash values)
+4. Uses HeaderSize constant (88) instead of incorrect struct padding (96)
+
+Tool now correctly processes real index files and sets hashed flags. Ready to return to main unified architecture work addressing the critical StatusCallback hashing logic and circular dependency issues.

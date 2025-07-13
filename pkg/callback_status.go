@@ -49,10 +49,14 @@ func (sc *StatusCallback) OnComparison(
 			// Check if the right entry (current filesystem state) is marked as deleted
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && isDeleted {
 				sc.result.Deleted = append(sc.result.Deleted, rightPath)
-			} else if sc.isFileModifiedInterface(leftEntry, rightEntry) {
-				sc.result.Modified = append(sc.result.Modified, rightPath)
+			} else {
+				// CRITICAL: Status command MUST hash files that need hashing
+				if needsHash(leftEntry, rightEntry) {
+					// File needs hashing - it will be hashed by iterator, categorize as modified
+					sc.result.Modified = append(sc.result.Modified, rightPath)
+				}
+				// If no hashing needed, file is unchanged (not added to any list)
 			}
-			// If unchanged, we don't add to any list (StatusUnchanged is implicit)
 		}
 		
 	case ComparisonLeftFirst:
@@ -69,6 +73,7 @@ func (sc *StatusCallback) OnComparison(
 		if rightEntry != nil {
 			// Only count as added if the right entry is not marked as deleted
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
+				// CRITICAL: Status command MUST hash new files (always needs hashing)
 				sc.result.Added = append(sc.result.Added, rightPath)
 			}
 		}
@@ -77,6 +82,7 @@ func (sc *StatusCallback) OnComparison(
 		// Only right entries remain - these are all new/added files
 		if rightEntry != nil {
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
+				// CRITICAL: Status command MUST hash new files (always needs hashing)
 				sc.result.Added = append(sc.result.Added, rightPath)
 			}
 		}
@@ -127,73 +133,6 @@ func (sc *StatusCallback) GetResult() *StatusResult {
 	return sc.result
 }
 
-// isFileModifiedInterface checks if a file has been modified using BinaryEntryInterface
-func (sc *StatusCallback) isFileModifiedInterface(leftEntry, rightEntry BinaryEntryInterface) bool {
-	// Quick size check
-	leftSize, err := leftEntry.FileSize()
-	if err != nil {
-		return true // Assume modified if we can't read size
-	}
-	rightSize, err := rightEntry.FileSize()
-	if err != nil {
-		return true // Assume modified if we can't read size
-	}
-	if leftSize != rightSize {
-		return true
-	}
-
-	// Check ownership
-	leftUID, err := leftEntry.UID()
-	if err != nil {
-		return true
-	}
-	rightUID, err := rightEntry.UID()
-	if err != nil {
-		return true
-	}
-	if leftUID != rightUID {
-		return true
-	}
-
-	leftGID, err := leftEntry.GID()
-	if err != nil {
-		return true
-	}
-	rightGID, err := rightEntry.GID()
-	if err != nil {
-		return true
-	}
-	if leftGID != rightGID {
-		return true
-	}
-
-	// Check timestamps using wall time
-	leftCTime, err := leftEntry.CTimeWall()
-	if err != nil {
-		return true
-	}
-	rightCTime, err := rightEntry.CTimeWall()
-	if err != nil {
-		return true
-	}
-	if leftCTime != rightCTime {
-		return true
-	}
-
-	leftMTime, err := leftEntry.MTimeWall()
-	if err != nil {
-		return true
-	}
-	rightMTime, err := rightEntry.MTimeWall()
-	if err != nil {
-		return true
-	}
-	if leftMTime != rightMTime {
-		return true
-	}
-
-	return false
-}
 
 // Clear resets the callback state for reuse
 func (sc *StatusCallback) Clear() {

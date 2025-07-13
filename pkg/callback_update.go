@@ -30,6 +30,10 @@ func (uc *UpdateCallback) OnComparison(
 	leftEntry, rightEntry BinaryEntryInterface,
 	leftPath, rightPath string,
 ) (bool, error) {
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.OnComparison: result=%s, leftPath=%s, rightPath=%s, leftEntry!=nil=%t, rightEntry!=nil=%t\n", 
+			result, leftPath, rightPath, leftEntry != nil, rightEntry != nil)
+	}
 	
 	switch result {
 	case ComparisonMatch:
@@ -54,12 +58,21 @@ func (uc *UpdateCallback) OnComparison(
 	case ComparisonRightFirst:
 		// File only in scan (right side) - new file (matches hwangLinCompareToSkiplist cmp < 0 case)
 		if rightEntry != nil {
+			if IsDebugEnabled("verbose-3") {
+				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: ComparisonRightFirst for %s - processing new file\n", rightPath)
+			}
 			// Check if this file should be indexed
 			if !uc.dc.shouldIndex(rightPath) {
+				if IsDebugEnabled("verbose-3") {
+					fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Skipping %s - shouldIndex returned false\n", rightPath)
+				}
 				// File should not be indexed - skip without creating entry
 				return true, nil
 			}
 			
+			if IsDebugEnabled("verbose-3") {
+				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Creating scan entry for new file %s\n", rightPath)
+			}
 			// Create scan entry and submit for hashing
 			return true, uc.createScanEntryAndHash(rightEntry)
 		}
@@ -88,20 +101,36 @@ func (uc *UpdateCallback) OnComparison(
 
 // createScanEntryAndHash collects a scan entry that has been processed by the iterator (matches hwangLinCompareToSkiplist logic)
 func (uc *UpdateCallback) createScanEntryAndHash(scanEntry BinaryEntryInterface) error {
+	relPath, _ := scanEntry.RelativePath()
+	
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: processing file %s\n", relPath)
+	}
+	
 	// For the unified architecture, the UnifiedFilesystemScanIterator handles hashing internally
 	// We just need to add the already-processed entry to our result skiplist
 	
 	ref, ok := scanEntry.GetBinaryEntryRef()
 	if !ok {
+		if IsDebugEnabled("verbose-3") {
+			fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: ERROR - scan entry does not support binaryEntryRef for %s\n", relPath)
+		}
 		return fmt.Errorf("scan entry does not support binaryEntryRef for update")
+	}
+	
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: inserting into skiplist for %s\n", relPath)
 	}
 	
 	// Insert into result skiplist - entry should already be hashed by the iterator
 	uc.resultSkiplist.Insert(ref, ScanContext)
 	
 	if IsDebugEnabled("scanning") {
-		relPath, _ := scanEntry.RelativePath()
 		fmt.Fprintf(os.Stderr, "[UPDATE] Collected scan entry for file: %s\n", relPath)
+	}
+	
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: completed for %s\n", relPath)
 	}
 	
 	return nil

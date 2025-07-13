@@ -352,6 +352,13 @@ for _, indexFile := range corruptedFiles {
 - **Correctness priority**: Architectural benefits outweigh theoretical performance concerns
 - **Batch operations**: Manual locking available for performance-critical paths
 
+## ⚠️ CRITICAL REMINDER: STATUS COMMAND MUST HASH FILES ⚠️
+
+**NEVER FORGET**: The Status command DOES hash files and caches results in `cache.idx` for performance optimization. This is NOT optional - it's a core requirement.
+
+**Common AI Error Pattern**: Assuming Status is "metadata-only" or "read-only" - THIS IS WRONG.
+**Correct Behavior**: Status hashes changed files and writes results to cache.idx for future performance.
+
 ## Critical Performance Optimization: needsHash() Function
 
 ### Problem Identified

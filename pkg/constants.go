@@ -25,7 +25,7 @@ const (
 const (
 	HeaderSize          = 88 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(2) + checksum_type(2) + checksum(64)
 	ChecksumSize        = 64 // Maximum checksum size (512 bits)
-	CurrentIndexVersion = 1  // Current index file format version
+	CurrentIndexVersion = 2  // Current index file format version
 )
 
 // Byte order magic for file format validation
@@ -82,6 +82,7 @@ const (
 // Entry flags
 const (
 	EntryFlagDeleted uint16 = 1 << 0 // Entry marked as deleted
+	EntryFlagHashed  uint16 = 1 << 1 // Entry has been hashed
 )
 
 // Import merge strategies from zerocopyskiplist

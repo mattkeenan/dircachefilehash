@@ -95,6 +95,16 @@ func (be *binaryEntry) ClearDeleted() {
 	be.EntryFlags &^= EntryFlagDeleted
 }
 
+// IsHashed returns true if this entry has been hashed
+func (be *binaryEntry) IsHashed() bool {
+	return be.EntryFlags&EntryFlagHashed != 0
+}
+
+// SetHashed marks this entry as hashed
+func (be *binaryEntry) SetHashed() {
+	be.EntryFlags |= EntryFlagHashed
+}
+
 // validateLayout performs runtime validation of struct layout assumptions
 // This should only be called in debug/development builds
 func (be *binaryEntry) validateLayout() {
