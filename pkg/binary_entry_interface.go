@@ -53,6 +53,11 @@ type BinaryEntryInterface interface {
 	IsHashRequested() (bool, error)  // Check if hashing has been requested
 	IsHashCompleted() (bool, error)  // Check if hashing has been completed
 	
+	// Internal hash coordination methods (for use by hash managers)
+	SetHashJobID(jobID uint64)       // Set the job ID when submitting to hash manager
+	GetHashJobID() uint64            // Get the job ID for completion tracking
+	MarkHashCompleted()              // Mark hashing as completed
+	
 	// Manual locking for batch operations
 	// These allow efficient multi-field access without re-acquiring locks
 	RLock()
@@ -107,6 +112,11 @@ type BinaryEntryBase struct {
 	mutex              sync.RWMutex
 	implementationType BinaryEntryImplementationType
 	supportsSkiplist   bool  // Whether this implementation supports skiplist building
+	
+	// Hash coordination state for two-phase processing
+	hashRequested      bool    // Whether hashing has been requested
+	hashCompleted      bool    // Whether hashing has been completed
+	hashJobID          uint64  // Job ID if hash has been requested (0 = not requested)
 }
 
 // NewBinaryEntryBase creates a new BinaryEntryBase with the specified implementation type
@@ -149,6 +159,67 @@ func (base *BinaryEntryBase) SupportsSkiplistBuilding() bool {
 // Implementations that support this should override this method
 func (base *BinaryEntryBase) GetBinaryEntryRef() (binaryEntryRef, bool) {
 	return binaryEntryRef{}, false
+}
+
+// RequestHash requests that this entry be hashed (default implementation)
+// This sets the hashRequested flag and assigns a job ID for coordination
+// The actual hashing should be handled by the calling code
+func (base *BinaryEntryBase) RequestHash() error {
+	base.mutex.Lock()
+	defer base.mutex.Unlock()
+	
+	// Already requested or completed
+	if base.hashRequested || base.hashCompleted {
+		return nil
+	}
+	
+	// Set request flag - job ID should be assigned by the hash manager
+	base.hashRequested = true
+	// Note: hashJobID will be set by the hash manager when the job is actually submitted
+	
+	return nil
+}
+
+// IsHashRequested checks if hashing has been requested (default implementation)
+func (base *BinaryEntryBase) IsHashRequested() (bool, error) {
+	base.mutex.RLock()
+	defer base.mutex.RUnlock()
+	
+	return base.hashRequested, nil
+}
+
+// IsHashCompleted checks if hashing has been completed (default implementation)
+func (base *BinaryEntryBase) IsHashCompleted() (bool, error) {
+	base.mutex.RLock()
+	defer base.mutex.RUnlock()
+	
+	return base.hashCompleted, nil
+}
+
+// SetHashJobID sets the job ID for hash coordination (internal use)
+// This is called by the hash manager when submitting the job
+func (base *BinaryEntryBase) SetHashJobID(jobID uint64) {
+	base.mutex.Lock()
+	defer base.mutex.Unlock()
+	
+	base.hashJobID = jobID
+}
+
+// GetHashJobID returns the job ID for hash coordination (internal use)
+func (base *BinaryEntryBase) GetHashJobID() uint64 {
+	base.mutex.RLock()
+	defer base.mutex.RUnlock()
+	
+	return base.hashJobID
+}
+
+// MarkHashCompleted marks hashing as completed (internal use)
+// This is called by the hash manager when the job completes
+func (base *BinaryEntryBase) MarkHashCompleted() {
+	base.mutex.Lock()
+	defer base.mutex.Unlock()
+	
+	base.hashCompleted = true
 }
 
 // ImplementationType returns the implementation type

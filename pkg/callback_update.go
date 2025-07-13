@@ -50,9 +50,16 @@ func (uc *UpdateCallback) OnComparison(
 				return true, uc.createDeletedEntry(leftEntry)
 			}
 
-			// Files are different if hwangLinUnified detected they don't match
-			// This means file was modified - create scan entry and submit for hashing
-			return true, uc.createScanEntryAndHash(rightEntry)
+			// Check if the file needs hashing (has changed)
+			if needsHash(leftEntry, rightEntry) {
+				// Request hashing for the changed file (rightEntry is the current filesystem state)
+				if err := rightEntry.RequestHash(); err != nil {
+					return false, err
+				}
+				// File was modified - create scan entry
+				return true, uc.createScanEntryAndHash(rightEntry)
+			}
+			// File unchanged - no need to create scan entry
 		}
 		
 	case ComparisonRightFirst:
@@ -72,6 +79,10 @@ func (uc *UpdateCallback) OnComparison(
 			
 			if IsDebugEnabled("verbose-3") {
 				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Creating scan entry for new file %s\n", rightPath)
+			}
+			// Request hashing for new file (always needs hashing)
+			if err := rightEntry.RequestHash(); err != nil {
+				return false, err
 			}
 			// Create scan entry and submit for hashing
 			return true, uc.createScanEntryAndHash(rightEntry)
@@ -224,6 +235,16 @@ func (uc *UpdateCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (b
 // OnRightOnly handles remaining entries from right iterator (when left is exhausted)  
 func (uc *UpdateCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	// Right entry exists but no left entry - this is a new file
+	// Check if this file should be indexed
+	if !uc.dc.shouldIndex(path) {
+		// File should not be indexed - skip without creating entry
+		return true, nil
+	}
+	
+	// Request hashing for new file (always needs hashing)
+	if err := entry.RequestHash(); err != nil {
+		return false, err
+	}
 	return true, uc.createScanEntryAndHash(entry)
 }
 

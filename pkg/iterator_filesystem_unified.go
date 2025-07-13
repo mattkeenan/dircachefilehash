@@ -118,6 +118,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 	
 	// Phase 1: Iterator just creates entries with metadata (no hashing decisions here)
 	// The Hwang-Lin callback will decide whether to hash based on comparison with existing entries
+	// Hash coordination happens later in the callback when writing to disk (CallbackHashCoordinator pattern)
 	
 	// Update current path and return the interface
 	ufsi.updateCurrentPathFromInterface(scanEntry)
@@ -208,6 +209,7 @@ func (ufsi *UnifiedFilesystemScanIterator) createScanIndex() (string, error) {
 	
 	return scanFileName, nil
 }
+
 
 
 // getNextJobID returns the next JobID in sequence

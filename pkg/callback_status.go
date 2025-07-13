@@ -52,7 +52,11 @@ func (sc *StatusCallback) OnComparison(
 			} else {
 				// CRITICAL: Status command MUST hash files that need hashing
 				if needsHash(leftEntry, rightEntry) {
-					// File needs hashing - it will be hashed by iterator, categorize as modified
+					// Request hashing for the changed file (rightEntry is the current filesystem state)
+					if err := rightEntry.RequestHash(); err != nil {
+						return false, err
+					}
+					// File needs hashing - categorize as modified
 					sc.result.Modified = append(sc.result.Modified, rightPath)
 				}
 				// If no hashing needed, file is unchanged (not added to any list)
@@ -74,6 +78,9 @@ func (sc *StatusCallback) OnComparison(
 			// Only count as added if the right entry is not marked as deleted
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
 				// CRITICAL: Status command MUST hash new files (always needs hashing)
+				if err := rightEntry.RequestHash(); err != nil {
+					return false, err
+				}
 				sc.result.Added = append(sc.result.Added, rightPath)
 			}
 		}
@@ -83,6 +90,9 @@ func (sc *StatusCallback) OnComparison(
 		if rightEntry != nil {
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
 				// CRITICAL: Status command MUST hash new files (always needs hashing)
+				if err := rightEntry.RequestHash(); err != nil {
+					return false, err
+				}
 				sc.result.Added = append(sc.result.Added, rightPath)
 			}
 		}
@@ -115,6 +125,10 @@ func (sc *StatusCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (b
 func (sc *StatusCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	if entry != nil {
 		if isDeleted, err := entry.IsDeleted(); err == nil && !isDeleted {
+			// CRITICAL: Status command MUST hash new files (always needs hashing)
+			if err := entry.RequestHash(); err != nil {
+				return false, err
+			}
 			sc.mutex.Lock()
 			sc.result.Added = append(sc.result.Added, path)
 			sc.mutex.Unlock()

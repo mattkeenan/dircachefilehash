@@ -16,6 +16,24 @@ const (
 	ComparisonRightExhausted
 )
 
+// String returns a string representation of the ComparisonResult
+func (cr ComparisonResult) String() string {
+	switch cr {
+	case ComparisonMatch:
+		return "Match"
+	case ComparisonLeftFirst:
+		return "LeftFirst"
+	case ComparisonRightFirst:
+		return "RightFirst"
+	case ComparisonLeftExhausted:
+		return "LeftExhausted"
+	case ComparisonRightExhausted:
+		return "RightExhausted"
+	default:
+		return "Unknown"
+	}
+}
+
 // HwangLinCallback defines the interface for operations that can be performed during
 // Hwang-Lin comparison. This allows different algorithms (status, dupes, update) to
 // plug into the unified comparison logic.

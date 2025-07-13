@@ -256,11 +256,14 @@ func createMockBinaryEntryForUpdate(relPath string, size uint64, deleted bool) B
 
 // mockBinaryEntry is a simple mock implementation for testing
 type mockBinaryEntry struct {
-	relPath   string
-	size      uint64
-	deleted   bool
-	mtime     time.Time
-	hashValue [20]byte
+	relPath       string
+	size          uint64
+	deleted       bool
+	mtime         time.Time
+	hashValue     [20]byte
+	hashRequested bool
+	hashCompleted bool
+	hashJobID     uint64
 }
 
 func (m *mockBinaryEntry) RelativePath() (string, error) { return m.relPath, nil }
@@ -287,3 +290,9 @@ func (m *mockBinaryEntry) Unlock()                                         {}
 func (m *mockBinaryEntry) IsValid() bool                                   { return true }
 func (m *mockBinaryEntry) SupportsSkiplistBuilding() bool                  { return false }
 func (m *mockBinaryEntry) GetBinaryEntryRef() (binaryEntryRef, bool)       { return binaryEntryRef{}, false }
+func (m *mockBinaryEntry) RequestHash() error                              { m.hashRequested = true; return nil }
+func (m *mockBinaryEntry) IsHashRequested() (bool, error)                  { return m.hashRequested, nil }
+func (m *mockBinaryEntry) IsHashCompleted() (bool, error)                  { return m.hashCompleted, nil }
+func (m *mockBinaryEntry) SetHashJobID(jobID uint64)                       { m.hashJobID = jobID }
+func (m *mockBinaryEntry) GetHashJobID() uint64                            { return m.hashJobID }
+func (m *mockBinaryEntry) MarkHashCompleted()                              { m.hashCompleted = true }
