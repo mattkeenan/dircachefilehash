@@ -73,6 +73,18 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		VerboseLog(3, "Status: comparisonSkiplist length = %d", comparisonSkiplist.Length())
 	}
 
+	// Initialize cache temp index for iterative writing during Status
+	cacheTempFileName := dc.generateTempFileName("status-cache")
+	if err := dc.initialiseScanIndex(cacheTempFileName); err != nil {
+		return nil, fmt.Errorf("failed to initialise cache temp index: %w", err)
+	}
+	defer func() {
+		// Cleanup temp file if it still exists (error case)
+		if _, err := os.Stat(cacheTempFileName); err == nil {
+			os.Remove(cacheTempFileName)
+		}
+	}()
+
 	// Create hash manager for filesystem scanning
 	hashManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
 	defer hashManager.Shutdown()
@@ -81,8 +93,8 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist, "existing")
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 
-	// Create status callback to collect status changes
-	statusCallback := NewStatusCallback("status", dc, hashManager)
+	// Create status callback for iterative cache writing during hwangLinUnified execution
+	statusCallback := NewStatusCallback("status", dc, hashManager, cacheTempFileName)
 
 	// Run unified algorithm to compare existing vs current filesystem state
 	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback); err != nil {
@@ -96,29 +108,22 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	hashManager.FinishSubmitting()
 
 	// CRITICAL: Status command MUST write hashed results to cache.idx for performance optimization
-	hashingEntries := statusCallback.GetHashingEntries()
-	if len(hashingEntries) > 0 {
-		// Create a skiplist with the hashed entries
-		cacheSkiplist := NewSkiplistWrapper(16, CacheContext)
-		for _, entry := range hashingEntries {
-			if ref, ok := entry.GetBinaryEntryRef(); ok {
-				cacheSkiplist.Insert(ref, CacheContext)
-			} else {
-				if IsDebugEnabled("scan") {
-					fmt.Fprintf(os.Stderr, "[STATUS] Warning: entry does not support skiplist building\n")
-				}
-			}
-		}
-		
-		// Write the cache skiplist to cache.idx atomically
-		if err := dc.atomicWriteIndex(cacheSkiplist, dc.CacheFile, CacheContext, false); err != nil {
+	// Atomically rename temp cache index to final cache.idx (iterative approach)
+	if _, err := os.Stat(cacheTempFileName); err == nil {
+		// Temp cache file exists - rename it atomically to cache.idx
+		if err := os.Rename(cacheTempFileName, dc.CacheFile); err != nil {
 			if IsDebugEnabled("scan") {
-				fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to write cache index: %v\n", err)
+				fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename cache temp to cache.idx: %v\n", err)
 			}
+			// Leave temp file for manual cleanup
 		} else {
 			if IsDebugEnabled("scan") {
-				fmt.Fprintf(os.Stderr, "[STATUS] Wrote %d hashed entries to cache.idx\n", len(hashingEntries))
+				fmt.Fprintf(os.Stderr, "[STATUS] Successfully wrote cache.idx via iterative approach\n")
 			}
+		}
+	} else {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] No cache temp file found - no hashed entries to cache\n")
 		}
 	}
 

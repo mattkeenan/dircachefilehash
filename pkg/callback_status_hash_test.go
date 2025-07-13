@@ -12,7 +12,7 @@ func TestStatusCallbackHashRequests(t *testing.T) {
 	dc := &DirectoryCache{}
 	
 	// Create status callback
-	callback := NewStatusCallback("test-status", dc, nil)
+	callback := NewStatusCallback("test-status", dc, nil, "test-cache-temp.idx")
 	
 	t.Run("ModifiedFileRequestsHash", func(t *testing.T) {
 		// Create a modified file scenario

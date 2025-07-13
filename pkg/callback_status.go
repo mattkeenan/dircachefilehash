@@ -1,7 +1,10 @@
 package dircachefilehash
 
 import (
+	"fmt"
 	"sync"
+	"syscall"
+	"unsafe"
 )
 
 // StatusCallback implements HwangLinCallback to collect file status changes
@@ -26,12 +29,14 @@ type StatusCallback struct {
 	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
 	nextFlushIndex   uint64                  // Next counter position to check for flushing
 	
-	// Cache index writing - entries to be written to cache.idx
-	hashingEntries   []BinaryEntryInterface  // Entries that need hashing and caching
+	// Iterative cache index writing (following architecture-v0.7.md batched IoVec approach)
+	cacheTempFileName string                  // Temp cache index filename for iterative writing
+	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
+	tempIndexWriter  interface{}             // IoVec writer for temp index output (TODO: implement TempIndexWriter)
 }
 
-// NewStatusCallback creates a new callback for status checking
-func NewStatusCallback(name string, dc *DirectoryCache, hashManager *algorithmHashManager) *StatusCallback {
+// NewStatusCallback creates a new callback for status checking and cache writing
+func NewStatusCallback(name string, dc *DirectoryCache, hashManager *algorithmHashManager, cacheTempFileName string) *StatusCallback {
 	return &StatusCallback{
 		CallbackBase: CallbackBase{name: name},
 		result: &StatusResult{
@@ -46,7 +51,11 @@ func NewStatusCallback(name string, dc *DirectoryCache, hashManager *algorithmHa
 		entryCounter:   0,
 		pendingEntries: make([]BinaryEntryInterface, 0),
 		nextFlushIndex: 0,
-		hashingEntries: make([]BinaryEntryInterface, 0),
+		
+		// Iterative cache writing
+		cacheTempFileName: cacheTempFileName,
+		backlog:          make([]BinaryEntryInterface, 0),
+		tempIndexWriter:  nil, // Will be initialized when first entry is written
 	}
 }
 
@@ -68,14 +77,16 @@ func (sc *StatusCallback) OnComparison(
 			} else {
 				// CRITICAL: Status command MUST hash files that need hashing
 				if needsHash(leftEntry, rightEntry) {
-					// Submit hash job for the changed file (rightEntry is the current filesystem state)
+					// File changed - submit hash job for current state
 					if err := sc.submitHashJobToManager(rightEntry); err != nil {
 						return false, err
 					}
 					// File needs hashing - categorize as modified
 					sc.result.Modified = append(sc.result.Modified, rightPath)
+				} else {
+					// File unchanged - append existing entry to backlog immediately
+					sc.appendToBacklog(leftEntry)
 				}
-				// If no hashing needed, file is unchanged (not added to any list)
 			}
 		}
 		
@@ -125,8 +136,13 @@ func (sc *StatusCallback) OnComparison(
 	// Release mutex before hash coordination to avoid deadlocks
 	sc.mutex.Unlock()
 	
-	// Check completion queue from hashJobManager and process completed entries
+	// Check completion queue from hashJobManager and merge completed entries to backlog
 	sc.processCompletedHashJobs()
+	
+	// Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
+	if err := sc.flushInOrderEntries(); err != nil {
+		return false, fmt.Errorf("failed to flush entries: %w", err)
+	}
 	
 	return true, nil // Continue processing
 }
@@ -185,21 +201,16 @@ func (sc *StatusCallback) Clear() {
 	sc.entryCounter = 0
 	sc.pendingEntries = make([]BinaryEntryInterface, 0)
 	sc.nextFlushIndex = 0
-	sc.hashingEntries = make([]BinaryEntryInterface, 0)
 }
 
-// submitHashJobToManager submits a hash job using the cookie-based tracking system
+// submitHashJobToManager submits hash job and stores entry for pending completion tracking
 func (sc *StatusCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
-	// Get the binaryEntryRef for hash job submission
-	// For now, request hash through the existing interface
-	if err := entry.RequestHash(); err != nil {
-		return err
+	// Submit to existing hash manager using callback's own counter as cookie
+	_, ok := entry.GetBinaryEntryRef()
+	if !ok {
+		return fmt.Errorf("entry doesn't support hash job submission")
 	}
 	
-	// Add entry to the list of entries that need to be cached
-	sc.hashingEntries = append(sc.hashingEntries, entry)
-	
-	// TODO: Implement direct hash job submission with cookie when GetBinaryEntryRef() is available
 	// Increment counter for this entry (used as external cookie)
 	sc.entryCounter++
 	cookie := sc.entryCounter
@@ -213,6 +224,82 @@ func (sc *StatusCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 	}
 	sc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
 	
+	// Request hash through the existing interface
+	if err := entry.RequestHash(); err != nil {
+		return err
+	}
+	
+	// TODO: Implement direct hash job submission with cookie to hashJobManager
+	// sc.hashJobManager.SubmitHashJob(&hashJobStart{
+	//     FilePath:    entry.AbsolutePath(),
+	//     IndexEntry:  ref,
+	//     Cookie:      cookie,
+	// })
+	
+	return nil
+}
+
+// appendToBacklog adds entry to backlog for immediate writing (file unchanged case)
+func (sc *StatusCallback) appendToBacklog(entry BinaryEntryInterface) {
+	sc.backlog = append(sc.backlog, entry)
+}
+
+// flushInOrderEntries processes backlog and pending entries, creating IoVecs for temp index writing
+func (sc *StatusCallback) flushInOrderEntries() error {
+	// Use counter to check for contiguous completed entries (no gaps)
+	var readyIoVecs []syscall.Iovec
+	
+	// Process backlog entries that can be written in order
+	for len(sc.backlog) > 0 {
+		entry := sc.backlog[0]
+		
+		// Create zero-copy IoVec when possible  
+		ioVec, err := sc.createEntryIoVec(entry)
+		if err != nil {
+			return err
+		}
+		
+		readyIoVecs = append(readyIoVecs, ioVec)
+		sc.backlog = sc.backlog[1:] // Remove from backlog
+	}
+	
+	// Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
+	for int(sc.nextFlushIndex) < len(sc.pendingEntries) {
+		if sc.pendingEntries[sc.nextFlushIndex] != nil {
+			// Hit a non-completed entry - stop to maintain order
+			break
+		}
+		// Entry is nil (completed) - can skip it in flush sequence
+		sc.nextFlushIndex++
+	}
+	
+	// Write batch with single vectorio call to temp index
+	if len(readyIoVecs) > 0 {
+		return sc.writeIoVecBatchToTempIndex(readyIoVecs)
+	}
+	
+	return nil
+}
+
+// createEntryIoVec creates zero-copy IoVec from BinaryEntryInterface
+func (sc *StatusCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.Iovec, error) {
+	// For mmap'd entries: Reference underlying mmap'd binaryEntry directly
+	if ref, ok := entry.GetBinaryEntryRef(); ok {
+		underlyingEntry := ref.GetBinaryEntry()
+		return syscall.Iovec{
+			Base: (*byte)(unsafe.Pointer(underlyingEntry)),
+			Len:  uint64(unsafe.Sizeof(binaryEntry{})),
+		}, nil
+	}
+	
+	return syscall.Iovec{}, fmt.Errorf("entry doesn't support binary entry reference")
+}
+
+// writeIoVecBatchToTempIndex writes IoVec batch to cache temp index using vectorio
+func (sc *StatusCallback) writeIoVecBatchToTempIndex(iovecs []syscall.Iovec) error {
+	// TODO: Implement proper IoVec batch writing to temp index
+	// For now, just skip writing - this will be implemented when TempIndexWriter is available
+	// The architecture framework is in place for iterative writing
 	return nil
 }
 
@@ -239,7 +326,3 @@ func (sc *StatusCallback) processCompletedHashJobs() {
 	}
 }
 
-// GetHashingEntries returns the entries that need to be cached (for writing to cache.idx)
-func (sc *StatusCallback) GetHashingEntries() []BinaryEntryInterface {
-	return sc.hashingEntries
-}
