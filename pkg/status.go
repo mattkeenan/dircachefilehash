@@ -79,7 +79,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 
 	// Create iterators for unified algorithm
 	existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan", hashManager)
+	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 
 	// Create status callback to collect status changes
 	statusCallback := NewStatusCallback("status", dc)

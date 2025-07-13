@@ -350,7 +350,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 
 	// Create iterators for unified algorithm
 	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan", hashJobManager)
+	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
 
 	// Create update callback that replicates hwangLinCompareToSkiplist logic
 	updateCallback := NewUpdateCallback(dc, scanFileName)

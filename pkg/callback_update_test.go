@@ -155,7 +155,7 @@ func TestUpdateCallback_RealFiles(t *testing.T) {
 	updateCallback := NewUpdateCallback(dc, scanFileName)
 
 	// Create real scan entries using the unified iterator
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "test-scan", hashManager)
+	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "test-scan")
 	defer scanIterator.Close()
 
 	// Get first file entry

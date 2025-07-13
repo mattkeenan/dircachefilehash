@@ -105,7 +105,7 @@ func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, fl
 	skiplistIterator := NewBinaryEntrySkiplistIterator(mergedSkiplist, "merged-main-cache")
 	defer skiplistIterator.Close()
 	
-	filesystemIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "filesystem-scan", hashManager)
+	filesystemIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "filesystem-scan")
 	defer filesystemIterator.Close()
 	
 	// Create callback for duplicate detection during streaming comparison

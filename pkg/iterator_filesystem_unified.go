@@ -3,14 +3,12 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
-	"sync"
-	"time"
 )
 
 // UnifiedFilesystemScanIterator streams files directly from filesystem scanning
-// using BinaryEntryInterface with integrated hash coordination via algorithmHashManager.
-// This provides memory-efficient iteration with asynchronous hashing that
+// using BinaryEntryInterface. This provides memory-efficient iteration that
 // maintains strict sorted order required by the Hwang-Lin algorithm.
+// Hash coordination is handled by callbacks, not the iterator.
 type UnifiedFilesystemScanIterator struct {
 	iteratorBase
 	
@@ -21,28 +19,16 @@ type UnifiedFilesystemScanIterator struct {
 	shutdownChan      chan struct{}
 	scanComplete      bool
 	scanError         error
-	
-	// Hash coordination
-	hashManager       *algorithmHashManager
-	completionChan    chan uint64                    // Receives completion notifications
-	pendingJobs       map[uint64]BinaryEntryInterface // JobID → entry waiting for hash
-	currentJobID      uint64                         // Next JobID we're expecting
 	scanIndexFileName string                         // Scan index file name
 	
 	// Current state
 	nextScanned       *scannedPath
 	scanStarted       bool
-	hashingStarted    bool
-	
-	// Synchronization
-	jobMutex          sync.Mutex                     // Protects pendingJobs and currentJobID
-	completionWait    map[uint64]chan struct{}       // JobID → completion signal
-	waitMutex         sync.Mutex                     // Protects completionWait
 }
 
-// NewUnifiedFilesystemScanIterator creates a new enhanced iterator that scans
-// the specified paths with integrated hash coordination using BinaryEntryInterface.
-func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name string, hashManager *algorithmHashManager) *UnifiedFilesystemScanIterator {
+// NewUnifiedFilesystemScanIterator creates a new iterator that scans
+// the specified paths using BinaryEntryInterface.
+func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name string) *UnifiedFilesystemScanIterator {
 	if dc == nil {
 		return &UnifiedFilesystemScanIterator{
 			iteratorBase: iteratorBase{
@@ -58,16 +44,6 @@ func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name s
 		paths:          paths,
 		scanChan:       make(chan *scannedPath, 100), // Buffered for performance
 		shutdownChan:   make(chan struct{}),
-		hashManager:    hashManager,
-		completionChan: make(chan uint64, 100),
-		pendingJobs:    make(map[uint64]BinaryEntryInterface),
-		currentJobID:   1, // JobIDs start at 1
-		completionWait: make(map[uint64]chan struct{}),
-	}
-	
-	// Register with hash manager for completion notifications
-	if hashManager != nil {
-		hashManager.RegisterIteratorNotification(iterator.completionChan)
 	}
 	
 	return iterator
@@ -92,11 +68,6 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 		}
 	}
 	
-	// Start hash completion monitoring if not already started
-	if !ufsi.hashingStarted {
-		ufsi.startHashCompletion()
-		ufsi.hashingStarted = true
-	}
 	
 	// Get the next scanned file
 	scanned, err := ufsi.getNextScannedFile()
@@ -116,9 +87,8 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 		return nil, fmt.Errorf("failed to create scan entry: %w", err)
 	}
 	
-	// Phase 1: Iterator just creates entries with metadata (no hashing decisions here)
-	// The Hwang-Lin callback will decide whether to hash based on comparison with existing entries
-	// Hash coordination happens later in the callback when writing to disk (CallbackHashCoordinator pattern)
+	// Iterator is synchronous: just creates entries with metadata
+	// Hash coordination happens in callbacks using CallbackHashCoordinator pattern
 	
 	// Update current path and return the interface
 	ufsi.updateCurrentPathFromInterface(scanEntry)
@@ -212,117 +182,6 @@ func (ufsi *UnifiedFilesystemScanIterator) createScanIndex() (string, error) {
 
 
 
-// getNextJobID returns the next JobID in sequence
-func (ufsi *UnifiedFilesystemScanIterator) getNextJobID() uint64 {
-	ufsi.jobMutex.Lock()
-	defer ufsi.jobMutex.Unlock()
-	
-	jobID := ufsi.currentJobID
-	ufsi.currentJobID++
-	return jobID
-}
-
-// submitHashJob submits a hash job to the algorithm hash manager
-func (ufsi *UnifiedFilesystemScanIterator) submitHashJob(jobID uint64, scanned *scannedPath, scanEntry BinaryEntryInterface) error {
-	if ufsi.hashManager == nil {
-		return fmt.Errorf("hash manager is nil")
-	}
-	
-	// Get the underlying binaryEntryRef for hash job
-	ref, hasRef := scanEntry.GetBinaryEntryRef()
-	if !hasRef {
-		return fmt.Errorf("scan entry does not support hash job submission")
-	}
-	
-	// Create hash job
-	job := &hashJobStart{
-		JobID:       jobID,
-		FilePath:    scanned.AbsPath,
-		IndexEntry:  ref,
-		ScannedPath: scanned,
-	}
-	
-	// Track pending job
-	ufsi.jobMutex.Lock()
-	ufsi.pendingJobs[jobID] = scanEntry
-	ufsi.jobMutex.Unlock()
-	
-	// Create completion wait channel
-	ufsi.waitMutex.Lock()
-	ufsi.completionWait[jobID] = make(chan struct{})
-	ufsi.waitMutex.Unlock()
-	
-	// Submit job
-	ufsi.hashManager.SubmitHashJob(job)
-	
-	if IsDebugEnabled("unified-iterator") {
-		fmt.Fprintf(os.Stderr, "[UNIFIED] Submitted hash job %d for file: %s\n", jobID, scanned.RelPath)
-	}
-	
-	return nil
-}
-
-// waitForHashCompletion waits for the specified job to complete
-func (ufsi *UnifiedFilesystemScanIterator) waitForHashCompletion(jobID uint64) error {
-	ufsi.waitMutex.Lock()
-	waitChan, exists := ufsi.completionWait[jobID]
-	ufsi.waitMutex.Unlock()
-	
-	if !exists {
-		return fmt.Errorf("no completion wait channel for job %d", jobID)
-	}
-	
-	// Wait for completion or timeout
-	select {
-	case <-waitChan:
-		// Job completed
-		if IsDebugEnabled("unified-iterator") {
-			fmt.Fprintf(os.Stderr, "[UNIFIED] Hash job %d completed\n", jobID)
-		}
-		return nil
-		
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("timeout waiting for hash job %d completion", jobID)
-		
-	case <-ufsi.shutdownChan:
-		return fmt.Errorf("iterator shutdown while waiting for hash job %d", jobID)
-	}
-}
-
-// startHashCompletion starts the hash completion monitoring goroutine
-func (ufsi *UnifiedFilesystemScanIterator) startHashCompletion() {
-	go func() {
-		for {
-			select {
-			case jobID, ok := <-ufsi.completionChan:
-				if !ok {
-					// Completion channel closed
-					return
-				}
-				
-				if IsDebugEnabled("unified-iterator") {
-					fmt.Fprintf(os.Stderr, "[UNIFIED] Received completion notification for job %d\n", jobID)
-				}
-				
-				// Signal completion to waiting goroutine
-				ufsi.waitMutex.Lock()
-				if waitChan, exists := ufsi.completionWait[jobID]; exists {
-					close(waitChan)
-					delete(ufsi.completionWait, jobID)
-				}
-				ufsi.waitMutex.Unlock()
-				
-				// Remove from pending jobs
-				ufsi.jobMutex.Lock()
-				delete(ufsi.pendingJobs, jobID)
-				ufsi.jobMutex.Unlock()
-				
-			case <-ufsi.shutdownChan:
-				return
-			}
-		}
-	}()
-}
 
 // startScan begins the filesystem scanning in a separate goroutine
 func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
@@ -353,12 +212,12 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 
 // Close stops the filesystem scan and releases resources
 func (ufsi *UnifiedFilesystemScanIterator) Close() error {
-	ufsi.markClosed()
-	
-	// Unregister from hash manager
-	if ufsi.hashManager != nil {
-		ufsi.hashManager.UnregisterIteratorNotification(ufsi.completionChan)
+	// Check if already closed to prevent double-close
+	if err := ufsi.checkClosed(); err != nil {
+		return nil // Already closed, nothing to do
 	}
+	
+	ufsi.markClosed()
 	
 	// Signal shutdown to scanning goroutine (only if not already closed)
 	if !ufsi.scanComplete && ufsi.shutdownChan != nil {
@@ -369,19 +228,6 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 			close(ufsi.shutdownChan)
 		}
 	}
-	
-	// Close completion channel
-	if ufsi.completionChan != nil {
-		close(ufsi.completionChan)
-	}
-	
-	// Signal any waiting goroutines
-	ufsi.waitMutex.Lock()
-	for _, waitChan := range ufsi.completionWait {
-		close(waitChan)
-	}
-	ufsi.completionWait = make(map[uint64]chan struct{})
-	ufsi.waitMutex.Unlock()
 	
 	// Clean up scan index
 	if ufsi.scanIndexFileName != "" {
@@ -431,16 +277,3 @@ func (ufsi *UnifiedFilesystemScanIterator) HasNext() bool {
 	return true
 }
 
-// GetPendingJobCount returns the number of pending hash jobs (for debugging)
-func (ufsi *UnifiedFilesystemScanIterator) GetPendingJobCount() int {
-	ufsi.jobMutex.Lock()
-	defer ufsi.jobMutex.Unlock()
-	return len(ufsi.pendingJobs)
-}
-
-// GetCurrentJobID returns the current job ID (for debugging)
-func (ufsi *UnifiedFilesystemScanIterator) GetCurrentJobID() uint64 {
-	ufsi.jobMutex.Lock()
-	defer ufsi.jobMutex.Unlock()
-	return ufsi.currentJobID
-}
