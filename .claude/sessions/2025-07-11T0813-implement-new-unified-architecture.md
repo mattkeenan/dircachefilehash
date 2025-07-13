@@ -893,3 +893,62 @@ After going down a conversion tool tangent, successfully implemented working dcf
 4. Uses HeaderSize constant (88) instead of incorrect struct padding (96)
 
 Tool now correctly processes real index files and sets hashed flags. Ready to return to main unified architecture work addressing the critical StatusCallback hashing logic and circular dependency issues.
+
+### Update - 2025-07-13T11:52:39Z
+
+**Summary**: Designed and documented two-phase hash coordination architecture to solve circular dependency between iterator and callback
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/binary_entry_interface.go
+- Current branch: local-main (commit: 9fe00d4)
+
+**Todo Progress**: 1 in progress, 6 pending
+- 🔄 In Progress: Implement hash request mechanism in BinaryEntryInterface for two-phase hashing
+
+**Details**: 
+Solved the chicken-and-egg problem between hwangLinUnified and hash job coordination through architectural design:
+
+**Key Insights Discovered**:
+- hwangLinUnified selection logic is independent of hash values (uses only metadata)
+- Hashing is purely for disk persistence when entries are chosen for writing
+- Callbacks must maintain path order while handling mixed hash states (some entries already hashed, others need hash jobs)
+
+**Architecture Documented**:
+1. **Phase 1**: Callbacks register unhashed entries with hash job manager (immediate return for concurrency)
+2. **Phase 2**: Callbacks flush completed entries in path order before returning to hwangLinUnified
+3. **Path Order Preservation**: Already-hashed entries write immediately, hash-pending entries reserve positions until completion
+
+**Problem Resolved**: Eliminated "submit hash job and wait" blocking pattern that violated concurrency requirements. New design allows hwangLinUnified to continue processing while hash jobs run in background, with ordered flushing maintaining strict path order for index writing.
+
+Next: Implement the hash coordination mechanism in callbacks and hash job manager.
+
+### Update - 2025-07-13T12:29:48Z
+
+**Summary**: Completed comprehensive two-phase implementation documentation with zero-copy IoVec integration
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/binary_entry_interface.go, session file
+- Removed: tmp-2-phase-implementation.md (merged into main architecture doc)
+- Current branch: local-main (commit: 9fe00d4)
+
+**Todo Progress**: 1 in progress, 6 pending
+- 🔄 In Progress: Implement hash request mechanism in BinaryEntryInterface for two-phase hashing
+
+**Details**: 
+Finalized the complete two-phase hash coordination architecture documentation:
+
+**Major Documentation Achievement**:
+- **Replaced old approach**: Eliminated post-processing `writeSkiplistWithVectorIOFiltered` pattern
+- **Integrated zero-copy optimization**: Added BinaryEntryInterface abstraction that preserves mmap'd memory references
+- **Documented complete implementation**: CallbackHashCoordinator with batched IoVec writing and path order preservation
+- **Added callback-specific filtering**: Status (exclude MainContext) vs Update (exclude deleted entries) patterns
+
+**Key Implementation Patterns Documented**:
+1. **Phase 1**: Immediate IoVec creation for already-hashed entries, registration for unhashed entries
+2. **Phase 2**: Ordered completion processing with contiguous batching for efficient vectorio calls
+3. **Zero-copy IoVecs**: Direct references to mmap'd binaryEntry structures when possible
+4. **Concurrent benefits**: Non-blocking hwangLinUnified progress with background hash completion
+
+**Architecture Decision**: Callbacks now handle index writing directly during hwangLinUnified execution rather than post-processing, enabling better concurrency and immediate write optimization.
+
+Ready to implement the CallbackHashCoordinator and integrate with existing StatusCallback/UpdateCallback.

@@ -48,6 +48,11 @@ type BinaryEntryInterface interface {
 	SetHash(hashBytes []byte, hashType uint16) error
 	SetDeleted(deleted bool) error
 	
+	// Hash coordination for two-phase processing
+	RequestHash() error  // Request that this entry be hashed (callback → iterator communication)
+	IsHashRequested() (bool, error)  // Check if hashing has been requested
+	IsHashCompleted() (bool, error)  // Check if hashing has been completed
+	
 	// Manual locking for batch operations
 	// These allow efficient multi-field access without re-acquiring locks
 	RLock()

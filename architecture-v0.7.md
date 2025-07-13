@@ -367,17 +367,53 @@ During v0.7 implementation, a critical performance bug was discovered where Stat
 ### Root Cause
 Iterator implementations initially used placeholder `needsHashing()` functions that always returned `true`, causing every file to be submitted for hashing regardless of whether it had actually changed.
 
-### Solution: Two-Phase Architecture
-**Phase 1: Iterator (Metadata Collection)**
-- Iterators scan filesystem and create entries with complete metadata (size, timestamps, ownership)
-- NO hashing decisions made at iterator level
-- Entries returned immediately to Hwang-Lin algorithm with empty hash placeholder
+### Solution: Two-Phase Architecture with Concurrent Hash Coordination
 
-**Phase 2: Callback (Intelligent Hashing)**
-- Callbacks receive both existing entry (from index) and new entry (from filesystem)
-- Use `needsHash(existingEntry, scannedPath)` function to compare metadata
-- Only submit hash jobs if metadata differs (size, mtime, ctime, uid, gid, mode)
-- Implements git-style efficiency: "not rehashing files that have the same name, size, mtime/ctime, uid & gid"
+The chicken-and-egg problem: hwangLinUnified needs to decide which entries to keep (requires metadata), but hash computation is only needed IF we're writing entries to disk AND entries don't have hashes.
+
+**Phase 1: Concurrent Iteration and Selection**
+- hwangLinUnified iterates over two sources of entries (left and right iterators)
+- Uses metadata (os.stat() type data) to decide which entries to keep - NO HASHING NEEDED
+- Callbacks collect the entries that hwangLinUnified has decided to keep
+- Hash computation happens concurrently but is NOT required for hwangLinUnified decisions
+
+**Phase 2: On-Demand Hash Coordination for Disk Write**
+- When callback needs to write entries to disk, it checks if entries have hashes
+- If entry lacks hash AND will be written to disk: register with hash job manager (immediate return)
+- Uses `needsHash(leftEntry, rightEntry)` to determine if hash computation is required
+- Hash completion handled asynchronously with ordered flushing (see detailed coordination below)
+
+**Key Insight**: hwangLinUnified selection logic is independent of hash values. Hashing is purely for disk persistence when entries are chosen for writing.
+
+### Two-Phase Hash Coordination for Mixed Entry States
+
+**Challenge**: Callbacks receive entries in path order, but some are already hashed while others need hash jobs. Must maintain path order for index writing.
+
+**Phase 1: Registration and Immediate Processing**
+- **Already Hashed Entries**: Write to index immediately (no delay)
+- **Unhashed Entries**: 
+  - Register with hash job manager → receive job ID immediately
+  - Store entry with job ID in pending queue (maintains path order position)
+  - Continue to next entry (don't wait for completion)
+
+**Phase 2: Ordered Completion Processing**
+- **Before each callback return to hwangLinUnified**:
+  - Check completion channel for finished job IDs
+  - Match completed job IDs to entries in pending queue
+  - Write completed entries to index in their original path order position
+  - Remove completed entries from pending queue
+
+**Path Order Preservation**:
+- Index writing maintains strict path order regardless of hash completion timing
+- Already-hashed entries write immediately at correct position
+- Hash-pending entries reserve their position until completion
+- No entry writes out-of-order even if later entries complete first
+
+**Example Flow**:
+1. Entry A (already hashed) → write immediately at position A
+2. Entry B (needs hash) → register job ID 1001, queue at position B  
+3. Entry C (already hashed) → write immediately at position C
+4. Job 1001 completes → write Entry B at reserved position B
 
 ### Status vs Update: Different Destinations, Same Optimization
 
@@ -395,21 +431,154 @@ Both Status and Update operations follow identical workflows but differ in where
 - **Purpose**: Update canonical state with latest changes
 - **Filter**: Exclude entries with deleted flag (remove deleted files from main index)
 
-### IoVec Writing with Context-Aware Filtering
+### Two-Phase Implementation with Zero-Copy IoVec Writing
 
-Final index writing uses vectorio with callback-based filtering:
+#### Zero-Copy Optimization Priority
 
+**Critical Requirement**: Maintain zero-copy semantics wherever possible to preserve performance benefits of mmap'd data access.
+
+- **BinaryEntryInterface Abstraction**: All entry access goes through BinaryEntryInterface, which provides unified access to binary entry data regardless of storage mechanism (mmap, read/write, ephemeral)
+- **Mmap'd Entry Preservation**: When entries originate from existing mmap'd binaryEntry structures (skiplist entries, existing index files), use them directly through BinaryEntryInterface without data copying
+- **IoVec Direct References**: Create IoVec structures that reference mmap'd memory directly, avoiding memory allocation and data duplication
+- **Hash-Only Updates**: For entries requiring hashing, update only the hash fields in-place while preserving all other mmap'd data
+
+#### Callback-Based Index Writing
+
+Callbacks that write indices (StatusCallback → cache.idx, UpdateCallback → main.idx) implement direct IoVec writing during hwangLinUnified execution:
+
+**Data Structures:**
 ```go
-// Status: Write cache index (exclude main context entries)
-writeSkiplistWithVectorIOFiltered(cacheSkiplist, cacheFile, func(entry *binaryEntry, context string) bool {
-    return context != MainContext  // Include cache and scan contexts only
-})
+type CallbackHashCoordinator struct {
+    // Path order tracking
+    pendingEntries []PendingEntry    // Entries waiting for hash completion (maintains path order)
+    nextFlushIndex int               // Next position to flush to disk
+    
+    // Hash job management  
+    hashManager    *AlgorithmHashManager
+    jobIDToIndex   map[uint64]int    // Maps job ID to position in pendingEntries
+    
+    // IoVec batching
+    readyIoVecs    []IoVec           // Ready-to-write IoVecs accumulated between flushes
+    indexWriter    *IndexWriter      // Handles actual disk writes
+    entryFilter    EntryFilterFunc   // Callback-specific filtering (cache vs main)
+}
 
-// Update: Write main index (exclude deleted entries)  
-writeSkiplistWithVectorIOFiltered(mainSkiplist, mainFile, func(entry *binaryEntry, context string) bool {
-    return !entry.IsDeleted()  // Include non-deleted entries only
-})
+type EntryFilterFunc func(entry BinaryEntryInterface, context string) bool
 ```
+
+**Phase 1: Registration and Immediate Processing**
+```go
+func (c *CallbackHashCoordinator) ProcessEntry(entry BinaryEntryInterface, context string) error {
+    // Apply callback-specific filtering first
+    if !c.entryFilter(entry, context) {
+        return nil // Skip entry based on callback requirements
+    }
+    
+    // Check if entry already has valid hash
+    if hasValidHash(entry) {
+        // Create IoVec immediately - use zero-copy when possible
+        ioVec, err := createEntryIoVecZeroCopy(entry)
+        if err != nil {
+            return err
+        }
+        
+        // Add to ready IoVecs for next batch write
+        c.readyIoVecs = append(c.readyIoVecs, ioVec)
+        return nil
+    }
+    
+    // Entry needs hashing - register and continue
+    return c.registerForHashing(entry, context)
+}
+
+// createEntryIoVecZeroCopy creates IoVec referencing mmap'd data directly when possible
+func createEntryIoVecZeroCopy(entry BinaryEntryInterface) (IoVec, error) {
+    // For mmap'd entries (BESkiplistEntry, BEIndexFileMmapEntry, BEScanEntry):
+    // Reference the underlying mmap'd binaryEntry directly
+    if binaryEntryRef, ok := entry.GetBinaryEntryRef(); ok {
+        underlyingEntry := binaryEntryRef.GetBinaryEntry()
+        return IoVec{
+            Base: unsafe.Pointer(underlyingEntry),
+            Len:  int(underlyingEntry.Size),
+        }, nil
+    }
+    
+    // For non-mmap'd entries (BEIndexFileIOEntry):
+    // Must serialize entry data (unavoidable copy)
+    return createEntryIoVecWithCopy(entry)
+}
+```
+
+**Phase 2: Ordered Completion and Batched Writing**
+```go
+func (c *CallbackHashCoordinator) FlushCompletedEntries() error {
+    // Check completion channel for finished jobs
+    completedJobIDs := c.hashManager.DrainCompletionChannel()
+    
+    // Mark completed entries and prepare IoVecs
+    for _, jobID := range completedJobIDs {
+        if err := c.markJobCompleted(jobID); err != nil {
+            return err
+        }
+    }
+    
+    // Flush contiguous ready entries from the front
+    return c.flushContiguousEntries()
+}
+
+func (c *CallbackHashCoordinator) flushContiguousEntries() error {
+    // Find all contiguous ready entries from nextFlushIndex
+    batchIoVecs := make([]IoVec, 0)
+    
+    // Add any ready IoVecs from immediate writes (already-hashed entries)
+    batchIoVecs = append(batchIoVecs, c.readyIoVecs...)
+    c.readyIoVecs = c.readyIoVecs[:0] // Clear ready list
+    
+    // Add contiguous completed entries from pending queue
+    for i := c.nextFlushIndex; i < len(c.pendingEntries); i++ {
+        entry := &c.pendingEntries[i]
+        
+        if entry.state != StateHashCompleted && entry.state != StateAlreadyHashed {
+            // Hit a non-ready entry - stop contiguous batching
+            break
+        }
+        
+        if entry.ioVec != nil {
+            batchIoVecs = append(batchIoVecs, *entry.ioVec)
+        }
+        c.nextFlushIndex++
+    }
+    
+    // Write entire batch with single vectorio call
+    if len(batchIoVecs) > 0 {
+        return c.indexWriter.WriteIoVecBatch(batchIoVecs)
+    }
+    
+    return nil
+}
+```
+
+**Callback-Specific Filtering:**
+```go
+// StatusCallback: Write cache index (exclude main context entries)
+statusFilter := func(entry BinaryEntryInterface, context string) bool {
+    return context != MainContext  // Include cache and scan contexts only
+}
+
+// UpdateCallback: Write main index (exclude deleted entries)
+updateFilter := func(entry BinaryEntryInterface, context string) bool {
+    if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
+        return false  // Exclude deleted entries from main index
+    }
+    return true
+}
+```
+
+**Concurrency Benefits:**
+- **Batched IoVec Writes**: Single vectorio call for multiple completed entries
+- **Out-of-Order Completion**: Hash jobs complete concurrently, written in path order
+- **Zero-Copy Efficiency**: Direct mmap'd memory references avoid data duplication
+- **Non-Blocking Progress**: hwangLinUnified continues while hash jobs run in background
 
 ### Performance Impact
 - **Before**: All files hashed on every operation (O(n) where n = total files)
