@@ -442,135 +442,199 @@ Both Status and Update operations follow identical workflows but differ in where
 - **IoVec Direct References**: Create IoVec structures that reference mmap'd memory directly, avoiding memory allocation and data duplication
 - **Hash-Only Updates**: For entries requiring hashing, update only the hash fields in-place while preserving all other mmap'd data
 
-#### Callback-Based Index Writing
+#### Concurrent Hash Coordination in Callbacks (No Separate Component)
 
-Callbacks that write indices (StatusCallback → cache.idx, UpdateCallback → main.idx) implement direct IoVec writing during hwangLinUnified execution:
+Callbacks coordinate hash processing directly with the existing `hashJobManager` during `hwangLinUnified` execution. This maintains iterative parallel concurrent architecture without introducing new components.
 
-**Data Structures:**
+**Architectural Principle**: Use existing `hashJobManager` from callbacks instead of creating new coordination layer. Avoid maps where simple counters work better.
+
+**Required Infrastructure Changes:**
+
+1. **Add Cookie Support to hashJobStart:**
 ```go
-type CallbackHashCoordinator struct {
-    // Path order tracking
-    pendingEntries []PendingEntry    // Entries waiting for hash completion (maintains path order)
-    nextFlushIndex int               // Next position to flush to disk
-    
-    // Hash job management  
-    hashManager    *AlgorithmHashManager
-    jobIDToIndex   map[uint64]int    // Maps job ID to position in pendingEntries
-    
-    // IoVec batching
-    readyIoVecs    []IoVec           // Ready-to-write IoVecs accumulated between flushes
-    indexWriter    *IndexWriter      // Handles actual disk writes
-    entryFilter    EntryFilterFunc   // Callback-specific filtering (cache vs main)
+type hashJobStart struct {
+    JobID       uint64              // System-assigned job ID (existing)
+    Cookie      uint64              // External cookie for caller tracking (NEW)
+    FilePath    string
+    IndexEntry  binaryEntryRef
+    ScannedPath *scannedPath
 }
-
-type EntryFilterFunc func(entry BinaryEntryInterface, context string) bool
 ```
 
-**Phase 1: Registration and Immediate Processing**
+2. **Modify Completion Notification:**
 ```go
-func (c *CallbackHashCoordinator) ProcessEntry(entry BinaryEntryInterface, context string) error {
-    // Apply callback-specific filtering first
-    if !c.entryFilter(entry, context) {
-        return nil // Skip entry based on callback requirements
+type hashJobCompletion struct {
+    JobID  uint64  // System job ID
+    Cookie uint64  // Caller's cookie (echoed back)
+}
+
+// CompletionChannel returns completions with both JobID and Cookie
+func (ahm *algorithmHashManager) CompletionChannel() <-chan hashJobCompletion
+```
+
+**Benefits of Cookie-Based Tracking:**
+- **Simple Counter**: Callbacks use `entryCounter++` instead of complex maps
+- **In-Order Detection**: Check `pendingEntries[cookie-1] == nil` to detect completion gaps
+- **Memory Efficient**: Slice indexed by cookie position vs map with hash lookups
+- **Ordering Guaranteed**: Callback knows exact position of each entry for IoVec writing
+
+**Callback Processing Flow During hwangLinUnified:**
+
+```go
+// In callback (StatusCallback/UpdateCallback) during hwangLinUnified
+func (callback *UpdateCallback) OnComparison(result ComparisonResult, left, right BinaryEntryInterface, ...) (bool, error) {
+    // Keep the most recent binaryEntry from Hwang-Lin
+    var entryToProcess BinaryEntryInterface
+    
+    switch result {
+    case ComparisonMatch:
+        if needsHash(left, right) {
+            // File changed - submit hash job for current state
+            if err := callback.submitHashJobToManager(right); err != nil {
+                return false, err
+            }
+        } else {
+            // File unchanged - append existing entry to backlog immediately
+            callback.appendToBacklog(left)
+        }
+    case ComparisonRightFirst:
+        // New file - submit hash job
+        if err := callback.submitHashJobToManager(right); err != nil {
+            return false, err
+        }
+    case ComparisonLeftFirst:
+        // Deleted file - append to backlog (for deletion marking)
+        callback.appendToBacklog(left)
     }
     
-    // Check if entry already has valid hash
-    if hasValidHash(entry) {
-        // Create IoVec immediately - use zero-copy when possible
-        ioVec, err := createEntryIoVecZeroCopy(entry)
+    // Check completion queue from hashJobManager and merge completed entries to backlog
+    callback.processCompletedHashJobs()
+    
+    // Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
+    callback.flushInOrderEntries()
+    
+    return true, nil
+}
+```
+
+**Callback State Management:**
+```go
+type UpdateCallback struct {
+    // Index writing
+    backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
+    tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
+    
+    // Hash coordination with existing hashJobManager (avoid maps where simple counter works)
+    hashJobManager   *AlgorithmHashManager   // Existing hash manager (passed from caller)
+    entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
+    pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
+    nextFlushIndex   uint64                  // Next counter position to check for flushing
+}
+
+func (callback *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
+    // Submit to existing hash manager using callback's own counter as cookie
+    ref, ok := entry.GetBinaryEntryRef()
+    if !ok {
+        return fmt.Errorf("entry doesn't support hash job submission")
+    }
+    
+    // Increment counter for this entry (used as external cookie)
+    callback.entryCounter++
+    cookie := callback.entryCounter
+    
+    // Store entry at cookie position for completion tracking
+    if int(cookie) > len(callback.pendingEntries) {
+        // Expand slice to accommodate new cookie position
+        newSlice := make([]BinaryEntryInterface, cookie)
+        copy(newSlice, callback.pendingEntries)
+        callback.pendingEntries = newSlice
+    }
+    callback.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
+    
+    callback.hashJobManager.SubmitHashJob(&hashJobStart{
+        FilePath:    entry.AbsolutePath(),
+        IndexEntry:  ref,
+        Cookie:      cookie,  // Pass callback's counter as external cookie
+    })
+    
+    return nil
+}
+
+func (callback *UpdateCallback) processCompletedHashJobs() {
+    // Non-blocking check for completed jobs from existing hashJobManager
+    for {
+        select {
+        case completion := <-callback.hashJobManager.CompletionChannel():
+            // completion now contains both JobID and Cookie
+            cookie := completion.Cookie
+            
+            if cookie > 0 && int(cookie) <= len(callback.pendingEntries) {
+                // Mark entry as completed by setting to nil (ready for flush)
+                callback.pendingEntries[cookie-1] = nil
+            }
+        default:
+            return // No more completed jobs available
+        }
+    }
+}
+
+func (callback *UpdateCallback) flushInOrderEntries() error {
+    // Use counter to check for contiguous completed entries (no gaps)
+    var readyIoVecs []IoVec
+    
+    // Process backlog entries that can be written in order
+    for len(callback.backlog) > 0 {
+        entry := callback.backlog[0]
+        
+        // Create zero-copy IoVec when possible  
+        ioVec, err := callback.createEntryIoVec(entry)
         if err != nil {
             return err
         }
         
-        // Add to ready IoVecs for next batch write
-        c.readyIoVecs = append(c.readyIoVecs, ioVec)
-        return nil
+        readyIoVecs = append(readyIoVecs, ioVec)
+        callback.backlog = callback.backlog[1:] // Remove from backlog
     }
     
-    // Entry needs hashing - register and continue
-    return c.registerForHashing(entry, context)
-}
-
-// createEntryIoVecZeroCopy creates IoVec referencing mmap'd data directly when possible
-func createEntryIoVecZeroCopy(entry BinaryEntryInterface) (IoVec, error) {
-    // For mmap'd entries (BESkiplistEntry, BEIndexFileMmapEntry, BEScanEntry):
-    // Reference the underlying mmap'd binaryEntry directly
-    if binaryEntryRef, ok := entry.GetBinaryEntryRef(); ok {
-        underlyingEntry := binaryEntryRef.GetBinaryEntry()
-        return IoVec{
-            Base: unsafe.Pointer(underlyingEntry),
-            Len:  int(underlyingEntry.Size),
-        }, nil
-    }
-    
-    // For non-mmap'd entries (BEIndexFileIOEntry):
-    // Must serialize entry data (unavoidable copy)
-    return createEntryIoVecWithCopy(entry)
-}
-```
-
-**Phase 2: Ordered Completion and Batched Writing**
-```go
-func (c *CallbackHashCoordinator) FlushCompletedEntries() error {
-    // Check completion channel for finished jobs
-    completedJobIDs := c.hashManager.DrainCompletionChannel()
-    
-    // Mark completed entries and prepare IoVecs
-    for _, jobID := range completedJobIDs {
-        if err := c.markJobCompleted(jobID); err != nil {
-            return err
-        }
-    }
-    
-    // Flush contiguous ready entries from the front
-    return c.flushContiguousEntries()
-}
-
-func (c *CallbackHashCoordinator) flushContiguousEntries() error {
-    // Find all contiguous ready entries from nextFlushIndex
-    batchIoVecs := make([]IoVec, 0)
-    
-    // Add any ready IoVecs from immediate writes (already-hashed entries)
-    batchIoVecs = append(batchIoVecs, c.readyIoVecs...)
-    c.readyIoVecs = c.readyIoVecs[:0] // Clear ready list
-    
-    // Add contiguous completed entries from pending queue
-    for i := c.nextFlushIndex; i < len(c.pendingEntries); i++ {
-        entry := &c.pendingEntries[i]
-        
-        if entry.state != StateHashCompleted && entry.state != StateAlreadyHashed {
-            // Hit a non-ready entry - stop contiguous batching
+    // Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
+    for int(callback.nextFlushIndex) < len(callback.pendingEntries) {
+        if callback.pendingEntries[callback.nextFlushIndex] != nil {
+            // Hit a non-completed entry - stop to maintain order
             break
         }
-        
-        if entry.ioVec != nil {
-            batchIoVecs = append(batchIoVecs, *entry.ioVec)
-        }
-        c.nextFlushIndex++
+        // Entry is nil (completed) - can skip it in flush sequence
+        callback.nextFlushIndex++
     }
     
-    // Write entire batch with single vectorio call
-    if len(batchIoVecs) > 0 {
-        return c.indexWriter.WriteIoVecBatch(batchIoVecs)
+    // Write batch with single vectorio call to temp index
+    if len(readyIoVecs) > 0 {
+        return callback.tempIndexWriter.WriteIoVecBatch(readyIoVecs)
     }
     
     return nil
 }
-```
 
-**Callback-Specific Filtering:**
-```go
-// StatusCallback: Write cache index (exclude main context entries)
-statusFilter := func(entry BinaryEntryInterface, context string) bool {
-    return context != MainContext  // Include cache and scan contexts only
-}
-
-// UpdateCallback: Write main index (exclude deleted entries)
-updateFilter := func(entry BinaryEntryInterface, context string) bool {
-    if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
-        return false  // Exclude deleted entries from main index
+// Zero-copy IoVec creation
+func (callback *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (IoVec, error) {
+    // For mmap'd entries: Reference underlying mmap'd binaryEntry directly
+    if binaryEntryRef, ok := entry.GetBinaryEntryRef(); ok {
+        underlyingEntry := binaryEntryRef.GetBinaryEntry()
+        return IoVec{
+            Data: unsafe.Pointer(underlyingEntry),
+            Len:  int(unsafe.Sizeof(binaryEntry{})),
+        }, nil
     }
-    return true
+    
+    // For read/write entries: Must copy data (unavoidable for non-mmap'd entries)
+    entryData, err := entry.GetBinaryData()
+    if err != nil {
+        return IoVec{}, err
+    }
+    
+    return IoVec{
+        Data: unsafe.Pointer(&entryData[0]),
+        Len:  len(entryData),
+    }, nil
 }
 ```
 
