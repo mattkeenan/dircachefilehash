@@ -1,5 +1,17 @@
 # Unified Architecture v0.7: BinaryEntryInterface & Iterator Unification
 
+## ⚠️ CRITICAL REQUIREMENT: ITERATIVE APPROACH IS MANDATORY ⚠️
+
+**HARD REQUIREMENT**: All operations MUST use iterative writing during hwangLinUnified execution. This is NOT optional and takes precedence over "the best part is no part" principle.
+
+**Why Iterative is Required**:
+- Memory efficiency: Prevents accumulating all entries in memory before writing
+- Streaming performance: Enables processing of arbitrarily large repositories
+- Consistent architecture: All operations follow the same iterative pattern
+- Resource management: Avoids memory spikes during index writing
+
+**Implementation Rule**: "The best part is no part" applies WITHIN the iterative approach constraint, not as an alternative to it.
+
 ## Overview
 
 This document outlines the unified architecture approach that combines `BinaryEntryInterface` for data access with unified iterator interfaces. This eliminates the bifurcated iterator hierarchy and provides a single, composable approach for all data sources in the HwangLin algorithm.
