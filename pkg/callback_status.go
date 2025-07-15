@@ -77,15 +77,30 @@ func (sc *StatusCallback) OnComparison(
 			} else {
 				// CRITICAL: Status command MUST hash files that need hashing
 				if needsHash(leftEntry, rightEntry) {
-					// File changed - submit hash job for current state
-					if err := sc.submitHashJobToManager(rightEntry); err != nil {
+					// File changed - categorize as modified and coordinate hashing
+					sc.result.Modified = append(sc.result.Modified, rightPath)
+					
+					// Release mutex before hash coordination to avoid deadlocks
+					sc.mutex.Unlock()
+					
+					// Use unified hash coordination for modified file
+					if err := sc.SubmitAndOrWriteHash(rightEntry, "modified"); err != nil {
 						return false, err
 					}
-					// File needs hashing - categorize as modified
-					sc.result.Modified = append(sc.result.Modified, rightPath)
+					
+					// Re-acquire mutex for rest of method
+					sc.mutex.Lock()
 				} else {
-					// File unchanged - append existing entry to backlog immediately
-					sc.appendToBacklog(leftEntry)
+					// File unchanged - use unified coordination for unchanged file
+					sc.mutex.Unlock()
+					
+					// Use unified hash coordination for unchanged file (will add to backlog)
+					if err := sc.SubmitAndOrWriteHash(leftEntry, "unchanged"); err != nil {
+						return false, err
+					}
+					
+					// Re-acquire mutex for rest of method
+					sc.mutex.Lock()
 				}
 			}
 		}
@@ -105,10 +120,16 @@ func (sc *StatusCallback) OnComparison(
 			// Only count as added if the right entry is not marked as deleted
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
 				// CRITICAL: Status command MUST hash new files (always needs hashing)
+				if IsDebugEnabled("hash") {
+					VerboseLog(3, "[STATUS-HASH] Requesting hash for new file: %s", rightPath)
+				}
 				if err := rightEntry.RequestHash(); err != nil {
 					return false, err
 				}
 				sc.result.Added = append(sc.result.Added, rightPath)
+				if IsDebugEnabled("hash") {
+					VerboseLog(3, "[STATUS-HASH] Successfully requested hash for new file: %s", rightPath)
+				}
 			}
 		}
 		
@@ -117,10 +138,16 @@ func (sc *StatusCallback) OnComparison(
 		if rightEntry != nil {
 			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
 				// CRITICAL: Status command MUST hash new files (always needs hashing)
+				if IsDebugEnabled("hash") {
+					VerboseLog(3, "[STATUS-HASH] Requesting hash for new file (left exhausted): %s", rightPath)
+				}
 				if err := rightEntry.RequestHash(); err != nil {
 					return false, err
 				}
 				sc.result.Added = append(sc.result.Added, rightPath)
+				if IsDebugEnabled("hash") {
+					VerboseLog(3, "[STATUS-HASH] Successfully requested hash for new file (left exhausted): %s", rightPath)
+				}
 			}
 		}
 		
@@ -133,16 +160,8 @@ func (sc *StatusCallback) OnComparison(
 		}
 	}
 	
-	// Release mutex before hash coordination to avoid deadlocks
+	// Release mutex at end (it was already handled in SubmitAndOrWriteHash calls above)
 	sc.mutex.Unlock()
-	
-	// Check completion queue from hashJobManager and merge completed entries to backlog
-	sc.processCompletedHashJobs()
-	
-	// Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
-	if err := sc.flushInOrderEntries(); err != nil {
-		return false, fmt.Errorf("failed to flush entries: %w", err)
-	}
 	
 	return true, nil // Continue processing
 }
@@ -154,6 +173,12 @@ func (sc *StatusCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (b
 			sc.mutex.Lock()
 			sc.result.Deleted = append(sc.result.Deleted, path)
 			sc.mutex.Unlock()
+			
+			// Deleted files don't need hashing, but DO get written to cache.idx
+			// SubmitAndOrWriteHash will add to backlog for cache writing
+			if err := sc.SubmitAndOrWriteHash(entry, "deleted"); err != nil {
+				return false, err
+			}
 		}
 	}
 	return true, nil
@@ -163,13 +188,15 @@ func (sc *StatusCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (b
 func (sc *StatusCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	if entry != nil {
 		if isDeleted, err := entry.IsDeleted(); err == nil && !isDeleted {
-			// CRITICAL: Status command MUST hash new files (always needs hashing)
-			if err := entry.RequestHash(); err != nil {
-				return false, err
-			}
+			// Add to result list
 			sc.mutex.Lock()
 			sc.result.Added = append(sc.result.Added, path)
 			sc.mutex.Unlock()
+			
+			// Use unified hash coordination for new file
+			if err := sc.SubmitAndOrWriteHash(entry, "new_file"); err != nil {
+				return false, err
+			}
 		}
 	}
 	return true, nil
@@ -241,17 +268,35 @@ func (sc *StatusCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 
 // appendToBacklog adds entry to backlog for immediate writing (file unchanged case)
 func (sc *StatusCallback) appendToBacklog(entry BinaryEntryInterface) {
+	if IsDebugEnabled("write") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[STATUS-WRITE] Adding entry to backlog: %s", path)
+		}
+	}
 	sc.backlog = append(sc.backlog, entry)
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[STATUS-WRITE] Backlog now contains %d entries", len(sc.backlog))
+	}
 }
 
 // flushInOrderEntries processes backlog and pending entries, creating IoVecs for temp index writing
 func (sc *StatusCallback) flushInOrderEntries() error {
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[STATUS-WRITE] Flushing entries: backlog=%d pending=%d", len(sc.backlog), len(sc.pendingEntries))
+	}
+	
 	// Use counter to check for contiguous completed entries (no gaps)
 	var readyIoVecs []syscall.Iovec
 	
 	// Process backlog entries that can be written in order
 	for len(sc.backlog) > 0 {
 		entry := sc.backlog[0]
+		
+		if IsDebugEnabled("write") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[STATUS-WRITE] Creating IoVec for backlog entry: %s", path)
+			}
+		}
 		
 		// Create zero-copy IoVec when possible  
 		ioVec, err := sc.createEntryIoVec(entry)
@@ -275,9 +320,15 @@ func (sc *StatusCallback) flushInOrderEntries() error {
 	
 	// Write batch with single vectorio call to temp index
 	if len(readyIoVecs) > 0 {
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[STATUS-WRITE] Writing %d IoVecs to temp index", len(readyIoVecs))
+		}
 		return sc.writeIoVecBatchToTempIndex(readyIoVecs)
 	}
 	
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[STATUS-WRITE] No IoVecs ready to write")
+	}
 	return nil
 }
 
@@ -297,9 +348,58 @@ func (sc *StatusCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.
 
 // writeIoVecBatchToTempIndex writes IoVec batch to cache temp index using vectorio
 func (sc *StatusCallback) writeIoVecBatchToTempIndex(iovecs []syscall.Iovec) error {
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[STATUS-WRITE] writeIoVecBatchToTempIndex called with %d iovecs - BUT NOT IMPLEMENTED", len(iovecs))
+	}
 	// TODO: Implement proper IoVec batch writing to temp index
 	// For now, just skip writing - this will be implemented when TempIndexWriter is available
 	// The architecture framework is in place for iterative writing
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[STATUS-WRITE] WARNING: writeIoVecBatchToTempIndex is not implemented - no entries written!")
+	}
+	return nil
+}
+
+// SubmitAndOrWriteHash handles unified hash coordination and cache writing for Status command
+func (sc *StatusCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[STATUS-HASH] SubmitAndOrWriteHash called for %s: %s", operation, path)
+		}
+	}
+	
+	// Status callback always writes to cache temp index for performance optimization
+	if entry == nil {
+		return nil // Nothing to process
+	}
+	
+	// Check if this entry needs hashing and writing
+	needsHashing := (operation == "new_file") || (operation == "modified")
+	
+	// CRITICAL: Cache index excludes MainContext entries (no duplication with main.idx)
+	entryContext, _ := entry.GetContext()
+	needsWriting := (entryContext != MainContext)
+	
+	if needsHashing {
+		// Submit hash job using the existing infrastructure
+		if err := sc.submitHashJobToManager(entry); err != nil {
+			return err
+		}
+	} else if needsWriting {
+		// File unchanged or deleted - add directly to backlog for writing to cache
+		// CRITICAL: cache.idx includes deleted entries but excludes MainContext entries
+		sc.appendToBacklog(entry)
+	}
+	// MainContext entries: no writing to cache (already in main.idx)
+	
+	// Process any completed hash jobs and write in-order entries
+	sc.processCompletedHashJobs()
+	
+	// Flush any ready entries to temp index
+	if err := sc.flushInOrderEntries(); err != nil {
+		return fmt.Errorf("failed to flush entries during hash coordination: %w", err)
+	}
+	
 	return nil
 }
 

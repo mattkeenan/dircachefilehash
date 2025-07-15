@@ -133,7 +133,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		IndexFile:     indexFile,
 		CacheFile:     cacheFile,
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
-		version:       1,
+		version:       2,
 		hasher:        sha1.New(),
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(dcfhDir),

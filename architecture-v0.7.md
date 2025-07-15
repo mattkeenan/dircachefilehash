@@ -37,6 +37,21 @@ The unified HwangLin architecture needs to handle **four distinct data sources**
 - **Index with iterative skiplist**: Use mmap() since skiplist is being built
 - **Scanning**: Always mmap() since entries are ephemeral and updated in-place
 
+**CRITICAL: Index File Content Rules**:
+- **main.idx**: Contains ONLY non-deleted entries (excludes deleted entries)
+- **cache.idx**: Contains ALL entries INCLUDING deleted entries BUT excludes entries already in main.idx
+- **scan-*.idx**: Contains ALL entries INCLUDING deleted entries (temporary files)
+
+**Context-Based Filtering**:
+- **MainContext entries**: Written to main.idx, excluded from cache.idx (prevents duplication)
+- **CacheContext entries**: Written to cache.idx, written to main.idx during updates (cache work gets promoted)
+- **ScanContext entries**: Written to appropriate index based on callback (new scan work)
+
+**Rationale**: 
+- Main index represents clean repository state (non-deleted only, includes promoted cache work)
+- Cache preserves work not yet in main index (deleted entries + new work)
+- Cache filtering prevents duplication, but main updates include cache entries
+
 ## Architectural Decision: Unified Iterator Interface
 
 **Critical Discovery**: During implementation, we identified a bifurcated iterator architecture that violated "best part is no part":
@@ -680,6 +695,94 @@ func (callback *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (Io
 - `pkg/binary_entry_interface_test.go` - Comprehensive tests
 - `pkg/iterator_filesystem_unified.go` - UnifiedFilesystemScanIterator
 - `pkg/hwang_lin_unified.go` - Unified algorithm using BinaryEntryIterator
+
+## Architectural Decision: Unified Hash Coordination Interface
+
+### Problem Discovered During Implementation
+
+During Status command implementation, we discovered that hash coordination logic was inconsistently implemented across different callback methods:
+
+**Issue**: The `OnComparison` method in StatusCallback had complete hash coordination:
+- Cookie-based hash job submission via `submitHashJobToManager()`
+- Hash completion processing via `processCompletedHashJobs()`
+- In-order cache writing via `flushInOrderEntries()`
+
+**Missing**: The `OnRightOnly` method (called for new files when left iterator is empty) only called `RequestHash()` but completely lacked cache writing coordination.
+
+**Result**: Status command found files correctly, requested hashing, but never wrote entries to cache.idx (only header written).
+
+### Root Cause Analysis
+
+**When hwangLinUnified runs with empty existing index**:
+1. leftEntry = nil (no existing files)
+2. rightEntry = valid (scanned files found)
+3. hwangLinUnified correctly calls `OnRightOnly()` instead of `OnComparison()`
+4. `OnRightOnly()` calls `RequestHash()` but has no cache writing logic
+5. Cache.idx gets created with header but no entries
+
+**Core Problem**: Hash coordination logic was duplicated and incomplete across callback methods.
+
+### Solution: SubmitAndOrWriteHash Interface Method
+
+**Decision**: Add a unified `SubmitAndOrWriteHash()` method to the `HwangLinCallback` interface that encapsulates ALL hash coordination and writing logic.
+
+```go
+type HwangLinCallback interface {
+    OnStart(leftName, rightName string) error
+    OnComparison(result ComparisonResult, leftEntry, rightEntry BinaryEntryInterface, leftPath, rightPath string) (bool, error)
+    OnRightOnly(entry BinaryEntryInterface, path string) (bool, error)
+    OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error)
+    OnComplete(err error) error
+    
+    // NEW: Unified hash coordination for all entry processing
+    SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error
+}
+```
+
+**Implementation Pattern**:
+```go
+// All On* methods call this before returning
+func (callback *SomeCallback) OnRightOnly(entry BinaryEntryInterface, path string) (bool, error) {
+    // Handle specific logic for this callback method
+    // ...
+    
+    // ALWAYS call unified hash coordination before returning
+    if err := callback.SubmitAndOrWriteHash(entry, "new_file"); err != nil {
+        return false, err
+    }
+    
+    return true, nil
+}
+```
+
+**Per-Callback Implementation**:
+- **StatusCallback**: Full hash coordination + cache.idx writing (excludes MainContext, includes deleted)
+- **UpdateCallback**: Full hash coordination + main.idx writing (excludes deleted only)
+- **DupesCallback**: No-op (`return nil`) - no writing needed
+- **Future callbacks**: Implement as needed
+
+**CRITICAL Context Filtering**:
+- **StatusCallback**: Writes CacheContext + ScanContext entries to cache.idx (excludes MainContext to prevent duplication)
+- **UpdateCallback**: Writes ALL non-deleted entries to main.idx (includes cache entries since main+cache are merged before HwangLin)
+- **Key principle**: Cache excludes main entries, but main includes cache entries (after merging)
+
+### Benefits
+
+1. **Eliminates Code Duplication**: Hash coordination logic centralized in one method
+2. **Consistent Behavior**: All On* methods use same coordination mechanism
+3. **Context-Aware Writing**: Each callback controls whether/how to write
+4. **Extensible**: New callbacks easily implement appropriate writing behavior
+5. **Debuggable**: Single place to add instrumentation for hash coordination
+
+### Implementation Requirements
+
+1. **Interface Addition**: Add `SubmitAndOrWriteHash()` to `HwangLinCallback`
+2. **Callback Updates**: All existing callbacks implement the method
+3. **Method Integration**: All On* methods call `SubmitAndOrWriteHash()` before returning
+4. **Logic Migration**: Move hash coordination from `OnComparison` to `SubmitAndOrWriteHash`
+5. **Testing**: Verify all callback paths write correctly
+
+**Priority**: HIGH - Fixes critical Status command cache writing bug
 
 ## Documentation Updates
 

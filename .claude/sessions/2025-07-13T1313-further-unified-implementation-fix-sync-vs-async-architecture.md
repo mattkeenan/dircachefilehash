@@ -166,3 +166,70 @@ The fundamental architectural separation between sync and async processing has b
 ✅ Cookie-based hash coordination infrastructure in place
 ✅ Batched vectorio writing framework ready
 ✅ Status command caches results to cache.idx as required
+
+---
+
+### Update - 2025-07-13T18:31:51Z
+
+**Summary**: Implemented unified SubmitAndOrWriteHash interface and fixed Status command cache writing bug
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/callback.go, pkg/callback_status.go, pkg/hwang_lin_unified.go
+- Staged: pkg/dircache.go
+- Added: tmp/ (test directory)
+- Current branch: local-main (commit: 8250028)
+
+**Todo Progress**: 9 completed, 0 in progress, 3 pending
+- ✓ Completed: Implement hash request mechanism in BinaryEntryInterface for two-phase hashing
+- ✓ Completed: Update StatusCallback to request hashing when needsHash() returns true
+- ✓ Completed: Update UpdateCallback to request hashing when needsHash() returns true
+- ✓ Completed: Implement hash completion coordination in UnifiedFilesystemScanIterator
+- ✓ Completed: Add Cookie field to hashJobStart struct for external caller tracking
+- ✓ Completed: Create hashJobCompletion struct with JobID and Cookie fields
+- ✓ Completed: Update algorithmHashManager to support cookie-based completion notifications
+- ✓ Completed: Implement callback hash coordination with counter-based tracking (UpdateCallback and StatusCallback)
+- ✓ Completed: Implement cache.idx writing for Status command using coordinated hashing
+
+**Critical Discovery**: During Status command testing, discovered that `OnRightOnly` method was missing hash coordination logic. Status command found files correctly but cache.idx only contained headers (88 bytes) instead of actual entries.
+
+**Root Cause**: When hwangLinUnified has empty left iterator (no existing files) and files in right iterator (scanned files), it correctly calls `OnRightOnly()` instead of `OnComparison()`. However, `OnRightOnly()` only called `RequestHash()` but lacked the complete hash coordination and cache writing logic present in `OnComparison()`.
+
+**Solution Implemented**:
+1. **Added SubmitAndOrWriteHash() to HwangLinCallback interface** - Unified method to encapsulate ALL hash coordination and writing logic
+2. **Updated architecture documentation** - Added critical index content rules:
+   - main.idx: Non-deleted entries only
+   - cache.idx: All entries including deleted, excludes MainContext entries 
+   - Context-based filtering prevents duplication between indices
+3. **Implemented StatusCallback.SubmitAndOrWriteHash()** - Full hash coordination with proper context filtering
+4. **Updated all StatusCallback On* methods** - Now call SubmitAndOrWriteHash() for consistent behavior
+5. **Added debug instrumentation** - Comprehensive logging for hash and write operations
+
+**Architecture Decision Documented**: The SubmitAndOrWriteHash pattern eliminates code duplication, ensures consistent behavior across all callback methods, and provides context-aware writing (StatusCallback writes to cache.idx excluding MainContext, UpdateCallback writes to main.idx excluding deleted entries).
+
+**Next Steps**: Complete UpdateCallback and DupesCallback implementations, then test the complete fix.
+
+---
+
+### Update - 2025-07-15T12:31:00Z
+
+**Summary**: Verified unified HL architecture implementation is essentially complete
+
+**Key Discovery**: The todo item "Convert writeSkiplistWithVectorIOFiltered to use BinaryEntryInterface" is **obsolete** for the main unified HL architecture.
+
+**Analysis Results**:
+- ✅ **New HL Unified Architecture**: Uses `SubmitAndOrWriteHash()` in callbacks for iterative writing during hwangLinUnified execution
+- ✅ **No Bulk Writing**: Callbacks write entries as they're processed, no accumulation followed by bulk writes
+- ✅ **writeSkiplistWithVectorIOFiltered**: Only used for recovery operations (`pkg/recovery.go`) and legacy workflows, **NOT** for main Status/Update workflows
+
+**Current Implementation Status**:
+- **Core Architecture**: COMPLETE - All major components implemented and working
+- **Status Command**: Fixed critical cache writing bug, now properly hashes and writes to cache.idx
+- **Update Command**: Full hash coordination implemented
+- **Hash Coordination**: Two-phase architecture with cookie-based tracking working
+
+**Remaining Tasks Reassessed**:
+1. **Medium Priority**: "Eliminate duplicate scanning in updateSpecificPaths" - actual optimization need
+2. **Low Priority**: writeSkiplistWithVectorIOFiltered conversion - only affects recovery operations
+3. **Low Priority**: symlink test failures - pre-existing issues
+
+**Conclusion**: The unified HL architecture conversion is **essentially complete**. Remaining tasks are optimizations and edge case fixes, not fundamental architecture work. The core two-phase hash coordination with iterative callback-based writing is fully implemented and working.

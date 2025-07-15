@@ -76,6 +76,22 @@ type HwangLinCallback interface {
 	// The error parameter indicates if the algorithm stopped due to an error.
 	OnComplete(err error) error
 	
+	// SubmitAndOrWriteHash handles unified hash coordination and cache writing.
+	// This method encapsulates all hash job submission, completion processing,
+	// and iterative cache writing logic in one place.
+	//
+	// Parameters:
+	// - entry: The BinaryEntryInterface that may need hashing and/or writing
+	// - operation: Description of the operation context ("new_file", "modified", "unchanged", etc.)
+	//
+	// Implementation varies by callback:
+	// - StatusCallback: Full hash coordination + cache.idx writing
+	// - UpdateCallback: Full hash coordination + main.idx writing  
+	// - DupesCallback: No-op (return nil) - no writing needed
+	//
+	// This method should be called by ALL On* methods before returning.
+	SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error
+	
 	// Name returns a descriptive name for this callback (for debugging/logging).
 	Name() string
 }

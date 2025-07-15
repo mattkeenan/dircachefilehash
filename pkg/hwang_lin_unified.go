@@ -21,6 +21,10 @@ func hwangLinUnified(
 	leftIter, rightIter BinaryEntryIterator,
 	callback HwangLinCallback,
 ) error {
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		VerboseLog(3, "[HWANG-LIN] Starting hwangLinUnified: left=%s, right=%s", leftIter.Name(), rightIter.Name())
+	}
+	
 	if leftIter == nil || rightIter == nil || callback == nil {
 		return fmt.Errorf("hwangLinUnified: nil parameters not allowed")
 	}
@@ -39,6 +43,11 @@ func hwangLinUnified(
 	// Get initial entries from both iterators
 	leftEntry, leftErr := leftIter.Next()
 	rightEntry, rightErr := rightIter.Next()
+	
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		VerboseLog(3, "[HWANG-LIN] Initial reads: leftEntry=%v leftErr=%v rightEntry=%v rightErr=%v", 
+			leftEntry != nil, leftErr, rightEntry != nil, rightErr)
+	}
 	
 	// Handle initial errors
 	if leftErr != nil {
@@ -115,6 +124,9 @@ func hwangLinUnified(
 			if cmp == 0 {
 				// Paths match
 				result = ComparisonMatch
+				if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+					VerboseLog(3, "[HWANG-LIN] Calling OnComparison(Match): left=%s, right=%s", leftPath, rightPath)
+				}
 				continueProcessing, err = callback.OnComparison(result, leftEntry, rightEntry, leftPath, rightPath)
 				if err != nil || !continueProcessing {
 					callback.OnComplete(err)
@@ -138,6 +150,9 @@ func hwangLinUnified(
 			} else if cmp < 0 {
 				// Left entry comes first
 				result = ComparisonLeftFirst
+				if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+					VerboseLog(3, "[HWANG-LIN] Calling OnComparison(LeftFirst): left=%s, right=<nil>", leftPath)
+				}
 				continueProcessing, err = callback.OnComparison(result, leftEntry, nil, leftPath, "")
 				if err != nil || !continueProcessing {
 					callback.OnComplete(err)
@@ -155,6 +170,9 @@ func hwangLinUnified(
 			} else {
 				// Right entry comes first
 				result = ComparisonRightFirst
+				if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+					VerboseLog(3, "[HWANG-LIN] Calling OnComparison(RightFirst): left=<nil>, right=%s", rightPath)
+				}
 				continueProcessing, err = callback.OnComparison(result, nil, rightEntry, "", rightPath)
 				if err != nil || !continueProcessing {
 					callback.OnComplete(err)
