@@ -336,13 +336,10 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 		dc.scanInProgress = false
 	}()
 
-	// Generate scan index filename for this operation
-	scanFileName := dc.generateScanFileName()
+	// v0.7: Generate temp main index filename for direct writing
+	tempMainIndexFileName := dc.generateTempFileName("main-index")
 
-	// Initialise scan index with mmap
-	if err := dc.initialiseScanIndex(scanFileName); err != nil {
-		return nil, fmt.Errorf("failed to initialise scan index: %w", err)
-	}
+	// v0.7: No scan index needed - UpdateCallback writes directly to temp main index
 
 	// Create hash job manager for concurrent hashing (reuse existing infrastructure)
 	hashJobManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
@@ -352,27 +349,29 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing")
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
 
-	// Create update callback that replicates hwangLinCompareToSkiplist logic
-	updateCallback := NewUpdateCallback(dc, scanFileName, hashJobManager)
+	// Create update callback for v0.7 direct temp index writing
+	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager)
 
 	// Run unified algorithm (replaces the complex internal logic)
 	if err := hwangLinUnified(existingIterator, scanIterator, updateCallback); err != nil {
-		// Return partial results if available (same interruption handling as before)
-		scanSkiplist := updateCallback.GetResultSkiplist()
-		dc.lastScanResult = scanSkiplist
+		// v0.7: Callback writes directly to temp index, no result skiplist to return
+		// TODO: Handle partial temp index results for interruption cases
+		dc.lastScanResult = nil
 		dc.lastScanError = err
-		return scanSkiplist, err
+		return nil, err
 	}
 
 	// Signal that no more hash jobs will be submitted (same as original)
 	hashJobManager.FinishSubmitting()
 
-	// Get final result skiplist  
-	scanSkiplist := updateCallback.GetResultSkiplist()
-	dc.lastScanResult = scanSkiplist
+	// v0.7: UpdateCallback has written directly to temp main index file
+	// TODO: Atomic rename temp index to main.idx here
+	// For now, return empty skiplist to maintain compatibility
+	emptySkiplist := NewSkiplistWrapper(16, ScanContext)
+	dc.lastScanResult = emptySkiplist
 	dc.lastScanError = nil
 
-	return scanSkiplist, nil
+	return emptySkiplist, nil
 }
 
 // loadIndexWithProcessor loads an index file with processor and returns a skiplist

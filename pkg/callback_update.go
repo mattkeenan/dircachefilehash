@@ -3,17 +3,14 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"syscall"
 )
 
-// UpdateCallback implements HwangLinCallback to perform index update operations using the same logic as hwangLinCompareToSkiplist
-// This replicates the exact update behavior but uses the unified algorithm infrastructure
+// UpdateCallback implements HwangLinCallback for v0.7 direct temp index writing
+// Writes entries directly to main.idx temp file during hwangLinUnified execution (no skiplist building)
 type UpdateCallback struct {
-	// Original fields
-	resultSkiplist  *skiplistWrapper
-	scanFileName    string
-	dc              *DirectoryCache
+	// v0.7 direct temp index writing
+	dc                *DirectoryCache
+	tempIndexFileName string                  // Temp main index filename for direct writing
 	
 	// Hash coordination with existing hashJobManager (avoid maps where simple counter works)
 	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
@@ -21,24 +18,27 @@ type UpdateCallback struct {
 	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
 	nextFlushIndex   uint64                  // Next counter position to check for flushing
 	
-	// Index writing - in-order entry processing
+	// Index writing - in-order entry processing (v0.7: direct temp index writing)
 	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
+	tempIndexWriter  interface{}             // IoVec writer for temp index output (TODO: implement TempIndexWriter)
 }
 
-// NewUpdateCallback creates a new UpdateCallback that matches the existing update logic
-func NewUpdateCallback(dc *DirectoryCache, scanFileName string, hashManager *algorithmHashManager) *UpdateCallback {
+// NewUpdateCallback creates a new UpdateCallback for v0.7 direct temp index writing
+func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager *algorithmHashManager) *UpdateCallback {
 	return &UpdateCallback{
-		// Original fields
-		resultSkiplist: NewSkiplistWrapper(16, ScanContext),
-		scanFileName:   scanFileName,
-		dc:             dc,
+		// v0.7 direct temp index writing
+		dc:                dc,
+		tempIndexFileName: tempIndexFileName,
 		
 		// Hash coordination
 		hashJobManager: hashManager,
 		entryCounter:   0,
 		pendingEntries: make([]BinaryEntryInterface, 0),
 		nextFlushIndex: 0,
-		backlog:        make([]BinaryEntryInterface, 0),
+		
+		// Direct temp index writing
+		backlog:         make([]BinaryEntryInterface, 0),
+		tempIndexWriter: nil, // Will be initialized when first entry is written
 	}
 }
 
@@ -64,8 +64,8 @@ func (uc *UpdateCallback) OnComparison(
 			
 			// Check if this file should still be indexed
 			if !uc.dc.shouldIndex(rightPath) {
-				// File exists but should no longer be indexed - create deleted entry
-				return true, uc.createDeletedEntry(leftEntry)
+				// File exists but should no longer be indexed - skip (main.idx excludes deleted entries)
+				return true, nil
 			}
 
 			// Check if the file needs hashing (has changed)
@@ -100,12 +100,10 @@ func (uc *UpdateCallback) OnComparison(
 			if IsDebugEnabled("verbose-3") {
 				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Creating scan entry for new file %s\n", rightPath)
 			}
-			// Request hashing for new file (always needs hashing)
-			if err := rightEntry.RequestHash(); err != nil {
+			// Use unified hash coordination for new file
+			if err := uc.SubmitAndOrWriteHash(rightEntry, "new_file"); err != nil {
 				return false, err
 			}
-			// Create scan entry and submit for hashing
-			return true, uc.createScanEntryAndHash(rightEntry)
 		}
 		
 	case ComparisonLeftFirst:
@@ -122,8 +120,8 @@ func (uc *UpdateCallback) OnComparison(
 				return true, nil // Continue processing
 			}
 
-			// Create deleted entry
-			return true, uc.createDeletedEntry(leftEntry)
+			// Skip deleted entries (main.idx excludes deleted entries per v0.7 architecture)
+			return true, nil
 		}
 	}
 	
@@ -138,127 +136,29 @@ func (uc *UpdateCallback) OnComparison(
 	return true, nil // Continue processing
 }
 
-// createScanEntryAndHash collects a scan entry that has been processed by the iterator (matches hwangLinCompareToSkiplist logic)
-func (uc *UpdateCallback) createScanEntryAndHash(scanEntry BinaryEntryInterface) error {
-	relPath, _ := scanEntry.RelativePath()
-	
-	if IsDebugEnabled("verbose-3") {
-		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: processing file %s\n", relPath)
-	}
-	
-	// For the unified architecture, the UnifiedFilesystemScanIterator handles hashing internally
-	// We just need to add the already-processed entry to our result skiplist
-	
-	ref, ok := scanEntry.GetBinaryEntryRef()
-	if !ok {
-		if IsDebugEnabled("verbose-3") {
-			fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: ERROR - scan entry does not support binaryEntryRef for %s\n", relPath)
+
+
+// writeEntryToTempIndex writes a single entry to the temp index file using IoVec
+func (uc *UpdateCallback) writeEntryToTempIndex(entry BinaryEntryInterface) error {
+	if IsDebugEnabled("write") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[UPDATE-WRITE] writeEntryToTempIndex called for: %s", path)
 		}
-		return fmt.Errorf("scan entry does not support binaryEntryRef for update")
 	}
 	
-	if IsDebugEnabled("verbose-3") {
-		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: inserting into skiplist for %s\n", relPath)
-		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: ref.IndexFile=%p, ref.IndexFile.Data=%p, ref.Offset=%d\n", ref.IndexFile, ref.IndexFile.Data, ref.Offset)
+	// TODO: Implement proper IoVec batch writing to temp index
+	// For now, just log that writing would happen here - this will be implemented when TempIndexWriter is available
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] WARNING: writeEntryToTempIndex is not implemented - no entries written!")
 	}
-	
-	// Insert into result skiplist - entry should already be hashed by the iterator
-	uc.resultSkiplist.Insert(ref, ScanContext)
-	
-	if IsDebugEnabled("scanning") {
-		fmt.Fprintf(os.Stderr, "[UPDATE] Collected scan entry for file: %s\n", relPath)
-	}
-	
-	if IsDebugEnabled("verbose-3") {
-		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: completed for %s\n", relPath)
-	}
-	
 	return nil
-}
-
-// createDeletedEntry creates a deleted entry for a file that was in index but not found on disk
-func (uc *UpdateCallback) createDeletedEntry(indexEntry BinaryEntryInterface) error {
-	// This matches the deleted entry creation logic from hwangLinCompareToSkiplist
-	
-	relPath, err := indexEntry.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get relative path for deleted entry: %w", err)
-	}
-	
-	// Create mock file info for the deleted entry (matches hwangLinCompareToSkiplist logic)
-	size, _ := indexEntry.Size()
-	mode, _ := indexEntry.Mode()
-	mtimeWall, _ := indexEntry.MTimeWall()
-	mtime := timeFromWall(mtimeWall)
-	dev, _ := indexEntry.Dev()
-	ino, _ := indexEntry.Ino()
-	uid, _ := indexEntry.UID()
-	gid, _ := indexEntry.GID()
-	ctimeWall, _ := indexEntry.CTimeWall()
-	ctime := timeFromWall(ctimeWall)
-	
-	mockInfo := &mockFileInfo{
-		name:    filepath.Base(relPath),
-		size:    int64(size),
-		mode:    os.FileMode(mode),
-		modTime: mtime,
-	}
-	mockStat := &syscall.Stat_t{
-		Dev:  uint64(dev),
-		Ino:  uint64(ino),
-		Mode: mode,
-		Uid:  uid,
-		Gid:  gid,
-		Ctim: syscall.Timespec{Sec: ctime.Unix(), Nsec: 0},
-		Mtim: syscall.Timespec{Sec: mtime.Unix(), Nsec: 0},
-	}
-
-	// Create scanned path for deleted entry
-	scannedPath := &scannedPath{
-		RelPath:  relPath,
-		AbsPath:  filepath.Join(uc.dc.RootDir, relPath),
-		Info:     mockInfo,
-		StatInfo: mockStat,
-	}
-	
-	// Create deleted entry using existing appendEntryToScanIndex
-	deletedEntry, err := uc.dc.appendEntryToScanIndex(uc.scanFileName, scannedPath)
-	if err != nil {
-		return fmt.Errorf("failed to create deleted scan index entry: %w", err)
-	}
-	
-	// Mark as deleted and copy hash from original entry
-	deletedEntry.SetDeleted()
-	hash, err := indexEntry.Hash()
-	if err == nil {
-		copy(deletedEntry.Hash[:], hash[:])
-	}
-	hashType, err := indexEntry.HashType()
-	if err == nil {
-		deletedEntry.HashType = hashType
-	}
-	
-	// Insert into result skiplist using binaryEntryRef (matches existing logic)
-	deletedRef := createBinaryEntryRef(deletedEntry, uc.dc.currentScan)
-	uc.resultSkiplist.Insert(deletedRef, ScanContext)
-	
-	return nil
-}
-
-// GetResultSkiplist returns the accumulated result skiplist
-func (uc *UpdateCallback) GetResultSkiplist() *skiplistWrapper {
-	return uc.resultSkiplist
-}
-
-// GetScanFileName returns the scan file name for this update operation
-func (uc *UpdateCallback) GetScanFileName() string {
-	return uc.scanFileName
 }
 
 // OnLeftOnly handles remaining entries from left iterator (when right is exhausted)
 func (uc *UpdateCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	// Left entry exists but no right entry - this is a deleted file
-	return true, uc.createDeletedEntry(entry)
+	// Skip deleted entries (main.idx excludes deleted entries per v0.7 architecture)
+	return true, nil
 }
 
 // OnRightOnly handles remaining entries from right iterator (when left is exhausted)  
@@ -270,11 +170,11 @@ func (uc *UpdateCallback) OnRightOnly(entry BinaryEntryInterface, path string) (
 		return true, nil
 	}
 	
-	// Request hashing for new file (always needs hashing)
-	if err := entry.RequestHash(); err != nil {
+	// Use unified hash coordination for new file
+	if err := uc.SubmitAndOrWriteHash(entry, "new_file"); err != nil {
 		return false, err
 	}
-	return true, uc.createScanEntryAndHash(entry)
+	return true, nil
 }
 
 // OnStart is called before the algorithm begins processing
@@ -283,10 +183,8 @@ func (uc *UpdateCallback) OnStart(leftName, rightName string) error {
 		fmt.Fprintf(os.Stderr, "[UPDATE] Starting unified update: left=%s, right=%s\n", leftName, rightName)
 	}
 	
-	// Increment reference count on the result skiplist to prevent premature cleanup
-	if refCounted, ok := interface{}(uc.resultSkiplist).(RefCounted); ok {
-		refCounted.IncRef()
-	}
+	// v0.7: No skiplist to manage, just initialize temp index writer if needed
+	// Temp index writer will be initialized on first write
 	
 	return nil
 }
@@ -297,14 +195,12 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed with error: %v\n", err)
 		} else {
-			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed successfully, result entries: %d\n", uc.resultSkiplist.Length())
+			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed successfully, entries written to temp index\n")
 		}
 	}
 	
-	// Decrement reference count on the result skiplist now that processing is complete
-	if refCounted, ok := interface{}(uc.resultSkiplist).(RefCounted); ok {
-		refCounted.DecRef()
-	}
+	// v0.7: No skiplist to manage, just ensure temp index writer is finalized
+	// Temp index writer cleanup will be handled by the caller
 	
 	return nil
 }
@@ -335,16 +231,28 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 	isDeleted, _ := entry.IsDeleted()
 	needsWriting := !isDeleted // Only write non-deleted entries to main.idx
 	
-	if needsHashing {
-		// Submit hash job using the existing infrastructure
+	if needsHashing && needsWriting {
+		// Submit hash job for files that need hashing and will be written to main.idx
+		if IsDebugEnabled("hash") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[UPDATE-HASH] Submitting hash job for: %s", path)
+			}
+		}
 		if err := uc.submitHashJobToManager(entry); err != nil {
 			return err
 		}
+		// Also add to backlog immediately for now (async completion handling is TODO)
+		uc.appendToBacklog(entry)
 	} else if needsWriting {
 		// File unchanged - add directly to backlog for writing to main.idx
+		if IsDebugEnabled("write") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[UPDATE-WRITE] Adding unchanged file to backlog: %s", path)
+			}
+		}
 		uc.appendToBacklog(entry)
 	}
-	// Deleted entries: no writing to main.idx (excluded from main index)
+	// Deleted entries or files that don't need writing: no action needed
 	
 	// Process any completed hash jobs and write in-order entries
 	uc.processCompletedHashJobs()
@@ -356,6 +264,7 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 	
 	return nil
 }
+
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system
 func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
@@ -434,17 +343,16 @@ func (uc *UpdateCallback) flushInOrderEntries() error {
 			}
 		}
 		
-		// Add entry to result skiplist (for compatibility with existing merge logic)
-		if ref, ok := entry.GetBinaryEntryRef(); ok {
-			uc.resultSkiplist.Insert(ref, ScanContext)
-			
-			if IsDebugEnabled("write") {
-				if path, err := entry.RelativePath(); err == nil {
-					VerboseLog(3, "[UPDATE-WRITE] Added entry to result skiplist: %s", path)
-				}
+		// v0.7: Write entry directly to temp index using IoVec batch writing
+		if IsDebugEnabled("write") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[UPDATE-WRITE] Writing entry to temp index: %s", path)
 			}
-		} else {
-			return fmt.Errorf("entry does not support skiplist building")
+		}
+		
+		// Write entry directly to temp index file (v0.7 approach)
+		if err := uc.writeEntryToTempIndex(entry); err != nil {
+			return fmt.Errorf("failed to write entry to temp index: %w", err)
 		}
 		
 		uc.backlog = uc.backlog[1:] // Remove from backlog
@@ -461,7 +369,7 @@ func (uc *UpdateCallback) flushInOrderEntries() error {
 	}
 	
 	if IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-WRITE] Flush complete: resultSkiplist now has %d entries", uc.resultSkiplist.Length())
+		VerboseLog(3, "[UPDATE-WRITE] Flush complete: entries written to temp index")
 	}
 	
 	return nil

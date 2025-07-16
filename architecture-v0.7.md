@@ -328,7 +328,7 @@ func processEntry(entry BinaryEntryInterface) error {
 
 The Update command migration follows the "best part is no part" principle by replacing the complex `performHwangLinScanToSkiplist` function (300+ lines) with the unified `hwangLinUnified` infrastructure:
 
-**Current Update Workflow:**
+**v0.6 Update Workflow (DEPRECATED):**
 1. Load main + cache indices → create `comparisonSkiplist` for change detection
 2. Call `performHwangLinScanToSkiplist(shutdownChan, paths, comparisonSkiplist)`
    - Internally: filesystem scan + Hwang-Lin comparison + scan index building
@@ -336,32 +336,36 @@ The Update command migration follows the "best part is no part" principle by rep
 3. Merge `scanSkiplist` back into `comparisonSkiplist` for complete state
 4. Write final result to main index atomically
 
-**Unified Architecture Adaptation:**
+**v0.7 Update Workflow (TARGET ARCHITECTURE):**
 1. **Same:** Load main + cache indices → create `comparisonSkiplist`
-2. **Replace complex scan:** Instead of `performHwangLinScanToSkiplist`:
+2. **Direct temp index writing:** Instead of building intermediate skiplists:
    ```go
    // Create iterators
    existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist)
-   scanIterator := NewEnhancedFilesystemScanIterator(dc, paths, shutdownChan, hashManager)
+   scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, shutdownChan, hashManager)
    
-   // Create update callback with same logic as hwangLinCompareToSkiplist
-   updateCallback := NewUpdateCallback(dc, scanFileName, hashManager)
+   // Create update callback that writes directly to main.idx temp file
+   updateCallback := NewUpdateCallback(dc, mainTempFileName, hashManager)
    
-   // Run unified algorithm (reuses existing infrastructure)
+   // Run unified algorithm with direct temp index writing during execution
    err := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
    
-   // Get result (same as before)
-   scanSkiplist := updateCallback.GetResultSkiplist()
+   // NO GetResultSkiplist() - callback writes directly to temp index
    ```
-3. **Same:** Merge `scanSkiplist` back into `comparisonSkiplist`
-4. **Same:** Write final result to main index
+3. **ELIMINATED:** No skiplist merging needed - temp index contains complete state
+4. **Simplified:** Atomic rename temp index to main.idx (no complex merge step)
+
+**CRITICAL v0.7 CHANGE: NO GetResultSkiplist() PATTERN**
+- **v0.6 Pattern**: UpdateCallback builds result skiplist → returned via GetResultSkiplist() → merged → written
+- **v0.7 Pattern**: UpdateCallback writes entries directly to temp index during hwangLinUnified execution
+- **Benefit**: Eliminates memory accumulation, reduces complexity, maintains path ordering through iterative writing
 
 **Key Benefits:**
 - **Eliminates 300+ lines** of duplicate Hwang-Lin algorithm code
-- **Preserves exact behavior** through UpdateCallback that replicates `hwangLinCompareToSkiplist` logic
+- **Eliminates skiplist building** - direct temp index writing during execution
 - **Maintains performance** - streaming, concurrent hashing, memory efficiency unchanged
-- **Same error handling** - interruption handling, partial results work identically
-- **Reuses battle-tested infrastructure** - iterators, hash management, unified algorithm
+- **Reduces memory usage** - no intermediate skiplist accumulation
+- **Simplifies workflow** - single temp index write instead of build→merge→write pattern
 
 ### Phase 4: Legacy Cleanup (PENDING)
 - [ ] Remove deprecated `PathEntryIterator` interface completely
