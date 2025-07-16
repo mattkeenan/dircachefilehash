@@ -23,14 +23,17 @@ import (
 type BEIndexFileMmapEntry struct {
 	BinaryEntryBase
 	entryRef binaryEntryRef // Reference to mmap'd index entry
+	context  string         // Context for this entry (e.g., MainContext, CacheContext)
 }
 
 // NewBEIndexFileMmapEntry creates a new BEIndexFileMmapEntry from a binaryEntryRef
 // The reference should point to a valid entry in a memory-mapped index file
-func NewBEIndexFileMmapEntry(entryRef binaryEntryRef) *BEIndexFileMmapEntry {
+// context: the context for this entry (e.g., MainContext, CacheContext, ScanContext)
+func NewBEIndexFileMmapEntry(entryRef binaryEntryRef, context string) *BEIndexFileMmapEntry {
 	return &BEIndexFileMmapEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BEIndexFileMmap),
 		entryRef:        entryRef,
+		context:         context,
 	}
 }
 
@@ -321,6 +324,12 @@ func (ime *BEIndexFileMmapEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
 	return ime.entryRef, true
 }
 
+// GetContext returns the context for this mmap index entry
+// Context is provided during creation and identifies the source/purpose of the entry
+func (ime *BEIndexFileMmapEntry) GetContext() (string, error) {
+	return ime.context, nil
+}
+
 // LoadIndexFileMmap loads an index file via mmap and creates a factory for creating entries
 // This is a helper function for creating BEIndexFileMmapEntry instances from an index file
 func LoadIndexFileMmap(filePath string, dc *DirectoryCache) (*mmapIndexFile, error) {
@@ -341,5 +350,5 @@ func CreateEntryFromOffset(indexFile *mmapIndexFile, entryOffset int) *BEIndexFi
 		IndexFile: indexFile,
 	}
 	
-	return NewBEIndexFileMmapEntry(entryRef)
+	return NewBEIndexFileMmapEntry(entryRef, "mmap")
 }

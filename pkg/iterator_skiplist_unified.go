@@ -48,14 +48,14 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 		
 		// If we haven't started iterating yet (currentPath is empty), take the first entry
 		if bsi.currentPath == "" {
-			foundEntry = NewBESkiplistEntry(entryRef)
+			foundEntry = NewBESkiplistEntry(entryRef, bsi.skiplist)
 			bsi.updateCurrentPathFromInterface(foundEntry)
 			return false // Stop iteration
 		}
 		
 		// If this path is lexicographically after our current position, take it
 		if entryPath > bsi.currentPath {
-			foundEntry = NewBESkiplistEntry(entryRef)
+			foundEntry = NewBESkiplistEntry(entryRef, bsi.skiplist)
 			bsi.updateCurrentPathFromInterface(foundEntry)
 			return false // Stop iteration
 		}

@@ -111,8 +111,8 @@ func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterfac
 		IndexFile: mockIndexFile,
 	}
 	
-	// Create BESkiplistEntry
-	skiplistEntry := NewBESkiplistEntry(ref)
+	// Create BESkiplistEntry (test doesn't need real skiplist for basic functionality)
+	skiplistEntry := NewBESkiplistEntry(ref, nil)
 	
 	// Store cleanup info (just need to track the allocated entry)
 	testCleanupDataSkiplist[skiplistEntry] = &skiplistTestCleanupInfo{

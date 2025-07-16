@@ -20,15 +20,17 @@ import (
 // - Error returns for consistency with interface (though failures rare)
 type BESkiplistEntry struct {
 	BinaryEntryBase
-	entryRef binaryEntryRef // Reference to mmap'd index entry via skiplist
+	entryRef binaryEntryRef   // Reference to mmap'd index entry via skiplist
+	skiplist *skiplistWrapper // Reference to skiplist for context lookup
 }
 
-// NewBESkiplistEntry creates a new BESkiplistEntry from a binaryEntryRef
+// NewBESkiplistEntry creates a new BESkiplistEntry from a binaryEntryRef and skiplist
 // The reference should point to a valid entry in a memory-mapped index file
-func NewBESkiplistEntry(entryRef binaryEntryRef) *BESkiplistEntry {
+func NewBESkiplistEntry(entryRef binaryEntryRef, skiplist *skiplistWrapper) *BESkiplistEntry {
 	return &BESkiplistEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BESkiplist),
 		entryRef:        entryRef,
+		skiplist:        skiplist,
 	}
 }
 
@@ -317,4 +319,23 @@ func (sle *BESkiplistEntry) SetDeleted(deleted bool) error {
 // GetBinaryEntryRef returns the underlying binaryEntryRef for skiplist building
 func (sle *BESkiplistEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
 	return sle.entryRef, true
+}
+
+// GetContext returns the context for this skiplist entry
+// Context is retrieved from the skiplist by looking up this entry's path
+// (MainContext, CacheContext, ScanContext, etc.)
+func (sle *BESkiplistEntry) GetContext() (string, error) {
+	if sle.skiplist == nil {
+		return "", fmt.Errorf("skiplist reference is nil")
+	}
+	
+	// Get the path for this entry to look up its context
+	path, err := sle.RelativePath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get relative path for context lookup: %v", err)
+	}
+	
+	// Find the entry in the skiplist to get its context
+	_, context := sle.skiplist.Find(path)
+	return context, nil
 }

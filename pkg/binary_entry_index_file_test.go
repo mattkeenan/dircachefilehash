@@ -98,7 +98,7 @@ func createBEIndexFileIO(t *testing.T, testData *TestEntryData) BinaryEntryInter
 	
 	// Create BEIndexFileIOEntry pointing to the entry (after header)
 	fileOffset := int64(HeaderSize)
-	indexFileEntry := NewBEIndexFileIOEntry(indexFilePath, fileOffset, testData.Size)
+	indexFileEntry := NewBEIndexFileIOEntry(indexFilePath, fileOffset, testData.Size, "test")
 	
 	// Store cleanup info with thread safety
 	cleanupMutex.Lock()
@@ -240,7 +240,7 @@ func testBEIndexFileIOEntryWriteOperations(t *testing.T) {
 // testBEIndexFileIOEntryErrorHandling tests error handling
 func testBEIndexFileIOEntryErrorHandling(t *testing.T) {
 	// Test with non-existent file
-	invalidEntry := NewBEIndexFileIOEntry("/nonexistent/file.idx", HeaderSize, 128)
+	invalidEntry := NewBEIndexFileIOEntry("/nonexistent/file.idx", HeaderSize, 128, "test")
 	
 	// Should not be valid
 	if invalidEntry.IsValid() {

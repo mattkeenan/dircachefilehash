@@ -290,6 +290,7 @@ func (m *mockBinaryEntry) Unlock()                                         {}
 func (m *mockBinaryEntry) IsValid() bool                                   { return true }
 func (m *mockBinaryEntry) SupportsSkiplistBuilding() bool                  { return false }
 func (m *mockBinaryEntry) GetBinaryEntryRef() (binaryEntryRef, bool)       { return binaryEntryRef{}, false }
+func (m *mockBinaryEntry) GetContext() (string, error)                    { return "mock", nil }
 func (m *mockBinaryEntry) RequestHash() error                              { m.hashRequested = true; return nil }
 func (m *mockBinaryEntry) IsHashRequested() (bool, error)                  { return m.hashRequested, nil }
 func (m *mockBinaryEntry) IsHashCompleted() (bool, error)                  { return m.hashCompleted, nil }

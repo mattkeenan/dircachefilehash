@@ -26,18 +26,21 @@ type BEIndexFileIOEntry struct {
 	filePath   string // Path to the index file
 	fileOffset int64  // Absolute file offset to the entry
 	entrySize  uint32 // Size of the entry for bounds checking
+	context    string // Context for this entry (e.g., MainContext, CacheContext)
 }
 
 // NewBEIndexFileIOEntry creates a new BEIndexFileIOEntry for standard file I/O access
 // filePath: path to the index file
 // fileOffset: absolute position of the entry in the file
 // entrySize: size of the entry for bounds checking
-func NewBEIndexFileIOEntry(filePath string, fileOffset int64, entrySize uint32) *BEIndexFileIOEntry {
+// context: the context for this entry (e.g., MainContext, CacheContext, ScanContext)
+func NewBEIndexFileIOEntry(filePath string, fileOffset int64, entrySize uint32, context string) *BEIndexFileIOEntry {
 	return &BEIndexFileIOEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BEIndexFileIO),
 		filePath:        filePath,
 		fileOffset:      fileOffset,
 		entrySize:       entrySize,
+		context:         context,
 	}
 }
 
@@ -385,4 +388,10 @@ func (ife *BEIndexFileIOEntry) SetDeleted(deleted bool) error {
 	
 	// Write back to file
 	return ife.writeEntryData(entry)
+}
+
+// GetContext returns the context for this index file entry
+// Context is provided during creation and identifies the source/purpose of the entry
+func (ife *BEIndexFileIOEntry) GetContext() (string, error) {
+	return ife.context, nil
 }

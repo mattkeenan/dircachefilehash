@@ -43,6 +43,7 @@ type BinaryEntryInterface interface {
 	RelativePath() (string, error)
 	HashString() (string, error)
 	IsDeleted() (bool, error)
+	GetContext() (string, error)
 	
 	// Setters (acquire write lock, can return errors for ephemeral entries)
 	SetHash(hashBytes []byte, hashType uint16) error

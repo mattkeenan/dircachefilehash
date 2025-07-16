@@ -101,7 +101,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 		Offset:    entryOffset,
 		IndexFile: scanIndex,
 	}
-	mmapEntry := NewBEIndexFileMmapEntry(entryRef)
+	mmapEntry := NewBEIndexFileMmapEntry(entryRef, "test")
 	
 	// Store cleanup info with thread safety
 	cleanupMutexMmap.Lock()

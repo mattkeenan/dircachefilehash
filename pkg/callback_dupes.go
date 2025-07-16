@@ -162,3 +162,10 @@ func (dc *DupesCallback) Clear() {
 	dc.hashMap = make(map[string][]string)
 	dc.results = nil
 }
+
+// SubmitAndOrWriteHash implements the HwangLinCallback interface method
+// For DupesCallback, we don't need to write hashes to any index - this is a no-op
+func (dc *DupesCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+	// DupesCallback just reads hashes for duplicate detection - no hash writing needed
+	return nil
+}

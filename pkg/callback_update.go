@@ -157,6 +157,7 @@ func (uc *UpdateCallback) createScanEntryAndHash(scanEntry BinaryEntryInterface)
 	
 	if IsDebugEnabled("verbose-3") {
 		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: inserting into skiplist for %s\n", relPath)
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback.createScanEntryAndHash: ref.IndexFile=%p, ref.IndexFile.Data=%p, ref.Offset=%d\n", ref.IndexFile, ref.IndexFile.Data, ref.Offset)
 	}
 	
 	// Insert into result skiplist - entry should already be hashed by the iterator
@@ -297,6 +298,34 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 // Name returns the name of this callback for debugging
 func (uc *UpdateCallback) Name() string {
 	return "update"
+}
+
+// SubmitAndOrWriteHash handles unified hash coordination for Update command
+// This method coordinates hash requests and index writing for the Update workflow
+func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+	switch operation {
+	case "submit_hash":
+		// Submit hash job for the entry
+		return uc.submitHashJobToManager(entry)
+		
+	case "write_entry":
+		// Add entry to backlog for ordered writing
+		uc.appendToBacklog(entry)
+		return nil
+		
+	case "submit_and_write":
+		// Submit hash job and add to backlog
+		if err := uc.submitHashJobToManager(entry); err != nil {
+			return err
+		}
+		uc.appendToBacklog(entry)
+		return nil
+		
+	default:
+		// For any other operation, just append to backlog (safe default)
+		uc.appendToBacklog(entry)
+		return nil
+	}
 }
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system

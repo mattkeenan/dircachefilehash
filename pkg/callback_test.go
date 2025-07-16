@@ -88,6 +88,13 @@ func (mc *mockCallback) OnComplete(err error) error {
 	return nil
 }
 
+// SubmitAndOrWriteHash implements the HwangLinCallback interface for testing
+func (mc *mockCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+	callDesc := fmt.Sprintf("SubmitAndOrWriteHash(%s)", operation)
+	mc.calls = append(mc.calls, callDesc)
+	return nil
+}
+
 // Helper function to convert ComparisonResult to string
 func comparisonResultString(result ComparisonResult) string {
 	switch result {

@@ -29,7 +29,7 @@ func TestBinaryEntryImplementationsHashCoordination(t *testing.T) {
 			Offset:    0,
 		}
 		
-		skipEntry := NewBESkiplistEntry(mockRef)
+		skipEntry := NewBESkiplistEntry(mockRef, nil)
 		
 		// Test hash coordination methods
 		testHashCoordinationMethods(t, skipEntry, "BESkiplistEntry")
@@ -37,7 +37,7 @@ func TestBinaryEntryImplementationsHashCoordination(t *testing.T) {
 	
 	t.Run("BEIndexFileIOEntry", func(t *testing.T) {
 		// Create a BEIndexFileIOEntry with fake file path
-		ioEntry := NewBEIndexFileIOEntry("/fake/path", 0, 100)
+		ioEntry := NewBEIndexFileIOEntry("/fake/path", 0, 100, "test")
 		
 		// Test hash coordination methods (they should work even if the file doesn't exist)
 		testHashCoordinationMethods(t, ioEntry, "BEIndexFileIOEntry")
@@ -50,7 +50,7 @@ func TestBinaryEntryImplementationsHashCoordination(t *testing.T) {
 			Offset:    0,
 		}
 		
-		mmapEntry := NewBEIndexFileMmapEntry(mockRef)
+		mmapEntry := NewBEIndexFileMmapEntry(mockRef, "test")
 		
 		// Test hash coordination methods
 		testHashCoordinationMethods(t, mmapEntry, "BEIndexFileMmapEntry")

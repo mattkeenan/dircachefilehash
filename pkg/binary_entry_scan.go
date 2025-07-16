@@ -324,3 +324,11 @@ func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
 func (sbe *BEScanEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
 	return sbe.entryRef, true
 }
+
+// GetContext returns the context for this scan entry
+// Scan entries are always created during filesystem scanning operations, so they have ScanContext
+// TODO: If future core operations need context from non-skiplist sources, this may need
+// to be enhanced to support context determination from other sources
+func (sbe *BEScanEntry) GetContext() (string, error) {
+	return ScanContext, nil
+}
