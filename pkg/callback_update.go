@@ -3,6 +3,8 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"syscall"
+	"unsafe"
 )
 
 // UpdateCallback implements HwangLinCallback for v0.7 direct temp index writing
@@ -20,7 +22,7 @@ type UpdateCallback struct {
 	
 	// Index writing - in-order entry processing (v0.7: direct temp index writing)
 	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
-	tempIndexWriter  interface{}             // IoVec writer for temp index output (TODO: implement TempIndexWriter)
+	tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
 }
 
 // NewUpdateCallback creates a new UpdateCallback for v0.7 direct temp index writing
@@ -199,10 +201,25 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		}
 	}
 	
-	// v0.7: No skiplist to manage, just ensure temp index writer is finalized
-	// Temp index writer cleanup will be handled by the caller
+	// v0.7: Close temp index writer to finalize the temp index file
+	if uc.tempIndexWriter != nil {
+		if closeErr := uc.tempIndexWriter.Close(); closeErr != nil {
+			if err == nil {
+				// No previous error, return the close error
+				return fmt.Errorf("failed to close temp index writer: %w", closeErr)
+			} else {
+				// Previous error exists, log close error but return original error
+				fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to close temp index writer: %v\n", closeErr)
+			}
+		}
+		
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-WRITE] Temp index writer closed: %s (%d entries)", 
+				uc.tempIndexWriter.GetTempPath(), uc.tempIndexWriter.GetEntryCount())
+		}
+	}
 	
-	return nil
+	return err // Return original error if any
 }
 
 // Name returns the name of this callback for debugging
@@ -328,10 +345,23 @@ func (uc *UpdateCallback) appendToBacklog(entry BinaryEntryInterface) {
 }
 
 // flushInOrderEntries processes backlog and pending entries for ordered writing
+// Implements architecture-specified immediate IoVec batching
 func (uc *UpdateCallback) flushInOrderEntries() error {
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "[UPDATE-WRITE] Flushing entries: backlog=%d pending=%d", len(uc.backlog), len(uc.pendingEntries))
 	}
+	
+	// Initialize temp index writer if needed
+	if uc.tempIndexWriter == nil {
+		writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
+		if err != nil {
+			return fmt.Errorf("failed to create temp index writer: %w", err)
+		}
+		uc.tempIndexWriter = writer
+	}
+	
+	// Use counter to check for contiguous completed entries (no gaps)
+	var readyIoVecs []syscall.Iovec
 	
 	// Process backlog entries that can be written in order
 	for len(uc.backlog) > 0 {
@@ -343,18 +373,13 @@ func (uc *UpdateCallback) flushInOrderEntries() error {
 			}
 		}
 		
-		// v0.7: Write entry directly to temp index using IoVec batch writing
-		if IsDebugEnabled("write") {
-			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-WRITE] Writing entry to temp index: %s", path)
-			}
+		// Create zero-copy IoVec when possible  
+		ioVec, err := uc.createEntryIoVec(entry)
+		if err != nil {
+			return fmt.Errorf("failed to create IoVec for entry: %w", err)
 		}
 		
-		// Write entry directly to temp index file (v0.7 approach)
-		if err := uc.writeEntryToTempIndex(entry); err != nil {
-			return fmt.Errorf("failed to write entry to temp index: %w", err)
-		}
-		
+		readyIoVecs = append(readyIoVecs, ioVec)
 		uc.backlog = uc.backlog[1:] // Remove from backlog
 	}
 	
@@ -368,9 +393,123 @@ func (uc *UpdateCallback) flushInOrderEntries() error {
 		uc.nextFlushIndex++
 	}
 	
+	// Write batch with single vectorio call to temp index
+	if len(readyIoVecs) > 0 {
+		if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
+			return fmt.Errorf("failed to write IoVec batch: %w", err)
+		}
+		
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-WRITE] Wrote batch of %d entries to temp index", len(readyIoVecs))
+		}
+	}
+	
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "[UPDATE-WRITE] Flush complete: entries written to temp index")
 	}
+	
+	return nil
+}
+
+// createEntryIoVec creates an IoVec for zero-copy writing when possible
+// Implementation from architecture document lines 688-709
+func (uc *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.Iovec, error) {
+	// For mmap'd entries: Reference underlying mmap'd binaryEntry directly
+	if binaryEntryRef, ok := entry.GetBinaryEntryRef(); ok {
+		underlyingEntry := binaryEntryRef.GetBinaryEntry()
+		return syscall.Iovec{
+			Base: (*byte)(unsafe.Pointer(underlyingEntry)),
+			Len:  uint64(unsafe.Sizeof(binaryEntry{})),
+		}, nil
+	}
+	
+	// For read/write entries: Must copy data (unavoidable for non-mmap'd entries)
+	// TODO: Implement GetBinaryData() method for BinaryEntryInterface if needed
+	// For now, handle heap-allocated entries by creating binary data
+	
+	// For heap-allocated BEScanEntry, we need to create binary data
+	var binaryData [256]byte // Size of binaryEntry struct
+	
+	// Fill binary data from BinaryEntryInterface methods
+	if err := uc.fillBinaryDataFromInterface(entry, &binaryData); err != nil {
+		return syscall.Iovec{}, fmt.Errorf("failed to fill binary data: %w", err)
+	}
+	
+	return syscall.Iovec{
+		Base: (*byte)(unsafe.Pointer(&binaryData[0])),
+		Len:  uint64(len(binaryData)),
+	}, nil
+}
+
+// fillBinaryDataFromInterface fills binary data structure from BinaryEntryInterface
+func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface, data *[256]byte) error {
+	// Create a binaryEntry struct in the data array
+	binaryEntryPtr := (*binaryEntry)(unsafe.Pointer(&data[0]))
+	
+	// Fill in all fields from the interface
+	var err error
+	
+	if binaryEntryPtr.Size, err = entry.Size(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.CTimeWall, err = entry.CTimeWall(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.MTimeWall, err = entry.MTimeWall(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.Dev, err = entry.Dev(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.Ino, err = entry.Ino(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.Mode, err = entry.Mode(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.UID, err = entry.UID(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.GID, err = entry.GID(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.FileSize, err = entry.FileSize(); err != nil {
+		return err
+	}
+	if binaryEntryPtr.HashType, err = entry.HashType(); err != nil {
+		return err
+	}
+	
+	// Fill hash
+	hash, err := entry.Hash()
+	if err != nil {
+		return err
+	}
+	copy(binaryEntryPtr.Hash[:], hash[:])
+	
+	// Fill entry flags
+	flags, err := entry.EntryFlags()
+	if err != nil {
+		return err
+	}
+	binaryEntryPtr.EntryFlags = uint16(flags)
+	
+	// Add relative path at the end of the binaryEntry
+	relPath, err := entry.RelativePath()
+	if err != nil {
+		return err
+	}
+	
+	// Calculate total size including path
+	pathBytes := []byte(relPath)
+	totalSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(pathBytes)) + 1 // +1 for null terminator
+	binaryEntryPtr.Size = totalSize
+	
+	// Copy path after the binaryEntry struct
+	pathStart := uintptr(unsafe.Pointer(binaryEntryPtr)) + unsafe.Sizeof(binaryEntry{})
+	pathDest := (*[256]byte)(unsafe.Pointer(pathStart))
+	copy(pathDest[:], pathBytes)
+	pathDest[len(pathBytes)] = 0 // Null terminator
 	
 	return nil
 }

@@ -233,3 +233,51 @@ The fundamental architectural separation between sync and async processing has b
 3. **Low Priority**: symlink test failures - pre-existing issues
 
 **Conclusion**: The unified HL architecture conversion is **essentially complete**. Remaining tasks are optimizations and edge case fixes, not fundamental architecture work. The core two-phase hash coordination with iterative callback-based writing is fully implemented and working.
+
+---
+
+### Update - 2025-07-16T10:34:17Z
+
+**Summary**: Completed GetContext() implementation and identified critical data writing bug
+
+**Git Changes**:
+- Clean working directory (last commit: 200e8d3)
+- Current branch: local-main
+- Commit: "feat: implement complete GetContext() support across all BinaryEntryInterface implementations"
+
+**Todo Progress**: 6 completed, 1 in progress, 2 pending
+- ✓ Completed: Implement GetContext() returning "" for non-skiplist implementations with TODO for future use cases
+- ✓ Completed: Implement SubmitAndOrWriteHash() in UpdateCallback
+- ✓ Completed: Implement SubmitAndOrWriteHash() in DupesCallback
+- ✓ Completed: Implement GetContext() method for BESkiplistEntry using skiplist lookup
+- ✓ Completed: Add GetContext() method to mockBinaryEntry and mockCallback test implementations
+- ✓ Completed: Add context parameter to NewBEIndexFileIOEntry and NewBEIndexFileMmapEntry constructors
+- 🔄 In Progress: Fix IndexFile.Data nil issue - scan index cleanup happening before final index write
+
+**Major Achievement**: Successfully implemented complete GetContext() support across all BinaryEntryInterface implementations:
+
+1. **BESkiplistEntry**: Uses skiplist.Find() to look up context by entry path
+2. **BEScanEntry**: Returns ScanContext (always scan operations)
+3. **BEIndexFileIOEntry**: Stores context from constructor parameter
+4. **BEIndexFileMmapEntry**: Stores context from constructor parameter
+
+**Critical Issue Identified**: Data writing bug causing "✓ Indexed 0 files" despite processing entries
+- **Root Cause**: IndexFile.Data becomes nil after scan index cleanup
+- **Timing Issue**: Scan index cleanup happens before final index write
+- **Impact**: binaryEntryRef references become invalid, causing entry writing failures
+- **Evidence**: Debug logs show "GetBinaryEntry: IndexFile.Data is nil" after scan completion
+
+**Solution Planned**: Reference counting architecture for mmapIndexFile
+- Add atomic ref counting to mmapIndexFile
+- Callbacks AddRef() when accessing scan indices
+- Callbacks Release() in OnComplete()
+- Cleanup only happens when ref count reaches zero
+- Works for 3/4 BinaryEntryInterface implementations (BESkiplistEntry, BEScanEntry, BEIndexFileMmapEntry)
+
+**Testing**: 
+- CLI integration verified - GetContext() methods called correctly
+- All BinaryEntry tests pass with context parameters
+- exec.Command tests reproduced the data writing issue
+- Memory safety maintained with proper locking
+
+**Next Steps**: Implement ref counting solution to fix the IndexFile.Data nil issue

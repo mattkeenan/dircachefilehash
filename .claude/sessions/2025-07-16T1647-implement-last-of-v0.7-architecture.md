@@ -34,10 +34,41 @@
 **Files Scanning Successfully**: file1.txt, file2.txt detected correctly
 **Problem**: UpdateCallback.createScanEntryAndHash() expects binaryEntryRef that doesn't exist for heap entries
 
-### Next Steps
-1. Remove resultSkiplist pattern from UpdateCallback
-2. Implement iterative temp index writing through SubmitAndOrWriteHash()
-3. Test end-to-end v0.7 workflow
+### Outstanding v0.7 Implementation Work
+
+**Framework Complete ✅**: v0.7 structural conversion done - all skiplist usage eliminated from callbacks
+
+**Implementation Remaining ❌**: Core v0.7 functionality still needs implementation:
+
+1. **TempIndexWriter Component** (HIGH PRIORITY)
+   - Design and implement TempIndexWriter for IoVec batch writing
+   - Support index header creation for temp files
+   - Handle proper file creation, writing, and closing
+
+2. **writeEntryToTempIndex Implementation** (HIGH PRIORITY) 
+   - Replace placeholder with actual IoVec batch writing to temp index files
+   - Integrate with TempIndexWriter component
+   - **Iterative Non-Blocking Batching**: Use non-blocking reads on completion queue, then immediately batch write via IoVec/writev
+   - **No Latency**: Don't wait for batches to fill - write single entries or even empty batches immediately
+   - Maintain path ordering through iterative batched writes
+
+3. **Complete Hash Coordination** (HIGH PRIORITY)
+   - Implement direct hash job submission with cookie-based tracking
+   - Fix submitHashJobToManager to actually submit to hash manager
+   - **Async Non-Blocking**: Complete async hash completion handling with non-blocking completion queue reads
+   - Maintain proper path ordering despite async completion timing
+
+4. **Atomic Index Replacement** (HIGH PRIORITY)
+   - Implement atomic rename of temp index to main.idx after hwangLinUnified completion
+   - Add proper cleanup of temp files on failure
+   - Ensure atomicity of index updates
+
+5. **Error Handling** (MEDIUM PRIORITY)
+   - Add proper error handling for partial temp index results during interruption
+   - Handle temp file cleanup on errors
+   - Maintain consistency during failures
+
+**Current Status**: Framework ready for implementation, all architectural barriers removed
 
 ---
 
@@ -84,3 +115,45 @@
 - Complete atomic rename of temp index to main.idx
 
 The v0.7 architecture conversion is now complete - callbacks no longer use skiplists and work purely with BinaryEntryInterface methods as intended.
+
+---
+
+### Update - 2025-07-16T18:37:01Z
+
+**Summary**: Implemented TempIndexWriter component with immediate IoVec batching for v0.7 architecture
+
+**Git Changes**:
+- Modified: pkg/callback_update.go
+- Added: pkg/temp_index_writer.go
+- Current branch: local-main (commit: 55aad85)
+
+**Todo Progress**: 20 completed, 1 in progress, 6 pending
+- ✓ Completed: Design and implement TempIndexWriter component for IoVec batch writing to temp index files
+
+**Major Achievements**:
+1. **TempIndexWriter Implementation**: Created complete TempIndexWriter component with:
+   - `NewTempIndexWriter()` for temp index file creation
+   - `WriteIoVecBatch()` implementing immediate batching (writes whatever entries are ready)
+   - `Close()` for finalizing temp index with proper header and checksum
+   - Zero-copy IoVec creation for mmap'd entries, data copying for heap entries
+
+2. **UpdateCallback Integration**: Fully integrated TempIndexWriter into UpdateCallback:
+   - Updated type from `interface{}` to `*TempIndexWriter`
+   - Implemented `createEntryIoVec()` method for zero-copy writing when possible
+   - Updated `flushInOrderEntries()` to use immediate IoVec batching pattern
+   - Updated `OnComplete()` to properly close and finalize temp index writer
+   - Added proper imports (syscall, unsafe) for IoVec operations
+
+3. **Architecture Compliance**: Implementation follows v0.7 specification exactly:
+   - **Immediate Batching**: Writes whatever entries are ready right now (no waiting)
+   - **Non-blocking**: Uses existing patterns without blocking waits
+   - **Zero-copy**: Direct mmap memory references when possible via GetBinaryEntryRef()
+   - **Vectorio**: Uses `vectorio.WritevRaw()` for efficient batch writes with IOV_MAX chunking
+
+**Technical Implementation Details**:
+- `createEntryIoVec()` handles both mmap'd entries (zero-copy) and heap entries (data copying)
+- `fillBinaryDataFromInterface()` converts BinaryEntryInterface to binary data for heap entries
+- Proper error handling for temp index creation, writing, and finalization
+- Checksum calculation using existing `calculateAndStoreHeaderChecksum()` infrastructure
+
+**Next Steps**: The TempIndexWriter component is complete and ready for use. Next priority is implementing the complete hash coordination with cookie-based tracking and direct hash job submission to the manager.
