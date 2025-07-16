@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 // hashJobCompletion represents a completed hash job with both system JobID and caller Cookie
@@ -103,8 +104,19 @@ func (ahm *algorithmHashManager) completionProcessor() {
 			ahm.processCompletion(jobID)
 			
 		case <-ahm.shutdownChan:
-			// Shutdown requested
-			return
+			// Shutdown requested - drain any remaining completions quickly
+			for {
+				select {
+				case jobID, ok := <-ahm.completionChan:
+					if !ok {
+						return
+					}
+					ahm.processCompletion(jobID)
+				default:
+					// No more completions to process
+					return
+				}
+			}
 		}
 	}
 }
@@ -335,12 +347,42 @@ func (ahm *algorithmHashManager) Shutdown() {
 	}
 	ahm.closeMutex.Unlock()
 	
-	// Wait for hash workers to finish
-	ahm.wg.Wait()
+	// Wait for hash workers to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		ahm.wg.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// Workers completed normally
+	case <-time.After(60 * time.Second):
+		// Timeout - continue anyway to prevent indefinite blocking
+		if IsDebugEnabled("algorithm") {
+			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Hash worker shutdown timeout\n")
+		}
+	}
 	
 	// Close completion processor
 	close(ahm.completionChan)
-	ahm.processorWg.Wait()
+	
+	// Wait for completion processor with timeout
+	processorDone := make(chan struct{})
+	go func() {
+		ahm.processorWg.Wait()
+		close(processorDone)
+	}()
+	
+	select {
+	case <-processorDone:
+		// Completion processor finished normally
+	case <-time.After(5 * time.Second):
+		// Timeout - continue anyway
+		if IsDebugEnabled("algorithm") {
+			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Completion processor shutdown timeout\n")
+		}
+	}
 	
 	// Close external completion channel
 	close(ahm.externalCompletionChan)
@@ -350,10 +392,41 @@ func (ahm *algorithmHashManager) Shutdown() {
 	}
 }
 
-// Wait waits for all hash workers to complete
+// Wait waits for all hash workers to complete with timeout
 func (ahm *algorithmHashManager) Wait() {
-	ahm.wg.Wait()
-	ahm.processorWg.Wait()
+	// Wait for hash workers with timeout
+	done := make(chan struct{})
+	go func() {
+		ahm.wg.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// Workers completed normally
+	case <-time.After(60 * time.Second):
+		// Timeout - continue anyway
+		if IsDebugEnabled("algorithm") {
+			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Hash worker wait timeout\n")
+		}
+	}
+	
+	// Wait for completion processor with timeout
+	processorDone := make(chan struct{})
+	go func() {
+		ahm.processorWg.Wait()
+		close(processorDone)
+	}()
+	
+	select {
+	case <-processorDone:
+		// Completion processor finished normally
+	case <-time.After(5 * time.Second):
+		// Timeout - continue anyway
+		if IsDebugEnabled("algorithm") {
+			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Completion processor wait timeout\n")
+		}
+	}
 }
 
 // GetQueueStats returns statistics about the completed queue for debugging

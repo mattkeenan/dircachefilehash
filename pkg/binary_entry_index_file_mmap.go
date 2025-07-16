@@ -330,6 +330,30 @@ func (ime *BEIndexFileMmapEntry) GetContext() (string, error) {
 	return ime.context, nil
 }
 
+// RefCounted interface implementation for mmap index file entries
+
+// IncRef increments the reference count on the underlying mmapIndexFile
+func (ime *BEIndexFileMmapEntry) IncRef() {
+	if ime.entryRef.IndexFile != nil {
+		ime.entryRef.IndexFile.IncRef()
+	}
+}
+
+// DecRef decrements the reference count on the underlying mmapIndexFile
+func (ime *BEIndexFileMmapEntry) DecRef() {
+	if ime.entryRef.IndexFile != nil {
+		ime.entryRef.IndexFile.DecRef()
+	}
+}
+
+// RefCount returns the reference count of the underlying mmapIndexFile
+func (ime *BEIndexFileMmapEntry) RefCount() int32 {
+	if ime.entryRef.IndexFile != nil {
+		return ime.entryRef.IndexFile.RefCount()
+	}
+	return 0
+}
+
 // LoadIndexFileMmap loads an index file via mmap and creates a factory for creating entries
 // This is a helper function for creating BEIndexFileMmapEntry instances from an index file
 func LoadIndexFileMmap(filePath string, dc *DirectoryCache) (*mmapIndexFile, error) {

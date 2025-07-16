@@ -142,28 +142,12 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 	}
 }
 
-// createScanEntry creates a BEScanEntry from scannedPath by adding to scan index
+// createScanEntry creates a heap-allocated BEScanEntry from scannedPath
+// v0.7: No scan index file needed - direct heap allocation with lazy hashing
 func (ufsi *UnifiedFilesystemScanIterator) createScanEntry(scanned *scannedPath) (BinaryEntryInterface, error) {
-	// Initialize scan index if needed
-	if ufsi.scanIndexFileName == "" {
-		var err error
-		ufsi.scanIndexFileName, err = ufsi.createScanIndex()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create scan index: %w", err)
-		}
-	}
-	
-	// Add entry to scan index and get the binary entry
-	scanEntry, err := ufsi.dc.appendEntryToScanIndex(ufsi.scanIndexFileName, scanned)
-	if err != nil {
-		return nil, fmt.Errorf("failed to append entry to scan index: %w", err)
-	}
-	
-	// Create binaryEntryRef from the binary entry and current scan
-	entryRef := createBinaryEntryRef(scanEntry, ufsi.dc.currentScan)
-	
-	// Create BEScanEntry using the entry reference
-	bescanEntry := NewBEScanEntry(entryRef)
+	// v0.7: Create heap-allocated entry directly (no scan index file)
+	// Entry will have metadata but no hash initially (lazy hashing)
+	bescanEntry := NewBEScanEntry(scanned.RelPath, scanned.Info, scanned.StatInfo)
 	return bescanEntry, nil
 }
 

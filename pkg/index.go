@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -48,6 +49,7 @@ type mmapIndexFile struct {
 	Type     string       // Index type: "main", "cache", "scan"
 	FilePath string       // File path for debugging/cleanup
 	mutex    sync.RWMutex // Protects Data/Size during mremap operations
+	refCount int32        // Atomic reference counter for safe cleanup
 }
 
 // Cleanup safely unmaps and closes the index file
@@ -70,6 +72,29 @@ func (mif *mmapIndexFile) Cleanup() error {
 	}
 
 	return nil
+}
+
+// IncRef atomically increments the reference count
+func (mif *mmapIndexFile) IncRef() {
+	atomic.AddInt32(&mif.refCount, 1)
+}
+
+// DecRef atomically decrements the reference count and cleans up if it reaches zero
+func (mif *mmapIndexFile) DecRef() {
+	if atomic.AddInt32(&mif.refCount, -1) == 0 {
+		// Last reference released - safe to cleanup
+		if err := mif.Cleanup(); err != nil {
+			// Log error but don't return it since DecRef() should not fail
+			if IsDebugEnabled("load") {
+				VerboseLog(2, "Warning: cleanup failed during DecRef for %s: %v", mif.Type, err)
+			}
+		}
+	}
+}
+
+// RefCount returns the current reference count (for debugging)
+func (mif *mmapIndexFile) RefCount() int32 {
+	return atomic.LoadInt32(&mif.refCount)
 }
 
 // Header returns a direct pointer to the header in mmap'd memory (zero-copy)
@@ -659,15 +684,15 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 
 	// Verify header using helper methods in logical order
 	if err := header.ValidateSignature(dc.signature); err != nil {
-		indexFile.Cleanup()
+		indexFile.DecRef()
 		return nil, nil, err
 	}
 	if err := header.ValidateByteOrder(); err != nil {
-		indexFile.Cleanup()
+		indexFile.DecRef()
 		return nil, nil, err
 	}
 	if err := header.ValidateVersion(dc.version); err != nil {
-		indexFile.Cleanup()
+		indexFile.DecRef()
 		return nil, nil, err
 	}
 
@@ -681,7 +706,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 	} else {
 		// File was closed cleanly - verify checksum from header
 		if err := dc.verifyHeaderChecksum(data, header); err != nil {
-			indexFile.Cleanup()
+			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
 		}
 	}
@@ -693,7 +718,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
-			indexFile.Cleanup()
+			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("unexpected end of data at entry %d", i)
 		}
 
@@ -702,14 +727,14 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 
 		// Validate binaryEntry chaining consistency
 		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
-			indexFile.Cleanup()
+			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
 
 		// Perform extra validation if debug flag is enabled
 		if IsDebugEnabled("extravalidation") {
 			if err := entry.ValidateEntry(); err != nil {
-				indexFile.Cleanup()
+				indexFile.DecRef()
 				return nil, nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
 			}
 		}
@@ -723,14 +748,14 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 
 		// Validate that we're not going backwards or stuck
 		if nextOffset <= offset {
-			indexFile.Cleanup()
+			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("entry %d has invalid size %d (would not advance)", i, entry.Size)
 		}
 
 		// Debug output for entry chaining if requested
 		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
 			if nextOffset >= len(entryData) {
-				indexFile.Cleanup()
+				indexFile.DecRef()
 				return nil, nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
 					i, entry.Size, offset, nextOffset, len(entryData))
 			}
@@ -741,7 +766,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 
 	// Final validation: ensure we consumed exactly the expected amount of data
 	if offset != len(entryData) {
-		indexFile.Cleanup()
+		indexFile.DecRef()
 		return nil, nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
 	}
 
@@ -833,34 +858,26 @@ func (dc *DirectoryCache) Close() error {
 		dc.mmapIndex = nil
 	}
 
-	// Clean up tracked index files
+	// Clean up tracked index files using DecRef() for proper reference counting
 	if dc.mainIndex != nil {
-		if err := dc.mainIndex.Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup main index: %w", err)
-		}
+		dc.mainIndex.DecRef()
 		dc.mainIndex = nil
 	}
 
 	if dc.cacheIndex != nil {
-		if err := dc.cacheIndex.Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup cache index: %w", err)
-		}
+		dc.cacheIndex.DecRef()
 		dc.cacheIndex = nil
 	}
 
 	if dc.currentScan != nil {
-		if err := dc.currentScan.Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup current scan index: %w", err)
-		}
+		dc.currentScan.DecRef()
 		dc.currentScan = nil
 	}
 
 	// Clean up all scan indices
 	for _, scanIndex := range dc.scanIndices {
 		if scanIndex != nil {
-			if err := scanIndex.Cleanup(); err != nil {
-				return fmt.Errorf("failed to cleanup scan index: %w", err)
-			}
+			scanIndex.DecRef()
 		}
 	}
 	dc.scanIndices = nil
@@ -1085,6 +1102,7 @@ func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 		Offset:   HeaderSize, // Start writing entries after header
 		Type:     "scan",
 		FilePath: scanFileName,
+		refCount: 1, // Start with ref count = 1 to prevent premature cleanup
 	}
 
 	// Register the scan index for tracking
@@ -1215,10 +1233,8 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	// Unregister from tracking before cleanup
 	dc.unregisterIndex("scan", dc.currentScan)
 
-	// Step 2 - Cleanup mmap and file descriptor
-	if err := dc.currentScan.Cleanup(); err != nil {
-		return fmt.Errorf("failed to cleanup scan index: %w", err)
-	}
+	// Step 2 - Decrement reference count, cleanup happens automatically when count reaches 0
+	dc.currentScan.DecRef()
 
 	// Step 3 - Remove the scan index file
 	err := os.Remove(filePath)

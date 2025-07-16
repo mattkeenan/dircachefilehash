@@ -395,3 +395,20 @@ func (ife *BEIndexFileIOEntry) SetDeleted(deleted bool) error {
 func (ife *BEIndexFileIOEntry) GetContext() (string, error) {
 	return ife.context, nil
 }
+
+// RefCounted interface implementation (no-op for file I/O entries)
+
+// IncRef is a no-op for file I/O entries since they don't hold mmap references
+func (ife *BEIndexFileIOEntry) IncRef() {
+	// No-op: File I/O entries don't need ref counting since they use standard file operations
+}
+
+// DecRef is a no-op for file I/O entries since they don't hold mmap references
+func (ife *BEIndexFileIOEntry) DecRef() {
+	// No-op: File I/O entries don't need ref counting since they use standard file operations
+}
+
+// RefCount always returns 0 for file I/O entries
+func (ife *BEIndexFileIOEntry) RefCount() int32 {
+	return 0 // No references to track for file I/O entries
+}

@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -34,7 +35,9 @@ func ResetStringCopyStats() {
 
 // skiplistWrapper wraps the new generic zerocopyskiplist with context support
 type skiplistWrapper struct {
-	skiplist *zcsl.ZeroCopySkiplist[binaryEntryRef, string, string]
+	skiplist          *zcsl.ZeroCopySkiplist[binaryEntryRef, string, string]
+	referencedIndices map[*mmapIndexFile]int32 // Atomic counters per index file
+	mutex            sync.RWMutex              // Protects the map operations
 }
 
 // NewSkiplistWrapper creates a new skiplist wrapper with context tracking
@@ -79,12 +82,15 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *skiplistWrapper {
 	)
 
 	return &skiplistWrapper{
-		skiplist: skiplist,
+		skiplist:          skiplist,
+		referencedIndices: make(map[*mmapIndexFile]int32),
 	}
 }
 
 // Insert adds a binaryEntryRef with specific context
 func (sw *skiplistWrapper) Insert(ref binaryEntryRef, context string) bool {
+	// Track the index file reference when entries are added
+	sw.AddIndexReference(ref.IndexFile)
 	return sw.skiplist.Insert(&ref, context)
 }
 
@@ -261,4 +267,54 @@ func (sw *skiplistWrapper) FilterNotByContext(context string) *skiplistWrapper {
 		}
 	}
 	return result
+}
+
+// RefCounted interface implementation for hierarchical reference counting
+
+// IncRef increments references to all index files this skiplist depends on
+func (sw *skiplistWrapper) IncRef() {
+	sw.mutex.Lock()
+	defer sw.mutex.Unlock()
+	
+	for indexFile := range sw.referencedIndices {
+		indexFile.IncRef()
+		sw.referencedIndices[indexFile]++
+	}
+}
+
+// DecRef decrements references to all index files this skiplist depends on
+func (sw *skiplistWrapper) DecRef() {
+	sw.mutex.Lock()
+	defer sw.mutex.Unlock()
+	
+	for indexFile := range sw.referencedIndices {
+		indexFile.DecRef()
+		sw.referencedIndices[indexFile]--
+	}
+}
+
+// RefCount returns the total number of index file references (for debugging)
+func (sw *skiplistWrapper) RefCount() int32 {
+	sw.mutex.RLock()
+	defer sw.mutex.RUnlock()
+	
+	var total int32
+	for _, localCount := range sw.referencedIndices {
+		total += localCount
+	}
+	return total
+}
+
+// AddIndexReference adds a reference to an index file when entries are inserted
+func (sw *skiplistWrapper) AddIndexReference(indexFile *mmapIndexFile) {
+	if indexFile == nil {
+		return
+	}
+	
+	sw.mutex.Lock()
+	defer sw.mutex.Unlock()
+	
+	if _, exists := sw.referencedIndices[indexFile]; !exists {
+		sw.referencedIndices[indexFile] = 0
+	}
 }

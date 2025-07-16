@@ -70,13 +70,15 @@ func (uc *UpdateCallback) OnComparison(
 
 			// Check if the file needs hashing (has changed)
 			if needsHash(leftEntry, rightEntry) {
-				// File changed - submit hash job for current state
-				if err := uc.submitHashJobToManager(rightEntry); err != nil {
+				// File changed - use unified hash coordination
+				if err := uc.SubmitAndOrWriteHash(rightEntry, "modified"); err != nil {
 					return false, err
 				}
 			} else {
-				// File unchanged - append existing entry to backlog immediately
-				uc.appendToBacklog(leftEntry)
+				// File unchanged - use unified hash coordination
+				if err := uc.SubmitAndOrWriteHash(leftEntry, "unchanged"); err != nil {
+					return false, err
+				}
 			}
 		}
 		
@@ -280,6 +282,12 @@ func (uc *UpdateCallback) OnStart(leftName, rightName string) error {
 	if IsDebugEnabled("scanning") {
 		fmt.Fprintf(os.Stderr, "[UPDATE] Starting unified update: left=%s, right=%s\n", leftName, rightName)
 	}
+	
+	// Increment reference count on the result skiplist to prevent premature cleanup
+	if refCounted, ok := interface{}(uc.resultSkiplist).(RefCounted); ok {
+		refCounted.IncRef()
+	}
+	
 	return nil
 }
 
@@ -292,6 +300,12 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed successfully, result entries: %d\n", uc.resultSkiplist.Length())
 		}
 	}
+	
+	// Decrement reference count on the result skiplist now that processing is complete
+	if refCounted, ok := interface{}(uc.resultSkiplist).(RefCounted); ok {
+		refCounted.DecRef()
+	}
+	
 	return nil
 }
 
@@ -301,31 +315,46 @@ func (uc *UpdateCallback) Name() string {
 }
 
 // SubmitAndOrWriteHash handles unified hash coordination for Update command
-// This method coordinates hash requests and index writing for the Update workflow
+// This method coordinates hash requests and iterative writing to main.idx temp file
 func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
-	switch operation {
-	case "submit_hash":
-		// Submit hash job for the entry
-		return uc.submitHashJobToManager(entry)
-		
-	case "write_entry":
-		// Add entry to backlog for ordered writing
-		uc.appendToBacklog(entry)
-		return nil
-		
-	case "submit_and_write":
-		// Submit hash job and add to backlog
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[UPDATE-HASH] SubmitAndOrWriteHash called for %s: %s", operation, path)
+		}
+	}
+	
+	// Update callback writes to main.idx temp file for complete repository state
+	if entry == nil {
+		return nil // Nothing to process
+	}
+	
+	// Check if this entry needs hashing and writing
+	needsHashing := (operation == "new_file") || (operation == "modified")
+	
+	// CRITICAL: Main index excludes deleted entries (clean repository state)
+	isDeleted, _ := entry.IsDeleted()
+	needsWriting := !isDeleted // Only write non-deleted entries to main.idx
+	
+	if needsHashing {
+		// Submit hash job using the existing infrastructure
 		if err := uc.submitHashJobToManager(entry); err != nil {
 			return err
 		}
+	} else if needsWriting {
+		// File unchanged - add directly to backlog for writing to main.idx
 		uc.appendToBacklog(entry)
-		return nil
-		
-	default:
-		// For any other operation, just append to backlog (safe default)
-		uc.appendToBacklog(entry)
-		return nil
 	}
+	// Deleted entries: no writing to main.idx (excluded from main index)
+	
+	// Process any completed hash jobs and write in-order entries
+	uc.processCompletedHashJobs()
+	
+	// Flush any ready entries to temp index
+	if err := uc.flushInOrderEntries(); err != nil {
+		return fmt.Errorf("failed to flush entries during hash coordination: %w", err)
+	}
+	
+	return nil
 }
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system
@@ -391,14 +420,29 @@ func (uc *UpdateCallback) appendToBacklog(entry BinaryEntryInterface) {
 
 // flushInOrderEntries processes backlog and pending entries for ordered writing
 func (uc *UpdateCallback) flushInOrderEntries() error {
-	// For now, just process the backlog directly into the result skiplist
-	// This maintains compatibility until the full IoVec writing is implemented
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Flushing entries: backlog=%d pending=%d", len(uc.backlog), len(uc.pendingEntries))
+	}
+	
+	// Process backlog entries that can be written in order
 	for len(uc.backlog) > 0 {
 		entry := uc.backlog[0]
 		
-		// Add entry to result skiplist (existing behavior)
+		if IsDebugEnabled("write") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[UPDATE-WRITE] Processing backlog entry: %s", path)
+			}
+		}
+		
+		// Add entry to result skiplist (for compatibility with existing merge logic)
 		if ref, ok := entry.GetBinaryEntryRef(); ok {
 			uc.resultSkiplist.Insert(ref, ScanContext)
+			
+			if IsDebugEnabled("write") {
+				if path, err := entry.RelativePath(); err == nil {
+					VerboseLog(3, "[UPDATE-WRITE] Added entry to result skiplist: %s", path)
+				}
+			}
 		} else {
 			return fmt.Errorf("entry does not support skiplist building")
 		}
@@ -414,6 +458,10 @@ func (uc *UpdateCallback) flushInOrderEntries() error {
 		}
 		// Entry is nil (completed) - can skip it in flush sequence
 		uc.nextFlushIndex++
+	}
+	
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Flush complete: resultSkiplist now has %d entries", uc.resultSkiplist.Length())
 	}
 	
 	return nil

@@ -315,7 +315,7 @@ func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 
 	if ref.IndexFile.Data == nil {
 		if IsDebugEnabled("load") {
-			VerboseLog(3, "GetBinaryEntry: IndexFile.Data is nil, IndexFile=%p, Path=%s", ref.IndexFile, ref.IndexFile.Path)
+			VerboseLog(3, "GetBinaryEntry: IndexFile.Data is nil, IndexFile=%p, FilePath=%s", ref.IndexFile, ref.IndexFile.FilePath)
 		}
 		return nil
 	}

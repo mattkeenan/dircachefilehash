@@ -3,74 +3,84 @@ package dircachefilehash
 import (
 	"encoding/hex"
 	"fmt"
+	"os"
+	"sync"
+	"syscall"
 	"unsafe"
 )
 
-// BEScanEntry implements BinaryEntryInterface for ephemeral mmap entries in scan indices
+// BEScanEntry implements BinaryEntryInterface for ephemeral heap-allocated entries during scanning
 //
-// This is the most complex implementation because scan entries are ephemeral:
-// - They exist in memory-mapped scan index files that can be remapped (mremap)
-// - The underlying memory can be unmapped when scan completes
-// - Hash workers update entries in-place during concurrent processing
-// - Memory addresses can change during mremap operations
+// v0.7 Architecture: Uses heap allocation instead of mmap scan index files:
+// - Entries are allocated on the heap with metadata but NO hash initially  
+// - Lazy hashing: hash is computed only if entry is selected for writing to index
+// - Standard Go garbage collection handles memory management
+// - No mremap/munmap complexity or file cleanup required
+// - Simpler locking model (per-entry mutex only)
 //
-// Safety is provided by:
-// - RWMutex locking to coordinate with mremap operations
-// - Quick validity checks to detect unmapped memory
-// - Error returns for all operations that can fail due to ephemeral nature
+// Key benefits over v0.6 mmap approach:
+// - Eliminates scan index file creation and cleanup
+// - Reduces memory usage (no sparse index files)
+// - Better performance (only hash files that will be indexed)
 type BEScanEntry struct {
 	BinaryEntryBase
-	entryRef binaryEntryRef // Reference to mmap'd scan index entry
+	entry   *binaryEntry // Heap-allocated entry data (no hash initially)
+	relPath string       // Relative path (stored separately from binaryEntry)
+	mutex   sync.RWMutex // Per-entry locking for hash coordination
 }
 
-// NewBEScanEntry creates a new BEScanEntry from a binaryEntryRef
-// The reference must point to a valid entry in a scan index file
-func NewBEScanEntry(entryRef binaryEntryRef) *BEScanEntry {
+// NewBEScanEntry creates a new heap-allocated BEScanEntry for filesystem scanning
+// Creates entry with metadata but NO hash (lazy hashing approach)
+func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat_t) *BEScanEntry {
+	// Allocate binaryEntry on heap with metadata but empty hash
+	entry := &binaryEntry{}
+	
+	// Fill in metadata from file system scan
+	entry.Size = uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(relPath)) + 1 // +1 for null terminator
+	modTime := fileInfo.ModTime()
+	entry.CTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond())) // Use ModTime for now, could enhance with ctime
+	entry.MTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
+	entry.Dev = uint32(statInfo.Dev)
+	entry.Ino = uint32(statInfo.Ino)
+	entry.Mode = uint32(fileInfo.Mode())
+	entry.UID = statInfo.Uid
+	entry.GID = statInfo.Gid
+	entry.FileSize = uint64(fileInfo.Size())
+	entry.HashType = 0    // No hash type initially (lazy hashing)
+	// entry.Hash remains zero-valued (no hash initially)
+	entry.EntryFlags = 0  // Not deleted initially
+	
 	return &BEScanEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BEScan),
-		entryRef:        entryRef,
+		entry:          entry,
+		relPath:        relPath,
+		mutex:          sync.RWMutex{},
 	}
 }
 
-// getBinaryEntry safely resolves the entry reference with proper locking
+// getBinaryEntry safely returns the heap-allocated entry with proper locking
 // Returns the entry pointer and nil error if successful
-// Returns nil and error if the entry has been invalidated
+// v0.7: Much simpler than v0.6 - no mmap complexity
 func (sbe *BEScanEntry) getBinaryEntry() (*binaryEntry, error) {
-	// Quick validity check without acquiring locks
-	if !sbe.IsValid() {
+	// Quick validity check - entry should never be nil for heap allocation
+	if sbe.entry == nil {
 		return nil, ErrEntryInvalidated
 	}
 	
-	// Acquire read lock on the underlying index
-	// This prevents mremap operations while we're accessing memory
-	if sbe.entryRef.IndexFile != nil {
-		sbe.entryRef.IndexFile.mutex.RLock()
-		defer sbe.entryRef.IndexFile.mutex.RUnlock()
-	}
-	
-	// Get the actual entry pointer
-	entry := sbe.entryRef.GetBinaryEntry()
-	if entry == nil {
-		return nil, ErrEntryInvalidated
-	}
-	
-	return entry, nil
+	// Return heap-allocated entry (no mmap locking needed)
+	return sbe.entry, nil
 }
 
 // IsValid performs a quick check if the entry is still accessible
-// This doesn't guarantee the entry won't become invalid immediately after,
-// but provides a fast path for obviously invalid entries
+// v0.7: Much simpler for heap allocation - just check if entry exists
 func (sbe *BEScanEntry) IsValid() bool {
-	return sbe.entryRef.IndexFile != nil && 
-		   sbe.entryRef.IndexFile.Data != nil &&
-		   sbe.entryRef.Offset >= 0 &&
-		   sbe.entryRef.Offset < len(sbe.entryRef.IndexFile.Data)
+	return sbe.entry != nil
 }
 
 // Size returns the entry size field
 func (sbe *BEScanEntry) Size() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -82,8 +92,8 @@ func (sbe *BEScanEntry) Size() (uint32, error) {
 
 // CTimeWall returns the creation time wall clock value
 func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -93,9 +103,15 @@ func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
 	return entry.CTimeWall, nil
 }
 
+// RelativePath returns the relative path for this entry
+// v0.7: Stored separately from binaryEntry for heap allocation
+func (sbe *BEScanEntry) RelativePath() (string, error) {
+	return sbe.relPath, nil
+}
+
 // MTimeWall returns the modification time wall clock value
 func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
-	sbe.RLock()
+	sbe.mutex.RLock()
 	defer sbe.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
@@ -226,35 +242,6 @@ func (sbe *BEScanEntry) EntryFlags() (uint32, error) {
 	return uint32(entry.EntryFlags), nil
 }
 
-// RelativePath returns the relative file path
-func (sbe *BEScanEntry) RelativePath() (string, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
-	
-	entry, err := sbe.getBinaryEntry()
-	if err != nil {
-		return "", err
-	}
-	
-	// Calculate path location after the fixed-size binaryEntry struct
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + unsafe.Sizeof(*entry))
-	pathBytes := (*[256]byte)(pathPtr) // Max reasonable path length for bounds checking
-	
-	// Find null terminator to determine actual path length
-	pathLen := 0
-	for i := 0; i < len(pathBytes); i++ {
-		if pathBytes[i] == 0 {
-			pathLen = i
-			break
-		}
-	}
-	
-	if pathLen == 0 {
-		return "", fmt.Errorf("invalid path in scan entry")
-	}
-	
-	return string(pathBytes[:pathLen]), nil
-}
 
 // HashString returns the hash as a hexadecimal string
 func (sbe *BEScanEntry) HashString() (string, error) {
@@ -280,8 +267,8 @@ func (sbe *BEScanEntry) IsDeleted() (bool, error) {
 // SetHash updates the entry's hash and hash type
 // This is used by hash workers to update entries in-place during scanning
 func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
-	sbe.Lock()
-	defer sbe.Unlock()
+	sbe.mutex.Lock()
+	defer sbe.mutex.Unlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -320,9 +307,10 @@ func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
 	return nil
 }
 
-// GetBinaryEntryRef returns the underlying binaryEntryRef for skiplist building
+// GetBinaryEntryRef returns false for heap-allocated entries
+// v0.7: Heap entries don't have binaryEntryRef since they're not mmap-backed
 func (sbe *BEScanEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
-	return sbe.entryRef, true
+	return binaryEntryRef{}, false
 }
 
 // GetContext returns the context for this scan entry
@@ -331,4 +319,42 @@ func (sbe *BEScanEntry) GetBinaryEntryRef() (binaryEntryRef, bool) {
 // to be enhanced to support context determination from other sources
 func (sbe *BEScanEntry) GetContext() (string, error) {
 	return ScanContext, nil
+}
+
+// RefCounted interface implementation for scan entries
+
+// IncRef increments the reference count - no-op for heap entries
+func (sbe *BEScanEntry) IncRef() {
+	// Heap-allocated entries don't need reference counting
+}
+
+// DecRef decrements the reference count - no-op for heap entries  
+func (sbe *BEScanEntry) DecRef() {
+	// Heap-allocated entries don't need reference counting
+}
+
+// RefCount returns the reference count - for heap entries, always return 1
+func (sbe *BEScanEntry) RefCount() int32 {
+	// Heap-allocated entries don't need reference counting
+	return 1
+}
+
+// RLock provides manual read locking for batch operations
+func (sbe *BEScanEntry) RLock() {
+	sbe.mutex.RLock()
+}
+
+// RUnlock releases the read lock
+func (sbe *BEScanEntry) RUnlock() {
+	sbe.mutex.RUnlock()
+}
+
+// Lock provides manual write locking for batch operations
+func (sbe *BEScanEntry) Lock() {
+	sbe.mutex.Lock()
+}
+
+// Unlock releases the write lock
+func (sbe *BEScanEntry) Unlock() {
+	sbe.mutex.Unlock()
 }

@@ -23,19 +23,58 @@ The unified HwangLin architecture needs to handle **four distinct data sources**
 1. **Skiplist (mmap-backed)** - In-memory merged view using mmap'd data (e.g., main+cache indices)
 2. **Index file (read/write)** - Direct file access without skiplist creation
 3. **Index file (mmap + iterative skiplist)** - Mmap'd index with skiplist built during HwangLin
-4. **Scanning (mmap-backed)** - Ephemeral entries in scan index
+4. **Scanning (heap-allocated)** - Ephemeral entries allocated on heap during filesystem scan
 
-**Justification for four sources**: The mmap vs read/write distinction is fundamental:
+**CRITICAL v0.7 Change**: Scan entries are now **heap-allocated**, not mmap-backed. The old v0.6 approach used sparse scan index files, but v0.7 uses lazy hashing with direct temp index writing.
+
+## v0.7 Lazy Hashing Architecture
+
+### Key Principles
+
+**1. Heap-Allocated Scan Entries**:
+- Scan iterator returns `binaryEntry` objects allocated on the heap
+- No mmap scan index files (eliminates v0.6 sparse scan index complexity)
+- Entries are created with metadata but **without hashes initially**
+- Standard Go garbage collection handles memory management
+
+**2. Lazy Hashing Strategy**:
+- Hash computation is deferred until we **know** the entry will be written to an index file
+- During hwangLinUnified execution, callbacks decide which entries to keep
+- Only entries selected for writing trigger hash job submission
+- Eliminates unnecessary hashing of files that won't be indexed
+
+**3. Direct Temp Index Writing**:
+- Callbacks write entries directly to temp index files during hwangLinUnified execution
+- No intermediate skiplist accumulation (eliminates v0.6 GetResultSkiplist() pattern)
+- Temp index files are atomically renamed to target index files (main.idx, cache.idx)
+- Maintains path order through iterative writing with completion coordination
+
+**4. Hash Coordination Flow**:
+```
+Filesystem Scan → Heap Entry (no hash) → hwangLinUnified Decision → 
+  ↓
+If Keep: Submit Hash Job + Write to Temp Index → Atomic Rename
+If Skip: Entry garbage collected (no hash computation)
+```
+
+### Performance Benefits
+
+- **Reduced Memory Usage**: No mmap scan index files or large skiplists in memory
+- **Faster Operations**: Only hash files that will actually be indexed
+- **Simpler Cleanup**: No scan index file cleanup, garbage collection handles memory
+- **Better Concurrency**: Direct temp index writing eliminates merge bottlenecks
+
+**Justification for four sources**: The mmap vs read/write vs heap allocation distinction is fundamental:
 - **Memory management**: mmap requires mremap/munmap handling, read/write uses standard file I/O
 - **Error handling**: mmap can fail due to munmap, read/write has different failure modes
 - **Performance**: mmap enables zero-copy access, read/write requires data copying
 - **Ephemeral nature**: Only mmap-backed entries can be ephemeral (address changes, disappearing)
 
-**Key Architectural Rules**:
+**Key Architectural Rules (v0.7)**:
 - **Skiplists**: Always use mmap() for zero-copy access
 - **Index without skiplist**: Use read()/write() for direct file access
 - **Index with iterative skiplist**: Use mmap() since skiplist is being built
-- **Scanning**: Always mmap() since entries are ephemeral and updated in-place
+- **Scanning**: Use heap allocation since entries are ephemeral and need lazy hashing
 
 **CRITICAL: Index File Content Rules**:
 - **main.idx**: Contains ONLY non-deleted entries (excludes deleted entries)
@@ -182,19 +221,19 @@ type BEIndexFileMmapEntry struct {
 **Memory management**: Managed by iterative skiplist process
 **Error handling**: Can fail if underlying mmap is unmapped
 
-#### 4. BEScan (mmap-backed, ephemeral)
+#### 4. BEScan (heap-allocated, ephemeral)
 ```go
-// BEScanEntry - ephemeral mmap entries for hash coordination
+// BEScanEntry - ephemeral heap-allocated entries for lazy hashing
 type BEScanEntry struct {
-    ref   binaryEntryRef // mmap reference with offset (can change/disappear)
+    entry *binaryEntry   // Heap-allocated entry data (no hash initially)
     mutex sync.RWMutex   // Per-entry locking for hash worker coordination
 }
 ```
-**Use case**: Ephemeral entries during filesystem scanning
-**Storage**: mmap() - ephemeral entries that can disappear or move (mremap)
-**Locking**: Per-entry RWMutex + underlying index-level RWMutex
-**Memory management**: Uses existing scan index cleanup (`cleanupCurrentScanFile()`)
-**Error handling**: Can fail if mmap is unmapped or remapped during access
+**Use case**: Ephemeral entries during filesystem scanning with lazy hashing
+**Storage**: Heap allocation - entries created without hashes, hashed only if needed
+**Locking**: Per-entry RWMutex only (no underlying index-level locking needed)
+**Memory management**: Standard Go garbage collection (no special cleanup required)
+**Error handling**: Standard memory allocation errors, no mmap-related failures
 
 ### Locking Strategy
 
@@ -246,13 +285,14 @@ func processEntry(entry BinaryEntryInterface) error {
 }
 ```
 
-### Hash Update Coordination
+### Hash Update Coordination (v0.7)
 
-**Synchronous SetHash() with existing coordination**:
-- Hash workers call `SetHash()` directly on scan entries
-- Coordination happens through `algorithmHashManager` completion queue
-- Iterator waits for completion notifications before returning entries
-- Updates are in-place in scan index mmap memory (existing pattern)
+**Lazy Hash Coordination with Temp Index Writing**:
+- Hash jobs are submitted only when entries are selected for writing
+- Hash workers compute hashes and notify completion via `algorithmHashManager`
+- Callbacks coordinate hash completion with temp index writing
+- Entries are written to temp index files with completed hashes
+- No in-place mmap updates (entries are heap-allocated)
 
 ### Memory Management
 
@@ -260,9 +300,9 @@ func processEntry(entry BinaryEntryInterface) error {
 - **BEIndexFileIOEntry**: No cleanup needed (data copied to memory)
 - **BEIndexFileMmapEntry**: Uses existing `mmapIndexFile` cleanup mechanisms
 - **BESkiplistEntry**: Managed by skiplist lifecycle
-- **BEScanEntry**: Uses existing scan index cleanup (`cleanupCurrentScanFile()`)
+- **BEScanEntry**: Standard Go garbage collection (heap-allocated, no special cleanup)
 
-No new lifecycle methods needed - existing patterns are sufficient.
+**v0.7 Simplification**: Scan entries use standard memory management, eliminating scan index file cleanup complexity.
 
 ## Migration Strategy
 

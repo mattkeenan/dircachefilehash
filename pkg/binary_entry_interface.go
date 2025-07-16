@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// RefCounted interface for hierarchical reference counting
+// Types that hold references to mmapIndexFile should implement this
+type RefCounted interface {
+	IncRef()
+	DecRef()
+	RefCount() int32 // for debugging
+}
+
 // BinaryEntryInterface abstracts access to binary entry data
 // regardless of storage mechanism (mmap, read/write, ephemeral)
 //
