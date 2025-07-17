@@ -228,8 +228,14 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		if err == nil {
 			mainIndexPath := uc.dc.IndexFile
 			
+			// Check the size of the temp file before rename
+			var tempFileSize int64 = -1
+			if stat, statErr := os.Stat(tempPath); statErr == nil {
+				tempFileSize = stat.Size()
+			}
+			
 			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-WRITE] Atomically renaming temp index: %s -> %s", tempPath, mainIndexPath)
+				VerboseLog(3, "[UPDATE-WRITE] Atomically renaming temp index: %s (%d bytes) -> %s", tempPath, tempFileSize, mainIndexPath)
 			}
 			
 			if renameErr := os.Rename(tempPath, mainIndexPath); renameErr != nil {
@@ -320,18 +326,50 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		}
 	}
 	
-	// RequestHash() does the actual job submission AND housekeeping (sets flags, prevents duplicates)
+	// Get the next job ID from hash manager
+	jobID := uc.hashJobManager.GetNextJobID()
+	
+	// Set the job ID on the entry for tracking
+	entry.SetHashJobID(jobID)
+	
+	// RequestHash() does housekeeping (sets flags, prevents duplicates)
 	if err := entry.RequestHash(); err != nil {
 		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[HASH-SUBMIT] Failed to submit hash job: %v", err)
+			VerboseLog(3, "[HASH-SUBMIT] Failed to set hash request flag: %v", err)
 		}
 		return err
 	}
 	
-	// Only increment counters after successful submission
-	atomic.AddUint64(&uc.jobsInFlight, 1)
+	// Get file path for hash job
+	filePath, err := entry.RelativePath()
+	if err != nil {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[HASH-SUBMIT] Failed to get relative path: %v", err)
+		}
+		return err
+	}
+	
+	// Increment counter to get cookie BEFORE creating hash job
 	uc.entryCounter++
 	cookie := uc.entryCounter
+	
+	// Create hash job start structure using unified BinaryEntryInterface
+	hashJob := &hashJobStart{
+		JobID:    jobID,
+		Cookie:   cookie,
+		FilePath: filePath,
+		Entry:    entry, // Unified interface works for both mmap and heap entries
+	}
+	
+	// Submit hash job to manager
+	uc.hashJobManager.SubmitHashJob(hashJob)
+	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted to manager: JobID=%d, Cookie=%d", jobID, cookie)
+	}
+	
+	// Only increment jobs in flight counter after successful submission
+	atomic.AddUint64(&uc.jobsInFlight, 1)
 	
 	if IsDebugEnabled("hash") {
 		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted successfully, cookie=%d, jobsInFlight=%d", cookie, atomic.LoadUint64(&uc.jobsInFlight))
@@ -627,9 +665,12 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 		return err
 	}
 	
-	// Calculate total size including path
+	// Calculate total size including path with 8-byte alignment
 	pathBytes := []byte(relPath)
-	totalSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(pathBytes)) + 1 // +1 for null terminator
+	rawSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(pathBytes)) + 1 // +1 for null terminator
+	
+	// Round up to next 8-byte boundary for alignment
+	totalSize := (rawSize + 7) &^ 7 // Equivalent to: ((rawSize + 7) / 8) * 8
 	binaryEntryPtr.Size = totalSize
 	
 	// Copy path after the binaryEntry struct

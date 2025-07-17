@@ -32,9 +32,10 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 		return nil, fmt.Errorf("failed to create temp index file %s: %w", tempPath, err)
 	}
 
-	// Create a new hasher instance based on the default hash type
+	// Create a new hasher instance based on the configured hash type
 	var checksumWriter hash.Hash
-	switch HashTypeSHA1 { // Default hash type used in placeholder header
+	currentHashType := dc.GetCurrentHashType()
+	switch currentHashType {
 	case HashTypeSHA1:
 		checksumWriter = sha1.New()
 	case HashTypeSHA256:
@@ -42,7 +43,7 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 	case HashTypeSHA512:
 		checksumWriter = sha512.New()
 	default:
-		checksumWriter = sha1.New() // Fallback to SHA-1
+		checksumWriter = sha256.New() // Fallback to SHA-256 (default)
 	}
 
 	return &TempIndexWriter{
@@ -95,7 +96,7 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 func (tiw *TempIndexWriter) writePlaceholderHeader() error {
 	// Create placeholder header (will be rewritten in Close() with correct count/checksum)
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, 0, 0, HashTypeSHA1)
+	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, 0, 0, tiw.dc.GetCurrentHashType())
 
 	// Create header IoVec
 	headerIovec := syscall.Iovec{
@@ -178,7 +179,7 @@ func (tiw *TempIndexWriter) Close() error {
 
 	// Create final header with correct entry count
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, tiw.entryCount, 0, HashTypeSHA1)
+	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, tiw.entryCount, 0, tiw.dc.GetCurrentHashType())
 
 	// Mark header as clean
 	header.setClean()

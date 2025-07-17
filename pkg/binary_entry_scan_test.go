@@ -93,19 +93,8 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 		t.Fatalf("No current scan index after AppendEntryToScanIndex")
 	}
 	
-	// Calculate offset of the entry in the scan index
-	// The binaryEntryRef.Offset is relative to the start of entries section (after header)
-	// The first entry has offset 0 relative to entries section
-	entryOffset := 0
-	
-	// Create binaryEntryRef pointing to our entry
-	entryRef := binaryEntryRef{
-		Offset:    entryOffset,
-		IndexFile: dc.currentScan,
-	}
-	
-	// Create and return BEScanEntry
-	scanEntry := NewBEScanEntry(entryRef)
+	// Create and return BEScanEntry using the v0.7 constructor
+	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
 	
 	// Store cleanup info in global map
 	testCleanupData[scanEntry] = &scanTestCleanupInfo{
@@ -237,13 +226,9 @@ func testBEScanConcurrentMremapSafety(t *testing.T) {
 
 // testBEScanInvalidHandling tests handling of invalid entries
 func testBEScanInvalidHandling(t *testing.T) {
-	// Create an invalid entry (nil IndexFile)
-	invalidRef := binaryEntryRef{
-		Offset:    0,
-		IndexFile: nil,
-	}
-	
-	invalidEntry := NewBEScanEntry(invalidRef)
+	// Create an invalid entry with minimal data 
+	// (BEScanEntry doesn't directly depend on IndexFile like the ref-based constructors)
+	invalidEntry := NewBEScanEntry("", nil, nil)
 	
 	// Should not be valid
 	if invalidEntry.IsValid() {
@@ -327,15 +312,8 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 		t.Fatalf("Failed to create scan entry: %v", err)
 	}
 	
-	// Create binaryEntryRef
-	// The first entry has offset 0 relative to entries section (after header)
-	entryRef := binaryEntryRef{
-		Offset:    0,
-		IndexFile: h.dc.currentScan,
-	}
-	
-	// Create BEScanEntry
-	scanEntry := NewBEScanEntry(entryRef)
+	// Create BEScanEntry using the v0.7 constructor
+	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
 	
 	// Return entry and cleanup function
 	cleanup := func() {

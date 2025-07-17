@@ -248,14 +248,14 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, e
 	hasher := dc.hasher
 	hasher.Reset()
 
-	// Use same order as TempIndexWriter iterative approach: entry data + header fields
+	// IMPORTANT: Use same order as TempIndexWriter: entry data first, then header fields
 	
 	// First: Hash entry data if any (matches TempIndexWriter.WriteIoVecBatch order)
 	if entrySize > 0 {
 		hasher.Write(entryData[:entrySize])
 	}
 
-	// Second: Hash header up to checksum field (matches TempIndexWriter.Close order)
+	// Second: Hash header up to checksum field (matches TempIndexWriter.addHeaderToChecksum order)
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
@@ -800,16 +800,17 @@ func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader)
 	}
 
 	// Calculate checksum of header (excluding checksum field) + entries
+	// IMPORTANT: Must match TempIndexWriter order: entry data first, then header fields
 	hasher.Reset()
 
-	// Hash header fields before checksum field
+	// Hash entry data first (matches TempIndexWriter.WriteIoVecBatch)
+	entryData := data[HeaderSize:]
+	hasher.Write(entryData)
+
+	// Hash header fields before checksum field (matches TempIndexWriter.addHeaderToChecksum)
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
-
-	// Hash entry data (everything after header)
-	entryData := data[HeaderSize:]
-	hasher.Write(entryData)
 
 	calculatedChecksum := hasher.Sum(nil)
 
@@ -915,7 +916,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 
 	// Write header directly to mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, 0, 0, HashTypeSHA1) // No flags for empty index
+	header.SetHeader(dc.signature, dc.version, 0, 0, dc.GetCurrentHashType()) // No flags for empty index
 
 	// Calculate and store checksum (no entries for empty index)
 	dc.calculateAndStoreHeaderChecksum(header, nil, 0)
@@ -1096,7 +1097,7 @@ func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 
 	// Initialise header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, dc.GetCurrentHashType()) // Start with 0 entries
 
 	// Create scan index wrapper (keep file open)
 	dc.currentScan = &mmapIndexFile{
@@ -1140,7 +1141,7 @@ func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 
 	// Initialise header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, dc.GetCurrentHashType()) // Start with 0 entries
 
 	// Sync to disk
 	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
@@ -1176,7 +1177,7 @@ func (dc *DirectoryCache) InitializeFixIndex(fixFileName string) (*mmapIndexFile
 
 	// Initialize header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, HashTypeSHA1) // Start with 0 entries
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, 0, 0, dc.GetCurrentHashType()) // Start with 0 entries
 
 	// Create mmapIndexFile for fix index
 	fixInfo := &mmapIndexFile{
@@ -1371,7 +1372,7 @@ func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWr
 
 	// Create header in memory for temp index (writable, so Clear flag cleared)
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(dc.signature, dc.version, uint32(entryCount), 0, HashTypeSHA1)
+	header.SetHeaderForWritableIndex(dc.signature, dc.version, uint32(entryCount), 0, dc.GetCurrentHashType())
 
 	// Create header IoVec
 	headerIovec := syscall.Iovec{

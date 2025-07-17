@@ -35,8 +35,9 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	// Allocate binaryEntry on heap with metadata but empty hash
 	entry := &binaryEntry{}
 	
-	// Fill in metadata from file system scan
-	entry.Size = uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(relPath)) + 1 // +1 for null terminator
+	// Fill in metadata from file system scan with 8-byte alignment
+	rawSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(relPath)) + 1 // +1 for null terminator
+	entry.Size = (rawSize + 7) &^ 7 // Round up to next 8-byte boundary for alignment
 	modTime := fileInfo.ModTime()
 	entry.CTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond())) // Use ModTime for now, could enhance with ctime
 	entry.MTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
@@ -275,9 +276,21 @@ func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 		return err
 	}
 	
-	// Validate hash length
-	if len(hashBytes) != 20 {
-		return fmt.Errorf("invalid hash length: got %d, expected 20", len(hashBytes))
+	// Validate hash length based on hash type
+	var expectedSize int
+	switch hashType {
+	case HashTypeSHA1:
+		expectedSize = HashSizeSHA1 // 20 bytes
+	case HashTypeSHA256:
+		expectedSize = HashSizeSHA256 // 32 bytes
+	case HashTypeSHA512:
+		expectedSize = HashSizeSHA512 // 64 bytes
+	default:
+		return fmt.Errorf("unknown hash type: %d", hashType)
+	}
+	
+	if len(hashBytes) != expectedSize {
+		return fmt.Errorf("invalid hash length for type %s: got %d, expected %d", HashTypeName(hashType), len(hashBytes), expectedSize)
 	}
 	
 	// Update hash and hash type in place

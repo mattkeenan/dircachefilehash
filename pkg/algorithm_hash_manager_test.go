@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -407,11 +408,21 @@ func createTestHashJobs(t *testing.T, dc *DirectoryCache, filePaths []string) []
 			// For testing, we'll use a simplified approach
 		}
 		
+		// Create a test BEScanEntry for v0.7 
+		// Get syscall.Stat_t for the file
+		var stat syscall.Stat_t
+		if err := syscall.Stat(filePath, &stat); err != nil {
+			t.Fatalf("Failed to get stat for test file %s: %v", filePath, err)
+		}
+		
+		testEntry := NewBEScanEntry(filepath.Base(filePath), fileInfo, &stat)
+		
 		job := &hashJobStart{
 			JobID:       uint64(i + 1),
 			FilePath:    filePath,
 			IndexEntry:  entryRef,
 			ScannedPath: scannedPath,
+			Entry:       testEntry, // v0.7 unified entry
 		}
 		
 		jobs = append(jobs, job)

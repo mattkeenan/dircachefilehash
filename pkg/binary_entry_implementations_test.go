@@ -1,7 +1,9 @@
 package dircachefilehash
 
 import (
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestBinaryEntryImplementationsHashCoordination tests that all BinaryEntry implementations
@@ -9,14 +11,23 @@ import (
 func TestBinaryEntryImplementationsHashCoordination(t *testing.T) {
 	
 	t.Run("BEScanEntry", func(t *testing.T) {
-		// Create a mock binaryEntryRef for testing
-		// Note: This is a minimal test - we're just checking that the methods exist and work
-		mockRef := binaryEntryRef{
-			IndexFile: nil,  // Will fail IsValid() which is fine for this test
-			Offset:    0,
+		// Create minimal mock data for v0.7 constructor
+		mockInfo := &mockFileInfo{
+			name:    "test.txt",
+			size:    100,
+			mode:    0644,
+			modTime: time.Now(),
 		}
 		
-		scanEntry := NewBEScanEntry(mockRef)
+		mockStat := &syscall.Stat_t{
+			Dev:  1,
+			Ino:  2,
+			Mode: 0644,
+			Uid:  1000,
+			Gid:  1000,
+		}
+		
+		scanEntry := NewBEScanEntry("test.txt", mockInfo, mockStat)
 		
 		// Test hash coordination methods (they should work even if the entry is invalid)
 		testHashCoordinationMethods(t, scanEntry, "BEScanEntry")

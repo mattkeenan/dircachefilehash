@@ -46,47 +46,14 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 		}
 	}
 
-	// Use unified scan workflow to get all files
-	scanSkiplist, err := dc.performUnifiedScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
+	// v0.7: Use unified scan workflow - UpdateCallback writes directly to temp main index
+	_, err = dc.performUnifiedScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
 	if err != nil {
-		// Handle interruption by saving partial work to cache
-		if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
-			// Merge partial scan results into comparison skiplist
-			if mergeErr := comparisonSkiplist.Merge(scanSkiplist, MergeTheirs); mergeErr != nil {
-				return fmt.Errorf("failed to merge partial scan results: %w", mergeErr)
-			}
-			
-			// Write to cache index atomically (CacheContext here means "create a cache index file"
-			// which excludes MainContext entries but keeps CacheContext + ScanContext entries)
-			if writeErr := dc.atomicWriteIndex(comparisonSkiplist, dc.CacheFile, CacheContext, false); writeErr != nil {
-				return fmt.Errorf("failed to save partial results to cache: %w", writeErr)
-			}
-			
-			// Cleanup scan index file after successful write
-			if cleanupErr := dc.cleanupCurrentScanFile(); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
-				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", cleanupErr)
-			}
-		}
-		return fmt.Errorf("update interrupted: %w", err)
+		return fmt.Errorf("unified scan failed: %w", err)
 	}
 
-	// For full repository update, merge scan results back into comparison skiplist
-	if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
-		if err := comparisonSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
-			return fmt.Errorf("failed to merge scan results: %w", err)
-		}
-	}
-
-	// Write the complete merged skiplist to main index atomically (exclude deleted entries)
-	if err := dc.atomicWriteIndex(comparisonSkiplist, dc.IndexFile, "", true); err != nil {
-		return fmt.Errorf("failed to write new main index: %w", err)
-	}
-
-	// Cleanup scan index file now that main index is written
-	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-		// Non-fatal, but log the error
-		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
-	}
+	// v0.7: UpdateCallback has already written and renamed the main index
+	// No skiplist merging or additional writing needed
 
 	// Remove cache file since everything is now in main index
 	os.Remove(dc.CacheFile) // Non-fatal if it fails
@@ -344,7 +311,10 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	defer func() {
 		if operationSuccessful {
 			// Success: atomic rename to main.idx and cleanup timestamped cache files
-			if _, err := os.Stat(tempMainIndexFileName); err == nil {
+			if stat, err := os.Stat(tempMainIndexFileName); err == nil {
+				if IsDebugEnabled("write") {
+					VerboseLog(3, "[UPDATE-WRITE] Second rename attempt: %s (%d bytes) -> %s", tempMainIndexFileName, stat.Size(), dc.IndexFile)
+				}
 				if renameErr := os.Rename(tempMainIndexFileName, dc.IndexFile); renameErr != nil {
 					if IsDebugEnabled("scan") {
 						fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to rename %s to main.idx: %v\n", tempMainIndexFileName, renameErr)

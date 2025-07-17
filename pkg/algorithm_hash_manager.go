@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +39,9 @@ type algorithmHashManager struct {
 	// Internal coordination
 	completionChan chan uint64            // Internal channel for processing completions
 	processorWg    sync.WaitGroup         // Wait group for completion processor
+	
+	// Job ID allocation
+	nextJobID      uint64                 // Monotonically increasing job ID counter (use atomic operations)
 }
 
 // newAlgorithmHashManager creates a new algorithm-specific hash manager
@@ -52,6 +56,7 @@ func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <
 		jobIDToCookie:       make(map[uint64]uint64),
 		externalCompletionChan: make(chan hashJobCompletion, 100),
 		completionChan:      make(chan uint64, 100),
+		nextJobID:           1, // Start job ID allocation at 1
 	}
 	
 	// Start hash workers (same as simpleHashManager)
@@ -265,6 +270,11 @@ func (ahm *algorithmHashManager) SubmitHashJob(job *hashJobStart) {
 	// Note: We don't send to callStartChan here as that's handled by the processor
 }
 
+// GetNextJobID returns a unique job ID for hash job submission
+func (ahm *algorithmHashManager) GetNextJobID() uint64 {
+	return atomic.AddUint64(&ahm.nextJobID, 1)
+}
+
 // CompletionChannel returns a channel that provides completion notifications with both JobID and Cookie
 func (ahm *algorithmHashManager) CompletionChannel() <-chan hashJobCompletion {
 	return ahm.externalCompletionChan
@@ -310,20 +320,37 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 			var hashType uint16
 			var err error
 
-			// Check if this is a symlink by examining the file mode
-			if job.ScannedPath.Info.Mode()&os.ModeSymlink != 0 {
+			// Check if this is a symlink by examining the file mode from the entry
+			var mode uint32
+			if job.Entry != nil {
+				mode, err = job.Entry.Mode()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] Failed to get file mode for hash job: %v\n", err)
+					goto hashComplete
+				}
+			} else if job.ScannedPath != nil {
+				// Fallback to ScannedPath for v0.6 compatibility
+				mode = uint32(job.ScannedPath.Info.Mode())
+			} else {
+				fmt.Fprintf(os.Stderr, "[ERROR] Hash job has neither Entry nor ScannedPath\n")
+				err = fmt.Errorf("invalid hash job: no entry or scanned path")
+				goto hashComplete
+			}
+			
+			if os.FileMode(mode)&os.ModeSymlink != 0 {
 				// This is a symlink - hash the target path
 				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
 				// Regular file - hash the file contents with interruptible hashing
 				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan)
 			}
+			
+		hashComplete:
 
 			if err == nil {
-				// Update the binaryEntry directly in the scan index mmap memory
-				// This provides zero-copy updates to the scan index file
-				if updateErr := dc.updateBinaryEntryHash(job.IndexEntry, hashBytes, hashType); updateErr != nil {
-					fmt.Fprintf(os.Stderr, "[ERROR] Failed to update binary entry hash: %v\n", updateErr)
+				// Update the entry with computed hash using unified BinaryEntryInterface
+				if updateErr := job.Entry.SetHash(hashBytes, hashType); updateErr != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] Failed to update entry hash: %v\n", updateErr)
 				}
 			}
 			

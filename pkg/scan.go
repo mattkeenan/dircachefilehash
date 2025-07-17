@@ -58,8 +58,11 @@ type hashJobStart struct {
 	JobID       uint64
 	Cookie      uint64         // External cookie for caller tracking
 	FilePath    string
-	IndexEntry  binaryEntryRef // Entry to update with hash (mremap-safe)
+	IndexEntry  binaryEntryRef // Entry to update with hash (mremap-safe) - DEPRECATED for v0.7
 	ScannedPath *scannedPath
+	
+	// v0.7 unified entry support - works for both mmap and heap entries
+	Entry       BinaryEntryInterface // Unified interface for all entry types
 }
 
 // mockFileInfo implements os.FileInfo for deleted entries

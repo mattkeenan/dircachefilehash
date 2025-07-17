@@ -52,7 +52,7 @@ func main() {
 	fmt.Printf("Testing Update workflow with debug=hash...\n")
 	shutdownChan := make(chan struct{})
 	flags := make(map[string]string)
-	flags["debug"] = "hash"
+	flags["debug"] = "scan,scanning,load,hash,write"
 	flags["verbose"] = "3"
 	
 	err = dc.Update(shutdownChan, flags)
