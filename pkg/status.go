@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -73,15 +74,34 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 		VerboseLog(3, "Status: comparisonSkiplist length = %d", comparisonSkiplist.Length())
 	}
 
-	// Initialize cache temp index for iterative writing during Status
-	cacheTempFileName := dc.generateTempFileName("status-cache")
+	// Initialize timestamped cache index for iterative writing during Status
+	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
 	if err := dc.initialiseScanIndex(cacheTempFileName); err != nil {
 		return nil, fmt.Errorf("failed to initialise cache temp index: %w", err)
 	}
+	
+	// Track operation success for proper cleanup strategy
+	var operationSuccessful bool
 	defer func() {
-		// Cleanup temp file if it still exists (error case)
-		if _, err := os.Stat(cacheTempFileName); err == nil {
-			os.Remove(cacheTempFileName)
+		if operationSuccessful {
+			// Success: atomic rename to cache.idx and cleanup timestamped files
+			if _, err := os.Stat(cacheTempFileName); err == nil {
+				if renameErr := os.Rename(cacheTempFileName, dc.CacheFile); renameErr != nil {
+					if IsDebugEnabled("scan") {
+						fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename %s to cache.idx: %v\n", cacheTempFileName, renameErr)
+					}
+				} else {
+					// Success - cleanup all timestamped cache files
+					if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+						fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
+					}
+				}
+			}
+		} else {
+			// Interruption/Error: leave timestamped cache file for startup merge
+			if IsDebugEnabled("scan") {
+				fmt.Fprintf(os.Stderr, "[STATUS] Operation incomplete - leaving %s for startup merge\n", filepath.Base(cacheTempFileName))
+			}
 		}
 	}()
 
@@ -97,7 +117,8 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	statusCallback := NewStatusCallback("status", dc, hashManager, cacheTempFileName)
 
 	// Run unified algorithm to compare existing vs current filesystem state
-	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan); err != nil {
+	scanErr := hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan)
+	if scanErr != nil {
 		// Even if interrupted, return partial results
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "[STATUS] Scan interrupted, returning partial status results\n")
@@ -107,23 +128,15 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	// Signal completion of hash job submission
 	hashManager.FinishSubmitting()
 
-	// CRITICAL: Status command MUST write hashed results to cache.idx for performance optimization
-	// Atomically rename temp cache index to final cache.idx (iterative approach)
-	if _, err := os.Stat(cacheTempFileName); err == nil {
-		// Temp cache file exists - rename it atomically to cache.idx
-		if err := os.Rename(cacheTempFileName, dc.CacheFile); err != nil {
-			if IsDebugEnabled("scan") {
-				fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename cache temp to cache.idx: %v\n", err)
-			}
-			// Leave temp file for manual cleanup
+	// CRITICAL: Status command MUST write hashed results to cache for performance optimization
+	// Mark operation as successful only if scan completed without interruption
+	operationSuccessful = (scanErr == nil)
+	
+	if IsDebugEnabled("scan") {
+		if operationSuccessful {
+			fmt.Fprintf(os.Stderr, "[STATUS] Operation completed successfully - will rename to cache.idx and cleanup\n")
 		} else {
-			if IsDebugEnabled("scan") {
-				fmt.Fprintf(os.Stderr, "[STATUS] Successfully wrote cache.idx via iterative approach\n")
-			}
-		}
-	} else {
-		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[STATUS] No cache temp file found - no hashed entries to cache\n")
+			fmt.Fprintf(os.Stderr, "[STATUS] Operation interrupted - will preserve timestamped cache file\n")
 		}
 	}
 

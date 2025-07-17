@@ -336,8 +336,37 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 		dc.scanInProgress = false
 	}()
 
-	// v0.7: Generate temp main index filename for direct writing
-	tempMainIndexFileName := dc.generateTempFileName("main-index")
+	// v0.7: Generate timestamped main index filename for persistent strategy
+	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
+	
+	// Track operation success for proper cleanup strategy
+	var operationSuccessful bool
+	defer func() {
+		if operationSuccessful {
+			// Success: atomic rename to main.idx and cleanup timestamped cache files
+			if _, err := os.Stat(tempMainIndexFileName); err == nil {
+				if renameErr := os.Rename(tempMainIndexFileName, dc.IndexFile); renameErr != nil {
+					if IsDebugEnabled("scan") {
+						fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to rename %s to main.idx: %v\n", tempMainIndexFileName, renameErr)
+					}
+				} else {
+					// Success - cleanup all timestamped cache files
+					if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+						fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
+					}
+				}
+			}
+		} else {
+			// Interruption/Error: delete incomplete main index file
+			if _, err := os.Stat(tempMainIndexFileName); err == nil {
+				if removeErr := os.Remove(tempMainIndexFileName); removeErr != nil && IsDebugEnabled("scan") {
+					fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to remove incomplete main index %s: %v\n", tempMainIndexFileName, removeErr)
+				} else if IsDebugEnabled("scan") {
+					fmt.Fprintf(os.Stderr, "[UPDATE] Removed incomplete main index: %s\n", filepath.Base(tempMainIndexFileName))
+				}
+			}
+		}
+	}()
 
 	// v0.7: No scan index needed - UpdateCallback writes directly to temp main index
 
@@ -353,19 +382,22 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager)
 
 	// Run unified algorithm (replaces the complex internal logic)
-	if err := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan); err != nil {
-		// v0.7: Callback writes directly to temp index, no result skiplist to return
-		// TODO: Handle partial temp index results for interruption cases
+	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
+	if scanErr != nil {
+		// v0.7: Mark operation as failed for proper cleanup
+		operationSuccessful = false
 		dc.lastScanResult = nil
-		dc.lastScanError = err
-		return nil, err
+		dc.lastScanError = scanErr
+		return nil, scanErr
 	}
 
 	// Signal that no more hash jobs will be submitted (same as original)
 	hashJobManager.FinishSubmitting()
 
 	// v0.7: UpdateCallback has written directly to temp main index file
-	// TODO: Atomic rename temp index to main.idx here
+	// Mark operation as successful for atomic rename
+	operationSuccessful = true
+	
 	// For now, return empty skiplist to maintain compatibility
 	emptySkiplist := NewSkiplistWrapper(16, ScanContext)
 	dc.lastScanResult = emptySkiplist

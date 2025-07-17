@@ -344,3 +344,40 @@ The iterative checksum calculation represents the final missing piece for v0.7 a
 - Validate signal handling works correctly with new test methodology
 
 The signal handling infrastructure is now complete for v0.7 architecture, but the validation test needs significant updates to work with the new heap-allocated scan entry approach.
+
+---
+
+### Update - 2025-07-17T09:04:30Z
+
+**Summary**: Implemented persistent index file strategy with timestamped cache merging and proper interruption handling
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/status.go, pkg/update.go, pkg/util.go, pkg/workflow.go, scratchpad.md
+- Current branch: local-main (commit: b21a2e0)
+
+**Todo Progress**: 28 completed, 0 in progress, 3 pending
+- ✓ Completed: Implement deferred cache merging strategy - leave temp cache files during interruption, merge on next startup
+- ✓ Completed: Add proper error handling for partial temp index results during interruption cases
+
+**Major Implementation**:
+- **Timestamped Index Files**: Replaced PID/TID temp files with ISO 8601 timestamped files (`cache-20250717T123045Z.idx`, `main-20250717T123045Z.idx`)
+- **Smart Completion Handling**: 
+  - Cache operations: Success → rename to `cache.idx` + cleanup, Interruption → preserve for startup merge
+  - Main operations: Success → rename to `main.idx` + cleanup, Interruption → delete incomplete file
+- **Enhanced Cache Loading**: `loadCacheIndex()` now automatically merges all timestamped cache files in chronological order
+- **Robust Error Handling**: Comprehensive cleanup strategies, graceful handling of corrupted files, debug logging
+
+**Key Functions Added**:
+- `GenerateTimestampedFileName(prefix)` - creates ISO 8601 timestamped filenames
+- `ScanForTimestampedCacheFiles()` - finds and sorts cache files chronologically
+- `CleanupTimestampedCacheFiles()` - removes timestamped files after successful operations
+
+**Architecture Benefits Achieved**:
+- **Fast shutdown**: No blocking merge operations during interruption
+- **Work preservation**: Cache files persist across interruptions for recovery
+- **Progressive recovery**: Startup automatically merges accumulated cache work
+- **Clean success path**: Atomic renames + automatic cleanup
+
+**Testing**: All core functionality validated - timestamped filename generation, chronological ordering, and cleanup operations working correctly.
+
+The persistent index file strategy is now complete and fully integrated with v0.7's iterative architecture.

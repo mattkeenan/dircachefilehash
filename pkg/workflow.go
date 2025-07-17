@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // LoadMainIndex loads the main index file into a skiplist with "main" context
@@ -61,28 +62,80 @@ func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 	return mergedSkiplist, nil
 }
 
-// LoadCacheIndex loads the cache index file into a skiplist with "cache" context
+// LoadCacheIndex loads the cache index file and merges timestamped cache files
 func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
-	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
-		return NewSkiplistWrapper(16, CacheContext), nil
-	}
-
-	// Load entries from file as binaryEntryRef instances
-	refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.CacheFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load cache index: %w", err)
-	}
-
-	// Register the cache index file for tracking
-	if indexFile != nil {
-		indexFile.Type = "cache"
-		dc.registerIndex("cache", indexFile)
-	}
-
-	// Create skiplist and insert all entries with cache context
+	// Create base skiplist for cache context
 	skiplist := NewSkiplistWrapper(16, CacheContext)
-	for _, ref := range refs {
-		skiplist.Insert(ref, CacheContext)
+	
+	// Load main cache.idx if it exists
+	if _, err := os.Stat(dc.CacheFile); err == nil {
+		// Load entries from file as binaryEntryRef instances
+		refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.CacheFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load cache index: %w", err)
+		}
+
+		// Register the cache index file for tracking
+		if indexFile != nil {
+			indexFile.Type = "cache"
+			dc.registerIndex("cache", indexFile)
+		}
+
+		// Insert all entries with cache context
+		for _, ref := range refs {
+			skiplist.Insert(ref, CacheContext)
+		}
+
+		if IsDebugEnabled("load") {
+			VerboseLog(3, "loadCacheIndex: loaded %d entries from cache.idx", len(refs))
+		}
+	}
+	
+	// Load and merge timestamped cache files in chronological order
+	timestampedCaches, err := dc.ScanForTimestampedCacheFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan for timestamped cache files: %w", err)
+	}
+	
+	for _, cacheFile := range timestampedCaches {
+		if IsDebugEnabled("load") {
+			VerboseLog(3, "loadCacheIndex: merging timestamped cache file: %s", filepath.Base(cacheFile))
+		}
+		
+		// Load timestamped cache file
+		refs, indexFile, err := dc.loadIndexFromFileWithTracking(cacheFile)
+		if err != nil {
+			// Log warning and skip corrupted cache files
+			if IsDebugEnabled("scan") {
+				fmt.Fprintf(os.Stderr, "[CACHE] Warning: skipping corrupted cache file %s: %v\n", cacheFile, err)
+			}
+			continue
+		}
+		
+		// Register the timestamped cache index file for tracking
+		if indexFile != nil {
+			indexFile.Type = "timestamped-cache"
+			dc.registerIndex(fmt.Sprintf("timestamped-cache-%s", filepath.Base(cacheFile)), indexFile)
+		}
+		
+		// Create temporary skiplist for this cache file
+		timestampedSkiplist := NewSkiplistWrapper(16, CacheContext)
+		for _, ref := range refs {
+			timestampedSkiplist.Insert(ref, CacheContext)
+		}
+		
+		// Merge into main cache skiplist (later timestamps take precedence)
+		if err := skiplist.Merge(timestampedSkiplist, MergeTheirs); err != nil {
+			return nil, fmt.Errorf("failed to merge timestamped cache file %s: %w", cacheFile, err)
+		}
+		
+		if IsDebugEnabled("load") {
+			VerboseLog(3, "loadCacheIndex: merged %d entries from %s", len(refs), filepath.Base(cacheFile))
+		}
+	}
+	
+	if IsDebugEnabled("load") && len(timestampedCaches) > 0 {
+		VerboseLog(3, "loadCacheIndex: final merged cache has %d entries", skiplist.Length())
 	}
 
 	return skiplist, nil

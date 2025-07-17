@@ -740,6 +740,50 @@ func (callback *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (Io
 4. **Memory leak tests** for scan entry cleanup
 5. **Concurrent access tests** for locking correctness
 
+## Persistent Index File Strategy
+
+### File Naming Convention
+
+**Timestamped Index Files (ISO 8601 format)**:
+- **Main indices**: `main-{iso8601}.idx` (e.g., `main-20250717T123045Z.idx`)
+- **Cache indices**: `cache-{iso8601}.idx` (e.g., `cache-20250717T123045Z.idx`)
+
+### Completion and Error Handling
+
+**Main Index Files (`dcfh update` operations)**:
+- **Success**: Atomic rename `main-{timestamp}.idx` → `main.idx`
+- **Interruption/Error**: Delete `main-{timestamp}.idx` (lose hash work temporarily)
+- **Rationale**: Complex partial main index merging deferred to future implementation
+
+**Cache Index Files (`dcfh status` and similar operations)**:
+- **Success**: Atomic rename `cache-{timestamp}.idx` → `cache.idx`
+- **Interruption/Error**: Close file, leave `cache-{timestamp}.idx` for startup merge
+- **Rationale**: Preserve hash work across interruptions for performance
+
+### Startup Merge Strategy
+
+**Cache Index Loading Order**:
+```go
+// Load indices in chronological merge order
+mainSkiplist := dc.LoadMainIndex()                    // main.idx
+cacheSkiplist := dc.loadCacheIndex()                  // cache.idx (if exists)
+
+// Merge timestamped cache files in chronological order  
+timestampedCaches := dc.scanForTimestampedCacheFiles() // cache-*.idx sorted by timestamp
+for _, cacheFile := range timestampedCaches {
+    timestampedSkiplist := dc.loadIndexFromFile(cacheFile)
+    cacheSkiplist.Merge(timestampedSkiplist, MergeTheirs) // Later timestamps take precedence
+}
+
+comparisonSkiplist := mainSkiplist.Copy()
+comparisonSkiplist.Merge(cacheSkiplist, MergeTheirs)
+```
+
+**Cleanup Strategy**:
+- **After Successful Operation**: Delete all `cache-{timestamp}.idx` files
+- **Startup Validation**: Check file headers/checksums, skip corrupted cache files
+- **Multiple Interruptions**: Handle accumulation of multiple timestamped cache files
+
 ## Implementation Files
 
 - `pkg/binary_entry_interface.go` - Interface definition and common patterns
