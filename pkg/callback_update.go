@@ -588,27 +588,42 @@ func (uc *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.
 		}, nil
 	}
 	
-	// For read/write entries: Must copy data (unavoidable for non-mmap'd entries)
-	// TODO: Implement GetBinaryData() method for BinaryEntryInterface if needed
-	// For now, handle heap-allocated entries by creating binary data
+	// For heap-allocated BEScanEntry: Use GetBinaryData() to avoid copying
+	if scanEntry, ok := entry.(*BEScanEntry); ok {
+		binaryData, err := scanEntry.GetBinaryData()
+		if err != nil {
+			return syscall.Iovec{}, fmt.Errorf("failed to get binary data from scan entry: %w", err)
+		}
+		
+		return syscall.Iovec{
+			Base: (*byte)(unsafe.Pointer(&binaryData[0])),
+			Len:  uint64(len(binaryData)),
+		}, nil
+	}
 	
-	// For heap-allocated BEScanEntry, we need to create binary data
-	var binaryData [256]byte // Size of binaryEntry struct
+	// For other entry types: Fall back to copying approach
+	entrySize, err := entry.Size()
+	if err != nil {
+		return syscall.Iovec{}, fmt.Errorf("failed to get entry size: %w", err)
+	}
+	
+	// Allocate buffer with entry's actual size
+	binaryData := make([]byte, entrySize)
 	
 	// Fill binary data from BinaryEntryInterface methods
-	if err := uc.fillBinaryDataFromInterface(entry, &binaryData); err != nil {
+	if err := uc.fillBinaryDataFromInterface(entry, binaryData); err != nil {
 		return syscall.Iovec{}, fmt.Errorf("failed to fill binary data: %w", err)
 	}
 	
 	return syscall.Iovec{
 		Base: (*byte)(unsafe.Pointer(&binaryData[0])),
-		Len:  uint64(len(binaryData)),
+		Len:  uint64(entrySize),
 	}, nil
 }
 
 // fillBinaryDataFromInterface fills binary data structure from BinaryEntryInterface
-func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface, data *[256]byte) error {
-	// Create a binaryEntry struct in the data array
+func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface, data []byte) error {
+	// Create a binaryEntry struct in the data slice
 	binaryEntryPtr := (*binaryEntry)(unsafe.Pointer(&data[0]))
 	
 	// Fill in all fields from the interface
@@ -616,6 +631,14 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 	
 	if binaryEntryPtr.Size, err = entry.Size(); err != nil {
 		return err
+	}
+	
+	// Verify size is not zero (debug)
+	if binaryEntryPtr.Size == 0 {
+		if path, pathErr := entry.RelativePath(); pathErr == nil {
+			return fmt.Errorf("BUG: entry for %s has zero size from interface", path)
+		}
+		return fmt.Errorf("BUG: entry has zero size from interface")
 	}
 	if binaryEntryPtr.CTimeWall, err = entry.CTimeWall(); err != nil {
 		return err
@@ -665,19 +688,21 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 		return err
 	}
 	
-	// Calculate total size including path with 8-byte alignment
+	// Size should already be calculated correctly in constructor - don't override it
+	// The Size field should come from the BinaryEntryInterface implementation
+	
+	// Copy path starting at the Path field (8-byte placeholder that can extend beyond)
 	pathBytes := []byte(relPath)
-	rawSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(pathBytes)) + 1 // +1 for null terminator
 	
-	// Round up to next 8-byte boundary for alignment
-	totalSize := (rawSize + 7) &^ 7 // Equivalent to: ((rawSize + 7) / 8) * 8
-	binaryEntryPtr.Size = totalSize
+	// Path starts at the Path field offset within binaryEntry
+	pathOffset := int(unsafe.Offsetof(binaryEntryPtr.Path))
+	pathSpace := data[pathOffset:]
 	
-	// Copy path after the binaryEntry struct
-	pathStart := uintptr(unsafe.Pointer(binaryEntryPtr)) + unsafe.Sizeof(binaryEntry{})
-	pathDest := (*[256]byte)(unsafe.Pointer(pathStart))
-	copy(pathDest[:], pathBytes)
-	pathDest[len(pathBytes)] = 0 // Null terminator
+	// Copy path with null terminator
+	copy(pathSpace, pathBytes)
+	if len(pathSpace) > len(pathBytes) {
+		pathSpace[len(pathBytes)] = 0 // Null terminator
+	}
 	
 	return nil
 }

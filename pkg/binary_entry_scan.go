@@ -24,22 +24,37 @@ import (
 // - Better performance (only hash files that will be indexed)
 type BEScanEntry struct {
 	BinaryEntryBase
-	entry   *binaryEntry // Heap-allocated entry data (no hash initially)
-	relPath string       // Relative path (stored separately from binaryEntry)
-	mutex   sync.RWMutex // Per-entry locking for hash coordination
+	binaryData []byte      // Single contiguous buffer containing binaryEntry + path data
+	relPath    string      // Relative path (cached for convenience)
+	mutex      sync.RWMutex // Per-entry locking for hash coordination
 }
 
 // NewBEScanEntry creates a new heap-allocated BEScanEntry for filesystem scanning
 // Creates entry with metadata but NO hash (lazy hashing approach)
 func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat_t) *BEScanEntry {
-	// Allocate binaryEntry on heap with metadata but empty hash
-	entry := &binaryEntry{}
+	// Calculate total size needed for binaryEntry + path + padding
+	totalSize := BESizeFromPathLen(len(relPath))
 	
-	// Fill in metadata from file system scan with 8-byte alignment
-	rawSize := uint32(unsafe.Sizeof(binaryEntry{})) + uint32(len(relPath)) + 1 // +1 for null terminator
-	entry.Size = (rawSize + 7) &^ 7 // Round up to next 8-byte boundary for alignment
+	// Debug: Print size calculation
+	if IsDebugEnabled("write") {
+		fmt.Fprintf(os.Stderr, "[DEBUG-SIZE] NewBEScanEntry for %s: pathLen=%d, totalSize=%d\n", relPath, len(relPath), totalSize)
+	}
+	
+	// Allocate single contiguous buffer for the complete binary entry
+	binaryData := make([]byte, totalSize)
+	
+	// Cast the beginning of the buffer as a binaryEntry struct
+	entry := (*binaryEntry)(unsafe.Pointer(&binaryData[0]))
+	
+	// Fill in metadata from file system scan
+	entry.Size = uint32(totalSize)
+	
+	// Debug: Verify size was set correctly
+	if IsDebugEnabled("write") {
+		fmt.Fprintf(os.Stderr, "[DEBUG-SIZE] NewBEScanEntry entry.Size set to: %d\n", entry.Size)
+	}
 	modTime := fileInfo.ModTime()
-	entry.CTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond())) // Use ModTime for now, could enhance with ctime
+	entry.CTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
 	entry.MTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
 	entry.Dev = uint32(statInfo.Dev)
 	entry.Ino = uint32(statInfo.Ino)
@@ -51,9 +66,19 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	// entry.Hash remains zero-valued (no hash initially)
 	entry.EntryFlags = 0  // Not deleted initially
 	
+	// Copy path starting at the Path field offset
+	pathOffset := int(unsafe.Offsetof(entry.Path))
+	pathBytes := []byte(relPath)
+	copy(binaryData[pathOffset:], pathBytes)
+	
+	// Add null terminator
+	if pathOffset+len(pathBytes) < len(binaryData) {
+		binaryData[pathOffset+len(pathBytes)] = 0
+	}
+	
 	return &BEScanEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BEScan),
-		entry:          entry,
+		binaryData:     binaryData,
 		relPath:        relPath,
 		mutex:          sync.RWMutex{},
 	}
@@ -63,19 +88,20 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 // Returns the entry pointer and nil error if successful
 // v0.7: Much simpler than v0.6 - no mmap complexity
 func (sbe *BEScanEntry) getBinaryEntry() (*binaryEntry, error) {
-	// Quick validity check - entry should never be nil for heap allocation
-	if sbe.entry == nil {
+	// Quick validity check - binaryData should never be nil for heap allocation
+	if sbe.binaryData == nil {
 		return nil, ErrEntryInvalidated
 	}
 	
-	// Return heap-allocated entry (no mmap locking needed)
-	return sbe.entry, nil
+	// Return pointer to binaryEntry struct at start of buffer
+	entry := (*binaryEntry)(unsafe.Pointer(&sbe.binaryData[0]))
+	return entry, nil
 }
 
 // IsValid performs a quick check if the entry is still accessible
-// v0.7: Much simpler for heap allocation - just check if entry exists
+// v0.7: Much simpler for heap allocation - just check if binaryData exists
 func (sbe *BEScanEntry) IsValid() bool {
-	return sbe.entry != nil
+	return sbe.binaryData != nil
 }
 
 // Size returns the entry size field
@@ -370,4 +396,18 @@ func (sbe *BEScanEntry) Lock() {
 // Unlock releases the write lock
 func (sbe *BEScanEntry) Unlock() {
 	sbe.mutex.Unlock()
+}
+
+// GetBinaryData returns the heap-allocated binaryEntry as binary data for IoVec writing
+// This returns the actual contiguous buffer - no copying needed
+func (sbe *BEScanEntry) GetBinaryData() ([]byte, error) {
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
+	
+	if sbe.binaryData == nil {
+		return nil, ErrEntryInvalidated
+	}
+	
+	// Return the actual contiguous buffer containing binaryEntry + path data
+	return sbe.binaryData, nil
 }
