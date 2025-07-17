@@ -277,3 +277,70 @@ The v0.7 architecture transformation is now complete and ready for testing with 
 - **Enables real-world testing**: v0.7 unified architecture ready for production validation
 
 The iterative checksum calculation represents the final missing piece for v0.7 architecture completion. The approach demonstrates the power of "fix validation to match efficient implementation" rather than "compromise implementation to match outdated validation."
+
+---
+
+### Update - 2025-07-17T07:30:21Z
+
+**Summary**: Fixed signal handling in v0.7 architecture and identified adaptive test issues
+
+**Git Changes**:
+- Modified: pkg/hwang_lin_unified.go, pkg/status.go, pkg/update.go, pkg/hwang_lin_unified_test.go, pkg/callback_dupes_test.go, scratchpad.md
+- Current branch: local-main (commit: f5d0bd5)
+
+**Todo Progress**: 25 completed, 0 in progress, 5 pending
+- ✓ Completed: Fix signal handling in hwangLinUnified - add shutdown channel checking in main comparison loop
+
+**Major Achievements**:
+
+1. **Signal Handling Implementation**: Added shutdown channel parameter to `hwangLinUnified()` function with proper shutdown checking in main comparison loop:
+   ```go
+   // Check for shutdown signal at the beginning of each iteration
+   select {
+   case <-shutdownChan:
+       shutdownErr := fmt.Errorf("operation interrupted by shutdown signal")
+       callback.OnComplete(shutdownErr)
+       return shutdownErr
+   default:
+       // Continue processing
+   }
+   ```
+
+2. **Integration Updates**: Updated all calls to `hwangLinUnified()` to pass shutdown channel:
+   - `pkg/update.go`: `hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)`
+   - `pkg/status.go`: `hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan)`
+   - All test files: `hwangLinUnified(leftIter, rightIter, callback, nil)`
+
+3. **Adaptive Test Issue Identified**: Discovered root cause of signal handling test failures:
+   - **Problem**: Adaptive test looks for v0.6 scan index files (`scan-*.idx`) that don't exist in v0.7
+   - **v0.6**: Creates scan index files detectable by strace pattern `scan-\d+-\d+\.idx`
+   - **v0.7**: Uses heap-allocated scan entries (no scan index files)
+   - **Result**: Strace can't detect scan activity, test reports "Interruption too fast"
+
+4. **Solution Design**: Documented comprehensive approach for enhanced strace analysis:
+   - Track file descriptor to index file mapping from `open()` syscalls
+   - Monitor write operations to index files before/after signal delivery
+   - Parse strace timeline to classify operations as pre-signal vs post-signal
+   - Update interrupt success criteria for v0.7 temp index file behavior
+
+5. **Test Configuration Improvements**: 
+   - Reduced adaptive test initial delay from 500ms → 50ms → 20ms for faster convergence
+   - Added comprehensive debug flags: `--debug=scan,scanning,hash,load`
+   - Extended timeout from 30s to 60s
+
+**Technical Implementation**:
+- Signal handling now properly integrated into main comparison loop of hwangLinUnified
+- Shutdown channel passed through complete call chain from CLI → Update/Status → hwangLinUnified
+- All test files updated to maintain compatibility with new function signature
+
+**Issues Encountered**:
+- Adaptive interrupt test continues to scale up files (500 → 64,000) but times out during file creation
+- Test logic fundamentally incompatible with v0.7 architecture due to missing scan index files
+- Manual testing shows v0.7 signal handling is working but can't be validated by current test
+
+**Next Steps**:
+- Implement enhanced strace analysis with fd tracking and timeline parsing
+- Update adaptive test patterns to detect v0.7 temp index operations instead of scan files
+- Validate signal handling works correctly with new test methodology
+
+The signal handling infrastructure is now complete for v0.7 architecture, but the validation test needs significant updates to work with the new heap-allocated scan entry approach.

@@ -353,7 +353,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager)
 
 	// Run unified algorithm (replaces the complex internal logic)
-	if err := hwangLinUnified(existingIterator, scanIterator, updateCallback); err != nil {
+	if err := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan); err != nil {
 		// v0.7: Callback writes directly to temp index, no result skiplist to return
 		// TODO: Handle partial temp index results for interruption cases
 		dc.lastScanResult = nil

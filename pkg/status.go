@@ -97,7 +97,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	statusCallback := NewStatusCallback("status", dc, hashManager, cacheTempFileName)
 
 	// Run unified algorithm to compare existing vs current filesystem state
-	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback); err != nil {
+	if err := hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan); err != nil {
 		// Even if interrupted, return partial results
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "[STATUS] Scan interrupted, returning partial status results\n")
