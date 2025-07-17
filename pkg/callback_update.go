@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
@@ -14,11 +15,14 @@ type UpdateCallback struct {
 	dc                *DirectoryCache
 	tempIndexFileName string                  // Temp main index filename for direct writing
 	
-	// Hash coordination with existing hashJobManager (avoid maps where simple counter works)
+	// Hash coordination with existing hashJobManager
 	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
 	entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
 	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
 	nextFlushIndex   uint64                  // Next counter position to check for flushing
+	
+	// Simple atomic counter for completion detection
+	jobsInFlight     uint64                  // Atomic counter: inc on submit, dec on complete
 	
 	// Index writing - in-order entry processing (v0.7: direct temp index writing)
 	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
@@ -203,6 +207,8 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 	
 	// v0.7: Close temp index writer to finalize the temp index file
 	if uc.tempIndexWriter != nil {
+		tempPath := uc.tempIndexWriter.GetTempPath() // Hoist - call once
+		
 		if closeErr := uc.tempIndexWriter.Close(); closeErr != nil {
 			if err == nil {
 				// No previous error, return the close error
@@ -215,7 +221,29 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		
 		if IsDebugEnabled("write") {
 			VerboseLog(3, "[UPDATE-WRITE] Temp index writer closed: %s (%d entries)", 
-				uc.tempIndexWriter.GetTempPath(), uc.tempIndexWriter.GetEntryCount())
+				tempPath, uc.tempIndexWriter.GetEntryCount())
+		}
+		
+		// v0.7: Atomic rename temp index to main.idx after successful completion
+		if err == nil {
+			mainIndexPath := uc.dc.IndexFile
+			
+			if IsDebugEnabled("write") {
+				VerboseLog(3, "[UPDATE-WRITE] Atomically renaming temp index: %s -> %s", tempPath, mainIndexPath)
+			}
+			
+			if renameErr := os.Rename(tempPath, mainIndexPath); renameErr != nil {
+				return fmt.Errorf("failed to atomically rename temp index to main index: %w", renameErr)
+			}
+			
+			if IsDebugEnabled("write") {
+				VerboseLog(3, "[UPDATE-WRITE] Successfully updated main index: %s", mainIndexPath)
+			}
+		} else {
+			// Error occurred - clean up temp file
+			if cleanupErr := os.Remove(tempPath); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup temp index file %s: %v\n", tempPath, cleanupErr)
+			}
 		}
 	}
 	
@@ -285,15 +313,13 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system
 func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
-	// Get the binaryEntryRef for hash job submission
-	// This assumes the entry supports GetBinaryEntryRef() - need to add this to interface
-	// For now, request hash through the existing interface
+	// RequestHash() does the actual job submission AND housekeeping (sets flags, prevents duplicates)
 	if err := entry.RequestHash(); err != nil {
 		return err
 	}
 	
-	// TODO: Implement direct hash job submission with cookie when GetBinaryEntryRef() is available
-	// Increment counter for this entry (used as external cookie)
+	// Only increment counters after successful submission
+	atomic.AddUint64(&uc.jobsInFlight, 1)
 	uc.entryCounter++
 	cookie := uc.entryCounter
 	
@@ -305,13 +331,6 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		uc.pendingEntries = newSlice
 	}
 	uc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
-	
-	// TODO: Submit to hash manager when direct submission is available
-	// uc.hashJobManager.SubmitHashJob(&hashJobStart{
-	//     FilePath:    rightPath,
-	//     IndexEntry:  ref,
-	//     Cookie:      cookie,
-	// })
 	
 	return nil
 }
@@ -326,12 +345,14 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 	for {
 		select {
 		case completion := <-uc.hashJobManager.CompletionChannel():
-			// completion now contains both JobID and Cookie
+			// completion contains both JobID and Cookie
 			cookie := completion.Cookie
 			
 			if cookie > 0 && int(cookie) <= len(uc.pendingEntries) {
 				// Mark entry as completed by setting to nil (ready for flush)
 				uc.pendingEntries[cookie-1] = nil
+				// Decrement atomic counter when job completes
+				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
 			}
 		default:
 			return // No more completed jobs available

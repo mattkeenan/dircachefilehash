@@ -519,6 +519,17 @@ Callbacks coordinate hash processing directly with the existing `hashJobManager`
 
 **Architectural Principle**: Use existing `hashJobManager` from callbacks instead of creating new coordination layer. Avoid maps where simple counters work better.
 
+**CRITICAL v0.7 INSIGHT: RequestHash() Pattern Simplification**
+
+During implementation, we discovered that `RequestHash()` was originally designed to handle actual hash job submission, not just flag setting. The v0.7 pattern leverages this:
+
+- **`RequestHash()`**: Does both housekeeping (flags, duplicates) AND actual job submission to hash manager
+- **Cookie tracking**: Callbacks maintain order via simple counter + slice indexing  
+- **Atomic counter**: Simple `jobsInFlight` tracking for completion detection
+- **No complex submission logic**: "The best part is no part" - use existing `RequestHash()` infrastructure
+
+This eliminates the need for complex hash job submission logic in callbacks while maintaining the cookie-based ordering system essential for path-ordered IoVec writing.
+
 **Required Infrastructure Changes:**
 
 1. **Add Cookie Support to hashJobStart:**
@@ -560,29 +571,25 @@ func (callback *UpdateCallback) OnComparison(result ComparisonResult, left, righ
     switch result {
     case ComparisonMatch:
         if needsHash(left, right) {
-            // File changed - submit hash job for current state
-            if err := callback.submitHashJobToManager(right); err != nil {
+            // File changed - submit hash job for current state using unified coordination
+            if err := callback.SubmitAndOrWriteHash(right, "modified"); err != nil {
                 return false, err
             }
         } else {
-            // File unchanged - append existing entry to backlog immediately
-            callback.appendToBacklog(left)
+            // File unchanged - use unified coordination for writing
+            if err := callback.SubmitAndOrWriteHash(left, "unchanged"); err != nil {
+                return false, err
+            }
         }
     case ComparisonRightFirst:
-        // New file - submit hash job
-        if err := callback.submitHashJobToManager(right); err != nil {
+        // New file - submit hash job using unified coordination
+        if err := callback.SubmitAndOrWriteHash(right, "new_file"); err != nil {
             return false, err
         }
     case ComparisonLeftFirst:
-        // Deleted file - append to backlog (for deletion marking)
-        callback.appendToBacklog(left)
+        // Deleted file - handle via unified coordination (may skip for main.idx)
+        return true, nil
     }
-    
-    // Check completion queue from hashJobManager and merge completed entries to backlog
-    callback.processCompletedHashJobs()
-    
-    // Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
-    callback.flushInOrderEntries()
     
     return true, nil
 }
@@ -591,25 +598,33 @@ func (callback *UpdateCallback) OnComparison(result ComparisonResult, left, righ
 **Callback State Management:**
 ```go
 type UpdateCallback struct {
-    // Index writing
-    backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
-    tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
+    // v0.7 direct temp index writing
+    dc                *DirectoryCache
+    tempIndexFileName string                  // Temp main index filename for direct writing
     
-    // Hash coordination with existing hashJobManager (avoid maps where simple counter works)
-    hashJobManager   *AlgorithmHashManager   // Existing hash manager (passed from caller)
+    // Hash coordination with existing hashJobManager
+    hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
     entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
     pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
     nextFlushIndex   uint64                  // Next counter position to check for flushing
+    
+    // Simple atomic counter for completion detection
+    jobsInFlight     uint64                  // Atomic counter: inc on submit, dec on complete
+    
+    // Index writing - in-order entry processing (v0.7: direct temp index writing)
+    backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
+    tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
 }
 
+// Simplified hash coordination - RequestHash() handles submission + housekeeping
 func (callback *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
-    // Submit to existing hash manager using callback's own counter as cookie
-    ref, ok := entry.GetBinaryEntryRef()
-    if !ok {
-        return fmt.Errorf("entry doesn't support hash job submission")
+    // RequestHash() does the actual job submission AND housekeeping (sets flags, prevents duplicates)
+    if err := entry.RequestHash(); err != nil {
+        return err
     }
     
-    // Increment counter for this entry (used as external cookie)
+    // Only increment counters after successful submission
+    atomic.AddUint64(&callback.jobsInFlight, 1)
     callback.entryCounter++
     cookie := callback.entryCounter
     
@@ -622,12 +637,6 @@ func (callback *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterfac
     }
     callback.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
     
-    callback.hashJobManager.SubmitHashJob(&hashJobStart{
-        FilePath:    entry.AbsolutePath(),
-        IndexEntry:  ref,
-        Cookie:      cookie,  // Pass callback's counter as external cookie
-    })
-    
     return nil
 }
 
@@ -636,12 +645,14 @@ func (callback *UpdateCallback) processCompletedHashJobs() {
     for {
         select {
         case completion := <-callback.hashJobManager.CompletionChannel():
-            // completion now contains both JobID and Cookie
+            // completion contains both JobID and Cookie
             cookie := completion.Cookie
             
             if cookie > 0 && int(cookie) <= len(callback.pendingEntries) {
                 // Mark entry as completed by setting to nil (ready for flush)
                 callback.pendingEntries[cookie-1] = nil
+                // Decrement atomic counter when job completes
+                atomic.AddUint64(&callback.jobsInFlight, ^uint64(0)) // Atomic decrement
             }
         default:
             return // No more completed jobs available
@@ -827,6 +838,134 @@ func (callback *SomeCallback) OnRightOnly(entry BinaryEntryInterface, path strin
 5. **Testing**: Verify all callback paths write correctly
 
 **Priority**: HIGH - Fixes critical Status command cache writing bug
+
+## Iterative Checksum Calculation Architecture
+
+### Problem: Bad File Descriptor in TempIndexWriter.Close()
+
+**Issue Identified**: The current `TempIndexWriter.Close()` implementation tries to calculate the index checksum by reopening and re-reading the entire temp index file after writing. This causes "bad file descriptor" errors because:
+
+1. File is closed after writing all entries
+2. `Close()` method tries to reopen file for checksum calculation  
+3. File descriptor becomes invalid or conflicts occur
+4. Reading entire file for checksum is inefficient and error-prone
+
+### Solution: Incremental Checksum During Writing
+
+**Key Insight**: Calculate the checksum incrementally as entries are written, not as a separate post-processing step.
+
+**Architecture Pattern**:
+```go
+// During iterative writing phase:
+while hwangLinUnified_active {
+    // Process completion queue (non-blocking)
+    for completion := range hashJobManager.CompletionChannel() {
+        entry := getEntryByCookie(completion.Cookie)
+        ioVec := createIoVec(entry)
+        
+        // CRITICAL: Add to checksum BEFORE writing to file
+        checksumHash.Write(entry.binaryData)
+        
+        iovecs = append(iovecs, ioVec)
+    }
+    
+    // Write batch to file (but don't close yet)
+    if len(iovecs) > 0 {
+        writeIovecs(iovecs)
+        iovecs = iovecs[:0] // Clear for next batch
+    }
+}
+
+// At close time (after all entries written):
+updateHeaderEntryCount(totalEntriesWritten)
+
+// Add header fields to checksum (excluding checksum field itself)
+checksumHash.Write(headerFieldsWithoutChecksum)
+
+// Finalize checksum
+finalChecksum := checksumHash.Sum(nil)
+header.checksum = finalChecksum
+
+// Write header at beginning of file (offset 0)
+file.pwrite(header, 0)
+file.close()
+```
+
+### Implementation Requirements
+
+**TempIndexWriter Changes**:
+
+1. **Add incremental checksum field**:
+```go
+type TempIndexWriter struct {
+    file           *os.File
+    entryCount     uint64
+    checksumWriter hash.Hash    // NEW: Incremental checksum calculation
+    // ... existing fields
+}
+```
+
+2. **Update WriteIoVecBatch() method**:
+```go
+func (tiw *TempIndexWriter) WriteIoVecBatch(iovecs []IoVec) error {
+    // Add each entry to checksum BEFORE writing
+    for _, iovec := range iovecs {
+        tiw.checksumWriter.Write(iovec.Data[:iovec.Len])
+    }
+    
+    // Write batch to file
+    return vectorio.WritevRaw(tiw.file, iovecs)
+}
+```
+
+3. **Simplify Close() method**:
+```go
+func (tiw *TempIndexWriter) Close() error {
+    // Create header with final entry count
+    header := createIndexHeader(tiw.entryCount)
+    
+    // Add header (without checksum field) to running checksum
+    headerBytes := serializeHeaderWithoutChecksum(header)
+    tiw.checksumWriter.Write(headerBytes)
+    
+    // Finalize checksum
+    header.checksum = tiw.checksumWriter.Sum(nil)
+    
+    // Write final header at offset 0
+    _, err := tiw.file.WriteAt(headerBytes, 0)
+    if err != nil {
+        return err
+    }
+    
+    // Close file (no reopening needed)
+    return tiw.file.Close()
+}
+```
+
+### Benefits
+
+1. **Eliminates "bad file descriptor" errors**: No file reopening required
+2. **Performance improvement**: Single pass through data (no re-reading)
+3. **Memory efficient**: No buffering of entire file content
+4. **Architecturally consistent**: Fits v0.7 iterative pattern perfectly
+5. **Correct checksum ordering**: Entries in file order + header fields
+6. **Atomic operations**: Header written last with complete checksum
+
+### Integration with v0.7 Architecture
+
+This approach integrates seamlessly with the existing v0.7 cookie-based hash coordination:
+
+- **Callback phase**: Entries added to completion queue in path order
+- **Writing phase**: IoVec batches written + checksum updated incrementally  
+- **Finalization phase**: Header written with complete checksum
+- **Atomic rename**: Temp index atomically becomes main.idx
+
+**CRITICAL**: The checksum calculation order must match the exact file layout:
+1. All binaryEntry structures (in path order)
+2. Header fields (signature, version, entry count, flags)
+3. Checksum field calculated from above data
+
+This ensures the checksum verification will work correctly when the index is later read and validated.
 
 ## Documentation Updates
 

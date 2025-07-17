@@ -1,7 +1,11 @@
 package dircachefilehash
 
 import (
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
+	"hash"
 	"os"
 	"syscall"
 	"unsafe"
@@ -17,6 +21,7 @@ type TempIndexWriter struct {
 	headerWritten bool
 	entryCount   uint32
 	dc           *DirectoryCache
+	checksumWriter hash.Hash    // Incremental checksum calculation
 }
 
 // NewTempIndexWriter creates a new temp index writer for the specified temp file
@@ -27,12 +32,26 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 		return nil, fmt.Errorf("failed to create temp index file %s: %w", tempPath, err)
 	}
 
+	// Create a new hasher instance based on the default hash type
+	var checksumWriter hash.Hash
+	switch HashTypeSHA1 { // Default hash type used in placeholder header
+	case HashTypeSHA1:
+		checksumWriter = sha1.New()
+	case HashTypeSHA256:
+		checksumWriter = sha256.New()
+	case HashTypeSHA512:
+		checksumWriter = sha512.New()
+	default:
+		checksumWriter = sha1.New() // Fallback to SHA-1
+	}
+
 	return &TempIndexWriter{
 		file:         file,
 		tempPath:     tempPath,
 		headerWritten: false,
 		entryCount:   0,
 		dc:           dc,
+		checksumWriter: checksumWriter,  // Use new hasher instance
 	}, nil
 }
 
@@ -53,6 +72,13 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 
 	// Write entries using vectorio (even empty batches or single entries)
 	if len(readyIoVecs) > 0 {
+		// CRITICAL: Add each entry to checksum BEFORE writing to file
+		for _, iovec := range readyIoVecs {
+			// Convert IoVec to []byte for checksum calculation
+			entryBytes := unsafe.Slice((*byte)(unsafe.Pointer(iovec.Base)), int(iovec.Len))
+			tiw.checksumWriter.Write(entryBytes)
+		}
+		
 		if err := tiw.writeEntriesWithVectorIO(readyIoVecs); err != nil {
 			return fmt.Errorf("failed to write entries batch: %w", err)
 		}
@@ -157,10 +183,14 @@ func (tiw *TempIndexWriter) Close() error {
 	// Mark header as clean
 	header.setClean()
 
-	// Calculate checksum of the entire file
-	if err := tiw.calculateAndStoreFileChecksum(&header); err != nil {
-		return fmt.Errorf("failed to calculate file checksum: %w", err)
+	// Add header fields (excluding checksum) to running checksum
+	if err := tiw.addHeaderToChecksum(&header); err != nil {
+		return fmt.Errorf("failed to add header to checksum: %w", err)
 	}
+
+	// Finalize checksum and store in header
+	finalChecksum := tiw.checksumWriter.Sum(nil)
+	copy(header.Checksum[:], finalChecksum)
 
 	// Rewrite header with correct count and checksum
 	if _, err := tiw.file.Seek(0, 0); err != nil {
@@ -186,34 +216,15 @@ func (tiw *TempIndexWriter) Close() error {
 	return nil
 }
 
-// calculateAndStoreFileChecksum calculates checksum of header+entries and stores in header
-func (tiw *TempIndexWriter) calculateAndStoreFileChecksum(header *indexHeader) error {
-	// Get file size to read all data
-	stat, err := tiw.file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat temp index file: %w", err)
-	}
-
-	fileSize := stat.Size()
-	if fileSize < HeaderSize {
-		return fmt.Errorf("temp index file too small: %d bytes", fileSize)
-	}
-
-	// Read entire file for checksum calculation
-	if _, err := tiw.file.Seek(0, 0); err != nil {
-		return fmt.Errorf("failed to seek to beginning for checksum: %w", err)
-	}
-
-	fileData := make([]byte, fileSize)
-	if n, err := tiw.file.Read(fileData); err != nil {
-		return fmt.Errorf("failed to read temp index for checksum: %w", err)
-	} else if int64(n) != fileSize {
-		return fmt.Errorf("incomplete read for checksum: read %d, expected %d", n, fileSize)
-	}
-
-	// Calculate checksum (exclude checksum field from header)
-	tiw.dc.calculateAndStoreHeaderChecksum(header, fileData[HeaderSize:], int(fileSize-HeaderSize))
-
+// addHeaderToChecksum adds header fields (excluding checksum field) to running checksum
+func (tiw *TempIndexWriter) addHeaderToChecksum(header *indexHeader) error {
+	// Serialize header WITHOUT checksum field (following existing pattern from index.go)
+	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	
+	// Add header fields (up to but not including checksum) to running checksum
+	tiw.checksumWriter.Write(headerBytes[:checksumOffset])
+	
 	return nil
 }
 

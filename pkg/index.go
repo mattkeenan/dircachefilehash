@@ -197,16 +197,11 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 
 // validateHeaderChecksum validates the header checksum against the file contents
 func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) error {
-	// Calculate expected checksum
+	// Calculate expected checksum using same order as TempIndexWriter iterative approach
 	hasher := sha1.New()
 
-	// Hash header up to checksum field
-	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
-	checksumOffset := unsafe.Offsetof(header.Checksum)
-	hasher.Write(headerBytes[:checksumOffset])
-
-	// If file has entry data, hash it too
-	entryDataSize := fileSize - HeaderSize - ChecksumSize
+	// First: Hash entry data (matches TempIndexWriter.WriteIoVecBatch order)
+	entryDataSize := fileSize - HeaderSize
 	if entryDataSize > 0 {
 		// Read entry data
 		entryData := make([]byte, entryDataSize)
@@ -215,6 +210,11 @@ func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) 
 		}
 		hasher.Write(entryData)
 	}
+
+	// Second: Hash header up to checksum field (matches TempIndexWriter.Close order)
+	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
 
 	// Compare with stored checksum
 	expectedChecksum := hasher.Sum(nil)
@@ -248,15 +248,17 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, e
 	hasher := dc.hasher
 	hasher.Reset()
 
-	// Hash header up to checksum field
-	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
-	checksumOffset := unsafe.Offsetof(header.Checksum)
-	hasher.Write(headerBytes[:checksumOffset])
-
-	// Hash entry data if any
+	// Use same order as TempIndexWriter iterative approach: entry data + header fields
+	
+	// First: Hash entry data if any (matches TempIndexWriter.WriteIoVecBatch order)
 	if entrySize > 0 {
 		hasher.Write(entryData[:entrySize])
 	}
+
+	// Second: Hash header up to checksum field (matches TempIndexWriter.Close order)
+	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
 
 	// Store checksum in header
 	checksumBytes := hasher.Sum(nil)
@@ -268,15 +270,17 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *inde
 	hasher := dc.hasher
 	hasher.Reset()
 
-	// Hash header up to (but not including) checksum field
-	headerBytes := unsafe.Slice((*byte)(headerIovec.Base), int(headerIovec.Len))
-	checksumOffset := unsafe.Offsetof(header.Checksum)
-	hasher.Write(headerBytes[:checksumOffset])
+	// Use same order as TempIndexWriter iterative approach: entry data + header fields
 
-	// Hash entries
+	// First: Hash entries (matches TempIndexWriter.WriteIoVecBatch order)
 	for _, iovec := range entryIovecs {
 		hasher.Write(unsafe.Slice((*byte)(iovec.Base), int(iovec.Len)))
 	}
+
+	// Second: Hash header up to (but not including) checksum field (matches TempIndexWriter.Close order)
+	headerBytes := unsafe.Slice((*byte)(headerIovec.Base), int(headerIovec.Len))
+	checksumOffset := unsafe.Offsetof(header.Checksum)
+	hasher.Write(headerBytes[:checksumOffset])
 
 	// Store checksum in header
 	checksumBytes := hasher.Sum(nil)
