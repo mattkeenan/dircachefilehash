@@ -109,19 +109,16 @@ func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, fl
 	defer filesystemIterator.Close()
 	
 	// Create callback for duplicate detection during streaming comparison
-	// dupesCallback := NewDupesCallback("unified-dupes")
+	dupesCallback := NewDupesCallback("unified-dupes")
 	
 	// Run unified Hwang-Lin algorithm with streaming iterators (no memory loading!)
-	// err = hwangLinUnified(skiplistIterator, filesystemIterator, dupesCallback)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("unified streaming algorithm failed: %w", err)
-	// }
+	err = hwangLinUnified(skiplistIterator, filesystemIterator, dupesCallback, shutdownChan)
+	if err != nil {
+		return nil, fmt.Errorf("unified streaming algorithm failed: %w", err)
+	}
 	
 	// Extract results from streaming callback
-	// result := dupesCallback.GetResults()
-	
-	// TODO: Implement DupesCallback and unified streaming algorithm
-	result := make([]DuplicateGroup, 0)
+	result := dupesCallback.GetResults()
 	
 	return result, nil
 }

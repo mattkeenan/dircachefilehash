@@ -313,8 +313,18 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system
 func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
+	// a) Hash job submission tracing
+	if IsDebugEnabled("hash") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[HASH-SUBMIT] Submitting hash job for entry: %s", path)
+		}
+	}
+	
 	// RequestHash() does the actual job submission AND housekeeping (sets flags, prevents duplicates)
 	if err := entry.RequestHash(); err != nil {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[HASH-SUBMIT] Failed to submit hash job: %v", err)
+		}
 		return err
 	}
 	
@@ -322,6 +332,10 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 	atomic.AddUint64(&uc.jobsInFlight, 1)
 	uc.entryCounter++
 	cookie := uc.entryCounter
+	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted successfully, cookie=%d, jobsInFlight=%d", cookie, atomic.LoadUint64(&uc.jobsInFlight))
+	}
 	
 	// Store entry at cookie position for completion tracking
 	if int(cookie) > len(uc.pendingEntries) {
@@ -332,101 +346,193 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 	}
 	uc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
 	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-SUBMIT] Entry stored in pendingEntries[%d], total pending slots: %d", cookie-1, len(uc.pendingEntries))
+	}
+	
 	return nil
 }
 
 // processCompletedHashJobs checks for completed jobs and marks them as ready
 func (uc *UpdateCallback) processCompletedHashJobs() {
 	if uc.hashJobManager == nil {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[HASH-COMPLETE] No hash manager available for completion processing")
+		}
 		return
 	}
 	
+	completionCount := 0
+	
+	// e) Hash completion message arrival tracing
 	// Non-blocking check for completed jobs from existing hashJobManager
 	for {
 		select {
 		case completion := <-uc.hashJobManager.CompletionChannel():
+			completionCount++
 			// completion contains both JobID and Cookie
 			cookie := completion.Cookie
 			
+			if IsDebugEnabled("hash") {
+				VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, cookie)
+			}
+			
 			if cookie > 0 && int(cookie) <= len(uc.pendingEntries) {
+				entry := uc.pendingEntries[cookie-1]
+				if entry != nil {
+					if path, err := entry.RelativePath(); err == nil {
+						if IsDebugEnabled("hash") {
+							VerboseLog(3, "[HASH-COMPLETE] Marking entry as completed: %s (cookie %d)", path, cookie)
+						}
+					}
+				}
+				
+				// f) Entry moved to completion state  
 				// Mark entry as completed by setting to nil (ready for flush)
 				uc.pendingEntries[cookie-1] = nil
 				// Decrement atomic counter when job completes
 				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
+				
+				if IsDebugEnabled("hash") {
+					remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
+					VerboseLog(3, "[HASH-COMPLETE] Entry marked complete, remaining jobs: %d", remainingJobs)
+				}
+			} else {
+				if IsDebugEnabled("hash") {
+					VerboseLog(3, "[HASH-COMPLETE] Invalid cookie %d (out of bounds, pendingEntries len=%d)", cookie, len(uc.pendingEntries))
+				}
 			}
 		default:
-			return // No more completed jobs available
+			// No more completed jobs available
+			if IsDebugEnabled("hash") && completionCount > 0 {
+				VerboseLog(3, "[HASH-COMPLETE] Processed %d completion messages this round", completionCount)
+			}
+			return 
 		}
 	}
 }
 
-// appendToBacklog adds an entry to the ready-to-write backlog
+// appendToBacklog adds an entry to the ready-to-write backlog  
 func (uc *UpdateCallback) appendToBacklog(entry BinaryEntryInterface) {
+	if IsDebugEnabled("hash") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[HASH-BACKLOG] Adding entry to backlog: %s (backlog size before: %d)", path, len(uc.backlog))
+		}
+	}
+	
+	// f) Hashed entries put in completion backlog queue
 	uc.backlog = append(uc.backlog, entry)
+	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-BACKLOG] Entry added to backlog, new backlog size: %d", len(uc.backlog))
+	}
 }
 
 // flushInOrderEntries processes backlog and pending entries for ordered writing
 // Implements architecture-specified immediate IoVec batching
 func (uc *UpdateCallback) flushInOrderEntries() error {
-	if IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-WRITE] Flushing entries: backlog=%d pending=%d", len(uc.backlog), len(uc.pendingEntries))
+	// g) In-order tests and IoVec creation tracing
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-FLUSH] Starting flush: backlog=%d pending=%d nextFlushIndex=%d", len(uc.backlog), len(uc.pendingEntries), uc.nextFlushIndex)
 	}
 	
 	// Initialize temp index writer if needed
 	if uc.tempIndexWriter == nil {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-FLUSH] Creating new TempIndexWriter for: %s", uc.tempIndexFileName)
+		}
 		writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
 		if err != nil {
 			return fmt.Errorf("failed to create temp index writer: %w", err)
 		}
 		uc.tempIndexWriter = writer
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-FLUSH] TempIndexWriter created successfully")
+		}
 	}
 	
 	// Use counter to check for contiguous completed entries (no gaps)
 	var readyIoVecs []syscall.Iovec
+	backlogProcessed := 0
 	
 	// Process backlog entries that can be written in order
 	for len(uc.backlog) > 0 {
 		entry := uc.backlog[0]
+		backlogProcessed++
 		
-		if IsDebugEnabled("write") {
+		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-WRITE] Processing backlog entry: %s", path)
+				VerboseLog(3, "[UPDATE-FLUSH] Processing backlog entry %d: %s", backlogProcessed, path)
 			}
 		}
 		
+		// h) IoVec creation from completed hashes
 		// Create zero-copy IoVec when possible  
 		ioVec, err := uc.createEntryIoVec(entry)
 		if err != nil {
+			if IsDebugEnabled("hash") {
+				VerboseLog(3, "[UPDATE-FLUSH] Failed to create IoVec for backlog entry: %v", err)
+			}
 			return fmt.Errorf("failed to create IoVec for entry: %w", err)
+		}
+		
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-FLUSH] Created IoVec for backlog entry, size: %d bytes", ioVec.Len)
 		}
 		
 		readyIoVecs = append(readyIoVecs, ioVec)
 		uc.backlog = uc.backlog[1:] // Remove from backlog
 	}
 	
+	// g) In-order test for pending entries
+	pendingSkipped := 0
 	// Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
 	for int(uc.nextFlushIndex) < len(uc.pendingEntries) {
 		if uc.pendingEntries[uc.nextFlushIndex] != nil {
 			// Hit a non-completed entry - stop to maintain order
+			if IsDebugEnabled("hash") {
+				VerboseLog(3, "[UPDATE-FLUSH] Hit non-completed entry at index %d, stopping in-order check", uc.nextFlushIndex)
+			}
 			break
 		}
 		// Entry is nil (completed) - can skip it in flush sequence
+		pendingSkipped++
 		uc.nextFlushIndex++
 	}
 	
+	if IsDebugEnabled("hash") && pendingSkipped > 0 {
+		VerboseLog(3, "[UPDATE-FLUSH] Skipped %d completed pending entries, nextFlushIndex now: %d", pendingSkipped, uc.nextFlushIndex)
+	}
+	
+	// i) IoVec entries writing tracing
 	// Write batch with single vectorio call to temp index
 	if len(readyIoVecs) > 0 {
+		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+			totalBytes := uint64(0)
+			for _, iovec := range readyIoVecs {
+				totalBytes += iovec.Len
+			}
+			VerboseLog(3, "[UPDATE-WRITE] Writing batch of %d IoVecs, total %d bytes to temp index", len(readyIoVecs), totalBytes)
+		}
+		
 		if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
+			if IsDebugEnabled("hash") {
+				VerboseLog(3, "[UPDATE-WRITE] Failed to write IoVec batch: %v", err)
+			}
 			return fmt.Errorf("failed to write IoVec batch: %w", err)
 		}
 		
-		if IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-WRITE] Wrote batch of %d entries to temp index", len(readyIoVecs))
+		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-WRITE] Successfully wrote batch of %d entries to temp index", len(readyIoVecs))
+		}
+	} else {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-WRITE] No entries ready for writing this flush cycle")
 		}
 	}
 	
-	if IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-WRITE] Flush complete: entries written to temp index")
+	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-FLUSH] Flush complete: processed %d backlog entries, skipped %d pending entries", backlogProcessed, pendingSkipped)
 	}
 	
 	return nil

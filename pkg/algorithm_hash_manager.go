@@ -237,14 +237,31 @@ func (ahm *algorithmHashManager) IsShuttingDown() bool {
 
 // SubmitHashJob submits a hash job for processing
 func (ahm *algorithmHashManager) SubmitHashJob(job *hashJobStart) {
+	// b) Actual hash job submission to manager
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-MANAGER] SubmitHashJob called: JobID=%d, Cookie=%d, FilePath=%s", job.JobID, job.Cookie, job.FilePath)
+	}
+	
 	// Track the mapping from JobID to Cookie for completion notifications
 	if job.Cookie != 0 {
 		ahm.queueMutex.Lock()
 		ahm.jobIDToCookie[job.JobID] = job.Cookie
 		ahm.queueMutex.Unlock()
+		
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[HASH-MANAGER] Mapped JobID %d to Cookie %d", job.JobID, job.Cookie)
+		}
+	}
+	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-MANAGER] Sending job to hash workers via hashJobChan")
 	}
 	
 	ahm.hashJobChan <- job
+	
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-MANAGER] Hash job submitted successfully to workers")
+	}
 	// Note: We don't send to callStartChan here as that's handled by the processor
 }
 

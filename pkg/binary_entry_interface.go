@@ -179,7 +179,15 @@ func (base *BinaryEntryBase) RequestHash() error {
 	
 	// Already requested or completed
 	if base.hashRequested || base.hashCompleted {
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[HASH-REQUEST] Hash already requested or completed for entry")
+		}
 		return nil
+	}
+	
+	// b) Hash request tracing (but this is just flag setting!)
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-REQUEST] Setting hashRequested flag (but NO actual job submission to manager)")
 	}
 	
 	// Set request flag - job ID should be assigned by the hash manager
