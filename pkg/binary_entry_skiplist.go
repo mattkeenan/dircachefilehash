@@ -245,7 +245,8 @@ func (sle *BESkiplistEntry) RelativePath() (string, error) {
 	}
 	
 	if pathLen == 0 {
-		return "", fmt.Errorf("invalid path in skiplist entry")
+		// Empty path represents current directory - normalize to "." like ls -al
+		return ".", nil
 	}
 	
 	return string(pathBytes[:pathLen]), nil

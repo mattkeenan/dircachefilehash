@@ -317,7 +317,8 @@ func (ife *BEIndexFileIOEntry) RelativePath() (string, error) {
 	}
 	
 	if pathLen == 0 {
-		return "", fmt.Errorf("invalid path in index file entry")
+		// Empty path represents current directory - normalize to "." like ls -al
+		return ".", nil
 	}
 	
 	return string(pathBytes[:pathLen]), nil

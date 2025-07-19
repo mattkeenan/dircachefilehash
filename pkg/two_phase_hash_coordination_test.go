@@ -57,7 +57,7 @@ func testPhase1HashRequests(t *testing.T, dc *DirectoryCache, tempDir string) {
 		t.Fatalf("Failed to load main index: %v", err)
 	}
 	
-	existingIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "existing")
+	existingIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "existing", nil)
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 	defer existingIterator.Close()
 	defer scanIterator.Close()

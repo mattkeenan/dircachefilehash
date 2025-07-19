@@ -717,6 +717,7 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 	scanFileName string,
 	hashJobManager *simpleHashManager,
 	callStartChan chan<- uint64,
+	shutdownChan <-chan struct{},
 ) error {
 	defer VerboseEnter()()
 	
@@ -726,8 +727,17 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 		if earlyExit {
 			// Drain any remaining items from scanChan in a separate goroutine
 			go func() {
-				for range scanChan {
-					// Just consume to prevent blocking
+				for {
+					select {
+					case <-scanChan:
+						// Just consume to prevent blocking
+					case <-shutdownChan:
+						// Exit if shutdown signal received
+						return
+					default:
+						// Channel is likely closed, exit
+						return
+					}
 				}
 			}()
 		}
@@ -751,6 +761,17 @@ func (dc *DirectoryCache) hwangLinCompareToSkiplist(
 	}
 
 	for scanChanOpen || currentIndex != nil {
+		// Check for shutdown signal at the beginning of each iteration
+		select {
+		case <-shutdownChan:
+			if IsDebugEnabled("scan") {
+				VerboseLog(3, "hwangLinCompareToSkiplist: shutdown signal received, exiting")
+			}
+			earlyExit = true
+			return fmt.Errorf("operation interrupted by shutdown signal")
+		default:
+			// Continue processing
+		}
 
 		var cmp int
 		if !scanChanOpen {
@@ -1390,7 +1411,7 @@ func (dc *DirectoryCache) performHwangLinScanToSkiplist(shutdownChan <-chan stru
 		if IsDebugEnabled("scanning") {
 			fmt.Fprintf(os.Stderr, "[SCAN] Starting Hwang-Lin comparison\n")
 		}
-		if err := dc.hwangLinCompareToSkiplist(scanChan, compareSkiplist, scanSkiplist, scanFileName, hashJobManager, callStartChan); err != nil {
+		if err := dc.hwangLinCompareToSkiplist(scanChan, compareSkiplist, scanSkiplist, scanFileName, hashJobManager, callStartChan, shutdownChan); err != nil {
 			fmt.Fprintf(os.Stderr, "Compare error: %v\n", err)
 		}
 		if IsDebugEnabled("scanning") {

@@ -139,7 +139,7 @@ func (sbe *BEScanEntry) RelativePath() (string, error) {
 // MTimeWall returns the modification time wall clock value
 func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 	sbe.mutex.RLock()
-	defer sbe.RUnlock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -151,8 +151,8 @@ func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 
 // Dev returns the device ID
 func (sbe *BEScanEntry) Dev() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -164,8 +164,8 @@ func (sbe *BEScanEntry) Dev() (uint32, error) {
 
 // Ino returns the inode number
 func (sbe *BEScanEntry) Ino() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -177,8 +177,8 @@ func (sbe *BEScanEntry) Ino() (uint32, error) {
 
 // Mode returns the file mode
 func (sbe *BEScanEntry) Mode() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -190,8 +190,8 @@ func (sbe *BEScanEntry) Mode() (uint32, error) {
 
 // UID returns the user ID
 func (sbe *BEScanEntry) UID() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -203,8 +203,8 @@ func (sbe *BEScanEntry) UID() (uint32, error) {
 
 // GID returns the group ID
 func (sbe *BEScanEntry) GID() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -216,8 +216,8 @@ func (sbe *BEScanEntry) GID() (uint32, error) {
 
 // FileSize returns the file size in bytes
 func (sbe *BEScanEntry) FileSize() (uint64, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -229,8 +229,8 @@ func (sbe *BEScanEntry) FileSize() (uint64, error) {
 
 // HashType returns the hash algorithm type
 func (sbe *BEScanEntry) HashType() (uint16, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -242,8 +242,8 @@ func (sbe *BEScanEntry) HashType() (uint16, error) {
 
 // Hash returns the file hash as a byte array
 func (sbe *BEScanEntry) Hash() ([20]byte, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -258,8 +258,8 @@ func (sbe *BEScanEntry) Hash() ([20]byte, error) {
 
 // EntryFlags returns the entry flags
 func (sbe *BEScanEntry) EntryFlags() (uint32, error) {
-	sbe.RLock()
-	defer sbe.RUnlock()
+	sbe.mutex.RLock()
+	defer sbe.mutex.RUnlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
@@ -328,8 +328,8 @@ func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 
 // SetDeleted updates the entry's deletion flag
 func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
-	sbe.Lock()
-	defer sbe.Unlock()
+	sbe.mutex.Lock()
+	defer sbe.mutex.Unlock()
 	
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {

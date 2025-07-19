@@ -280,8 +280,8 @@ func TestHwangLinUnifiedWithSkiplists(t *testing.T) {
 		rightSkiplist := createTestSkiplistWrapper(rightPaths)
 		
 		// Create skiplist iterators
-		leftIter := NewSkiplistIterator(leftSkiplist, "left-skiplist")
-		rightIter := NewSkiplistIterator(rightSkiplist, "right-skiplist")
+		leftIter := NewSkiplistIterator(leftSkiplist, "left-skiplist", nil)
+		rightIter := NewSkiplistIterator(rightSkiplist, "right-skiplist", nil)
 		
 		// Create callback
 		callback := newMockCallback("skiplist-callback")

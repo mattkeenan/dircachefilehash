@@ -345,7 +345,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	defer hashJobManager.Shutdown()
 
 	// Create iterators for unified algorithm
-	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing")
+	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing", shutdownChan)
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
 
 	// Create update callback for v0.7 direct temp index writing

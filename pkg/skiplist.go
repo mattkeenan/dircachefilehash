@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,14 +137,24 @@ func (sw *skiplistWrapper) ForEachContext(context string, callback func(*binaryE
 
 // ForEachRef iterates through binaryEntryRef instances directly
 // This is useful for BinaryEntryInterface implementations that need the ref
-func (sw *skiplistWrapper) ForEachRef(callback func(binaryEntryRef, string) bool) {
+// shutdownChan allows graceful interruption during iteration
+func (sw *skiplistWrapper) ForEachRef(callback func(binaryEntryRef, string) bool, shutdownChan <-chan struct{}) error {
 	for current := sw.skiplist.First(); current != nil; current = current.Next() {
+		// Check for shutdown signal before processing each entry
+		select {
+		case <-shutdownChan:
+			return fmt.Errorf("iteration interrupted by shutdown signal")
+		default:
+			// Continue processing
+		}
+		
 		context := current.Context()
 		ref := current.Item()
 		if !callback(*ref, context) {
 			break
 		}
 	}
+	return nil
 }
 
 // Merge merges another skiplist into this skiplist

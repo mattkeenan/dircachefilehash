@@ -7,23 +7,26 @@ package dircachefilehash
 // a skiplist that's already loaded in memory
 type SkiplistIterator struct {
 	iteratorBase
-	skiplist *skiplistWrapper
+	skiplist     *skiplistWrapper
+	shutdownChan <-chan struct{}
 }
 
 // NewSkiplistIterator creates a new iterator for the given skiplist
-func NewSkiplistIterator(sl *skiplistWrapper, name string) *SkiplistIterator {
+func NewSkiplistIterator(sl *skiplistWrapper, name string, shutdownChan <-chan struct{}) *SkiplistIterator {
 	if sl == nil {
 		return &SkiplistIterator{
 			iteratorBase: iteratorBase{
 				name:      name,
 				exhausted: true, // Empty/nil skiplist is immediately exhausted
 			},
+			shutdownChan: shutdownChan,
 		}
 	}
 	
 	return &SkiplistIterator{
 		iteratorBase: iteratorBase{name: name},
 		skiplist:     sl,
+		shutdownChan: shutdownChan,
 	}
 }
 
@@ -42,7 +45,7 @@ func (si *SkiplistIterator) Next() (BinaryEntryInterface, error) {
 	var foundEntry BinaryEntryInterface = nil
 	
 	// Use ForEachRef to find the next entry after our current position
-	si.skiplist.ForEachRef(func(entryRef binaryEntryRef, context string) bool {
+	err := si.skiplist.ForEachRef(func(entryRef binaryEntryRef, context string) bool {
 		// Get the path for comparison
 		entry := entryRef.GetBinaryEntry()
 		if entry == nil {
@@ -65,7 +68,13 @@ func (si *SkiplistIterator) Next() (BinaryEntryInterface, error) {
 		}
 		
 		return true // Continue looking
-	})
+	}, si.shutdownChan)
+	
+	if err != nil {
+		// Signal handling interruption
+		si.markExhausted()
+		return nil, err
+	}
 	
 	if foundEntry == nil {
 		// No more entries found

@@ -102,7 +102,7 @@ func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, fl
 	defer hashManager.Shutdown()
 	
 	// Create streaming iterators for unified algorithm - this is the key performance improvement
-	skiplistIterator := NewBinaryEntrySkiplistIterator(mergedSkiplist, "merged-main-cache")
+	skiplistIterator := NewBinaryEntrySkiplistIterator(mergedSkiplist, "merged-main-cache", shutdownChan)
 	defer skiplistIterator.Close()
 	
 	filesystemIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "filesystem-scan")

@@ -51,8 +51,10 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 		t.Skip("No entries in skiplist for testing - this might be expected in test environment")
 	}
 	
-	// Create iterator
-	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-unified-skiplist")
+	// Create iterator with dummy shutdown channel
+	shutdownChan := make(chan struct{})
+	defer close(shutdownChan)
+	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-unified-skiplist", shutdownChan)
 	defer iterator.Close()
 	
 	var paths []string
@@ -102,7 +104,9 @@ func TestBinaryEntrySkiplistIterator_EmptySkiplist(t *testing.T) {
 	skiplist := NewSkiplistWrapper(16, MainContext)
 	
 	// Create iterator
-	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-empty")
+	shutdownChan := make(chan struct{})
+	defer close(shutdownChan)
+	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-empty", shutdownChan)
 	defer iterator.Close()
 	
 	// Should have no entries
@@ -122,7 +126,9 @@ func TestBinaryEntrySkiplistIterator_EmptySkiplist(t *testing.T) {
 
 func TestBinaryEntrySkiplistIterator_NilSkiplist(t *testing.T) {
 	// Create iterator with nil skiplist
-	iterator := NewBinaryEntrySkiplistIterator(nil, "test-nil")
+	shutdownChan := make(chan struct{})
+	defer close(shutdownChan)
+	iterator := NewBinaryEntrySkiplistIterator(nil, "test-nil", shutdownChan)
 	defer iterator.Close()
 	
 	// Should be immediately exhausted
@@ -143,7 +149,9 @@ func TestBinaryEntrySkiplistIterator_NilSkiplist(t *testing.T) {
 func TestBinaryEntrySkiplistIterator_ClosedIterator(t *testing.T) {
 	// Test with empty skiplist to avoid needing to create entries
 	skiplist := NewSkiplistWrapper(16, MainContext)
-	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-closed")
+	shutdownChan := make(chan struct{})
+	defer close(shutdownChan)
+	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-closed", shutdownChan)
 	
 	// Close the iterator immediately
 	iterator.Close()
@@ -165,7 +173,9 @@ func TestBinaryEntrySkiplistIterator_ClosedIterator(t *testing.T) {
 
 func TestBinaryEntrySkiplistIterator_InterfaceCompliance(t *testing.T) {
 	// Test that empty iterator implements BinaryEntryIterator interface
-	iterator := NewBinaryEntrySkiplistIterator(nil, "test-interface")
+	shutdownChan := make(chan struct{})
+	defer close(shutdownChan)
+	iterator := NewBinaryEntrySkiplistIterator(nil, "test-interface", shutdownChan)
 	defer iterator.Close()
 	
 	// Test that it implements BinaryEntryIterator interface

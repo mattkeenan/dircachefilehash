@@ -110,7 +110,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	defer hashManager.Shutdown()
 
 	// Create iterators for unified algorithm
-	existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist, "existing")
+	existingIterator := NewBinaryEntrySkiplistIterator(comparisonSkiplist, "existing", shutdownChan)
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 
 	// Create status callback for iterative cache writing during hwangLinUnified execution

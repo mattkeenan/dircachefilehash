@@ -68,7 +68,7 @@ func TestSkiplistIterator(t *testing.T) {
 	
 	t.Run("NormalIteration", func(t *testing.T) {
 		skiplist := createTestSkiplistWrapper(testPaths)
-		iter := NewSkiplistIterator(skiplist, "test-skiplist")
+		iter := NewSkiplistIterator(skiplist, "test-skiplist", nil)
 		defer iter.Close()
 		
 		// Check initial state
@@ -140,7 +140,7 @@ func TestSkiplistIterator(t *testing.T) {
 	
 	t.Run("EmptySkiplist", func(t *testing.T) {
 		skiplist := createTestSkiplistWrapper([]string{})
-		iter := NewSkiplistIterator(skiplist, "empty-skiplist")
+		iter := NewSkiplistIterator(skiplist, "empty-skiplist", nil)
 		defer iter.Close()
 		
 		if iter.Length() != 0 {
@@ -163,7 +163,7 @@ func TestSkiplistIterator(t *testing.T) {
 	})
 	
 	t.Run("NilSkiplist", func(t *testing.T) {
-		iter := NewSkiplistIterator(nil, "nil-skiplist")
+		iter := NewSkiplistIterator(nil, "nil-skiplist", nil)
 		defer iter.Close()
 		
 		if iter.Length() != 0 {
@@ -187,7 +187,7 @@ func TestSkiplistIterator(t *testing.T) {
 	
 	t.Run("ClosedIterator", func(t *testing.T) {
 		skiplist := createTestSkiplistWrapper(testPaths)
-		iter := NewSkiplistIterator(skiplist, "closed-skiplist")
+		iter := NewSkiplistIterator(skiplist, "closed-skiplist", nil)
 		
 		// Close the iterator
 		if err := iter.Close(); err != nil {
@@ -221,7 +221,7 @@ func TestSkiplistIterator(t *testing.T) {
 	
 	t.Run("SingleEntry", func(t *testing.T) {
 		skiplist := createTestSkiplistWrapper([]string{"single.txt"})
-		iter := NewSkiplistIterator(skiplist, "single-entry")
+		iter := NewSkiplistIterator(skiplist, "single-entry", nil)
 		defer iter.Close()
 		
 		if iter.Length() != 1 {

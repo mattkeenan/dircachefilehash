@@ -173,7 +173,8 @@ func (be *binaryEntry) RelativePathModern() string {
 	// Calculate path length by scanning for null terminator
 	pathLen := be.calculatePathLength()
 	if pathLen == 0 {
-		return ""
+		// Empty path represents current directory - normalize to "." like ls -al
+		return "."
 	}
 
 	// Use Go 1.17+ unsafe.Slice for safer memory access

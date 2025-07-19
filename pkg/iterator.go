@@ -105,11 +105,20 @@ func (ib *iteratorBase) updateCurrentPath(entry *binaryEntry) {
 func (ib *iteratorBase) updateCurrentPathFromInterface(entry BinaryEntryInterface) {
 	if entry != nil {
 		if path, err := entry.RelativePath(); err == nil {
+			if IsDebugEnabled("load") {
+				VerboseLog(3, "[ITERATOR-DEBUG] updateCurrentPathFromInterface: success, path='%s'", path)
+			}
 			ib.currentPath = path
 		} else {
+			if IsDebugEnabled("load") {
+				VerboseLog(3, "[ITERATOR-DEBUG] updateCurrentPathFromInterface: RelativePath() error: %v", err)
+			}
 			ib.currentPath = ""
 		}
 	} else {
+		if IsDebugEnabled("load") {
+			VerboseLog(3, "[ITERATOR-DEBUG] updateCurrentPathFromInterface: entry is nil")
+		}
 		ib.currentPath = ""
 	}
 }
