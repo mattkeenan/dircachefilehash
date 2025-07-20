@@ -32,7 +32,7 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		shutdownChan := make(chan struct{})
 		defer close(shutdownChan)
 		
-		_, err = dc.updateCacheIndexWithWorkflow(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(shutdownChan)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
@@ -99,7 +99,7 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		shutdownChan := make(chan struct{})
 		defer close(shutdownChan)
 		
-		_, err = dc.updateCacheIndexWithWorkflow(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(shutdownChan)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
@@ -171,7 +171,7 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		shutdownChan := make(chan struct{})
 		defer close(shutdownChan)
 		
-		_, err = dc.updateCacheIndexWithWorkflow(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(shutdownChan)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
@@ -301,7 +301,7 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		shutdownChan := make(chan struct{})
 		defer close(shutdownChan)
 		
-		_, err = dc.updateCacheIndexWithWorkflow(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(shutdownChan)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
@@ -422,7 +422,7 @@ func BenchmarkFindDuplicates(b *testing.B) {
 	shutdownChan := make(chan struct{})
 	defer close(shutdownChan)
 	
-	_, err = dc.updateCacheIndexWithWorkflow(shutdownChan)
+	_, err = dc.runStatusWorkflowUnified(shutdownChan)
 	if err != nil {
 		b.Fatalf("Initial cache update failed: %v", err)
 	}

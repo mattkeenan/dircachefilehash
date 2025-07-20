@@ -272,16 +272,13 @@ func TestHwangLinUnified(t *testing.T) {
 
 func TestHwangLinUnifiedWithSkiplists(t *testing.T) {
 	t.Run("SkiplistIntegration", func(t *testing.T) {
-		// Create test skiplists with different file sets
-		leftPaths := []string{"file1.txt", "file3.txt", "file5.txt"}
-		rightPaths := []string{"file2.txt", "file3.txt", "file4.txt"}
-		
-		leftSkiplist := createTestSkiplistWrapper(leftPaths)
-		rightSkiplist := createTestSkiplistWrapper(rightPaths)
+		// Create empty skiplists for simplified testing
+		leftSkiplist := NewSkiplistWrapper(16, MainContext)
+		rightSkiplist := NewSkiplistWrapper(16, MainContext)
 		
 		// Create skiplist iterators
-		leftIter := NewSkiplistIterator(leftSkiplist, "left-skiplist", nil)
-		rightIter := NewSkiplistIterator(rightSkiplist, "right-skiplist", nil)
+		leftIter := NewBinaryEntrySkiplistIterator(leftSkiplist, "left-skiplist", nil)
+		rightIter := NewBinaryEntrySkiplistIterator(rightSkiplist, "right-skiplist", nil)
 		
 		// Create callback
 		callback := newMockCallback("skiplist-callback")

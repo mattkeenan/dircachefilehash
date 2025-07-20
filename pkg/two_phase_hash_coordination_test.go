@@ -146,7 +146,7 @@ func testPhase2HashCoordination(t *testing.T, dc *DirectoryCache, tempDir string
 	// We'll use the Update command which should trigger hash computation
 	
 	// First, do an update to populate the main index using unified architecture
-	updateResult, err := dc.updateCacheIndexWithWorkflowUnified(nil)
+	updateResult, err := dc.runStatusWorkflowUnified(nil)
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}

@@ -22,9 +22,9 @@ func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map
 		}
 	}
 	
-	// Use the new cache update workflow which returns the scan result
+	// Use the unified Status workflow which returns the scan result
 	// The scan result contains all current files (main + cache + new scan)
-	scanSkiplist, err := dc.updateCacheIndexWithWorkflow(shutdownChan)
+	scanSkiplist, err := dc.runStatusWorkflowUnified(shutdownChan)
 	if err != nil && scanSkiplist == nil {
 		// Only return error if we got no data at all
 		return nil, fmt.Errorf("failed to update cache index: %w", err)

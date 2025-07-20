@@ -1,3 +1,4 @@
+//go:build exclude
 package dircachefilehash
 
 // No additional imports needed - using existing BESkiplistEntry
