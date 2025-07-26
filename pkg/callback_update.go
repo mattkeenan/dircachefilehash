@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"unsafe"
+	"github.com/google/vectorio"
 )
 
 // UpdateCallback implements HwangLinCallback for v0.7 direct temp index writing
@@ -17,15 +18,15 @@ type UpdateCallback struct {
 	
 	// Hash coordination with existing hashJobManager
 	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
-	entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
+	entryCounter     uint64                  // Internal counter for callback entries (used as path order ID)
 	
 	// Simple atomic counter for completion detection
 	jobsInFlight     uint64                  // Atomic counter: inc on submit, dec on complete
 	
-	// Path order preservation via parking skiplist
-	parkedSkiplist   *skiplistWrapper        // Entries ready to write, ordered by cookie-as-context
-	nextRetireIndex  uint64                  // Next cookie sequence number expected for retirement
-	cookieToEntry    map[uint64]BinaryEntryInterface // Track entries by cookie for completion lookup
+	// Path order preservation via retire skiplist
+	retireSkiplist   *skiplistWrapper        // Entries ready to retire, ordered by path order ID as context
+	nextRetireIndex  uint64                  // Next path order ID sequence number expected for retirement
+	pathOrderToEntry map[uint64]BinaryEntryInterface // Track entries by path order ID for completion lookup
 	
 	// Index writing - IoVec writer for temp index output
 	tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
@@ -43,9 +44,9 @@ func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager
 		entryCounter:   0,
 		
 		// Path order preservation
-		parkedSkiplist:  NewSkiplistWrapper(16, "parked"),
-		nextRetireIndex: 1, // Start retiring from cookie 1
-		cookieToEntry:   make(map[uint64]BinaryEntryInterface),
+		retireSkiplist:  NewSkiplistWrapper(16, "retire"),
+		nextRetireIndex: 1, // Start retiring from path order ID 1
+		pathOrderToEntry: make(map[uint64]BinaryEntryInterface),
 		
 		// Index writing
 		tempIndexWriter: nil, // Will be initialized when first entry is written
@@ -294,39 +295,41 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 		return nil
 	}
 	
-	// Assign sequential cookie to maintain callback order
+	// Assign sequential path order ID to maintain callback order
 	uc.entryCounter++
-	cookie := uc.entryCounter
+	pathOrderID := uc.entryCounter
 	
 	if needsHashing {
 		// Submit hash job (parallel processing - don't park here)
 		if IsDebugEnabled("hash") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-HASH] Submitting hash job for: %s (cookie=%d)", path, cookie)
+				VerboseLog(3, "[UPDATE-HASH] Submitting hash job for: %s (pathOrderID=%d)", path, pathOrderID)
 			}
 		}
-		if err := uc.submitHashJobToManager(entry, cookie); err != nil {
+		if err := uc.submitHashJobToManager(entry, pathOrderID); err != nil {
 			return err
 		}
 		// Entry will be added to parkedSkiplist when hash completion arrives
 	} else {
-		// Already hashed - add directly to parkedSkiplist with cookie as context
+		// Already hashed - add directly to retireSkiplist with path order ID as context
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-WRITE] Adding unchanged file to parkedSkiplist: %s (cookie=%d)", path, cookie)
+				VerboseLog(3, "[UPDATE-WRITE] Adding unchanged file to retireSkiplist: %s (pathOrderID=%d)", path, pathOrderID)
 			}
 		}
-		cookieStr := fmt.Sprintf("%d", cookie)
-		uc.parkedSkiplist.Insert(entry, cookieStr)
+		pathOrderStr := fmt.Sprintf("%d", pathOrderID)
+		if entryRef, ok := entry.GetBinaryEntryRef(); ok {
+			uc.retireSkiplist.Insert(entryRef, pathOrderStr)
+		}
 	}
 	
-	// Try to retire contiguous sequence from parkedSkiplist
+	// Try to retire contiguous sequence from retireSkiplist
 	return uc.retireContiguousEntries()
 }
 
 
-// submitHashJobToManager submits a hash job using the cookie-based tracking system
-func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, cookie uint64) error {
+// submitHashJobToManager submits a hash job using the path order ID tracking system
+func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, pathOrderID uint64) error {
 	// a) Hash job submission tracing
 	if IsDebugEnabled("hash") {
 		if path, err := entry.RelativePath(); err == nil {
@@ -360,7 +363,7 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, coo
 	// Create hash job start structure using unified BinaryEntryInterface
 	hashJob := &hashJobStart{
 		JobID:    jobID,
-		Cookie:   cookie,
+		Cookie:   pathOrderID,
 		FilePath: filePath,
 		Entry:    entry, // Unified interface works for both mmap and heap entries
 	}
@@ -369,17 +372,17 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, coo
 	uc.hashJobManager.SubmitHashJob(hashJob)
 	
 	if IsDebugEnabled("hash") {
-		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted to manager: JobID=%d, Cookie=%d", jobID, cookie)
+		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted to manager: JobID=%d, Cookie=%d", jobID, pathOrderID)
 	}
 	
-	// Store cookie-to-entry mapping for completion lookup
-	uc.cookieToEntry[cookie] = entry
+	// Store path order ID to entry mapping for completion lookup
+	uc.pathOrderToEntry[pathOrderID] = entry
 	
 	// Only increment jobs in flight counter after successful submission
 	atomic.AddUint64(&uc.jobsInFlight, 1)
 	
 	if IsDebugEnabled("hash") {
-		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted successfully, cookie=%d, jobsInFlight=%d", cookie, atomic.LoadUint64(&uc.jobsInFlight))
+		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted successfully, pathOrderID=%d, jobsInFlight=%d", pathOrderID, atomic.LoadUint64(&uc.jobsInFlight))
 	}
 	
 	return nil
@@ -399,28 +402,30 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 		select {
 		case completion := <-uc.hashJobManager.CompletionChannel():
 			// Completions arrive in JobID order thanks to algorithmHashManager
-			// Add completed entry to parkedSkiplist with cookie as context for ordering
-			cookie := completion.Cookie
+			// Add completed entry to retireSkiplist with path order ID as context for ordering
+			pathOrderID := completion.Cookie
 			
 			if IsDebugEnabled("hash") {
-				VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, cookie)
+				VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, pathOrderID)
 			}
 			
 			// Find the entry that this completion belongs to
-			entry := uc.findEntryByCookie(cookie)
+			entry := uc.findEntryByPathOrderID(pathOrderID)
 			if entry != nil {
 				if path, err := entry.RelativePath(); err == nil {
 					if IsDebugEnabled("hash") {
-						VerboseLog(3, "[HASH-COMPLETE] Adding completed entry to parkedSkiplist: %s (cookie=%d)", path, cookie)
+						VerboseLog(3, "[HASH-COMPLETE] Adding completed entry to retireSkiplist: %s (pathOrderID=%d)", path, pathOrderID)
 					}
 				}
 				
-				// Add to parking skiplist with cookie as context
-				cookieStr := fmt.Sprintf("%d", cookie)
-				uc.parkedSkiplist.Insert(entry, cookieStr)
+				// Add to retire skiplist with path order ID as context
+				pathOrderStr := fmt.Sprintf("%d", pathOrderID)
+				if entryRef, ok := entry.GetBinaryEntryRef(); ok {
+					uc.retireSkiplist.Insert(entryRef, pathOrderStr)
+				}
 				
-				// Clean up cookie-to-entry mapping since job is complete
-				delete(uc.cookieToEntry, cookie)
+				// Clean up path order ID to entry mapping since job is complete
+				delete(uc.pathOrderToEntry, pathOrderID)
 				
 				// Decrement atomic counter when job completes
 				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
@@ -431,7 +436,7 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 				}
 			} else {
 				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[HASH-COMPLETE] Could not find entry for cookie %d", cookie)
+					VerboseLog(3, "[HASH-COMPLETE] Could not find entry for pathOrderID %d", pathOrderID)
 				}
 			}
 		default:
@@ -698,41 +703,41 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 	return nil
 }
 
-// findEntryByCookie finds the entry that corresponds to a given cookie
-func (uc *UpdateCallback) findEntryByCookie(cookie uint64) BinaryEntryInterface {
-	entry, exists := uc.cookieToEntry[cookie]
+// findEntryByPathOrderID finds the entry that corresponds to a given path order ID
+func (uc *UpdateCallback) findEntryByPathOrderID(pathOrderID uint64) BinaryEntryInterface {
+	entry, exists := uc.pathOrderToEntry[pathOrderID]
 	if !exists {
 		return nil
 	}
 	return entry
 }
 
-// retireContiguousEntries processes parked entries in cookie order for writing
+// retireContiguousEntries processes retire entries in path order ID sequence for writing
 func (uc *UpdateCallback) retireContiguousEntries() error {
 	var readyIoVecs []IoVec
 	
-	// Retire entries in strict cookie sequence (no gaps allowed)
+	// Retire entries in strict path order ID sequence (no gaps allowed)
 	for {
-		cookieStr := fmt.Sprintf("%d", uc.nextRetireIndex)
-		entry := uc.parkedSkiplist.FindByContext(cookieStr)
+		pathOrderStr := fmt.Sprintf("%d", uc.nextRetireIndex)
+		entry := uc.retireSkiplist.FindByContext(pathOrderStr)
 		if entry == nil {
-			break // Gap found - cannot retire until this cookie arrives
+			break // Gap found - cannot retire until this path order ID arrives
 		}
 		
 		// Found next contiguous entry - create IoVec for writing
 		ioVec, err := uc.createEntryIoVec(entry)
 		if err != nil {
-			return fmt.Errorf("failed to create IoVec for cookie %d: %w", uc.nextRetireIndex, err)
+			return fmt.Errorf("failed to create IoVec for path order ID %d: %w", uc.nextRetireIndex, err)
 		}
 		
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-RETIRE] Retiring entry %s (cookie=%d)", path, uc.nextRetireIndex)
+				VerboseLog(3, "[UPDATE-RETIRE] Retiring entry %s (pathOrderID=%d)", path, uc.nextRetireIndex)
 			}
 		}
 		
 		readyIoVecs = append(readyIoVecs, ioVec)
-		uc.parkedSkiplist.RemoveByContext(cookieStr)
+		uc.retireSkiplist.RemoveByContext(pathOrderStr)
 		uc.nextRetireIndex++
 	}
 	

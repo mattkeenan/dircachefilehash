@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BinaryEntry Workflow - Swimlane Diagram</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .legend { background: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        
+        /* Swimlane table layout */
+        .swimlane-diagram { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .swimlane-diagram th, .swimlane-diagram td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }
+        .swimlane-diagram th { background: #e0e0e0; font-weight: bold; text-align: center; width: 120px; }
+        .swimlane-diagram td { min-height: 80px; background: white; }
+        
+        /* Activity styling */
+        .step { display: inline-block; padding: 6px 10px; margin: 3px; border-radius: 3px; font-size: 12px; }
+        .data-structure { background: #fff3cd; border: 1px solid #ffc107; }
+        .process { background: #cce5ff; border: 1px solid #007bff; }
+        .channel { background: #f8d7da; border: 1px solid #dc3545; }
+        .parallel { background: #e2e3e5; border: 1px solid #6c757d; }
+        
+        /* Flow arrows */
+        .arrow { font-size: 16px; margin: 0 5px; color: #666; }
+        .flow-down { font-size: 20px; color: #666; text-align: center; }
+        
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .note { font-style: italic; color: #666; margin: 5px 0; font-size: 11px; }
+        
+        /* Time flow column headers */
+        .time-header { background: #d1ecf1; font-weight: bold; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BinaryEntry Workflow - V0.7 Unified Architecture</h1>
+        
+        <div class="legend">
+            <h2>Legend - Data Structures & Terminology</h2>
+            <div class="step data-structure">Data Structure</div>
+            <div class="step process">Process/Function</div>
+            <div class="step channel">Channel/Communication</div>
+            <div class="step parallel">Parallel Operation</div>
+            
+            <h3>Key Data Structures:</h3>
+            <ul>
+                <li><strong>binaryEntry</strong>: Raw 68-byte binary structure in mmap memory</li>
+                <li><strong>binaryEntryRef</strong>: Safe pointer wrapper with offset + IndexFile reference</li>
+                <li><strong>BinaryEntryInterface</strong>: Interface for entry access (implemented by binaryEntryRef)</li>
+                <li><strong>skiplistWrapper</strong>: Zero-copy skiplist for ordered entry management</li>
+                <li><strong>retireSkiplist</strong>: Entries ready for retirement, ordered by path order ID</li>
+                <li><strong>pathOrderToEntry map</strong>: Path order ID → BinaryEntryInterface lookup for completions</li>
+                <li><strong>hashJobStart</strong>: Hash job submission structure (JobID + file path)</li>
+                <li><strong>hashJobComplete</strong>: Hash completion structure (JobID + computed hash)</li>
+                <li><strong>IoVec</strong>: Vectorio structure for efficient bulk writes</li>
+            </ul>
+        </div>
+
+        <table class="swimlane-diagram">
+            <thead>
+                <tr>
+                    <th>Actor/Component</th>
+                    <th class="time-header">Step 1</th>
+                    <th class="time-header">Step 2</th>
+                    <th class="time-header">Step 3</th>
+                    <th class="time-header">Step 4</th>
+                    <th class="time-header">Step 5</th>
+                    <th class="time-header">Step 6</th>
+                    <th class="time-header">Step 7</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Filesystem Iterator</th>
+                    <td>
+                        <div class="step process">Next()</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">binaryEntry (mmap)</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">binaryEntryRef</div>
+                        <div class="note">Creates 68-byte entries in scan index</div>
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                
+                <tr>
+                    <th>Hwang-Lin Algorithm</th>
+                    <td>
+                        <div class="flow-down">↓</div>
+                    </td>
+                    <td>
+                        <div class="step data-structure">binaryEntryRef (right)</div>
+                        <span class="arrow">vs</span>
+                        <div class="step data-structure">binaryEntryRef (left)</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">ProcessEntry()</div>
+                        <div class="note">Path comparison: New/Modified/Unchanged/Deleted</div>
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                
+                <tr>
+                    <th>UpdateCallback</th>
+                    <td></td>
+                    <td>
+                        <div class="flow-down">↓</div>
+                    </td>
+                    <td>
+                        <div class="step data-structure">BinaryEntryInterface</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">SubmitAndOrWriteHash()</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">pathOrderID = ++entryCounter</div>
+                        <div class="step data-structure">pathOrderToEntry[pathOrderID] = entry</div>
+                        <div class="note">Atomic path order ID assignment for ordering</div>
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="step process">processCompletedHashJobs()</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">pathOrderToEntry[pathOrderID] lookup</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">retireSkiplist.Insert(entry, pathOrderStr)</div>
+                        <div class="note">Non-blocking completion processing, lookup entry and add to retire queue</div>
+                    </td>
+                    <td>
+                        <div class="step process">retireContiguousEntries()</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">createEntryIoVec()</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">WriteIoVec()</div>
+                        <div class="note">Non-blocking async: only retires contiguous completed entries, called iteratively</div>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <th>Hash Manager</th>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="step process">GetNextJobID()</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">hashJobStart{JobID, pathOrderID, path}</div>
+                        <span class="arrow">→</span>
+                        <div class="step channel">hashJobChan</div>
+                        <div class="note">Hash jobs for modified/new files with path order ID as Cookie</div>
+                    </td>
+                    <td></td>
+                    <td>
+                        <div class="step channel">completionChan</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">hashJobCompletion{JobID, pathOrderID}</div>
+                        <div class="note">Hash completions from workers with path order ID</div>
+                    </td>
+                    <td></td>
+                </tr>
+                
+                <tr>
+                    <th>Hash Workers (1..n)</th>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="flow-down">↓</div>
+                    </td>
+                    <td>
+                        <div class="step parallel">Worker Pool</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">hashFile(path)</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">entry.SetHash(hashBytes, hashType)</div>
+                        <div class="note">Parallel SHA-1 computation and direct entry update</div>
+                    </td>
+                    <td>
+                        <div class="flow-down">↑</div>
+                    </td>
+                    <td></td>
+                </tr>
+                
+                <tr>
+                    <th>Retire Skiplist</th>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="step data-structure">retireSkiplist.Insert(entry, pathOrderStr)</div>
+                        <div class="note">Unchanged files skip hashing, go directly to retire queue</div>
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="step data-structure">retireSkiplist (receives entries)</div>
+                        <div class="note">Hash-completed entries added from Step 6</div>
+                    </td>
+                    <td>
+                        <div class="flow-down">↑</div>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <th>Temp Index Writer</th>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>
+                        <div class="step data-structure">IoVec</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">temp-main-{pid}-{tid}.idx</div>
+                        <span class="arrow">→</span>
+                        <div class="step process">atomic rename()</div>
+                        <span class="arrow">→</span>
+                        <div class="step data-structure">main.idx</div>
+                        <div class="note">Atomic index replacement</div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Key Coordination Mechanisms</h2>
+        <ul>
+            <li><strong>Path Order ID Sequencing</strong>: Ensures path order preservation through async hash processing</li>
+            <li><strong>Retire Skiplist</strong>: Holds completed entries until sequential retirement possible</li>
+            <li><strong>Non-blocking Completion</strong>: Prevents goroutine coordination deadlocks</li>
+            <li><strong>JobID Tracking</strong>: Links hash jobs to specific entries via algorithmHashManager</li>
+            <li><strong>pathOrderToEntry Map</strong>: Bridges async completion notifications to entry references</li>
+            <li><strong>Channel Coordination</strong>: hashJobChan → workers → completionChan → parking</li>
+        </ul>
+
+        <h2>Critical Sequencing Rules</h2>
+        <ul>
+            <li>Path order ID assignment must be atomic and sequential</li>
+            <li>Retirement from retireSkiplist must be strictly sequential (1, 2, 3, ...)</li>
+            <li>Hash completions can arrive out-of-order but writes must be in-order</li>
+            <li>Unchanged files bypass hashing but maintain sequence position</li>
+            <li>pathOrderToEntry map is cleaned up immediately after entry is added to retire queue</li>
+        </ul>
+    </div>
+</body>
+</html>

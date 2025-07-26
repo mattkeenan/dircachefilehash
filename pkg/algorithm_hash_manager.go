@@ -241,7 +241,10 @@ func (ahm *algorithmHashManager) IsShuttingDown() bool {
 	}
 }
 
-// SubmitHashJob submits a hash job for processing
+// SubmitHashJob submits a hash job to the worker pool
+// Note: The Cookie field in hashJobStart is typically the Hwang-Lin process path order ID,
+// representing the sequential position after ignores, symlink updates, deletes, etc.
+// The specific order depends on callback type requirements (Status, Update, Dupes).
 func (ahm *algorithmHashManager) SubmitHashJob(job *hashJobStart) {
 	// b) Actual hash job submission to manager
 	if IsDebugEnabled("hash") {

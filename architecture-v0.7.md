@@ -108,16 +108,15 @@ If Skip: Entry garbage collected (no hash computation)
 ### Solution: Unified Interface
 **Decision**: Converge on `BinaryEntryIterator` as the single iterator interface (correct descriptive name for iterating over binary entries).
 
-```go
-// Single iterator interface for all use cases
-type BinaryEntryIterator interface {
-    Next() (BinaryEntryInterface, error)  // Always returns unified interface
-    CurrentPath() string
-    HasNext() bool
-    Name() string
-    Close() error
+**Pseudo-code**:
+```
+interface BinaryEntryIterator {
+    Next() -> (BinaryEntryInterface, error)
+    CurrentPath() -> string
+    // ... standard iterator methods
 }
 ```
+**Reference**: `pkg/binary_entry_interface.go:80-87`
 
 **Benefits**:
 - Single source of truth eliminates duplication
@@ -139,43 +138,25 @@ The existing `binaryEntryRef` assumes everything comes from mmap'd index files w
 
 ### Interface Definition
 
-```go
-// BinaryEntryInterface abstracts access to binary entry data
-// regardless of storage mechanism (mmap, read/write, ephemeral)
-type BinaryEntryInterface interface {
-    // Field accessors (acquire read lock, can return errors for ephemeral entries)
-    Size() (uint32, error)
-    CTimeWall() (uint64, error)
-    MTimeWall() (uint64, error)
-    Dev() (uint32, error)
-    Ino() (uint32, error)
-    Mode() (uint32, error)
-    UID() (uint32, error)
-    GID() (uint32, error)
-    FileSize() (uint64, error)
-    HashType() (uint16, error)
-    Hash() ([20]byte, error)
-    EntryFlags() (uint32, error)
+**Pseudo-code**:
+```
+interface BinaryEntryInterface {
+    // Field accessors with error handling
+    Size(), CTimeWall(), MTimeWall(), ... -> (value, error)
     
-    // Derived methods (acquire read lock, can return errors for ephemeral entries)
-    RelativePath() (string, error)
-    HashString() (string, error)
-    IsDeleted() (bool, error)
+    // Derived methods  
+    RelativePath(), HashString(), IsDeleted() -> (value, error)
     
-    // Setters (acquire write lock, can return errors for ephemeral entries)
-    SetHash(hashBytes []byte, hashType uint16) error
-    SetDeleted(deleted bool) error
+    // Setters for hash coordination
+    SetHash(hashBytes, hashType) -> error
+    SetDeleted(deleted) -> error
     
-    // Manual locking for batch operations
-    RLock()
-    RUnlock()
-    Lock()
-    Unlock()
-    
-    // Entry lifecycle
-    IsValid() bool  // Quick check if entry is still accessible
+    // Locking for concurrent access
+    RLock(), RUnlock(), Lock(), Unlock()
+    IsValid() -> bool
 }
 ```
+**Reference**: `pkg/binary_entry_interface.go:39-78`
 
 ### Implementation Types
 
@@ -194,13 +175,14 @@ type BESkiplistEntry struct {
 **Error handling**: Can fail if underlying mmap is unmapped
 
 #### 2. BEIndexFileIO (file I/O)
-```go
-// BEIndexFileIOEntry - standard file I/O access
-type BEIndexFileIOEntry struct {
-    entry *binaryEntry   // Copy of data in memory
-    mutex sync.RWMutex   // Per-entry locking
+**Pseudo-code**:
+```
+struct BEIndexFileIOEntry {
+    entry: binaryEntry copy
+    mutex: RWMutex for concurrent access
 }
 ```
+**Reference**: `pkg/binary_entry_index_file.go:25-28`
 **Use case**: Direct file access without skiplist creation
 **Storage**: read()/write() - data copied to memory
 **Locking**: Per-entry RWMutex only
@@ -556,7 +538,7 @@ func (ahm *algorithmHashManager) CompletionChannel() <-chan hashJobCompletion
 
 **Benefits of Cookie-Based Tracking:**
 - **Simple Counter**: Callbacks use `entryCounter++` instead of complex maps
-- **In-Order Detection**: Check `pendingEntries[cookie-1] == nil` to detect completion gaps
+- **In-Order Detection**: Check `pendingEntries[pathOrderID-1] == nil` to detect completion gaps
 - **Memory Efficient**: Slice indexed by cookie position vs map with hash lookups
 - **Ordering Guaranteed**: Callback knows exact position of each entry for IoVec writing
 
@@ -602,56 +584,47 @@ func (callback *UpdateCallback) OnComparison(result ComparisonResult, left, righ
 **Key Insight**: The `algorithmHashManager` completion processor already handles re-ordering - hash jobs complete out of order, but notifications are sent to `externalCompletionChan` in the correct JobID sequence. Callbacks receive completions in order and can write entries immediately.
 
 **Implementation Pattern**:
-```go
-func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
-    // Non-blocking check for completed hash jobs on every iteration
-    uc.processCompletedHashJobs()
+```
+function SubmitAndOrWriteHash(entry, operation):
+    // Non-blocking completion processing on each call
+    processCompletedHashJobs()
     
-    // Submit new hash job if needed
-    if needsHashing(operation) {
-        if err := uc.submitHashJobToManager(entry); err != nil {
-            return err
-        }
-        // Add to backlog immediately (hash updates memory asynchronously)
-        uc.appendToBacklog(entry)
-    } else {
-        // Already hashed - add directly to backlog for writing
-        uc.appendToBacklog(entry)
-    }
+    // Path order assignment and conditional hashing
+    pathOrderID = ++entryCounter
+    pathOrderToEntry[pathOrderID] = entry
     
-    // Flush any completed entries via IoVec batching
-    return uc.flushCompletedEntries()
-}
+    if needsHashing(operation):
+        submitHashJobToManager(entry, pathOrderID)
+    else:
+        retireSkiplist.Insert(entry, pathOrderID)
+        retireContiguousEntries()
+```
+**Reference**: `pkg/callback_update.go:291-328`
+```
 
-func (uc *UpdateCallback) processCompletedHashJobs() {
-    // Non-blocking read of completion channel (entries arrive in order)
-    for {
-        select {
-        case completion := <-uc.hashJobManager.CompletionChannel():
-            // Completions arrive in JobID order thanks to algorithmHashManager
-            // Add completed entry to parkedSkiplist with cookie as context for ordering
-            cookie := completion.Cookie
-            if entry := uc.findEntryByCookie(cookie); entry != nil {
-                cookieStr := fmt.Sprintf("%d", cookie)
-                uc.parkedSkiplist.Insert(entry, cookieStr)
-                atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
-            }
-        default:
-            return // No more completions available (non-blocking)
-        }
-    }
-}
+**Completion Processing**:
+```
+function processCompletedHashJobs():
+    // Non-blocking channel reads
+    while completion = tryReceive(externalCompletionChan):
+        pathOrderID = completion.Cookie
+        entry = pathOrderToEntry[pathOrderID]
+        retireSkiplist.Insert(entry, pathOrderID)
+        delete(pathOrderToEntry, pathOrderID)
+        jobsInFlight--
+```
+**Reference**: `pkg/callback_update.go:392-443`
 
 func (uc *UpdateCallback) Close() error {
     // At close time: blocking read until all submitted cookies are consumed
     for atomic.LoadUint64(&uc.jobsInFlight) > 0 {
         select {
         case completion := <-uc.hashJobManager.CompletionChannel():
-            // Same processing as above - add to parkedSkiplist
+            // Same processing as above - add to retireSkiplist
             cookie := completion.Cookie
-            if entry := uc.findEntryByCookie(cookie); entry != nil {
-                cookieStr := fmt.Sprintf("%d", cookie)
-                uc.parkedSkiplist.Insert(entry, cookieStr)
+            if entry := uc.findEntryByPathOrderID(pathOrderID); entry != nil {
+                pathOrderStr := fmt.Sprintf("%d", pathOrderID)
+                uc.retireSkiplist.Insert(entry, pathOrderStr)
                 atomic.AddUint64(&uc.jobsInFlight, ^uint64(0))
             }
         case <-time.After(100 * time.Millisecond):
@@ -659,7 +632,7 @@ func (uc *UpdateCallback) Close() error {
         }
     }
     
-    // Final retirement of all remaining parked entries
+    // Final retirement of all remaining retire entries
     return uc.retireAllRemainingEntries()
 }
 ```
@@ -668,7 +641,7 @@ func (uc *UpdateCallback) Close() error {
 
 **Challenge**: hwangLinUnified delivers entries in path order, but some need hashing (submitted to parallel hash workers) while others are already complete. Entries must be written to the index in strict path order regardless of hash completion timing.
 
-**Solution**: Use a "parking skiplist" with cookie-based ordering to hold entries until they can be retired in sequence.
+**Solution**: Use a "retire skiplist" with path order ID-based ordering to hold entries until they can be retired in sequence.
 
 **Architecture Pattern**:
 ```go
@@ -676,7 +649,7 @@ type UpdateCallback struct {
     // ... existing fields ...
     
     // Path order preservation via parking mechanism
-    parkedSkiplist   *skiplistWrapper  // Entries ready to write, ordered by cookie-as-context
+    retireSkiplist   *skiplistWrapper  // Entries ready to retire, ordered by path order ID as context
     nextRetireIndex  uint64            // Next cookie sequence number expected for retirement
     entryCounter     uint64            // Sequential cookie assignment (callback's internal order)
 }
@@ -687,54 +660,51 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
     
     // Assign sequential cookie to maintain callback order
     uc.entryCounter++
-    cookie := uc.entryCounter
+    pathOrderID := uc.entryCounter
     
     if needsHashing(operation) {
         // Submit to hash manager (parallel processing - don't park here)
         if err := uc.submitHashJobToManager(entry, cookie); err != nil {
             return err
         }
-        // Entry will be added to parkedSkiplist when hash completion arrives
+        // Entry will be added to retireSkiplist when hash completion arrives
     } else {
-        // Already hashed - add directly to parkedSkiplist with cookie as context
+        // Already hashed - add directly to retireSkiplist with path order ID as context
         cookieStr := fmt.Sprintf("%d", cookie)
-        uc.parkedSkiplist.Insert(entry, cookieStr)
+        uc.retireSkiplist.Insert(entry, pathOrderStr)
     }
     
-    // Try to retire contiguous sequence from parkedSkiplist
-    return uc.retireContiguousEntries()
-}
-
-func (uc *UpdateCallback) retireContiguousEntries() error {
-    var readyIoVecs []IoVec
-    
-    // Retire entries in strict cookie sequence (no gaps allowed)
-    for {
-        cookieStr := fmt.Sprintf("%d", uc.nextRetireIndex)
-        entry := uc.parkedSkiplist.FindByContext(cookieStr)
-        if entry == nil {
-            break // Gap found - cannot retire until this cookie arrives
-        }
-        
-        // Found next contiguous entry - create IoVec for writing
-        ioVec, err := uc.createEntryIoVec(entry)
-        if err != nil {
-            return err
-        }
-        
-        readyIoVecs = append(readyIoVecs, ioVec)
-        uc.parkedSkiplist.RemoveByContext(cookieStr)
-        uc.nextRetireIndex++
-    }
-    
-    // Write contiguous batch to temp index via single IoVec operation
-    if len(readyIoVecs) > 0 {
-        return uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs)
-    }
-    
-    return nil
+    return retireContiguousEntries()
 }
 ```
+
+**Critical: Non-Blocking Async Sequential Retirement**:
+
+⚠️ **CORRECTNESS & PERFORMANCE REQUIREMENT**: `retireContiguousEntries()` is non-blocking and async, called iteratively throughout the Hwang-Lin process. It only retires contiguous completed entries available at call time.
+
+```
+function retireContiguousEntries():
+    readyIoVecs = []
+    
+    // CRITICAL: Only process completed entries, stop at first gap
+    while entry = retireSkiplist.FindByContext(nextRetireIndex):
+        ioVec = createEntryIoVec(entry)
+        readyIoVecs.append(ioVec)
+        retireSkiplist.RemoveByContext(nextRetireIndex)
+        nextRetireIndex++
+    
+    // Batch write ready entries (may be zero if gaps exist)
+    if len(readyIoVecs) > 0:
+        tempIndexWriter.WriteIoVecBatch(readyIoVecs)
+```
+
+**Why This Design is Critical**:
+- **Correctness**: Maintains strict path order in output index files
+- **Performance**: Non-blocking prevents workflow stalls during hash processing
+- **Async Processing**: Called on every hash completion and unchanged file processing
+- **Gap Handling**: Stops immediately when sequential entries are missing (waiting for hash completion)
+
+**Reference**: `pkg/callback_update.go:715-759`
 
 **Key Benefits**:
 
@@ -746,15 +716,15 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 
 **Example Scenario**:
 ```
-Entry A (cookie=1, needs hash) → Submit to hash manager
-Entry B (cookie=2, already hashed) → Add to parkedSkiplist[2]
-Entry C (cookie=3, needs hash) → Submit to hash manager
-Entry D (cookie=4, already hashed) → Add to parkedSkiplist[4]
+Entry A (pathOrderID=1, needs hash) → Submit to hash manager
+Entry B (pathOrderID=2, already hashed) → Add to retireSkiplist[2]
+Entry C (pathOrderID=3, needs hash) → Submit to hash manager
+Entry D (pathOrderID=4, already hashed) → Add to retireSkiplist[4]
 
-Hash completion for Entry C (cookie=3) arrives → Add to parkedSkiplist[3]
-Hash completion for Entry A (cookie=1) arrives → Add to parkedSkiplist[1]
+Hash completion for Entry C (pathOrderID=3) arrives → Add to retireSkiplist[3]
+Hash completion for Entry A (pathOrderID=1) arrives → Add to retireSkiplist[1]
 
-Retirement check: cookies 1,2,3,4 all present → Retire all 4 entries in single IoVec batch
+Retirement check: pathOrderIDs 1,2,3,4 all present → Retire all 4 entries in single IoVec batch
 ```
 
 **Performance Characteristics**:
@@ -774,7 +744,7 @@ type UpdateCallback struct {
     // Hash coordination with existing hashJobManager
     hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
     entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
-    pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
+    pendingEntries   []BinaryEntryInterface  // Entries indexed by (pathOrderID-1), nil = completed/ready
     nextFlushIndex   uint64                  // Next counter position to check for flushing
     
     // Simple atomic counter for completion detection
@@ -795,16 +765,16 @@ func (callback *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterfac
     // Only increment counters after successful submission
     atomic.AddUint64(&callback.jobsInFlight, 1)
     callback.entryCounter++
-    cookie := callback.entryCounter
+    pathOrderID := callback.entryCounter
     
-    // Store entry at cookie position for completion tracking
-    if int(cookie) > len(callback.pendingEntries) {
-        // Expand slice to accommodate new cookie position
-        newSlice := make([]BinaryEntryInterface, cookie)
+    // Store entry at path order ID position for completion tracking
+    if int(pathOrderID) > len(callback.pendingEntries) {
+        // Expand slice to accommodate new path order ID position
+        newSlice := make([]BinaryEntryInterface, pathOrderID)
         copy(newSlice, callback.pendingEntries)
         callback.pendingEntries = newSlice
     }
-    callback.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
+    callback.pendingEntries[pathOrderID-1] = entry // Store at (pathOrderID-1) since path order IDs start at 1
     
     return nil
 }
@@ -819,7 +789,7 @@ func (callback *UpdateCallback) processCompletedHashJobs() {
             
             if cookie > 0 && int(cookie) <= len(callback.pendingEntries) {
                 // Mark entry as completed by setting to nil (ready for flush)
-                callback.pendingEntries[cookie-1] = nil
+                callback.pendingEntries[pathOrderID-1] = nil
                 // Decrement atomic counter when job completes
                 atomic.AddUint64(&callback.jobsInFlight, ^uint64(0)) // Atomic decrement
             }

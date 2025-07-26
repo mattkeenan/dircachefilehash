@@ -3,90 +3,39 @@
 ## 🎯 CURRENT STATUS (2025-07-26)
 
 ### ✅ COMPLETED TASKS
-- ✅ **Fixed algorithmHashManager off-by-one error** - Changed nextJobID from 1→0 so first JobID=1 matches nextExpectedJobID=1  
-- ✅ **Implemented parking skiplist architecture** - Added cookie-based path order preservation with non-blocking completion processing
-- ✅ **Fixed UpdateCallback async coordination** - Entries now properly wait for hash completion before writing to index
-- ✅ **Updated architecture documentation** - Added comprehensive async completion processing patterns
+- ✅ **Fixed algorithmHashManager off-by-one error** - JobID allocation now starts correctly
+- ✅ **Implemented retire skiplist architecture** - Path order preservation with async processing
+- ✅ **Updated terminology** - cookie → pathOrderID, parkedSkiplist → retireSkiplist throughout codebase
+- ✅ **Updated documentation** - Architecture docs and swimlane diagrams reflect current implementation
 
-## 🔧 IMMEDIATE TASKS
+## 🔧 COMPILATION FIXES NEEDED (HIGH PRIORITY)
 
-### 1. Compilation Fixes (HIGH PRIORITY)
-**Task**: Fix any missing imports or method signature issues in `pkg/callback_update.go`
-**Expected Issues**: Missing imports (fmt, sync/atomic), undefined types (IoVec, TempIndexWriter)
+### Current Errors in `pkg/callback_update.go`:
+1. **Undefined fields**: `uc.backlog` references (lines 453, 458, 461, 470) - remnants from old architecture
+2. **Duplicate method**: `createEntryIoVec` declared twice (lines 577 + 762)  
+3. **Missing import**: `IoVec` type undefined - need `github.com/google/vectorio` import
+4. **Type issues**: Fixed `GetBinaryEntryRef()` calls for skiplist insertion
 
-### 2. Test Current Implementation (HIGH PRIORITY)  
-**Task**: Run `TestAdaptiveUpdateInterruption` to verify livelock fixes work
-**Command**: `cd cmd/dcfh && go test -run TestAdaptiveUpdateInterruption -v -timeout 60s`
+### Fix Plan:
+1. **Remove old backlog code** - Delete `appendToBacklog()` and `flushInOrderEntries()` functions
+2. **Remove duplicate method** - Keep one `createEntryIoVec()` implementation
+3. **Add missing imports** - Import vectorio package
+4. **Test compilation** - Run `go build ./...` to verify fixes
+5. **Fix OnComplete()** - Add final `retireContiguousEntries()` call before closing temp index
 
-## 📋 ROBUST SIGNAL HANDLING TEST FRAMEWORK PLAN
+### Next Steps:
+1. Fix compilation errors first
+2. Run `TestAdaptiveUpdateInterruption` to verify signal handling
+3. Address any remaining integration issues
 
-### Problem Statement
-We've had recurring issues with signal handling, goroutine coordination, and channel management in the hwangLinUnified/callback system. Need comprehensive test coverage to prevent future regressions.
+## 📋 FUTURE WORK
 
-### Test Framework Design Plan
+### Signal Handling Test Framework
+- Build comprehensive test coverage for hwangLinUnified/callback coordination
+- Test signal propagation, channel coordination, and resource cleanup
+- Create deterministic test infrastructure for race condition detection
 
-#### 1. **Test Categories** (3-4 distinct test scenarios)
-
-**A. Basic Signal Handling Tests**
-- Test SIGINT delivery and processing during different phases (scan, hash, write)
-- Verify shutdown channels propagate correctly through all components
-- Test timeout handling and graceful degradation
-
-**B. Channel Coordination Tests**  
-- Test completion channel consumption (non-blocking reads work correctly)
-- Test parking skiplist retirement under various timing scenarios
-- Test cookie-to-entry mapping cleanup during interruptions
-
-**C. Stress/Race Condition Tests**
-- Test rapid file processing with frequent interruptions
-- Test hash completion race conditions (jobs complete before/after interruption)
-- Test multiple goroutine shutdown coordination
-
-**D. Integration Tests**
-- Test full hwangLinUnified workflow with controlled interruption points
-- Test different callback types (Update, Status, Dupes) handle signals consistently
-- Test recovery from partial writes and incomplete operations
-
-#### 2. **Test Infrastructure Components**
-
-**Mock Helpers**:
-- Controllable hash manager with simulated completion delays
-- File system simulator with configurable timing  
-- Signal injection at precise execution points
-
-**Verification Helpers**:
-- Channel state inspection (empty/full, closed status)
-- Goroutine leak detection
-- Resource cleanup verification (temp files, memory)
-
-**Timing Helpers**:
-- Deterministic signal delivery (not random timing)
-- Controlled hash completion sequencing  
-- Precise interruption point targeting
-
-#### 3. **Implementation Approach** (2-3 hours)
-
-**Phase 1**: Create test infrastructure
-- Build controllable mocks for algorithmHashManager, filesystem scanning
-- Add channel state inspection utilities
-- Create deterministic signal delivery mechanism
-
-**Phase 2**: Implement core test scenarios  
-- Basic signal propagation tests (do all goroutines receive shutdown signal?)
-- Completion channel drainage tests (are completions consumed properly?)
-- Parking skiplist consistency tests (entries retired in correct order?)
-
-**Phase 3**: Integration and stress tests
-- Full workflow interruption tests with various file counts
-- Race condition tests with concurrent hash completions and shutdowns
-- Resource cleanup verification tests
-
-#### 4. **Success Criteria**
-
-**Correctness**: All goroutines exit cleanly, no resource leaks, proper error handling
-**Robustness**: Tests pass consistently across multiple runs, no flaky timing issues  
-**Coverage**: Test all major signal handling code paths in hwangLinUnified, callbacks, hash manager
-**Maintainability**: Tests are fast, deterministic, and provide clear failure diagnostics
-
-### Implementation Priority
-**Next Steps**: Implement basic compilation fixes and run existing test first, then build comprehensive test framework based on what gaps we discover.
+### Performance Optimization
+- Profile retire skiplist performance under various workloads
+- Optimize hash worker coordination patterns
+- Benchmark async completion processing efficiency
