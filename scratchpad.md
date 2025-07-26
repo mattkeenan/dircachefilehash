@@ -1,41 +1,40 @@
 # v0.7 Architecture Status & Implementation
 
-## 🎯 CURRENT STATUS (2025-07-26)
+## 🔧 IMMEDIATE PRIORITIES
 
-### ✅ COMPLETED TASKS
-- ✅ **Fixed algorithmHashManager off-by-one error** - JobID allocation now starts correctly
-- ✅ **Implemented retire skiplist architecture** - Path order preservation with async processing
-- ✅ **Updated terminology** - cookie → pathOrderID, parkedSkiplist → retireSkiplist throughout codebase
-- ✅ **Updated documentation** - Architecture docs and swimlane diagrams reflect current implementation
+### Fix OnComplete() Final Retirement (HIGH PRIORITY)
 
-## 🔧 COMPILATION FIXES NEEDED (HIGH PRIORITY)
+The main HwangLin loop has finished but there may be remaining entries in retireSkiplist that need to be written before closing the temp index.
 
-### Current Errors in `pkg/callback_update.go`:
-1. **Undefined fields**: `uc.backlog` references (lines 453, 458, 461, 470) - remnants from old architecture
-2. **Duplicate method**: `createEntryIoVec` declared twice (lines 577 + 762)  
-3. **Missing import**: `IoVec` type undefined - need `github.com/google/vectorio` import
-4. **Type issues**: Fixed `GetBinaryEntryRef()` calls for skiplist insertion
+**Problem**: After HwangLin loop completes, some entries might still be:
+- In flight (hash workers still processing)
+- Completed but not yet retired (sitting in retireSkiplist)
 
-### Fix Plan:
-1. **Remove old backlog code** - Delete `appendToBacklog()` and `flushInOrderEntries()` functions
-2. **Remove duplicate method** - Keep one `createEntryIoVec()` implementation
-3. **Add missing imports** - Import vectorio package
-4. **Test compilation** - Run `go build ./...` to verify fixes
-5. **Fix OnComplete()** - Add final `retireContiguousEntries()` call before closing temp index
+**Solution Approach** (avoid spinlock/busy loop):
+1. **Signal hash manager shutdown** - Close hash job channel, wait for completion channel to close
+2. **Final processCompletedHashJobs()** - Drain remaining completions from closed channel
+3. **Final retireContiguousEntries()** - Write any remaining entries from retireSkiplist
+4. **Verification** - Check jobsInFlight counter and retireSkiplist emptiness for debugging
 
-### Next Steps:
-1. Fix compilation errors first
-2. Run `TestAdaptiveUpdateInterruption` to verify signal handling
-3. Address any remaining integration issues
+**Implementation in OnComplete()**:
+```go
+// 1. Signal shutdown and wait for hash workers
+uc.hashJobManager.Shutdown() // or similar - need to check API
 
-## 📋 FUTURE WORK
+// 2. Drain any remaining completions (non-blocking)
+uc.processCompletedHashJobs()
 
-### Signal Handling Test Framework
-- Build comprehensive test coverage for hwangLinUnified/callback coordination
-- Test signal propagation, channel coordination, and resource cleanup
-- Create deterministic test infrastructure for race condition detection
+// 3. Write remaining entries from retireSkiplist
+if err := uc.retireContiguousEntries(); err != nil {
+    return err
+}
 
-### Performance Optimization
-- Profile retire skiplist performance under various workloads
-- Optimize hash worker coordination patterns
-- Benchmark async completion processing efficiency
+// 4. Close temp index writer
+```
+
+### Check Current Compilation Status
+- Test `go build ./pkg/...` to see remaining errors
+- Fix any remaining undefined references
+
+### Next Test
+- Run `TestAdaptiveUpdateInterruption` to verify signal handling works

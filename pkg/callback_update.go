@@ -1,10 +1,13 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 	"github.com/google/vectorio"
 )
@@ -28,12 +31,16 @@ type UpdateCallback struct {
 	nextRetireIndex  uint64                  // Next path order ID sequence number expected for retirement
 	pathOrderToEntry map[uint64]BinaryEntryInterface // Track entries by path order ID for completion lookup
 	
-	// Index writing - IoVec writer for temp index output
-	tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
+	// Shutdown coordination and hash job synchronization
+	shutdownChan     <-chan struct{}         // Shutdown signal from main
+	hashJobWG        sync.WaitGroup          // Wait for all hash jobs to complete
+	
+	// Index writing - Iovec writer for temp index output
+	tempIndexWriter  *TempIndexWriter        // Iovec writer for temp index output
 }
 
 // NewUpdateCallback creates a new UpdateCallback for v0.7 direct temp index writing
-func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager *algorithmHashManager) *UpdateCallback {
+func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager *algorithmHashManager, shutdownChan <-chan struct{}) *UpdateCallback {
 	return &UpdateCallback{
 		// v0.7 direct temp index writing
 		dc:                dc,
@@ -47,6 +54,9 @@ func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager
 		retireSkiplist:  NewSkiplistWrapper(16, "retire"),
 		nextRetireIndex: 1, // Start retiring from path order ID 1
 		pathOrderToEntry: make(map[uint64]BinaryEntryInterface),
+		
+		// Shutdown coordination
+		shutdownChan: shutdownChan,
 		
 		// Index writing
 		tempIndexWriter: nil, // Will be initialized when first entry is written
@@ -139,8 +149,8 @@ func (uc *UpdateCallback) OnComparison(
 	// Check completion queue from hashJobManager and merge completed entries to backlog
 	uc.processCompletedHashJobs()
 	
-	// Create IoVec array from in-order entries (no gaps) and call writeIoVec to output temp index
-	if err := uc.flushInOrderEntries(); err != nil {
+	// Try to retire contiguous entries (non-blocking)
+	if err := uc.retireContiguousEntries(); err != nil {
 		return false, err
 	}
 	
@@ -149,7 +159,7 @@ func (uc *UpdateCallback) OnComparison(
 
 
 
-// writeEntryToTempIndex writes a single entry to the temp index file using IoVec
+// writeEntryToTempIndex writes a single entry to the temp index file using Iovec
 func (uc *UpdateCallback) writeEntryToTempIndex(entry BinaryEntryInterface) error {
 	if IsDebugEnabled("write") {
 		if path, err := entry.RelativePath(); err == nil {
@@ -157,7 +167,7 @@ func (uc *UpdateCallback) writeEntryToTempIndex(entry BinaryEntryInterface) erro
 		}
 	}
 	
-	// TODO: Implement proper IoVec batch writing to temp index
+	// TODO: Implement proper Iovec batch writing to temp index
 	// For now, just log that writing would happen here - this will be implemented when TempIndexWriter is available
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "[UPDATE-WRITE] WARNING: writeEntryToTempIndex is not implemented - no entries written!")
@@ -207,6 +217,51 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed with error: %v\n", err)
 		} else {
 			fmt.Fprintf(os.Stderr, "[UPDATE] Update completed successfully, entries written to temp index\n")
+		}
+	}
+	
+	// Wait for all hash jobs to complete with graceful shutdown handling
+	if IsDebugEnabled("hash") {
+		remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
+		if remainingJobs > 0 {
+			VerboseLog(3, "[UPDATE-COMPLETE] Waiting for %d remaining hash jobs to complete", remainingJobs)
+		}
+	}
+	
+	// Wait for hash jobs with cancellation support
+	done := make(chan struct{})
+	go func() {
+		uc.hashJobWG.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// All jobs completed normally
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-COMPLETE] All hash jobs completed successfully")
+		}
+	case <-uc.shutdownChan:
+		// Interrupted - cleanup what we have
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-COMPLETE] Shutdown signal received, proceeding with available entries")
+		}
+	}
+	
+	// Final cleanup regardless of completion vs interruption
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[UPDATE-COMPLETE] Processing final completions and retiring remaining entries")
+	}
+	
+	// Drain any remaining completions (non-blocking)
+	uc.processCompletedHashJobs()
+	
+	// Write any remaining entries from retireSkiplist
+	if retireErr := uc.retireContiguousEntries(); retireErr != nil {
+		if err == nil {
+			err = fmt.Errorf("failed to retire remaining entries: %w", retireErr)
+		} else {
+			fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to retire remaining entries: %v\n", retireErr)
 		}
 	}
 	
@@ -337,6 +392,9 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, pat
 		}
 	}
 	
+	// Increment wait group BEFORE submitting job
+	uc.hashJobWG.Add(1)
+	
 	// Get the next job ID from hash manager
 	jobID := uc.hashJobManager.GetNextJobID()
 	
@@ -430,6 +488,9 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 				// Decrement atomic counter when job completes
 				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
 				
+				// Signal wait group that this job is done
+				uc.hashJobWG.Done()
+				
 				if IsDebugEnabled("hash") {
 					remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
 					VerboseLog(3, "[HASH-COMPLETE] Entry added to parkedSkiplist, remaining jobs: %d", remainingJobs)
@@ -446,135 +507,11 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 	}
 }
 
-// appendToBacklog adds an entry to the ready-to-write backlog  
-func (uc *UpdateCallback) appendToBacklog(entry BinaryEntryInterface) {
-	if IsDebugEnabled("hash") {
-		if path, err := entry.RelativePath(); err == nil {
-			VerboseLog(3, "[HASH-BACKLOG] Adding entry to backlog: %s (backlog size before: %d)", path, len(uc.backlog))
-		}
-	}
-	
-	// f) Hashed entries put in completion backlog queue
-	uc.backlog = append(uc.backlog, entry)
-	
-	if IsDebugEnabled("hash") {
-		VerboseLog(3, "[HASH-BACKLOG] Entry added to backlog, new backlog size: %d", len(uc.backlog))
-	}
-}
 
-// flushInOrderEntries processes backlog and pending entries for ordered writing
-// Implements architecture-specified immediate IoVec batching
-func (uc *UpdateCallback) flushInOrderEntries() error {
-	// g) In-order tests and IoVec creation tracing
-	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-FLUSH] Starting flush: backlog=%d pending=%d nextFlushIndex=%d", len(uc.backlog), len(uc.pendingEntries), uc.nextFlushIndex)
-	}
-	
-	// Initialize temp index writer if needed
-	if uc.tempIndexWriter == nil {
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-FLUSH] Creating new TempIndexWriter for: %s", uc.tempIndexFileName)
-		}
-		writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
-		if err != nil {
-			return fmt.Errorf("failed to create temp index writer: %w", err)
-		}
-		uc.tempIndexWriter = writer
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-FLUSH] TempIndexWriter created successfully")
-		}
-	}
-	
-	// Use counter to check for contiguous completed entries (no gaps)
-	var readyIoVecs []syscall.Iovec
-	backlogProcessed := 0
-	
-	// Process backlog entries that can be written in order
-	for len(uc.backlog) > 0 {
-		entry := uc.backlog[0]
-		backlogProcessed++
-		
-		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-FLUSH] Processing backlog entry %d: %s", backlogProcessed, path)
-			}
-		}
-		
-		// h) IoVec creation from completed hashes
-		// Create zero-copy IoVec when possible  
-		ioVec, err := uc.createEntryIoVec(entry)
-		if err != nil {
-			if IsDebugEnabled("hash") {
-				VerboseLog(3, "[UPDATE-FLUSH] Failed to create IoVec for backlog entry: %v", err)
-			}
-			return fmt.Errorf("failed to create IoVec for entry: %w", err)
-		}
-		
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-FLUSH] Created IoVec for backlog entry, size: %d bytes", ioVec.Len)
-		}
-		
-		readyIoVecs = append(readyIoVecs, ioVec)
-		uc.backlog = uc.backlog[1:] // Remove from backlog
-	}
-	
-	// g) In-order test for pending entries
-	pendingSkipped := 0
-	// Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
-	for int(uc.nextFlushIndex) < len(uc.pendingEntries) {
-		if uc.pendingEntries[uc.nextFlushIndex] != nil {
-			// Hit a non-completed entry - stop to maintain order
-			if IsDebugEnabled("hash") {
-				VerboseLog(3, "[UPDATE-FLUSH] Hit non-completed entry at index %d, stopping in-order check", uc.nextFlushIndex)
-			}
-			break
-		}
-		// Entry is nil (completed) - can skip it in flush sequence
-		pendingSkipped++
-		uc.nextFlushIndex++
-	}
-	
-	if IsDebugEnabled("hash") && pendingSkipped > 0 {
-		VerboseLog(3, "[UPDATE-FLUSH] Skipped %d completed pending entries, nextFlushIndex now: %d", pendingSkipped, uc.nextFlushIndex)
-	}
-	
-	// i) IoVec entries writing tracing
-	// Write batch with single vectorio call to temp index
-	if len(readyIoVecs) > 0 {
-		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-			totalBytes := uint64(0)
-			for _, iovec := range readyIoVecs {
-				totalBytes += iovec.Len
-			}
-			VerboseLog(3, "[UPDATE-WRITE] Writing batch of %d IoVecs, total %d bytes to temp index", len(readyIoVecs), totalBytes)
-		}
-		
-		if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
-			if IsDebugEnabled("hash") {
-				VerboseLog(3, "[UPDATE-WRITE] Failed to write IoVec batch: %v", err)
-			}
-			return fmt.Errorf("failed to write IoVec batch: %w", err)
-		}
-		
-		if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-WRITE] Successfully wrote batch of %d entries to temp index", len(readyIoVecs))
-		}
-	} else {
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-WRITE] No entries ready for writing this flush cycle")
-		}
-	}
-	
-	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-FLUSH] Flush complete: processed %d backlog entries, skipped %d pending entries", backlogProcessed, pendingSkipped)
-	}
-	
-	return nil
-}
 
-// createEntryIoVec creates an IoVec for zero-copy writing when possible
+// createEntryIovec creates an Iovec for zero-copy writing when possible
 // Implementation from architecture document lines 688-709
-func (uc *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.Iovec, error) {
+func (uc *UpdateCallback) createEntryIovec(entry BinaryEntryInterface) (syscall.Iovec, error) {
 	// For mmap'd entries: Reference underlying mmap'd binaryEntry directly
 	if binaryEntryRef, ok := entry.GetBinaryEntryRef(); ok {
 		underlyingEntry := binaryEntryRef.GetBinaryEntry()
@@ -714,7 +651,7 @@ func (uc *UpdateCallback) findEntryByPathOrderID(pathOrderID uint64) BinaryEntry
 
 // retireContiguousEntries processes retire entries in path order ID sequence for writing
 func (uc *UpdateCallback) retireContiguousEntries() error {
-	var readyIoVecs []IoVec
+	var readyIoVecs []syscall.Iovec
 	
 	// Retire entries in strict path order ID sequence (no gaps allowed)
 	for {
@@ -724,10 +661,10 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 			break // Gap found - cannot retire until this path order ID arrives
 		}
 		
-		// Found next contiguous entry - create IoVec for writing
-		ioVec, err := uc.createEntryIoVec(entry)
+		// Found next contiguous entry - create Iovec for writing
+		ioVec, err := uc.createEntryIovec(entry)
 		if err != nil {
-			return fmt.Errorf("failed to create IoVec for path order ID %d: %w", uc.nextRetireIndex, err)
+			return fmt.Errorf("failed to create Iovec for path order ID %d: %w", uc.nextRetireIndex, err)
 		}
 		
 		if IsDebugEnabled("write") {
@@ -741,29 +678,50 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 		uc.nextRetireIndex++
 	}
 	
-	// Write contiguous batch to temp index via single IoVec operation
+	// Write contiguous batch to temp index via single Iovec operation
 	if len(readyIoVecs) > 0 {
+		// Initialize temp index writer if needed
+		if uc.tempIndexWriter == nil {
+			if IsDebugEnabled("write") {
+				VerboseLog(3, "[UPDATE-RETIRE] Creating new TempIndexWriter for: %s", uc.tempIndexFileName)
+			}
+			writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
+			if err != nil {
+				return fmt.Errorf("failed to create temp index writer: %w", err)
+			}
+			uc.tempIndexWriter = writer
+			if IsDebugEnabled("write") {
+				VerboseLog(3, "[UPDATE-RETIRE] TempIndexWriter created successfully")
+			}
+		}
+		
 		if IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-RETIRE] Writing batch of %d entries to temp index", len(readyIoVecs))
+			totalBytes := uint64(0)
+			for _, iovec := range readyIoVecs {
+				totalBytes += iovec.Len
+			}
+			VerboseLog(3, "[UPDATE-RETIRE] Writing batch of %d Iovecs, total %d bytes to temp index", len(readyIoVecs), totalBytes)
 		}
 		
-		// Ensure temp index writer is initialized
-		if err := uc.ensureTempIndexWriter(); err != nil {
-			return err
+		if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
+			if IsDebugEnabled("write") {
+				VerboseLog(3, "[UPDATE-RETIRE] Failed to write Iovec batch: %v", err)
+			}
+			return fmt.Errorf("failed to write Iovec batch: %w", err)
 		}
 		
-		return uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs)
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-RETIRE] Successfully wrote batch of %d entries to temp index", len(readyIoVecs))
+		}
+	} else {
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")
+		}
 	}
 	
 	return nil
 }
 
-// createEntryIoVec creates an IoVec for writing an entry to the temp index
-func (uc *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (IoVec, error) {
-	// For now, use the existing createIoVecFromEntry method
-	// This will need to be updated based on the actual BinaryEntryInterface implementation
-	return uc.createIoVecFromEntry(entry)
-}
 
 // ensureTempIndexWriter ensures the temp index writer is initialized
 func (uc *UpdateCallback) ensureTempIndexWriter() error {
