@@ -18,14 +18,16 @@ type UpdateCallback struct {
 	// Hash coordination with existing hashJobManager
 	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
 	entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
-	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
-	nextFlushIndex   uint64                  // Next counter position to check for flushing
 	
 	// Simple atomic counter for completion detection
 	jobsInFlight     uint64                  // Atomic counter: inc on submit, dec on complete
 	
-	// Index writing - in-order entry processing (v0.7: direct temp index writing)
-	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
+	// Path order preservation via parking skiplist
+	parkedSkiplist   *skiplistWrapper        // Entries ready to write, ordered by cookie-as-context
+	nextRetireIndex  uint64                  // Next cookie sequence number expected for retirement
+	cookieToEntry    map[uint64]BinaryEntryInterface // Track entries by cookie for completion lookup
+	
+	// Index writing - IoVec writer for temp index output
 	tempIndexWriter  *TempIndexWriter        // IoVec writer for temp index output
 }
 
@@ -39,11 +41,13 @@ func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager
 		// Hash coordination
 		hashJobManager: hashManager,
 		entryCounter:   0,
-		pendingEntries: make([]BinaryEntryInterface, 0),
-		nextFlushIndex: 0,
 		
-		// Direct temp index writing
-		backlog:         make([]BinaryEntryInterface, 0),
+		// Path order preservation
+		parkedSkiplist:  NewSkiplistWrapper(16, "parked"),
+		nextRetireIndex: 1, // Start retiring from cookie 1
+		cookieToEntry:   make(map[uint64]BinaryEntryInterface),
+		
+		// Index writing
 		tempIndexWriter: nil, // Will be initialized when first entry is written
 	}
 }
@@ -270,6 +274,9 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 		}
 	}
 	
+	// Process any completed hash jobs first (non-blocking)
+	uc.processCompletedHashJobs()
+	
 	// Update callback writes to main.idx temp file for complete repository state
 	if entry == nil {
 		return nil // Nothing to process
@@ -282,43 +289,44 @@ func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 	isDeleted, _ := entry.IsDeleted()
 	needsWriting := !isDeleted // Only write non-deleted entries to main.idx
 	
-	if needsHashing && needsWriting {
-		// Submit hash job for files that need hashing and will be written to main.idx
+	if !needsWriting {
+		// Deleted entries: no action needed for main.idx
+		return nil
+	}
+	
+	// Assign sequential cookie to maintain callback order
+	uc.entryCounter++
+	cookie := uc.entryCounter
+	
+	if needsHashing {
+		// Submit hash job (parallel processing - don't park here)
 		if IsDebugEnabled("hash") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-HASH] Submitting hash job for: %s", path)
+				VerboseLog(3, "[UPDATE-HASH] Submitting hash job for: %s (cookie=%d)", path, cookie)
 			}
 		}
-		if err := uc.submitHashJobToManager(entry); err != nil {
+		if err := uc.submitHashJobToManager(entry, cookie); err != nil {
 			return err
 		}
-		// Also add to backlog immediately for now (async completion handling is TODO)
-		uc.appendToBacklog(entry)
-	} else if needsWriting {
-		// File unchanged - add directly to backlog for writing to main.idx
+		// Entry will be added to parkedSkiplist when hash completion arrives
+	} else {
+		// Already hashed - add directly to parkedSkiplist with cookie as context
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
-				VerboseLog(3, "[UPDATE-WRITE] Adding unchanged file to backlog: %s", path)
+				VerboseLog(3, "[UPDATE-WRITE] Adding unchanged file to parkedSkiplist: %s (cookie=%d)", path, cookie)
 			}
 		}
-		uc.appendToBacklog(entry)
-	}
-	// Deleted entries or files that don't need writing: no action needed
-	
-	// Process any completed hash jobs and write in-order entries
-	uc.processCompletedHashJobs()
-	
-	// Flush any ready entries to temp index
-	if err := uc.flushInOrderEntries(); err != nil {
-		return fmt.Errorf("failed to flush entries during hash coordination: %w", err)
+		cookieStr := fmt.Sprintf("%d", cookie)
+		uc.parkedSkiplist.Insert(entry, cookieStr)
 	}
 	
-	return nil
+	// Try to retire contiguous sequence from parkedSkiplist
+	return uc.retireContiguousEntries()
 }
 
 
 // submitHashJobToManager submits a hash job using the cookie-based tracking system
-func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) error {
+func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface, cookie uint64) error {
 	// a) Hash job submission tracing
 	if IsDebugEnabled("hash") {
 		if path, err := entry.RelativePath(); err == nil {
@@ -349,10 +357,6 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		return err
 	}
 	
-	// Increment counter to get cookie BEFORE creating hash job
-	uc.entryCounter++
-	cookie := uc.entryCounter
-	
 	// Create hash job start structure using unified BinaryEntryInterface
 	hashJob := &hashJobStart{
 		JobID:    jobID,
@@ -368,6 +372,9 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted to manager: JobID=%d, Cookie=%d", jobID, cookie)
 	}
 	
+	// Store cookie-to-entry mapping for completion lookup
+	uc.cookieToEntry[cookie] = entry
+	
 	// Only increment jobs in flight counter after successful submission
 	atomic.AddUint64(&uc.jobsInFlight, 1)
 	
@@ -375,23 +382,10 @@ func (uc *UpdateCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		VerboseLog(3, "[HASH-SUBMIT] Hash job submitted successfully, cookie=%d, jobsInFlight=%d", cookie, atomic.LoadUint64(&uc.jobsInFlight))
 	}
 	
-	// Store entry at cookie position for completion tracking
-	if int(cookie) > len(uc.pendingEntries) {
-		// Expand slice to accommodate new cookie position
-		newSlice := make([]BinaryEntryInterface, cookie)
-		copy(newSlice, uc.pendingEntries)
-		uc.pendingEntries = newSlice
-	}
-	uc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
-	
-	if IsDebugEnabled("hash") {
-		VerboseLog(3, "[HASH-SUBMIT] Entry stored in pendingEntries[%d], total pending slots: %d", cookie-1, len(uc.pendingEntries))
-	}
-	
 	return nil
 }
 
-// processCompletedHashJobs checks for completed jobs and marks them as ready
+// processCompletedHashJobs checks for completed jobs and adds them to parking skiplist
 func (uc *UpdateCallback) processCompletedHashJobs() {
 	if uc.hashJobManager == nil {
 		if IsDebugEnabled("hash") {
@@ -400,52 +394,49 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 		return
 	}
 	
-	completionCount := 0
-	
-	// e) Hash completion message arrival tracing
-	// Non-blocking check for completed jobs from existing hashJobManager
+	// Non-blocking read of completion channel (entries arrive in JobID order)
 	for {
 		select {
 		case completion := <-uc.hashJobManager.CompletionChannel():
-			completionCount++
-			// completion contains both JobID and Cookie
+			// Completions arrive in JobID order thanks to algorithmHashManager
+			// Add completed entry to parkedSkiplist with cookie as context for ordering
 			cookie := completion.Cookie
 			
 			if IsDebugEnabled("hash") {
 				VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, cookie)
 			}
 			
-			if cookie > 0 && int(cookie) <= len(uc.pendingEntries) {
-				entry := uc.pendingEntries[cookie-1]
-				if entry != nil {
-					if path, err := entry.RelativePath(); err == nil {
-						if IsDebugEnabled("hash") {
-							VerboseLog(3, "[HASH-COMPLETE] Marking entry as completed: %s (cookie %d)", path, cookie)
-						}
+			// Find the entry that this completion belongs to
+			entry := uc.findEntryByCookie(cookie)
+			if entry != nil {
+				if path, err := entry.RelativePath(); err == nil {
+					if IsDebugEnabled("hash") {
+						VerboseLog(3, "[HASH-COMPLETE] Adding completed entry to parkedSkiplist: %s (cookie=%d)", path, cookie)
 					}
 				}
 				
-				// f) Entry moved to completion state  
-				// Mark entry as completed by setting to nil (ready for flush)
-				uc.pendingEntries[cookie-1] = nil
+				// Add to parking skiplist with cookie as context
+				cookieStr := fmt.Sprintf("%d", cookie)
+				uc.parkedSkiplist.Insert(entry, cookieStr)
+				
+				// Clean up cookie-to-entry mapping since job is complete
+				delete(uc.cookieToEntry, cookie)
+				
 				// Decrement atomic counter when job completes
 				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
 				
 				if IsDebugEnabled("hash") {
 					remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
-					VerboseLog(3, "[HASH-COMPLETE] Entry marked complete, remaining jobs: %d", remainingJobs)
+					VerboseLog(3, "[HASH-COMPLETE] Entry added to parkedSkiplist, remaining jobs: %d", remainingJobs)
 				}
 			} else {
 				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[HASH-COMPLETE] Invalid cookie %d (out of bounds, pendingEntries len=%d)", cookie, len(uc.pendingEntries))
+					VerboseLog(3, "[HASH-COMPLETE] Could not find entry for cookie %d", cookie)
 				}
 			}
 		default:
-			// No more completed jobs available
-			if IsDebugEnabled("hash") && completionCount > 0 {
-				VerboseLog(3, "[HASH-COMPLETE] Processed %d completion messages this round", completionCount)
-			}
-			return 
+			// No more completions available (non-blocking)
+			return
 		}
 	}
 }
@@ -704,5 +695,79 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 		pathSpace[len(pathBytes)] = 0 // Null terminator
 	}
 	
+	return nil
+}
+
+// findEntryByCookie finds the entry that corresponds to a given cookie
+func (uc *UpdateCallback) findEntryByCookie(cookie uint64) BinaryEntryInterface {
+	entry, exists := uc.cookieToEntry[cookie]
+	if !exists {
+		return nil
+	}
+	return entry
+}
+
+// retireContiguousEntries processes parked entries in cookie order for writing
+func (uc *UpdateCallback) retireContiguousEntries() error {
+	var readyIoVecs []IoVec
+	
+	// Retire entries in strict cookie sequence (no gaps allowed)
+	for {
+		cookieStr := fmt.Sprintf("%d", uc.nextRetireIndex)
+		entry := uc.parkedSkiplist.FindByContext(cookieStr)
+		if entry == nil {
+			break // Gap found - cannot retire until this cookie arrives
+		}
+		
+		// Found next contiguous entry - create IoVec for writing
+		ioVec, err := uc.createEntryIoVec(entry)
+		if err != nil {
+			return fmt.Errorf("failed to create IoVec for cookie %d: %w", uc.nextRetireIndex, err)
+		}
+		
+		if IsDebugEnabled("write") {
+			if path, err := entry.RelativePath(); err == nil {
+				VerboseLog(3, "[UPDATE-RETIRE] Retiring entry %s (cookie=%d)", path, uc.nextRetireIndex)
+			}
+		}
+		
+		readyIoVecs = append(readyIoVecs, ioVec)
+		uc.parkedSkiplist.RemoveByContext(cookieStr)
+		uc.nextRetireIndex++
+	}
+	
+	// Write contiguous batch to temp index via single IoVec operation
+	if len(readyIoVecs) > 0 {
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-RETIRE] Writing batch of %d entries to temp index", len(readyIoVecs))
+		}
+		
+		// Ensure temp index writer is initialized
+		if err := uc.ensureTempIndexWriter(); err != nil {
+			return err
+		}
+		
+		return uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs)
+	}
+	
+	return nil
+}
+
+// createEntryIoVec creates an IoVec for writing an entry to the temp index
+func (uc *UpdateCallback) createEntryIoVec(entry BinaryEntryInterface) (IoVec, error) {
+	// For now, use the existing createIoVecFromEntry method
+	// This will need to be updated based on the actual BinaryEntryInterface implementation
+	return uc.createIoVecFromEntry(entry)
+}
+
+// ensureTempIndexWriter ensures the temp index writer is initialized
+func (uc *UpdateCallback) ensureTempIndexWriter() error {
+	if uc.tempIndexWriter == nil {
+		var err error
+		uc.tempIndexWriter, err = NewTempIndexWriter(uc.tempIndexFileName)
+		if err != nil {
+			return fmt.Errorf("failed to create temp index writer: %w", err)
+		}
+	}
 	return nil
 }

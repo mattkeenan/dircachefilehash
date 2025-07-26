@@ -595,6 +595,175 @@ func (callback *UpdateCallback) OnComparison(result ComparisonResult, left, righ
 }
 ```
 
+### Async Hash Completion Processing (Non-Blocking Channel Pattern)
+
+**Architecture Principle**: Use non-blocking completion channel reads on each iteration instead of separate goroutines to avoid complex synchronization and ensure natural backpressure.
+
+**Key Insight**: The `algorithmHashManager` completion processor already handles re-ordering - hash jobs complete out of order, but notifications are sent to `externalCompletionChan` in the correct JobID sequence. Callbacks receive completions in order and can write entries immediately.
+
+**Implementation Pattern**:
+```go
+func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+    // Non-blocking check for completed hash jobs on every iteration
+    uc.processCompletedHashJobs()
+    
+    // Submit new hash job if needed
+    if needsHashing(operation) {
+        if err := uc.submitHashJobToManager(entry); err != nil {
+            return err
+        }
+        // Add to backlog immediately (hash updates memory asynchronously)
+        uc.appendToBacklog(entry)
+    } else {
+        // Already hashed - add directly to backlog for writing
+        uc.appendToBacklog(entry)
+    }
+    
+    // Flush any completed entries via IoVec batching
+    return uc.flushCompletedEntries()
+}
+
+func (uc *UpdateCallback) processCompletedHashJobs() {
+    // Non-blocking read of completion channel (entries arrive in order)
+    for {
+        select {
+        case completion := <-uc.hashJobManager.CompletionChannel():
+            // Completions arrive in JobID order thanks to algorithmHashManager
+            // Add completed entry to parkedSkiplist with cookie as context for ordering
+            cookie := completion.Cookie
+            if entry := uc.findEntryByCookie(cookie); entry != nil {
+                cookieStr := fmt.Sprintf("%d", cookie)
+                uc.parkedSkiplist.Insert(entry, cookieStr)
+                atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
+            }
+        default:
+            return // No more completions available (non-blocking)
+        }
+    }
+}
+
+func (uc *UpdateCallback) Close() error {
+    // At close time: blocking read until all submitted cookies are consumed
+    for atomic.LoadUint64(&uc.jobsInFlight) > 0 {
+        select {
+        case completion := <-uc.hashJobManager.CompletionChannel():
+            // Same processing as above - add to parkedSkiplist
+            cookie := completion.Cookie
+            if entry := uc.findEntryByCookie(cookie); entry != nil {
+                cookieStr := fmt.Sprintf("%d", cookie)
+                uc.parkedSkiplist.Insert(entry, cookieStr)
+                atomic.AddUint64(&uc.jobsInFlight, ^uint64(0))
+            }
+        case <-time.After(100 * time.Millisecond):
+            // Prevent infinite blocking, log timeout warning if needed
+        }
+    }
+    
+    // Final retirement of all remaining parked entries
+    return uc.retireAllRemainingEntries()
+}
+```
+
+### Path Order Preservation via Parking Skiplist
+
+**Challenge**: hwangLinUnified delivers entries in path order, but some need hashing (submitted to parallel hash workers) while others are already complete. Entries must be written to the index in strict path order regardless of hash completion timing.
+
+**Solution**: Use a "parking skiplist" with cookie-based ordering to hold entries until they can be retired in sequence.
+
+**Architecture Pattern**:
+```go
+type UpdateCallback struct {
+    // ... existing fields ...
+    
+    // Path order preservation via parking mechanism
+    parkedSkiplist   *skiplistWrapper  // Entries ready to write, ordered by cookie-as-context
+    nextRetireIndex  uint64            // Next cookie sequence number expected for retirement
+    entryCounter     uint64            // Sequential cookie assignment (callback's internal order)
+}
+
+func (uc *UpdateCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error {
+    // Process any completed hash jobs (non-blocking)
+    uc.processCompletedHashJobs()
+    
+    // Assign sequential cookie to maintain callback order
+    uc.entryCounter++
+    cookie := uc.entryCounter
+    
+    if needsHashing(operation) {
+        // Submit to hash manager (parallel processing - don't park here)
+        if err := uc.submitHashJobToManager(entry, cookie); err != nil {
+            return err
+        }
+        // Entry will be added to parkedSkiplist when hash completion arrives
+    } else {
+        // Already hashed - add directly to parkedSkiplist with cookie as context
+        cookieStr := fmt.Sprintf("%d", cookie)
+        uc.parkedSkiplist.Insert(entry, cookieStr)
+    }
+    
+    // Try to retire contiguous sequence from parkedSkiplist
+    return uc.retireContiguousEntries()
+}
+
+func (uc *UpdateCallback) retireContiguousEntries() error {
+    var readyIoVecs []IoVec
+    
+    // Retire entries in strict cookie sequence (no gaps allowed)
+    for {
+        cookieStr := fmt.Sprintf("%d", uc.nextRetireIndex)
+        entry := uc.parkedSkiplist.FindByContext(cookieStr)
+        if entry == nil {
+            break // Gap found - cannot retire until this cookie arrives
+        }
+        
+        // Found next contiguous entry - create IoVec for writing
+        ioVec, err := uc.createEntryIoVec(entry)
+        if err != nil {
+            return err
+        }
+        
+        readyIoVecs = append(readyIoVecs, ioVec)
+        uc.parkedSkiplist.RemoveByContext(cookieStr)
+        uc.nextRetireIndex++
+    }
+    
+    // Write contiguous batch to temp index via single IoVec operation
+    if len(readyIoVecs) > 0 {
+        return uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs)
+    }
+    
+    return nil
+}
+```
+
+**Key Benefits**:
+
+1. **Parallel Hash Processing**: Unhashed entries submitted immediately to hash workers (no blocking)
+2. **Strict Path Order**: Entries only retired when contiguous cookie sequence is available
+3. **Efficient Batching**: Multiple ready entries written in single IoVec batch operation
+4. **Gap Detection**: Cannot retire entry N+1 until entry N is available (prevents out-of-order writes)
+5. **Unified Handling**: Both completed hash jobs and already-hashed entries use same parking mechanism
+
+**Example Scenario**:
+```
+Entry A (cookie=1, needs hash) → Submit to hash manager
+Entry B (cookie=2, already hashed) → Add to parkedSkiplist[2]
+Entry C (cookie=3, needs hash) → Submit to hash manager
+Entry D (cookie=4, already hashed) → Add to parkedSkiplist[4]
+
+Hash completion for Entry C (cookie=3) arrives → Add to parkedSkiplist[3]
+Hash completion for Entry A (cookie=1) arrives → Add to parkedSkiplist[1]
+
+Retirement check: cookies 1,2,3,4 all present → Retire all 4 entries in single IoVec batch
+```
+
+**Performance Characteristics**:
+- **Skiplist Operations**: O(log n) insert/find/remove for parking/retirement
+- **Memory Efficiency**: Only hold entries temporarily until contiguous sequence ready
+- **I/O Efficiency**: Batch multiple ready entries into single writev() system call
+- **Concurrency**: Hash workers process in parallel while maintaining strict write order
+```
+
 **Callback State Management:**
 ```go
 type UpdateCallback struct {

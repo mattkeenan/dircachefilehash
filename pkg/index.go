@@ -13,10 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 	"unsafe"
 
-	"github.com/google/vectorio"
 	"golang.org/x/sys/unix"
 )
 
@@ -1252,245 +1250,17 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	return nil
 }
 
-// WriteSkiplistWithVectorIO writes a skiplist to an index file using vectorio for efficient bulk writes
-func (dc *DirectoryCache) writeSkiplistWithVectorIO(skiplist *skiplistWrapper, outputPath string, context string) error {
-	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, false)
-}
+// TODO: Batch writing infrastructure removed - use callback-based writing with UpdateCallback/StatusCallback patterns
 
-// writeMainIndexWithVectorIO writes a main index file excluding deleted entries using vectorio
-func (dc *DirectoryCache) writeMainIndexWithVectorIO(skiplist *skiplistWrapper, outputPath string, context string) error {
-	return dc.writeSkiplistWithVectorIOFiltered(skiplist, outputPath, context, true)
-}
 
-// writeSkiplistWithVectorIOFiltered writes a skiplist to temp index using pure vectorio (no mmap)
-func (dc *DirectoryCache) writeSkiplistWithVectorIOFiltered(skiplist *skiplistWrapper, outputPath string, context string, excludeDeleted bool) error {
-	// Collect all unique indices referenced by the skiplist
-	referencedIndices := dc.getAllReferencedIndices(skiplist)
-	
-	// Acquire read locks on all referenced indices with timeout
-	lockAcquired := make(chan bool, 1)
-	lockTimeout := time.Duration(dc.indexLockTimeout) * time.Second
-	
-	go func() {
-		// Sort indices by address to avoid deadlock
-		var indices []*mmapIndexFile
-		for idx := range referencedIndices {
-			indices = append(indices, idx)
-		}
-		// Sort by pointer address for consistent lock ordering
-		for i := 0; i < len(indices); i++ {
-			for j := i + 1; j < len(indices); j++ {
-				if uintptr(unsafe.Pointer(indices[i])) > uintptr(unsafe.Pointer(indices[j])) {
-					indices[i], indices[j] = indices[j], indices[i]
-				}
-			}
-		}
-		
-		// Acquire all locks in order
-		VerboseLog(3, "Acquiring read locks on %d index files for hash calculation", len(indices))
-		for _, idx := range indices {
-			if idx != nil {
-				idx.mutex.RLock()
-				VerboseLog(3, "Acquired read lock on %s index", idx.Type)
-			}
-		}
-		lockAcquired <- true
-	}()
-	
-	// Wait for locks with timeout
-	select {
-	case <-lockAcquired:
-		// Locks acquired successfully
-		VerboseLog(3, "All index locks acquired successfully")
-	case <-time.After(lockTimeout):
-		// Timeout - log warning and continue without protection
-		fmt.Fprintf(os.Stderr, "Warning: Failed to acquire index locks within %v timeout, continuing without memory protection\n", lockTimeout)
-	}
-	
-	// Ensure we release locks when done
-	defer func() {
-		for idx := range referencedIndices {
-			if idx != nil {
-				idx.mutex.RUnlock()
-				VerboseLog(3, "Released read lock on %s index", idx.Type)
-			}
-		}
-	}()
-	
-	// Generate IoVec slices for the specified context
-	var entryIovecs []syscall.Iovec
+// TODO: writeSkiplistWithVectorIOFiltered removed - contained problematic go func with loops
+// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
 
-	if excludeDeleted {
-		// Use callback to filter out deleted entries for main index
-		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
-			// Include entry if it matches context (or no context filter), is not deleted, and has a valid hash
-			contextMatch := (context == "" || entryContext == context)
-			return contextMatch && !entry.IsDeleted() && !entry.IsHashEmpty()
-		})
-	} else {
-		// Include all entries for cache index (including deleted ones)
-		// BUT: preserve deleted entries even if they have empty hashes
-		entryIovecs = skiplist.CallbackToIovecSlice(func(entry *binaryEntry, entryContext string) bool {
-			// For cache index: always keep deleted entries (even with empty hash)
-			if entry.IsDeleted() {
-				// Apply context filter for deleted entries too
-				if context == "" {
-					return true
-				} else {
-					return entryContext != MainContext
-				}
-			}
-			
-			// For non-deleted entries, exclude if hash is empty
-			if entry.IsHashEmpty() {
-				return false
-			}
-			
-			// Apply context filter
-			if context == "" {
-				return true
-			} else {
-				// For cache index, exclude MainContext entries (keep CacheContext + ScanContext)
-				return entryContext != MainContext
-			}
-		})
-	}
+// TODO: atomicWriteIndex removed - used problematic batch writing functions
+// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
 
-	// Calculate entry data size
-	totalEntrySize := 0
-	entryCount := len(entryIovecs)
-	for _, iovec := range entryIovecs {
-		totalEntrySize += int(iovec.Len)
-	}
-
-	// Create output file (O_CREAT|O_WRONLY)
-	file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to create temp index file %s: %w", outputPath, err)
-	}
-	defer file.Close()
-
-	// Create header in memory for temp index (writable, so Clear flag cleared)
-	header := indexHeader{}
-	header.SetHeaderForWritableIndex(dc.signature, dc.version, uint32(entryCount), 0, dc.GetCurrentHashType())
-
-	// Create header IoVec
-	headerIovec := syscall.Iovec{
-		Base: (*byte)(unsafe.Pointer(&header)),
-		Len:  uint64(HeaderSize),
-	}
-
-	// Write header using vectorio
-	if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
-		return fmt.Errorf("failed to write header with vectorio: %w", err)
-	} else if nw != HeaderSize {
-		return fmt.Errorf("header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
-	}
-
-	// Write entries using vectorio (if any) - chunk to respect IOV_MAX limit
-	if len(entryIovecs) > 0 {
-		maxIovecs, err := getSystemIOVMax()
-		if err != nil {
-			return fmt.Errorf("failed to get system IOV_MAX: %w", err)
-		}
-		totalWritten := 0
-
-		for offset := 0; offset < len(entryIovecs); offset += maxIovecs {
-			end := offset + maxIovecs
-			if end > len(entryIovecs) {
-				end = len(entryIovecs)
-			}
-
-			// Use slice without copying to avoid allocation
-			chunk := entryIovecs[offset:end]
-
-			if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), chunk); err != nil {
-				return fmt.Errorf("failed to write entries chunk with vectorio: %w", err)
-			} else {
-				totalWritten += nw
-			}
-		}
-
-		if totalWritten != totalEntrySize {
-			return fmt.Errorf("entries write incomplete: wrote %d bytes, expected %d", totalWritten, totalEntrySize)
-		}
-	}
-
-	// Mark header as clean first (before calculating checksum)
-	header.setClean()
-
-	// Calculate checksum from IoVecs and store in header
-	dc.calculateAndStoreHeaderChecksumFromIoVecs(&header, headerIovec, entryIovecs)
-
-	// Rewrite the complete header with clean flag and checksum
-	if _, err := file.Seek(0, 0); err != nil {
-		return fmt.Errorf("failed to seek to beginning for final header: %w", err)
-	}
-
-	if nw, err := vectorio.WritevRaw(uintptr(file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
-		return fmt.Errorf("failed to write final header with vectorio: %w", err)
-	} else if nw != HeaderSize {
-		return fmt.Errorf("final header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
-	}
-
-	// Sync to disk
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync temp index: %w", err)
-	}
-
-	return nil
-}
-
-// atomicWriteIndex writes a skiplist to a target index file atomically via temp file + rename
-// This consolidates the common pattern of: write temp → rename → cleanup on error
-func (dc *DirectoryCache) atomicWriteIndex(skiplist *skiplistWrapper, targetPath string, context string, excludeDeleted bool) error {
-	// Generate temp file name based on target
-	var tempPath string
-	switch targetPath {
-	case dc.IndexFile:
-		tempPath = dc.generateTempFileName("index")
-	case dc.CacheFile:
-		tempPath = dc.generateTempFileName("cache")
-	default:
-		// For other targets, generate based on the base name
-		tempPath = dc.generateTempFileName(filepath.Base(targetPath))
-	}
-
-	// Write to temp file
-	var writeErr error
-	if excludeDeleted {
-		writeErr = dc.writeMainIndexWithVectorIO(skiplist, tempPath, context)
-	} else {
-		writeErr = dc.writeSkiplistWithVectorIO(skiplist, tempPath, context)
-	}
-	
-	if writeErr != nil {
-		os.Remove(tempPath) // Cleanup on write failure
-		return fmt.Errorf("failed to write index to temp file: %w", writeErr)
-	}
-
-	// Atomic rename temp file to target
-	if err := os.Rename(tempPath, targetPath); err != nil {
-		os.Remove(tempPath) // Cleanup on rename failure
-		return fmt.Errorf("failed to atomically replace %s: %w", filepath.Base(targetPath), err)
-	}
-
-	return nil
-}
-
-// MergeScanSkiplistsWithVectorIO merges scan skiplists and writes final index using vectorio
-func (dc *DirectoryCache) mergeScanSkiplistsWithVectorIO(baseSkiplist *skiplistWrapper, scanSkiplist *skiplistWrapper, outputPath string) error {
-	// Create merged skiplist
-	mergedSkiplist := baseSkiplist.Copy()
-
-	// Merge scan results into base skiplist
-	if err := mergedSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
-		return fmt.Errorf("failed to merge skiplists: %w", err)
-	}
-
-	// Write merged result using vectorio
-	return dc.writeSkiplistWithVectorIO(mergedSkiplist, outputPath, "")
-}
+// TODO: MergeScanSkiplistsWithVectorIO removed - used problematic batch writing functions
+// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
 
 // getSystemIOVMax returns the system's IOV_MAX limit using sysconf(_SC_IOV_MAX)
 // Falls back to conservative default if sysconf fails

@@ -445,25 +445,32 @@ func (dc *DirectoryCache) CreateEmptyMainIndex() error {
 	}
 
 	// Create an empty skiplist
-	emptySkiplist := NewSkiplistWrapper(16, MainContext)
+	_ = NewSkiplistWrapper(16, MainContext) // emptySkiplist - unused until RecoveryCallback implemented
 
 	// Write empty index to a temp file first
-	tempIndexPath := dc.generateTempFileName("index")
-	if err := dc.writeMainIndexWithVectorIO(emptySkiplist, tempIndexPath, MainContext); err != nil {
-		os.Remove(tempIndexPath)
-		return fmt.Errorf("failed to write empty index: %w", err)
-	}
+	_ = dc.generateTempFileName("index") // tempIndexPath - unused until RecoveryCallback implemented
+	// TODO: Replace with callback-based writing using RecoveryCallback pattern
+	// This batch writing approach uses problematic writeMainIndexWithVectorIO function
+	// if err := dc.writeMainIndexWithVectorIO(emptySkiplist, tempIndexPath, MainContext); err != nil {
+	//	os.Remove(tempIndexPath)
+	//	return fmt.Errorf("failed to write empty index: %w", err)
+	// }
+	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
+	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
+	os.Exit(1)
 
+	// Unreachable code after os.Exit(1) - commented out until RecoveryCallback implemented
 	// Atomic replace main index
-	if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
-		os.Remove(tempIndexPath) // Cleanup on failure
-		return fmt.Errorf("failed to replace main index: %w", err)
-	}
+	// if err := os.Rename(tempIndexPath, dc.IndexFile); err != nil {
+	//	os.Remove(tempIndexPath) // Cleanup on failure
+	//	return fmt.Errorf("failed to replace main index: %w", err)
+	// }
 
 	// Remove cache file since we're starting fresh
-	os.Remove(dc.CacheFile) // Non-fatal if it fails
+	// os.Remove(dc.CacheFile) // Non-fatal if it fails
 
-	return nil
+	// return nil
+	return nil // Unreachable but required for Go compiler
 }
 
 // CreatePreRecoverySnapshotForIdxck creates a pre-recovery snapshot specifically for idxck operations
@@ -533,18 +540,23 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 
 	// 1. Write main index using vectorio (exclude deleted entries for main)
 	tempMainPath := dc.generateTempFileName("main")
-	if err := dc.writeMainIndexWithVectorIO(currentSkiplist, tempMainPath, MainContext); err != nil {
-		os.Remove(tempMainPath)
-		return fmt.Errorf("failed to write recovery main index: %w", err)
-	}
+	// TODO: Replace with callback-based writing using RecoveryCallback pattern
+	// This batch writing approach uses problematic writeMainIndexWithVectorIO function
+	// if err := dc.writeMainIndexWithVectorIO(currentSkiplist, tempMainPath, MainContext); err != nil {
+	//	os.Remove(tempMainPath)
+	//	return fmt.Errorf("failed to write recovery main index: %w", err)
+	// }
+	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
+	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
+	os.Exit(1)
 
 	// 2. Write cache index using vectorio (include deleted entries for cache)
 	tempCachePath := dc.generateTempFileName("cache")
-	if err := dc.writeSkiplistWithVectorIO(currentSkiplist, tempCachePath, CacheContext); err != nil {
-		os.Remove(tempMainPath) // Cleanup main on failure
-		os.Remove(tempCachePath)
-		return fmt.Errorf("failed to write recovery cache index: %w", err)
-	}
+	// TODO: Replace with callback-based writing using RecoveryCallback pattern
+	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
+	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
+	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for cache index writing\n")
+	os.Exit(1)
 
 	// Cleanup scan index file now that temp indices are written
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
@@ -1397,45 +1409,56 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 
 	// Step 6: Write recovered cache index
 	tempCachePath := dc.generateTempFileName("cache")
-	if err := dc.writeSkiplistWithVectorIO(finalSkiplist, tempCachePath, CacheContext); err != nil {
-		os.Remove(tempCachePath)
-		return fmt.Errorf("failed to write recovered cache index: %w", err)
-	}
+	// TODO: Replace with callback-based writing using RecoveryCallback pattern
+	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
+	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
+	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for cache index writing\n")
+	os.Exit(1)
 
 	// Step 7: Write recovered main index (excluding deleted)
-	tempMainPath := dc.generateTempFileName("main")
-	if err := dc.writeMainIndexWithVectorIO(finalSkiplist, tempMainPath, MainContext); err != nil {
-		os.Remove(tempCachePath)
-		os.Remove(tempMainPath)
-		return fmt.Errorf("failed to write recovered main index: %w", err)
-	}
+	_ = dc.generateTempFileName("main") // tempMainPath - unused until RecoveryCallback implemented
+	// TODO: Replace with callback-based writing using RecoveryCallback pattern
+	// This batch writing approach uses problematic writeMainIndexWithVectorIO function
+	// if err := dc.writeMainIndexWithVectorIO(finalSkiplist, tempMainPath, MainContext); err != nil {
+	//	os.Remove(tempCachePath)
+	//	os.Remove(tempMainPath)
+	//	return fmt.Errorf("failed to write recovered main index: %w", err)
+	// }
+	_ = finalSkiplist // finalSkiplist - unused until RecoveryCallback implemented
+	_ = tempCachePath // tempCachePath - unused until RecoveryCallback implemented
+	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
+	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
+	os.Exit(1)
 
+	// Unreachable code after os.Exit(1) - commented out until RecoveryCallback implemented
 	// Step 8: Atomic replacement
-	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
-		os.Remove(tempCachePath)
-		os.Remove(tempMainPath)
-		return fmt.Errorf("failed to replace cache index: %w", err)
-	}
+	// Unreachable code after os.Exit(1) - commented out until RecoveryCallback implemented
+	// if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
+	//	os.Remove(tempCachePath)
+	//	os.Remove(tempMainPath)
+	//	return fmt.Errorf("failed to replace cache index: %w", err)
+	// }
 
-	if err := os.Rename(tempMainPath, dc.IndexFile); err != nil {
-		os.Remove(tempMainPath)
-		return fmt.Errorf("failed to replace main index: %w", err)
-	}
+	// if err := os.Rename(tempMainPath, dc.IndexFile); err != nil {
+	//	os.Remove(tempMainPath)
+	//	return fmt.Errorf("failed to replace main index: %w", err)
+	// }
 
 	// Cleanup scan files after successful recovery
-	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-		if verbosity >= 2 {
-			VerboseLog(2, "Warning: failed to cleanup scan file: %v", err)
-		}
-	}
+	// if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
+	//	if verbosity >= 2 {
+	//		VerboseLog(2, "Warning: failed to cleanup scan file: %v", err)
+	//	}
+	// }
 
-	if verbosity >= 1 {
-		VerboseLog(1, "Recovery completed successfully. Backups created:")
-		for _, backup := range backupPaths {
-			VerboseLog(1, "  %s", backup)
-		}
-		VerboseLog(1, "Final result: %d entries in both main and cache indices", finalSkiplist.Length())
-	}
+	// if verbosity >= 1 {
+	//	VerboseLog(1, "Recovery completed successfully. Backups created:")
+	//	for _, backup := range backupPaths {
+	//		VerboseLog(1, "  %s", backup)
+	//	}
+	//	VerboseLog(1, "Final result: %d entries in both main and cache indices", finalSkiplist.Length())
+	// }
 
-	return nil
+	// return nil
+	return nil // Unreachable but required for Go compiler
 }

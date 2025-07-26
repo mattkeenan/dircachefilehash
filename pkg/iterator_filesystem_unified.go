@@ -222,13 +222,19 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 		ufsi.scanIndexFileName = ""
 	}
 	
-	// Drain any remaining entries from the channel
+	// Drain any remaining entries from the channel (non-blocking)
 	if ufsi.scanChan != nil {
-		go func() {
-			for range ufsi.scanChan {
-				// Drain the channel
+		// Non-blocking drain - just empty what's currently buffered
+	drainLoop:
+		for {
+			select {
+			case <-ufsi.scanChan:
+				// Drain buffered entry
+			default:
+				// No more buffered entries, done
+				break drainLoop
 			}
-		}()
+		}
 	}
 	
 	return nil

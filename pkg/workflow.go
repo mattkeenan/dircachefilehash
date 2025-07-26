@@ -141,21 +141,6 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	return skiplist, nil
 }
 
-// createUnifiedTmpIndexFromScan scans the directory using unified architecture
-func (dc *DirectoryCache) createUnifiedTmpIndexFromScan(shutdownChan <-chan struct{}, comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
-	// Use the unified PerformUnifiedScanToSkiplist workflow  
-	scanSkiplist, err := dc.performUnifiedScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
-	// Pass through both the skiplist and error - the caller will decide if partial data is acceptable
-	return scanSkiplist, err
-}
-
-// CreateTmpIndexFromScan scans the directory and creates a temporary index using the unified v0.7 architecture
-func (dc *DirectoryCache) createTmpIndexFromScan(shutdownChan <-chan struct{}, comparisonSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
-	// Use the unified v0.7 architecture with hwangLinUnified
-	scanSkiplist, err := dc.createUnifiedTmpIndexFromScan(shutdownChan, comparisonSkiplist)
-	// Pass through both the skiplist and error - the caller will decide if partial data is acceptable
-	return scanSkiplist, err
-}
 
 // runStatusWorkflowUnified implements the Status command workflow using unified architecture
 // This follows the v0.7 pattern: write to cache-{timestamp}.idx, rename to cache.idx on success,
@@ -211,64 +196,74 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 		return nil, fmt.Errorf("failed to merge cache with main index: %w", err)
 	}
 
-	// Step 5: Create tmp index from scan using unified Hwang-Lin algorithm
-	scanSkiplist, scanErr := dc.createUnifiedTmpIndexFromScan(shutdownChan, workingSkiplist)
-	
-	// If we got absolutely no data, return error immediately
-	if scanErr != nil && scanSkiplist == nil {
-		return nil, fmt.Errorf("failed to create scan index: %w", scanErr)
-	}
-	
-	// If we have partial data due to interruption, continue to save it
-	if scanErr != nil && IsDebugEnabled("scan") {
-		fmt.Fprintf(os.Stderr, "[WORKFLOW] Scan interrupted, continuing with partial data (%d entries)\n", scanSkiplist.Length())
+	// v0.7 unified: Use performUnifiedStatusScan which handles iterative writing via StatusCallback
+	// This writes directly to temp cache index during Hwang-Lin iteration - no skiplist handling needed
+	resultSkiplist, scanErr := dc.performUnifiedStatusScan(shutdownChan, cacheTempFileName, workingSkiplist)
+	if scanErr != nil {
+		// v0.7: On interruption, StatusCallback handles cleanup and partial results preserved in timestamped file
+		// operationSuccessful remains false, so defer will leave timestamped file for startup merge
+		return resultSkiplist, fmt.Errorf("status scan interrupted: %w", scanErr)
 	}
 
-	// Merge scan results back into workingSkiplist to create complete state
-	// This ensures the returned skiplist contains all files (unchanged + changed)
-	if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
-		if err := workingSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
-			return nil, fmt.Errorf("failed to merge scan results: %w", err)
+	// v0.7: performUnifiedStatusScan has already written cache entries to cacheTempFileName
+	// Mark operation as successful so defer will rename to cache.idx and cleanup timestamped files
+	operationSuccessful = true
+	
+	return resultSkiplist, nil
+}
+
+// performUnifiedStatusScan performs status scan using StatusCallback for v0.7 cache writing
+// This follows the same pattern as performUnifiedScanToSkiplist but uses StatusCallback
+// to filter and write only cache entries (not in main context) during iteration
+func (dc *DirectoryCache) performUnifiedStatusScan(shutdownChan <-chan struct{}, cacheFileName string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+	defer VerboseEnter()()
+	
+	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
+	dc.scanMutex.Lock()
+	defer dc.scanMutex.Unlock()
+
+	// If a scan is already in progress, wait for it and return the same results
+	if dc.scanInProgress {
+		if dc.lastScanError != nil {
+			return nil, dc.lastScanError
 		}
+		return dc.lastScanResult, nil
 	}
 
-	// Steps 6-8 are handled inside createUnifiedTmpIndexFromScan (Hwang-Lin, hashing, waiting)
+	// Mark scan as in progress
+	dc.scanInProgress = true
+	defer func() {
+		dc.scanInProgress = false
+	}()
 
-	// Step 9: Filter cache entries (entries not in main context)
-	cacheOnlySkiplist := workingSkiplist.FilterNotByContext(MainContext)
+	// Create hash job manager for concurrent hashing
+	hashJobManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
+	defer hashJobManager.Shutdown()
 
-	// If no cache entries, remove cache file and mark success
-	if cacheOnlySkiplist.IsEmpty() {
-		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[WORKFLOW] No cache entries found, removing cache file\n")
-		}
-		os.Remove(dc.CacheFile)
-		operationSuccessful = true // No cache file to write, so this is success
-		// Return the complete working skiplist and the original scan error (if any)
-		return workingSkiplist, scanErr
-	}
-	
-	if IsDebugEnabled("scan") {
-		fmt.Fprintf(os.Stderr, "[WORKFLOW] Writing cache index to timestamped file %s with %d entries\n", cacheTempFileName, cacheOnlySkiplist.Length())
-	}
+	// Create iterators for unified algorithm
+	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing", shutdownChan)
+	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
 
-	// Step 10 & 11: Write cache index to timestamped file (v0.7 pattern)
-	// Note: We defer cleanup of scan index file until after Status completes
-	// to avoid use-after-free when Status reads from scan skiplist
-	if writeErr := dc.atomicWriteIndex(cacheOnlySkiplist, cacheTempFileName, CacheContext, false); writeErr != nil {
-		// If we can't write the cache, at least return the complete working data we have
-		return workingSkiplist, fmt.Errorf("scan error: %v, cache write error: %w", scanErr, writeErr)
+	// Create status callback for v0.7 direct cache index writing
+	statusCallback := NewStatusCallback("status", dc, hashJobManager, cacheFileName)
+
+	// Run unified algorithm with StatusCallback
+	scanErr := hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan)
+	if scanErr != nil {
+		dc.lastScanResult = compareSkiplist // Return original skiplist on error
+		dc.lastScanError = scanErr
+		return compareSkiplist, scanErr
 	}
 
-	// If we got here without interruption, mark operation as successful
-	if scanErr == nil {
-		operationSuccessful = true
-	}
-	// Note: If scanErr != nil, we still wrote partial results but don't mark as successful
-	// This leaves the timestamped file for startup merge (correct v0.7 behavior)
+	// Signal that no more hash jobs will be submitted
+	hashJobManager.FinishSubmitting()
 
-	// Return the complete working skiplist and propagate the scan error (if any) so caller knows scan was interrupted
-	return workingSkiplist, scanErr
+	// v0.7: StatusCallback has written cache entries to temp cache index file
+	// Return the original comparison skiplist (represents complete file state)
+	dc.lastScanResult = compareSkiplist
+	dc.lastScanError = nil
+
+	return compareSkiplist, nil
 }
 
 // updateCacheIndexWithWorkflow has been moved to v0.6/pkg/workflow.go as part of the v0.7 unified

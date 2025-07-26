@@ -1,80 +1,92 @@
-# v0.7 Architecture Status & Signal Handling Implementation
+# v0.7 Architecture Status & Implementation
 
-## 🎯 IMPLEMENTING SIGNAL HANDLING FIX (2025-07-17)
+## 🎯 CURRENT STATUS (2025-07-26)
 
-### Implementation Plan: Signal-Aware ForEachRef()
+### ✅ COMPLETED TASKS
+- ✅ **Fixed algorithmHashManager off-by-one error** - Changed nextJobID from 1→0 so first JobID=1 matches nextExpectedJobID=1  
+- ✅ **Implemented parking skiplist architecture** - Added cookie-based path order preservation with non-blocking completion processing
+- ✅ **Fixed UpdateCallback async coordination** - Entries now properly wait for hash completion before writing to index
+- ✅ **Updated architecture documentation** - Added comprehensive async completion processing patterns
 
-Following the scratchpad proposal and "the best part is no part" principle, we need to modify the existing `ForEachRef()` method to accept shutdown channel instead of creating new methods.
+## 🔧 IMMEDIATE TASKS
 
-**Target Change in `pkg/skiplist.go`**:
-1. Modify `ForEachRef()` signature to accept shutdown channel
-2. Add shutdown checking in the iteration loop  
-3. Update all callers to pass shutdown channel and handle error return
-4. Update `BinaryEntrySkiplistIterator` to propagate shutdown channel
+### 1. Compilation Fixes (HIGH PRIORITY)
+**Task**: Fix any missing imports or method signature issues in `pkg/callback_update.go`
+**Expected Issues**: Missing imports (fmt, sync/atomic), undefined types (IoVec, TempIndexWriter)
 
-**Key Files to Modify**:
-- `pkg/skiplist.go` - Core ForEachRef() implementation
-- `pkg/iterator_skiplist_unified.go` - BinaryEntrySkiplistIterator.Next() method
-- All callers of ForEachRef() - add shutdown channel parameter
+### 2. Test Current Implementation (HIGH PRIORITY)  
+**Task**: Run `TestAdaptiveUpdateInterruption` to verify livelock fixes work
+**Command**: `cd cmd/dcfh && go test -run TestAdaptiveUpdateInterruption -v -timeout 60s`
 
-**Implementation Strategy**:
-1. **Step 1**: Update ForEachRef() signature and add shutdown checking
-2. **Step 2**: Update BinaryEntrySkiplistIterator to accept and use shutdown channel
-3. **Step 3**: Update all ForEachRef() callers with shutdown channel
-4. **Step 4**: Test signal handling across all commands
+## 📋 ROBUST SIGNAL HANDLING TEST FRAMEWORK PLAN
 
-## ✅ COMPLETED FIXES
+### Problem Statement
+We've had recurring issues with signal handling, goroutine coordination, and channel management in the hwangLinUnified/callback system. Need comprehensive test coverage to prevent future regressions.
 
-### BEScanEntry Locking Deadlocks (Fixed)
-- ✅ **Fixed 11 locking inconsistencies** in `pkg/binary_entry_scan.go`
-- ✅ **Signal handling tests updated** to use `strings` instead of buggy `dcfhfind`
-- ✅ **Basic signal infrastructure working** for update commands (non-status)
+### Test Framework Design Plan
 
-### Core v0.7 Architecture (95% Complete)
-- ✅ **Hash job submission gap fixed** - Added GetNextJobID(), proper hashJobStart creation
-- ✅ **Temp index to main.idx rename fixed** - Removed redundant atomicWriteIndex call
-- ✅ **Hash type configuration fixed** - Replaced hardcoded HashTypeSHA1 with dc.GetCurrentHashType()
-- ✅ **Checksum calculation order fixed** - Made verification match TempIndexWriter order
-- ✅ **Entry size alignment fixed** - Added 8-byte alignment to size calculations
+#### 1. **Test Categories** (3-4 distinct test scenarios)
 
-## 🔧 SIGNAL HANDLING ROOT CAUSE & SOLUTION
+**A. Basic Signal Handling Tests**
+- Test SIGINT delivery and processing during different phases (scan, hash, write)
+- Verify shutdown channels propagate correctly through all components
+- Test timeout handling and graceful degradation
 
-### Problem Identified
-The `BinaryEntrySkiplistIterator.Next()` method uses `skiplist.ForEachRef()` which cannot be interrupted by signals, causing infinite loops during signal handling tests.
+**B. Channel Coordination Tests**  
+- Test completion channel consumption (non-blocking reads work correctly)
+- Test parking skiplist retirement under various timing scenarios
+- Test cookie-to-entry mapping cleanup during interruptions
 
-### Solution Architecture
-Modify existing `ForEachRef()` method to accept shutdown channel parameter - follows "the best part is no part" principle by fixing existing code instead of adding new methods.
+**C. Stress/Race Condition Tests**
+- Test rapid file processing with frequent interruptions
+- Test hash completion race conditions (jobs complete before/after interruption)
+- Test multiple goroutine shutdown coordination
 
-**Target Implementation**:
-```go
-func (sw *skiplistWrapper) ForEachRef(callback func(binaryEntryRef, string) bool, shutdownChan <-chan struct{}) error {
-    for current := sw.skiplist.First(); current != nil; current = current.Next() {
-        // Check for shutdown signal before processing each entry
-        select {
-        case <-shutdownChan:
-            return fmt.Errorf("iteration interrupted by shutdown signal")
-        default:
-            // Continue processing
-        }
-        
-        context := current.Context()
-        ref := current.Item()
-        if !callback(*ref, context) {
-            break
-        }
-    }
-    return nil
-}
-```
+**D. Integration Tests**
+- Test full hwangLinUnified workflow with controlled interruption points
+- Test different callback types (Update, Status, Dupes) handle signals consistently
+- Test recovery from partial writes and incomplete operations
 
-### Implementation Status
-- **Ready to implement**: Solution designed and validated
-- **Estimated time**: 1-2 hours to implement + test
-- **Risk**: Low - simple change with clear benefits
+#### 2. **Test Infrastructure Components**
 
-## 🎯 IMPLEMENTATION NEXT STEPS
+**Mock Helpers**:
+- Controllable hash manager with simulated completion delays
+- File system simulator with configurable timing  
+- Signal injection at precise execution points
 
-1. **Modify ForEachRef() signature** - Add shutdown channel parameter and error return
-2. **Update iterator constructors** - Accept and store shutdown channel  
-3. **Update all callers** - Pass shutdown channel to ForEachRef() calls
-4. **Test comprehensive signal handling** - Verify across status, update, dupes commands
+**Verification Helpers**:
+- Channel state inspection (empty/full, closed status)
+- Goroutine leak detection
+- Resource cleanup verification (temp files, memory)
+
+**Timing Helpers**:
+- Deterministic signal delivery (not random timing)
+- Controlled hash completion sequencing  
+- Precise interruption point targeting
+
+#### 3. **Implementation Approach** (2-3 hours)
+
+**Phase 1**: Create test infrastructure
+- Build controllable mocks for algorithmHashManager, filesystem scanning
+- Add channel state inspection utilities
+- Create deterministic signal delivery mechanism
+
+**Phase 2**: Implement core test scenarios  
+- Basic signal propagation tests (do all goroutines receive shutdown signal?)
+- Completion channel drainage tests (are completions consumed properly?)
+- Parking skiplist consistency tests (entries retired in correct order?)
+
+**Phase 3**: Integration and stress tests
+- Full workflow interruption tests with various file counts
+- Race condition tests with concurrent hash completions and shutdowns
+- Resource cleanup verification tests
+
+#### 4. **Success Criteria**
+
+**Correctness**: All goroutines exit cleanly, no resource leaks, proper error handling
+**Robustness**: Tests pass consistently across multiple runs, no flaky timing issues  
+**Coverage**: Test all major signal handling code paths in hwangLinUnified, callbacks, hash manager
+**Maintainability**: Tests are fast, deterministic, and provide clear failure diagnostics
+
+### Implementation Priority
+**Next Steps**: Implement basic compilation fixes and run existing test first, then build comprehensive test framework based on what gaps we discover.

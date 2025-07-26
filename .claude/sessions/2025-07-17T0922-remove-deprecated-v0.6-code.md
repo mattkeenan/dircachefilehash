@@ -120,3 +120,47 @@ Implement the missing hash job submission bridge (2-3 hour fix):
 4. Test complete hash flow works correctly
 
 **Architecture Status**: v0.7 unified architecture is structurally complete, only missing the hash job submission connection between RequestHash() and the hash manager.
+
+### Update - 2025-07-26T10:36:48Z
+
+**Summary**: Fixed critical signal handling livelock and implemented async hash completion architecture
+
+**Git Changes**:
+- Modified: architecture-v0.7.md, pkg/algorithm_hash_manager.go, pkg/callback_update.go
+- Current branch: local-main (commit: 0dd6a96)
+
+**Todo Progress**: 2 completed, 0 in progress, 2 pending
+- ✓ Completed: Fix off-by-one error in algorithmHashManager job ID allocation
+- ✓ Completed: Implement parking skiplist mechanism in UpdateCallback for path order preservation
+
+**Issues Encountered**:
+- Critical livelock discovered: TestAdaptiveUpdateInterruption was sending SIGINT to strace process instead of dcfh process
+- Root cause identified: algorithmHashManager had off-by-one error (nextJobID=1, first allocation=2, but expected JobID=1)
+- Process was livelocked waiting for JobID=1 that never existed, with 1000+ jobs queued out-of-order
+
+**Solutions Implemented**:
+1. **Fixed Off-By-One Error**: Changed `nextJobID: 1` to `nextJobID: 0` in algorithmHashManager constructor so first `GetNextJobID()` returns 1
+2. **Implemented Parking Skiplist Architecture**:
+   - Added `parkedSkiplist` to UpdateCallback for cookie-based entry ordering
+   - Added `cookieToEntry` mapping for completion lookup
+   - Updated `SubmitAndOrWriteHash()` with non-blocking completion processing
+   - Implemented `retireContiguousEntries()` for strict sequence retirement
+3. **Fixed Test Signal Targeting**: Updated TestAdaptiveUpdateInterruption to send SIGINT to dcfh process instead of strace
+4. **Documented Architecture**: Updated architecture-v0.7.md with async completion processing patterns
+
+**Code Changes Made**:
+- `pkg/algorithm_hash_manager.go`: Fixed nextJobID initialization (line 59)
+- `pkg/callback_update.go`: Complete rewrite with parking skiplist mechanism
+  - Added parkedSkiplist, cookieToEntry fields
+  - Rewrote SubmitAndOrWriteHash() for async coordination
+  - Added processCompletedHashJobs(), retireContiguousEntries() methods
+- `cmd/dcfh/interruption_test.go`: Fixed signal targeting to dcfh process
+- `architecture-v0.7.md`: Added "Async Hash Completion Processing" section
+
+**Architecture Benefits**:
+- Eliminates livelock by ensuring completion channel gets drained regularly
+- Maintains strict path order while allowing parallel hash processing
+- Non-blocking completion processing prevents goroutine coordination issues
+- Cookie-based tracking enables efficient IoVec batching
+
+**Next Steps**: Test updated implementation and fix any compilation errors

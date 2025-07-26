@@ -67,14 +67,11 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 
 // updateSpecificPathsUnified updates only specified paths using the unified hwangLinUnified architecture
 func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{}, paths []string) error {
-	// Load main index for final output
-	mainSkiplist, err := dc.LoadMainIndex()
+	// Load main index for comparison (avoid re-hashing unchanged files)
+	comparisonSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
 		return fmt.Errorf("failed to load main index: %w", err)
 	}
-
-	// Create comparison skiplist starting with main index
-	comparisonSkiplist := mainSkiplist.Copy()
 	
 	// Load cache index and merge for comparison to avoid re-hashing
 	cacheSkiplist, err := dc.loadCacheIndex()
@@ -85,55 +82,19 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 		}
 	}
 
-	// Use unified scan workflow with merged index as comparison to get only changes in specified paths
-	scanSkiplist, err := dc.performUnifiedScanToSkiplist(shutdownChan, paths, comparisonSkiplist)
+	// v0.7 unified: Use performUnifiedScanToSkiplist which handles iterative writing via UpdateCallback
+	// This writes directly to temp main index during Hwang-Lin iteration - no skiplist handling needed
+	_, err = dc.performUnifiedScanToSkiplist(shutdownChan, paths, comparisonSkiplist)
 	if err != nil {
-		// Handle interruption by saving partial work to cache
-		if scanSkiplist != nil && !scanSkiplist.IsEmpty() {
-			// Merge partial scan results into comparison skiplist (which already has cache data)
-			if mergeErr := comparisonSkiplist.Merge(scanSkiplist, MergeTheirs); mergeErr != nil {
-				return fmt.Errorf("failed to merge partial scan results: %w", mergeErr)
-			}
-			
-			// Write to cache index atomically (CacheContext here means "create a cache index file"
-			// which excludes MainContext entries but keeps CacheContext + ScanContext entries)
-			if writeErr := dc.atomicWriteIndex(comparisonSkiplist, dc.CacheFile, CacheContext, false); writeErr != nil {
-				return fmt.Errorf("failed to save partial results to cache: %w", writeErr)
-			}
-			
-			// Cleanup scan index file after successful write
-			if cleanupErr := dc.cleanupCurrentScanFile(); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
-				fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", cleanupErr)
-			}
-		}
+		// v0.7: On interruption, UpdateCallback handles cleanup and partial results are lost
+		// (This is the correct v0.7 behavior - no cache preservation for main index updates)
 		return fmt.Errorf("update interrupted: %w", err)
 	}
 
-	// Merge scan results with main index (scan results take precedence)
-	if err := mainSkiplist.Merge(scanSkiplist, MergeTheirs); err != nil {
-		return fmt.Errorf("failed to merge scan results with main index: %w", err)
-	}
-
-	// Write new main index atomically (exclude deleted entries)
-	if err := dc.atomicWriteIndex(mainSkiplist, dc.IndexFile, MainContext, true); err != nil {
-		return fmt.Errorf("failed to write new main index: %w", err)
-	}
-
-	// Cleanup scan index file now that main index is written
-	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-		// Non-fatal, but log the error
-		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
-	}
-
-	// Update cache using the unified workflow
+	// v0.7: performUnifiedScanToSkiplist has already written and renamed temp index to main.idx
+	// Update cache using the unified workflow to reflect the new main index state
 	if _, err := dc.runStatusWorkflowUnified(shutdownChan); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
-	}
-
-	// Cleanup scan index file from cache workflow
-	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-		// Non-fatal, but log the error
-		fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
 	}
 
 	dc.checkForOrphanedIndexFiles()

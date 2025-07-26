@@ -56,7 +56,7 @@ func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <
 		jobIDToCookie:       make(map[uint64]uint64),
 		externalCompletionChan: make(chan hashJobCompletion, 100),
 		completionChan:      make(chan uint64, 100),
-		nextJobID:           1, // Start job ID allocation at 1
+		nextJobID:           0, // Start job ID allocation at 0 so first GetNextJobID() returns 1
 	}
 	
 	// Start hash workers (same as simpleHashManager)
@@ -97,6 +97,7 @@ func (ahm *algorithmHashManager) UnregisterIteratorNotification(notifyChan chan<
 // completionProcessor processes hash job completions and sends ordered notifications
 func (ahm *algorithmHashManager) completionProcessor() {
 	defer ahm.processorWg.Done()
+	defer close(ahm.externalCompletionChan) // Close external completion channel on exit
 	
 	for {
 		select {
