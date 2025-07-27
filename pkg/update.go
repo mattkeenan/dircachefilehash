@@ -173,7 +173,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
 
 	// Create update callback for v0.7 direct temp index writing
-	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager)
+	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager, shutdownChan)
 
 	// Run unified algorithm (replaces the complex internal logic)
 	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)

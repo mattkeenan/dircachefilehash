@@ -1,15 +1,12 @@
 package dircachefilehash
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 	"unsafe"
-	"github.com/google/vectorio"
 )
 
 // UpdateCallback implements HwangLinCallback for v0.7 direct temp index writing
@@ -655,8 +652,8 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 	
 	// Retire entries in strict path order ID sequence (no gaps allowed)
 	for {
-		pathOrderStr := fmt.Sprintf("%d", uc.nextRetireIndex)
-		entry := uc.retireSkiplist.FindByContext(pathOrderStr)
+		// O(1) lookup by path order ID
+		entry := uc.pathOrderToEntry[uc.nextRetireIndex]
 		if entry == nil {
 			break // Gap found - cannot retire until this path order ID arrives
 		}
@@ -670,11 +667,14 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
 				VerboseLog(3, "[UPDATE-RETIRE] Retiring entry %s (pathOrderID=%d)", path, uc.nextRetireIndex)
+				// Remove from skiplist by path (not context)
+				uc.retireSkiplist.Delete(path)
 			}
 		}
 		
 		readyIoVecs = append(readyIoVecs, ioVec)
-		uc.retireSkiplist.RemoveByContext(pathOrderStr)
+		// Clean up path order mapping
+		delete(uc.pathOrderToEntry, uc.nextRetireIndex)
 		uc.nextRetireIndex++
 	}
 	
@@ -727,7 +727,7 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 func (uc *UpdateCallback) ensureTempIndexWriter() error {
 	if uc.tempIndexWriter == nil {
 		var err error
-		uc.tempIndexWriter, err = NewTempIndexWriter(uc.tempIndexFileName)
+		uc.tempIndexWriter, err = NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
 		if err != nil {
 			return fmt.Errorf("failed to create temp index writer: %w", err)
 		}
