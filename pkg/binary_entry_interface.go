@@ -46,40 +46,40 @@ type BinaryEntryInterface interface {
 	HashType() (uint16, error)
 	Hash() ([20]byte, error)
 	EntryFlags() (uint32, error)
-	
+
 	// Derived methods (acquire read lock, can return errors for ephemeral entries)
 	RelativePath() (string, error)
 	HashString() (string, error)
 	IsDeleted() (bool, error)
 	GetContext() (string, error)
-	
+
 	// Setters (acquire write lock, can return errors for ephemeral entries)
 	SetHash(hashBytes []byte, hashType uint16) error
 	SetDeleted(deleted bool) error
-	
+
 	// Hash coordination for two-phase processing
-	RequestHash() error  // Request that this entry be hashed (callback → iterator communication)
-	IsHashRequested() (bool, error)  // Check if hashing has been requested
-	IsHashCompleted() (bool, error)  // Check if hashing has been completed
-	
+	RequestHash() error             // Request that this entry be hashed (callback → iterator communication)
+	IsHashRequested() (bool, error) // Check if hashing has been requested
+	IsHashCompleted() (bool, error) // Check if hashing has been completed
+
 	// Internal hash coordination methods (for use by hash managers)
-	SetHashJobID(jobID uint64)       // Set the job ID when submitting to hash manager
-	GetHashJobID() uint64            // Get the job ID for completion tracking
-	MarkHashCompleted()              // Mark hashing as completed
-	
+	SetHashJobID(jobID uint64) // Set the job ID when submitting to hash manager
+	GetHashJobID() uint64      // Get the job ID for completion tracking
+	MarkHashCompleted()        // Mark hashing as completed
+
 	// Manual locking for batch operations
 	// These allow efficient multi-field access without re-acquiring locks
 	RLock()
 	RUnlock()
 	Lock()
 	Unlock()
-	
+
 	// Entry lifecycle
-	IsValid() bool  // Quick check if entry is still accessible (for ephemeral entries)
-	
+	IsValid() bool // Quick check if entry is still accessible (for ephemeral entries)
+
 	// Skiplist building capabilities
-	SupportsSkiplistBuilding() bool                    // Can entries be used to build skiplist?
-	GetBinaryEntryRef() (binaryEntryRef, bool)        // Get ref if available for skiplist building
+	SupportsSkiplistBuilding() bool            // Can entries be used to build skiplist?
+	GetBinaryEntryRef() (binaryEntryRef, bool) // Get ref if available for skiplist building
 }
 
 // BinaryEntryImplementationType identifies the type of implementation
@@ -88,13 +88,13 @@ type BinaryEntryImplementationType int
 const (
 	// BESkiplist - mmap-backed entries in skiplist
 	BESkiplist BinaryEntryImplementationType = iota
-	
+
 	// BEIndexFileIO - standard file I/O access
 	BEIndexFileIO
-	
+
 	// BEIndexFileMmap - mmap with iterative skiplist building
 	BEIndexFileMmap
-	
+
 	// BEScan - ephemeral mmap entries for hash coordination
 	BEScan
 )
@@ -120,19 +120,19 @@ func (t BinaryEntryImplementationType) String() string {
 type BinaryEntryBase struct {
 	mutex              sync.RWMutex
 	implementationType BinaryEntryImplementationType
-	supportsSkiplist   bool  // Whether this implementation supports skiplist building
-	
+	supportsSkiplist   bool // Whether this implementation supports skiplist building
+
 	// Hash coordination state for two-phase processing
-	hashRequested      bool    // Whether hashing has been requested
-	hashCompleted      bool    // Whether hashing has been completed
-	hashJobID          uint64  // Job ID if hash has been requested (0 = not requested)
+	hashRequested bool   // Whether hashing has been requested
+	hashCompleted bool   // Whether hashing has been completed
+	hashJobID     uint64 // Job ID if hash has been requested (0 = not requested)
 }
 
 // NewBinaryEntryBase creates a new BinaryEntryBase with the specified implementation type
 func NewBinaryEntryBase(implType BinaryEntryImplementationType) BinaryEntryBase {
 	// Determine skiplist support based on implementation type
 	supportsSkiplist := (implType == BESkiplist || implType == BEIndexFileMmap || implType == BEScan)
-	
+
 	return BinaryEntryBase{
 		implementationType: implType,
 		supportsSkiplist:   supportsSkiplist,
@@ -176,7 +176,7 @@ func (base *BinaryEntryBase) GetBinaryEntryRef() (binaryEntryRef, bool) {
 func (base *BinaryEntryBase) RequestHash() error {
 	base.mutex.Lock()
 	defer base.mutex.Unlock()
-	
+
 	// Already requested or completed
 	if base.hashRequested || base.hashCompleted {
 		if IsDebugEnabled("hash") {
@@ -184,16 +184,16 @@ func (base *BinaryEntryBase) RequestHash() error {
 		}
 		return nil
 	}
-	
+
 	// b) Hash request tracing (but this is just flag setting!)
 	if IsDebugEnabled("hash") {
 		VerboseLog(3, "[HASH-REQUEST] Setting hashRequested flag (but NO actual job submission to manager)")
 	}
-	
+
 	// Set request flag - job ID should be assigned by the hash manager
 	base.hashRequested = true
 	// Note: hashJobID will be set by the hash manager when the job is actually submitted
-	
+
 	return nil
 }
 
@@ -201,7 +201,7 @@ func (base *BinaryEntryBase) RequestHash() error {
 func (base *BinaryEntryBase) IsHashRequested() (bool, error) {
 	base.mutex.RLock()
 	defer base.mutex.RUnlock()
-	
+
 	return base.hashRequested, nil
 }
 
@@ -209,7 +209,7 @@ func (base *BinaryEntryBase) IsHashRequested() (bool, error) {
 func (base *BinaryEntryBase) IsHashCompleted() (bool, error) {
 	base.mutex.RLock()
 	defer base.mutex.RUnlock()
-	
+
 	return base.hashCompleted, nil
 }
 
@@ -218,7 +218,7 @@ func (base *BinaryEntryBase) IsHashCompleted() (bool, error) {
 func (base *BinaryEntryBase) SetHashJobID(jobID uint64) {
 	base.mutex.Lock()
 	defer base.mutex.Unlock()
-	
+
 	base.hashJobID = jobID
 }
 
@@ -226,7 +226,7 @@ func (base *BinaryEntryBase) SetHashJobID(jobID uint64) {
 func (base *BinaryEntryBase) GetHashJobID() uint64 {
 	base.mutex.RLock()
 	defer base.mutex.RUnlock()
-	
+
 	return base.hashJobID
 }
 
@@ -235,7 +235,7 @@ func (base *BinaryEntryBase) GetHashJobID() uint64 {
 func (base *BinaryEntryBase) MarkHashCompleted() {
 	base.mutex.Lock()
 	defer base.mutex.Unlock()
-	
+
 	base.hashCompleted = true
 }
 
@@ -253,10 +253,10 @@ func (base *BinaryEntryBase) IsEphemeral() bool {
 var (
 	// ErrEntryInvalidated is returned when an ephemeral entry has been invalidated
 	ErrEntryInvalidated = fmt.Errorf("binary entry has been invalidated (munmap/mremap)")
-	
+
 	// ErrEntryNotWritable is returned when trying to modify a read-only entry
 	ErrEntryNotWritable = fmt.Errorf("binary entry is read-only")
-	
+
 	// ErrEntryCorrupted is returned when entry data appears corrupted
 	ErrEntryCorrupted = fmt.Errorf("binary entry data is corrupted")
 )
@@ -269,12 +269,12 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingEntry == nil {
 		return true
 	}
-	
+
 	// If no scanned entry, assume needs hashing (shouldn't happen in normal flow)
 	if scannedEntry == nil {
 		return true
 	}
-	
+
 	// Quick size check
 	existingSize, err := existingEntry.FileSize()
 	if err != nil {
@@ -287,7 +287,7 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingSize != scannedSize {
 		return true
 	}
-	
+
 	// Check ownership
 	existingUID, err := existingEntry.UID()
 	if err != nil {
@@ -300,7 +300,7 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingUID != scannedUID {
 		return true
 	}
-	
+
 	existingGID, err := existingEntry.GID()
 	if err != nil {
 		return true
@@ -312,7 +312,7 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingGID != scannedGID {
 		return true
 	}
-	
+
 	// Check mode
 	existingMode, err := existingEntry.Mode()
 	if err != nil {
@@ -325,7 +325,7 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingMode != scannedMode {
 		return true
 	}
-	
+
 	// Check timestamps using wall time
 	existingCTime, err := existingEntry.CTimeWall()
 	if err != nil {
@@ -338,7 +338,7 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingCTime != scannedCTime {
 		return true
 	}
-	
+
 	existingMTime, err := existingEntry.MTimeWall()
 	if err != nil {
 		return true
@@ -350,6 +350,6 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 	if existingMTime != scannedMTime {
 		return true
 	}
-	
+
 	return false // No changes detected, no hashing needed
 }

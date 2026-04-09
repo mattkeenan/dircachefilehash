@@ -83,7 +83,7 @@ func (sr *SnapshotRepository) Initialise() error {
 	// Create config file if it doesn't exist
 	configPath := filepath.Join(sr.SnapshotsDir, "config")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		config := map[string]interface{}{
+		config := map[string]any{
 			"version": "1",
 			"id":      generateRepositoryID(),
 			"created": time.Now().UTC(),
@@ -547,7 +547,7 @@ func generateSnapshotID(t time.Time) string {
 }
 
 func generateRepositoryID() string {
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
+	hash := sha256.Sum256(fmt.Appendf(nil, "%d", time.Now().UnixNano()))
 	return hex.EncodeToString(hash[:16])
 }
 

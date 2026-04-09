@@ -9,13 +9,13 @@ import (
 // in a single pass without needing to iterate through all entries separately.
 type DupesCallback struct {
 	CallbackBase
-	
+
 	// Hash map storing file paths by their hash value
 	hashMap map[string][]string
-	
+
 	// Mutex to protect concurrent access to hashMap
 	mutex sync.Mutex
-	
+
 	// Results after processing is complete
 	results []DuplicateGroup
 }
@@ -37,7 +37,7 @@ func (dc *DupesCallback) OnComparison(
 ) (bool, error) {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	switch result {
 	case ComparisonMatch:
 		// Both entries exist - add the right entry (current filesystem state)
@@ -49,11 +49,11 @@ func (dc *DupesCallback) OnComparison(
 				}
 			}
 		}
-		
+
 	case ComparisonLeftFirst:
 		// Left entry exists but not on right - this is a deleted file
 		// Don't add deleted files to duplicate detection
-		
+
 	case ComparisonRightFirst:
 		// Right entry exists but not on left - this is a new/added file
 		if rightEntry != nil {
@@ -63,7 +63,7 @@ func (dc *DupesCallback) OnComparison(
 				}
 			}
 		}
-		
+
 	case ComparisonLeftExhausted:
 		// Only right entries remain - these are all new/added files
 		if rightEntry != nil {
@@ -73,12 +73,12 @@ func (dc *DupesCallback) OnComparison(
 				}
 			}
 		}
-		
+
 	case ComparisonRightExhausted:
 		// Only left entries remain - these are all deleted files
 		// Don't add deleted files to duplicate detection
 	}
-	
+
 	return true, nil // Continue processing
 }
 
@@ -106,11 +106,11 @@ func (dc *DupesCallback) OnRightOnly(entry BinaryEntryInterface, path string) (b
 func (dc *DupesCallback) OnComplete(err error) error {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	// Convert hash map to DuplicateGroup results
 	// Only include hashes that have more than one file
 	dc.results = make([]DuplicateGroup, 0)
-	
+
 	for hash, files := range dc.hashMap {
 		if len(files) > 1 {
 			dc.results = append(dc.results, DuplicateGroup{
@@ -120,7 +120,7 @@ func (dc *DupesCallback) OnComplete(err error) error {
 			})
 		}
 	}
-	
+
 	return nil
 }
 
@@ -129,7 +129,7 @@ func (dc *DupesCallback) OnComplete(err error) error {
 func (dc *DupesCallback) GetResults() []DuplicateGroup {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	// Return a copy to prevent external modification
 	results := make([]DuplicateGroup, len(dc.results))
 	copy(results, dc.results)
@@ -140,17 +140,17 @@ func (dc *DupesCallback) GetResults() []DuplicateGroup {
 func (dc *DupesCallback) GetHashMapStats() (totalHashes int, totalEntries int, duplicateHashes int) {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	totalHashes = len(dc.hashMap)
 	duplicateHashes = 0
-	
+
 	for _, files := range dc.hashMap {
 		totalEntries += len(files)
 		if len(files) > 1 {
 			duplicateHashes++
 		}
 	}
-	
+
 	return totalHashes, totalEntries, duplicateHashes
 }
 
@@ -158,7 +158,7 @@ func (dc *DupesCallback) GetHashMapStats() (totalHashes int, totalEntries int, d
 func (dc *DupesCallback) Clear() {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	
+
 	dc.hashMap = make(map[string][]string)
 	dc.results = nil
 }

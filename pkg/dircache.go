@@ -182,7 +182,7 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		dc.hashWorkers = performanceConfig.HashWorkers
 		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
 	} else {
-		dc.hashWorkers = 4 // fallback default
+		dc.hashWorkers = 4      // fallback default
 		dc.indexLockTimeout = 5 // fallback default (5 seconds)
 	}
 
@@ -366,21 +366,12 @@ func repoDir() (string, error) {
 	return "", fmt.Errorf("not a dcfh repository (or any of the parent directories): .dcfh directory not found")
 }
 
-// dcfhDir returns the .dcfh directory path
-func dcfhDir() (string, error) {
-	repoRoot, err := repoDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(repoRoot, ".dcfh"), nil
-}
-
 // registerIndex tracks an mmap'd index file for memory protection
 func (dc *DirectoryCache) registerIndex(indexType string, indexFile *mmapIndexFile) {
 	if indexFile == nil {
 		return
 	}
-	
+
 	switch indexType {
 	case "main":
 		dc.mainIndex = indexFile
@@ -397,7 +388,7 @@ func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndex
 	if indexFile == nil {
 		return
 	}
-	
+
 	switch indexType {
 	case "main":
 		if dc.mainIndex == indexFile {
@@ -423,7 +414,7 @@ func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndex
 // getIndexForEntry identifies which mmap'd index file contains the given entry
 func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
 	entryPtr := uintptr(unsafe.Pointer(entry))
-	
+
 	// Check main index
 	if dc.mainIndex != nil && dc.mainIndex.Data != nil {
 		dataStart := uintptr(unsafe.Pointer(&dc.mainIndex.Data[0]))
@@ -432,7 +423,7 @@ func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
 			return dc.mainIndex
 		}
 	}
-	
+
 	// Check cache index
 	if dc.cacheIndex != nil && dc.cacheIndex.Data != nil {
 		dataStart := uintptr(unsafe.Pointer(&dc.cacheIndex.Data[0]))
@@ -441,7 +432,7 @@ func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
 			return dc.cacheIndex
 		}
 	}
-	
+
 	// Check scan indices
 	for _, scanIndex := range dc.scanIndices {
 		if scanIndex != nil && scanIndex.Data != nil {
@@ -452,20 +443,20 @@ func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // getAllReferencedIndices collects all unique indices referenced by entries in a skiplist
 func (dc *DirectoryCache) getAllReferencedIndices(skiplist *skiplistWrapper) map[*mmapIndexFile]bool {
 	indices := make(map[*mmapIndexFile]bool)
-	
+
 	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
 		if index := dc.getIndexForEntry(entry); index != nil {
 			indices[index] = true
 		}
 		return true // Continue iteration
 	})
-	
+
 	return indices
 }

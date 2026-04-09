@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"unsafe"
-	
+
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
@@ -13,25 +13,25 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s <input-v1.idx> <output-v2.idx>\n", os.Args[0])
 		os.Exit(1)
 	}
-	
+
 	inputFile := os.Args[1]
 	outputFile := os.Args[2]
-	
+
 	fmt.Printf("Converting %s to v2 format...\n", inputFile)
-	
+
 	// Process the index file
-	
+
 	// Use IterateIndexFile to process entries
 	convertedCount := 0
 	totalCount := 0
-	
+
 	// First pass: count and identify entries that need hashing flag
 	entries := make([]*dircachefilehash.EntryInfo, 0)
-	
+
 	err := dircachefilehash.IterateIndexFile(inputFile, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
 		totalCount++
 		entries = append(entries, entry)
-		
+
 		// Check if entry has a valid hash
 		hasValidHash := false
 		if entry.HashType != 0 && entry.HashStr != "" {
@@ -45,28 +45,28 @@ func main() {
 			}
 			hasValidHash = !allZeros
 		}
-		
+
 		if hasValidHash {
 			convertedCount++
 		}
-		
+
 		return true // Continue iteration
 	})
-	
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error processing index: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	fmt.Printf("Processed %d entries, %d will be marked as hashed\n", totalCount, convertedCount)
-	
+
 	// Read the file data for binary manipulation
 	data, err := os.ReadFile(inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input file: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	// Use the EXACT structs from the codebase
 	// indexHeader from pkg/index.go:23-31
 	type indexHeader struct {
@@ -78,43 +78,43 @@ func main() {
 		ChecksumType uint16   // Checksum algorithm type (matches binaryEntry.HashType size)
 		Checksum     [64]byte // Checksum of header+entries (up to 512-bit support)
 	}
-	
+
 	// Get the correct offsets using unsafe.Offsetof
 	byteOrderOffset := unsafe.Offsetof(indexHeader{}.ByteOrder)
 	versionOffset := unsafe.Offsetof(indexHeader{}.Version)
 	headerSize := unsafe.Sizeof(indexHeader{})
-	
+
 	fmt.Printf("Header offsets: ByteOrder=%d, Version=%d, HeaderSize=%d\n", byteOrderOffset, versionOffset, headerSize)
-	
+
 	if len(data) >= int(headerSize) {
 		// Check if this looks like a dcfh file
 		if string(data[0:4]) == "dcfh" {
 			// Check byte order magic
 			byteOrderBytes := data[byteOrderOffset : byteOrderOffset+8]
 			expectedMagic := []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01} // Little endian
-			
+
 			isLittleEndian := true
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				if byteOrderBytes[i] != expectedMagic[i] {
 					isLittleEndian = false
 					break
 				}
 			}
-			
+
 			var currentVersion uint32
 			if isLittleEndian {
 				// Read version (little endian)
-				currentVersion = uint32(data[versionOffset]) | uint32(data[versionOffset+1])<<8 | 
+				currentVersion = uint32(data[versionOffset]) | uint32(data[versionOffset+1])<<8 |
 					uint32(data[versionOffset+2])<<16 | uint32(data[versionOffset+3])<<24
 			} else {
 				// Read version (big endian)
-				currentVersion = uint32(data[versionOffset+3]) | uint32(data[versionOffset+2])<<8 | 
+				currentVersion = uint32(data[versionOffset+3]) | uint32(data[versionOffset+2])<<8 |
 					uint32(data[versionOffset+1])<<16 | uint32(data[versionOffset])<<24
 			}
-			
-			fmt.Printf("Detected %s endian format, current version: %d\n", 
+
+			fmt.Printf("Detected %s endian format, current version: %d\n",
 				map[bool]string{true: "little", false: "big"}[isLittleEndian], currentVersion)
-			
+
 			if currentVersion == 1 {
 				// Update to version 2 using same endianness
 				if isLittleEndian {
@@ -129,7 +129,7 @@ func main() {
 					data[versionOffset] = 0
 				}
 				fmt.Printf("Updated version from %d to 2\n", currentVersion)
-				
+
 				// Now update the EntryFlagHashed bits for entries with valid hashes
 				// Use the actual HeaderSize constant (88) not our struct size (96)
 				updatedEntries := updateEntryHashedFlags(data, 88, entries)
@@ -139,26 +139,13 @@ func main() {
 			}
 		}
 	}
-	
+
 	if err := os.WriteFile(outputFile, data, 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
 		os.Exit(1)
 	}
-	
-	fmt.Printf("Conversion complete: %s\n", outputFile)
-}
 
-func getExpectedHashLength(hashType uint16) int {
-	switch hashType {
-	case 1: // SHA1
-		return 20
-	case 2: // SHA256  
-		return 32
-	case 3: // SHA512
-		return 64
-	default:
-		return 0
-	}
+	fmt.Printf("Conversion complete: %s\n", outputFile)
 }
 
 func updateEntryHashedFlags(data []byte, headerSize int, entries []*dircachefilehash.EntryInfo) int {
@@ -178,45 +165,45 @@ func updateEntryHashedFlags(data []byte, headerSize int, entries []*dircachefile
 		Hash       [64]byte // Hash value (up to 64 bytes for SHA-512)
 		Path       [8]byte  // Path as bytes, actual length variable but must be at least 8 bytes long
 	}
-	
+
 	// Use unsafe.Offsetof for ALL the fields I need
-	sizeOffset := unsafe.Offsetof(binaryEntry{}.Size)         // Should be 0
+	sizeOffset := unsafe.Offsetof(binaryEntry{}.Size) // Should be 0
 	entryFlagsOffset := unsafe.Offsetof(binaryEntry{}.EntryFlags)
 	hashTypeOffset := unsafe.Offsetof(binaryEntry{}.HashType)
 	hashOffset := unsafe.Offsetof(binaryEntry{}.Hash)
-	
-	fmt.Printf("binaryEntry offsets: Size=%d, EntryFlags=%d, HashType=%d, Hash=%d, TotalSize=%d\n", 
+
+	fmt.Printf("binaryEntry offsets: Size=%d, EntryFlags=%d, HashType=%d, Hash=%d, TotalSize=%d\n",
 		sizeOffset, entryFlagsOffset, hashTypeOffset, hashOffset, unsafe.Sizeof(binaryEntry{}))
-	
+
 	const EntryFlagHashed uint16 = 1 << 1 // From constants.go
-	
+
 	updatedCount := 0
 	offset := headerSize
 	entryIndex := 0
-	
+
 	for offset < len(data) && entryIndex < len(entries) {
 		if offset+4 > len(data) {
 			break
 		}
-		
+
 		// Read entry size using the proper offset
 		sizePos := offset + int(sizeOffset)
-		entrySize := uint32(data[sizePos]) | uint32(data[sizePos+1])<<8 | 
+		entrySize := uint32(data[sizePos]) | uint32(data[sizePos+1])<<8 |
 			uint32(data[sizePos+2])<<16 | uint32(data[sizePos+3])<<24
-			
+
 		if entryIndex < 5 { // Debug first few entries
-			fmt.Printf("Entry %d at offset %d: size bytes = %02x %02x %02x %02x = %d\n", 
+			fmt.Printf("Entry %d at offset %d: size bytes = %02x %02x %02x %02x = %d\n",
 				entryIndex, sizePos, data[sizePos], data[sizePos+1], data[sizePos+2], data[sizePos+3], entrySize)
 		}
-			
+
 		if entrySize < 48 || entrySize > 4096 || offset+int(entrySize) > len(data) {
 			fmt.Printf("Warning: invalid entry size %d at offset %d\n", entrySize, offset)
 			break
 		}
-		
+
 		// Get the corresponding EntryInfo
 		entry := entries[entryIndex]
-		
+
 		// Check if this entry should have hashed flag set
 		shouldBeHashed := false
 		if entry.HashType != 0 && entry.HashStr != "" {
@@ -230,7 +217,7 @@ func updateEntryHashedFlags(data []byte, headerSize int, entries []*dircachefile
 			}
 			shouldBeHashed = !allZeros
 		}
-		
+
 		if shouldBeHashed {
 			// Set the EntryFlagHashed bit
 			flagsPos := offset + int(entryFlagsOffset)
@@ -242,10 +229,10 @@ func updateEntryHashedFlags(data []byte, headerSize int, entries []*dircachefile
 				updatedCount++
 			}
 		}
-		
+
 		offset += int(entrySize)
 		entryIndex++
 	}
-	
+
 	return updatedCount
 }

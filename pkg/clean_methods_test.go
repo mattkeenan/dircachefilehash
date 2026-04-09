@@ -78,7 +78,7 @@ func TestCleanMethodsMultipleOperations(t *testing.T) {
 	var header indexHeader
 
 	// Test multiple set/clear cycles
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		header.setClean()
 		if !header.isClean() {
 			t.Errorf("Header should be clean after setClean() iteration %d", i)
@@ -194,7 +194,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 
 	// Goroutine 1: Set clean repeatedly
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			header.setClean()
 		}
 		done <- true
@@ -202,7 +202,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 
 	// Goroutine 2: Check clean state repeatedly
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			header.isClean() // Just check, don't care about result
 		}
 		done <- true

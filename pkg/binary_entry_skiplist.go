@@ -43,35 +43,35 @@ func (sle *BESkiplistEntry) getBinaryEntry() (*binaryEntry, error) {
 		sle.entryRef.IndexFile.mutex.RLock()
 		defer sle.entryRef.IndexFile.mutex.RUnlock()
 	}
-	
+
 	// Get the actual entry pointer
 	entry := sle.entryRef.GetBinaryEntry()
 	if entry == nil {
 		return nil, ErrEntryInvalidated
 	}
-	
+
 	return entry, nil
 }
 
 // IsValid performs a quick check if the entry is accessible
 // For skiplist entries, this should almost always return true
 func (sle *BESkiplistEntry) IsValid() bool {
-	return sle.entryRef.IndexFile != nil && 
-		   sle.entryRef.IndexFile.Data != nil &&
-		   sle.entryRef.Offset >= 0 &&
-		   sle.entryRef.Offset < len(sle.entryRef.IndexFile.Data)
+	return sle.entryRef.IndexFile != nil &&
+		sle.entryRef.IndexFile.Data != nil &&
+		sle.entryRef.Offset >= 0 &&
+		sle.entryRef.Offset < len(sle.entryRef.IndexFile.Data)
 }
 
 // Size returns the entry size field
 func (sle *BESkiplistEntry) Size() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Size, nil
 }
 
@@ -79,12 +79,12 @@ func (sle *BESkiplistEntry) Size() (uint32, error) {
 func (sle *BESkiplistEntry) CTimeWall() (uint64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.CTimeWall, nil
 }
 
@@ -92,12 +92,12 @@ func (sle *BESkiplistEntry) CTimeWall() (uint64, error) {
 func (sle *BESkiplistEntry) MTimeWall() (uint64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.MTimeWall, nil
 }
 
@@ -105,12 +105,12 @@ func (sle *BESkiplistEntry) MTimeWall() (uint64, error) {
 func (sle *BESkiplistEntry) Dev() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Dev, nil
 }
 
@@ -118,12 +118,12 @@ func (sle *BESkiplistEntry) Dev() (uint32, error) {
 func (sle *BESkiplistEntry) Ino() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Ino, nil
 }
 
@@ -131,12 +131,12 @@ func (sle *BESkiplistEntry) Ino() (uint32, error) {
 func (sle *BESkiplistEntry) Mode() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Mode, nil
 }
 
@@ -144,12 +144,12 @@ func (sle *BESkiplistEntry) Mode() (uint32, error) {
 func (sle *BESkiplistEntry) UID() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.UID, nil
 }
 
@@ -157,12 +157,12 @@ func (sle *BESkiplistEntry) UID() (uint32, error) {
 func (sle *BESkiplistEntry) GID() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.GID, nil
 }
 
@@ -170,12 +170,12 @@ func (sle *BESkiplistEntry) GID() (uint32, error) {
 func (sle *BESkiplistEntry) FileSize() (uint64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.FileSize, nil
 }
 
@@ -183,12 +183,12 @@ func (sle *BESkiplistEntry) FileSize() (uint64, error) {
 func (sle *BESkiplistEntry) HashType() (uint16, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.HashType, nil
 }
 
@@ -196,12 +196,12 @@ func (sle *BESkiplistEntry) HashType() (uint16, error) {
 func (sle *BESkiplistEntry) Hash() ([20]byte, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return [20]byte{}, err
 	}
-	
+
 	// Convert from [64]byte to [20]byte (taking only first 20 bytes)
 	var hash [20]byte
 	copy(hash[:], entry.Hash[:20])
@@ -212,12 +212,12 @@ func (sle *BESkiplistEntry) Hash() ([20]byte, error) {
 func (sle *BESkiplistEntry) EntryFlags() (uint32, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint32(entry.EntryFlags), nil
 }
 
@@ -225,30 +225,30 @@ func (sle *BESkiplistEntry) EntryFlags() (uint32, error) {
 func (sle *BESkiplistEntry) RelativePath() (string, error) {
 	sle.RLock()
 	defer sle.RUnlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Calculate path location after the fixed-size binaryEntry struct
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + unsafe.Sizeof(*entry))
+	pathPtr := unsafe.Add(unsafe.Pointer(entry), unsafe.Sizeof(*entry))
 	pathBytes := (*[256]byte)(pathPtr) // Max reasonable path length for bounds checking
-	
+
 	// Find null terminator to determine actual path length
 	pathLen := 0
-	for i := 0; i < len(pathBytes); i++ {
+	for i := range len(pathBytes) {
 		if pathBytes[i] == 0 {
 			pathLen = i
 			break
 		}
 	}
-	
+
 	if pathLen == 0 {
 		// Empty path represents current directory - normalize to "." like ls -al
 		return ".", nil
 	}
-	
+
 	return string(pathBytes[:pathLen]), nil
 }
 
@@ -258,7 +258,7 @@ func (sle *BESkiplistEntry) HashString() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return hex.EncodeToString(hash[:]), nil
 }
 
@@ -268,7 +268,7 @@ func (sle *BESkiplistEntry) IsDeleted() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	// Check bit 0 for deletion flag (matching existing implementation)
 	return (flags & 1) != 0, nil
 }
@@ -278,21 +278,21 @@ func (sle *BESkiplistEntry) IsDeleted() (bool, error) {
 func (sle *BESkiplistEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	sle.Lock()
 	defer sle.Unlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Validate hash length
 	if len(hashBytes) != 20 {
 		return fmt.Errorf("invalid hash length: got %d, expected 20", len(hashBytes))
 	}
-	
+
 	// Update hash and hash type in place
 	copy(entry.Hash[:], hashBytes)
 	entry.HashType = hashType
-	
+
 	return nil
 }
 
@@ -301,19 +301,19 @@ func (sle *BESkiplistEntry) SetHash(hashBytes []byte, hashType uint16) error {
 func (sle *BESkiplistEntry) SetDeleted(deleted bool) error {
 	sle.Lock()
 	defer sle.Unlock()
-	
+
 	entry, err := sle.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Update deletion flag (bit 0)
 	if deleted {
 		entry.EntryFlags |= 1
 	} else {
 		entry.EntryFlags &^= 1
 	}
-	
+
 	return nil
 }
 
@@ -329,13 +329,13 @@ func (sle *BESkiplistEntry) GetContext() (string, error) {
 	if sle.skiplist == nil {
 		return "", fmt.Errorf("skiplist reference is nil")
 	}
-	
+
 	// Get the path for this entry to look up its context
 	path, err := sle.RelativePath()
 	if err != nil {
 		return "", fmt.Errorf("failed to get relative path for context lookup: %v", err)
 	}
-	
+
 	// Find the entry in the skiplist to get its context
 	_, context := sle.skiplist.Find(path)
 	return context, nil

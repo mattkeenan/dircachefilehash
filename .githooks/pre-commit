@@ -1,0 +1,75 @@
+#!/bin/bash
+# Pre-commit hook: format, fix, lint, and test Go code
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Get list of staged Go files (only additions, copies, modifications)
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+if [ -z "$STAGED_GO_FILES" ]; then
+    echo "No staged Go files, skipping checks."
+    exit 0
+fi
+
+# Run go fmt on staged files (auto-fix and re-stage)
+echo "Running go fmt..."
+UNFORMATTED=$(echo "$STAGED_GO_FILES" | xargs gofmt -l 2>/dev/null)
+if [ -n "$UNFORMATTED" ]; then
+    echo "Formatting:"
+    echo "$UNFORMATTED"
+    echo "$UNFORMATTED" | xargs gofmt -w
+    echo "$UNFORMATTED" | xargs git add
+fi
+
+# Run go fix
+echo "Running go fix..."
+if ! go fix ./... 2>&1; then
+    echo "ERROR: go fix failed"
+    exit 1
+fi
+# Re-stage any staged files that were modified by go fix
+for f in $STAGED_GO_FILES; do
+    if ! git diff --quiet -- "$f" 2>/dev/null; then
+        git add "$f"
+    fi
+done
+
+# Run gopls diagnostics on staged files (error severity only).
+# gopls check is invoked once with all files to avoid spawning per-file processes.
+if command -v gopls &>/dev/null; then
+    echo "Running gopls diagnostics..."
+    GOPLS_ERRORS=$(echo "$STAGED_GO_FILES" | xargs gopls check -severity=error 2>/dev/null || true)
+    if [ -n "$GOPLS_ERRORS" ]; then
+        echo "gopls found errors:"
+        echo "$GOPLS_ERRORS"
+        exit 1
+    fi
+fi
+
+# Run go vet (disable unsafeptr check — this codebase uses intentional
+# unsafe.Pointer arithmetic for mmap/zero-copy operations)
+echo "Running go vet..."
+if ! go vet -unsafeptr=false ./...; then
+    echo "ERROR: go vet found issues"
+    exit 1
+fi
+
+# Run golangci-lint
+if command -v golangci-lint &>/dev/null; then
+    echo "Running golangci-lint..."
+    if ! golangci-lint run ./...; then
+        echo "ERROR: golangci-lint found issues"
+        exit 1
+    fi
+fi
+
+# Run go test with race detector
+echo "Running go test -race..."
+if ! go test -race ./...; then
+    echo "ERROR: Tests failed"
+    exit 1
+fi
+
+echo "All pre-commit checks passed!"
+exit 0

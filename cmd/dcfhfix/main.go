@@ -560,7 +560,7 @@ func headerShow(indexFile string, options *ParsedOptions) error {
 	format := getFormat(options)
 	if format == "json" {
 		// JSON output
-		headerData := map[string]interface{}{
+		headerData := map[string]any{
 			"signature":     string(header.Signature[:]),
 			"byte_order":    fmt.Sprintf("0x%016x", header.ByteOrder),
 			"version":       header.Version,
@@ -987,8 +987,8 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 // getIndexType extracts the index type from the file path (e.g., "main" from "main.idx")
 func getIndexType(indexFile string) string {
 	base := filepath.Base(indexFile)
-	if strings.HasSuffix(base, ".idx") {
-		return strings.TrimSuffix(base, ".idx")
+	if before, ok := strings.CutSuffix(base, ".idx"); ok {
+		return before
 	}
 	return "unknown"
 }
@@ -1466,12 +1466,12 @@ func writeIndexFile(indexAccess *indexFileAccess, targetPath string, options *Pa
 // displayEntriesJSON displays entries in JSON format
 func displayEntriesJSON(entries []*dircachefilehash.EntryInfo, notFoundPaths []string, options *ParsedOptions) error {
 	// Convert entries to JSON-friendly format with ISO 8601 timestamps
-	jsonEntries := make([]map[string]interface{}, len(entries))
+	jsonEntries := make([]map[string]any, len(entries))
 	for i, entry := range entries {
 		mtime := dircachefilehash.TimeFromWall(entry.MTimeWall)
 		ctime := dircachefilehash.TimeFromWall(entry.CTimeWall)
 
-		jsonEntries[i] = map[string]interface{}{
+		jsonEntries[i] = map[string]any{
 			"path":            entry.Path,
 			"flag_is_deleted": entry.IsDeleted,
 			"file_size":       entry.FileSize,
@@ -1486,7 +1486,7 @@ func displayEntriesJSON(entries []*dircachefilehash.EntryInfo, notFoundPaths []s
 		}
 	}
 
-	output := map[string]interface{}{
+	output := map[string]any{
 		"entries": jsonEntries,
 	}
 
@@ -2202,7 +2202,7 @@ func modifyEntryFieldInData(data []byte, offset int, field, value string) error 
 		}
 		// Clear and copy hash at offset 52
 		hashStart := offset + 52
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			data[hashStart+i] = 0
 		}
 		copy(data[hashStart:], hashBytes)

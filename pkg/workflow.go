@@ -44,7 +44,7 @@ func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
-	
+
 	// Load cache index and merge into the merged skiplist (avoid .Copy() - merge directly)
 	cacheSkiplist, err := dc.loadCacheIndex()
 	if err != nil {
@@ -58,7 +58,7 @@ func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 			return nil, fmt.Errorf("failed to merge cache index: %w", err)
 		}
 	}
-	
+
 	return mergedSkiplist, nil
 }
 
@@ -66,7 +66,7 @@ func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	// Create base skiplist for cache context
 	skiplist := NewSkiplistWrapper(16, CacheContext)
-	
+
 	// Load main cache.idx if it exists
 	if _, err := os.Stat(dc.CacheFile); err == nil {
 		// Load entries from file as binaryEntryRef instances
@@ -90,18 +90,18 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 			VerboseLog(3, "loadCacheIndex: loaded %d entries from cache.idx", len(refs))
 		}
 	}
-	
+
 	// Load and merge timestamped cache files in chronological order
 	timestampedCaches, err := dc.ScanForTimestampedCacheFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan for timestamped cache files: %w", err)
 	}
-	
+
 	for _, cacheFile := range timestampedCaches {
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "loadCacheIndex: merging timestamped cache file: %s", filepath.Base(cacheFile))
 		}
-		
+
 		// Load timestamped cache file
 		refs, indexFile, err := dc.loadIndexFromFileWithTracking(cacheFile)
 		if err != nil {
@@ -111,29 +111,29 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 			}
 			continue
 		}
-		
+
 		// Register the timestamped cache index file for tracking
 		if indexFile != nil {
 			indexFile.Type = "timestamped-cache"
 			dc.registerIndex(fmt.Sprintf("timestamped-cache-%s", filepath.Base(cacheFile)), indexFile)
 		}
-		
+
 		// Create temporary skiplist for this cache file
 		timestampedSkiplist := NewSkiplistWrapper(16, CacheContext)
 		for _, ref := range refs {
 			timestampedSkiplist.Insert(ref, CacheContext)
 		}
-		
+
 		// Merge into main cache skiplist (later timestamps take precedence)
 		if err := skiplist.Merge(timestampedSkiplist, MergeTheirs); err != nil {
 			return nil, fmt.Errorf("failed to merge timestamped cache file %s: %w", cacheFile, err)
 		}
-		
+
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "loadCacheIndex: merged %d entries from %s", len(refs), filepath.Base(cacheFile))
 		}
 	}
-	
+
 	if IsDebugEnabled("load") && len(timestampedCaches) > 0 {
 		VerboseLog(3, "loadCacheIndex: final merged cache has %d entries", skiplist.Length())
 	}
@@ -141,16 +141,15 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 	return skiplist, nil
 }
 
-
 // runStatusWorkflowUnified implements the Status command workflow using unified architecture
 // This follows the v0.7 pattern: write to cache-{timestamp}.idx, rename to cache.idx on success,
 // leave timestamped file on interruption for startup merge.
 func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{}) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
-	
+
 	// Generate timestamped cache filename following v0.7 architecture
 	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
-	
+
 	// Track operation success for proper v0.7 cleanup strategy
 	var operationSuccessful bool
 	defer func() {
@@ -175,7 +174,7 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 			}
 		}
 	}()
-	
+
 	// Step 1: Load main index
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -208,7 +207,7 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 	// v0.7: performUnifiedStatusScan has already written cache entries to cacheTempFileName
 	// Mark operation as successful so defer will rename to cache.idx and cleanup timestamped files
 	operationSuccessful = true
-	
+
 	return resultSkiplist, nil
 }
 
@@ -217,7 +216,7 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 // to filter and write only cache entries (not in main context) during iteration
 func (dc *DirectoryCache) performUnifiedStatusScan(shutdownChan <-chan struct{}, cacheFileName string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
-	
+
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
 	defer dc.scanMutex.Unlock()

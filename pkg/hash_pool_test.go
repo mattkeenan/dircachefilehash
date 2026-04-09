@@ -134,7 +134,7 @@ func TestHashPoolMultipleFiles(t *testing.T) {
 	// Create files and entries
 	for i := range nFiles {
 		name := filepath.Join(testDir, fmt.Sprintf("file%d.txt", i))
-		if err := os.WriteFile(name, []byte(fmt.Sprintf("content %d", i)), 0644); err != nil {
+		if err := os.WriteFile(name, fmt.Appendf(nil, "content %d", i), 0644); err != nil {
 			t.Fatalf("failed to write file: %v", err)
 		}
 		info, _ := os.Stat(name)

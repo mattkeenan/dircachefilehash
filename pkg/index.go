@@ -247,7 +247,7 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, e
 	hasher.Reset()
 
 	// IMPORTANT: Use same order as TempIndexWriter: entry data first, then header fields
-	
+
 	// First: Hash entry data if any (matches TempIndexWriter.WriteIoVecBatch order)
 	if entrySize > 0 {
 		hasher.Write(entryData[:entrySize])
@@ -255,28 +255,6 @@ func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, e
 
 	// Second: Hash header up to checksum field (matches TempIndexWriter.addHeaderToChecksum order)
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
-	checksumOffset := unsafe.Offsetof(header.Checksum)
-	hasher.Write(headerBytes[:checksumOffset])
-
-	// Store checksum in header
-	checksumBytes := hasher.Sum(nil)
-	copy(header.Checksum[:], checksumBytes)
-}
-
-// calculateAndStoreHeaderChecksumFromIoVecs calculates checksum from IoVecs and stores it in header
-func (dc *DirectoryCache) calculateAndStoreHeaderChecksumFromIoVecs(header *indexHeader, headerIovec syscall.Iovec, entryIovecs []syscall.Iovec) {
-	hasher := dc.hasher
-	hasher.Reset()
-
-	// Use same order as TempIndexWriter iterative approach: entry data + header fields
-
-	// First: Hash entries (matches TempIndexWriter.WriteIoVecBatch order)
-	for _, iovec := range entryIovecs {
-		hasher.Write(unsafe.Slice((*byte)(iovec.Base), int(iovec.Len)))
-	}
-
-	// Second: Hash header up to (but not including) checksum field (matches TempIndexWriter.Close order)
-	headerBytes := unsafe.Slice((*byte)(headerIovec.Base), int(headerIovec.Len))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
 
@@ -342,7 +320,7 @@ func (dc *DirectoryCache) writeBinaryEntryToMmap(data []byte, relPath string, ha
 	data[pathOffset+len(relPath)] = 0
 
 	// Zero out padding
-	for i := 0; i < padding; i++ {
+	for i := range padding {
 		data[totalSize+i] = 0
 	}
 }
@@ -830,7 +808,7 @@ func (dc *DirectoryCache) verifyChecksumMmap(data []byte, contentSize int) error
 	storedChecksum := data[contentSize : contentSize+ChecksumSize]
 	calculatedChecksum := dc.calculateChecksum(data[:contentSize])
 
-	for i := 0; i < ChecksumSize; i++ {
+	for i := range ChecksumSize {
 		if storedChecksum[i] != calculatedChecksum[i] {
 			return fmt.Errorf("checksum mismatch at byte %d", i)
 		}

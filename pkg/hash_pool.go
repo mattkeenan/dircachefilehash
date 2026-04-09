@@ -15,10 +15,10 @@ import (
 // Ownership: each PipelineEntry is owned by exactly one worker while being
 // hashed, then ownership transfers to the output channel consumer.
 type hashPool struct {
-	dc       *DirectoryCache
-	input    <-chan *PipelineEntry
-	output   chan<- *PipelineEntry
-	workers  int
+	dc      *DirectoryCache
+	input   <-chan *PipelineEntry
+	output  chan<- *PipelineEntry
+	workers int
 }
 
 // newHashPool creates a hash pool. The caller must close input when no more

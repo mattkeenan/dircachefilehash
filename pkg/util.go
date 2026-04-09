@@ -36,14 +36,14 @@ type ScanIndexInfo struct {
 // DirectoryCache manages the file cache for a directory
 // Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
-	RootDir       string
-	IndexFile     string
-	CacheFile     string         // Path to index.cache file
-	signature     [4]byte        // "dcfh" signature
-	version       uint32         // Index version
-	hasher        hash.Hash      // SHA-1 hasher for checksums
-	mmapIndex     *mmapIndex     // Memory-mapped index file
-	ignoreManager *IgnoreManager // Ignore pattern manager
+	RootDir         string
+	IndexFile       string
+	CacheFile       string         // Path to index.cache file
+	signature       [4]byte        // "dcfh" signature
+	version         uint32         // Index version
+	hasher          hash.Hash      // SHA-1 hasher for checksums
+	mmapIndex       *mmapIndex     // Memory-mapped index file
+	ignoreManager   *IgnoreManager // Ignore pattern manager
 	config          *Config        // Configuration manager
 	symlinkMode     string         // Current symlink handling mode
 	ignoreIsDeindex bool           // Whether newly ignored files should be marked as deleted
@@ -432,32 +432,32 @@ func (dc *DirectoryCache) GenerateTimestampedFileName(prefix string) string {
 // ScanForTimestampedCacheFiles finds all cache-{timestamp}.idx files in chronological order
 func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
 	dcfhDir := filepath.Dir(dc.IndexFile)
-	
+
 	// Read directory contents
 	entries, err := os.ReadDir(dcfhDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .dcfh directory: %w", err)
 	}
-	
+
 	// Pattern to match cache-{timestamp}.idx files
 	cachePattern := regexp.MustCompile(`^cache-(\d{8}T\d{6}Z)\.idx$`)
-	
+
 	var timestampedCaches []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		matches := cachePattern.FindStringSubmatch(entry.Name())
 		if matches != nil {
 			fullPath := filepath.Join(dcfhDir, entry.Name())
 			timestampedCaches = append(timestampedCaches, fullPath)
 		}
 	}
-	
+
 	// Sort by filename (which sorts chronologically due to ISO 8601 format)
 	sort.Strings(timestampedCaches)
-	
+
 	return timestampedCaches, nil
 }
 
@@ -467,7 +467,7 @@ func (dc *DirectoryCache) CleanupTimestampedCacheFiles() error {
 	if err != nil {
 		return fmt.Errorf("failed to scan for timestamped cache files: %w", err)
 	}
-	
+
 	for _, cacheFile := range timestampedCaches {
 		if err := os.Remove(cacheFile); err != nil && !os.IsNotExist(err) {
 			// Log warning but continue with other files
@@ -478,7 +478,7 @@ func (dc *DirectoryCache) CleanupTimestampedCacheFiles() error {
 			fmt.Fprintf(os.Stderr, "[CLEANUP] Removed timestamped cache file: %s\n", cacheFile)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -551,20 +551,20 @@ func FormatHumanSize(bytes int64) string {
 	// Find the highest bit position to determine the unit
 	// bits.Len64 returns the bit length (position of highest 1 bit + 1)
 	bitLen := bits.Len64(uint64(bytes))
-	
+
 	// Each unit is 10 bits apart (2^10 = 1024)
 	// So we divide by 10 to get the unit index
 	unitIndex := (bitLen - 1) / 10
-	
+
 	units := []string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
 	if unitIndex >= len(units) {
 		unitIndex = len(units) - 1
 	}
-	
+
 	// Calculate the divisor as 1 << (unitIndex * 10)
 	divisor := float64(int64(1) << (unitIndex * 10))
 	value := float64(bytes) / divisor
-	
+
 	// Use integer format for bytes, decimal format for larger units
 	if unitIndex == 0 {
 		return fmt.Sprintf("%d %s", bytes, units[unitIndex])

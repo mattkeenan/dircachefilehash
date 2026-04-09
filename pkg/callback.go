@@ -8,7 +8,7 @@ const (
 	ComparisonMatch ComparisonResult = iota
 	// Left entry comes before right entry (left < right)
 	ComparisonLeftFirst
-	// Right entry comes before left entry (left > right)  
+	// Right entry comes before left entry (left > right)
 	ComparisonRightFirst
 	// Left iterator exhausted, only right entries remain
 	ComparisonLeftExhausted
@@ -42,7 +42,7 @@ func (cr ComparisonResult) String() string {
 // sorted iterators, allowing the callback to perform its specific operation.
 type HwangLinCallback interface {
 	// OnComparison is called for each comparison result during Hwang-Lin algorithm.
-	// 
+	//
 	// Parameters:
 	// - result: The comparison result (match, left first, right first, etc.)
 	// - leftEntry: Entry from left iterator (nil if right iterator has advanced)
@@ -58,24 +58,24 @@ type HwangLinCallback interface {
 		leftEntry, rightEntry BinaryEntryInterface,
 		leftPath, rightPath string,
 	) (continueProcessing bool, err error)
-	
+
 	// OnLeftOnly is called when the left iterator has entries but right is exhausted.
 	// This is a convenience method for handling remaining entries from one side.
 	OnLeftOnly(entry BinaryEntryInterface, path string) (continueProcessing bool, err error)
-	
+
 	// OnRightOnly is called when the right iterator has entries but left is exhausted.
 	// This is a convenience method for handling remaining entries from one side.
 	OnRightOnly(entry BinaryEntryInterface, path string) (continueProcessing bool, err error)
-	
+
 	// OnStart is called before the algorithm begins processing.
 	// This allows callbacks to initialize state, validate inputs, etc.
 	OnStart(leftName, rightName string) error
-	
+
 	// OnComplete is called after the algorithm finishes processing.
 	// This allows callbacks to finalize results, cleanup resources, etc.
 	// The error parameter indicates if the algorithm stopped due to an error.
 	OnComplete(err error) error
-	
+
 	// SubmitAndOrWriteHash handles unified hash coordination and cache writing.
 	// This method encapsulates all hash job submission, completion processing,
 	// and iterative cache writing logic in one place.
@@ -86,12 +86,12 @@ type HwangLinCallback interface {
 	//
 	// Implementation varies by callback:
 	// - StatusCallback: Full hash coordination + cache.idx writing
-	// - UpdateCallback: Full hash coordination + main.idx writing  
+	// - UpdateCallback: Full hash coordination + main.idx writing
 	// - DupesCallback: No-op (return nil) - no writing needed
 	//
 	// This method should be called by ALL On* methods before returning.
 	SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error
-	
+
 	// Name returns a descriptive name for this callback (for debugging/logging).
 	Name() string
 }

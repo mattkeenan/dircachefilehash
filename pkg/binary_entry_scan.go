@@ -12,7 +12,7 @@ import (
 // BEScanEntry implements BinaryEntryInterface for ephemeral heap-allocated entries during scanning
 //
 // v0.7 Architecture: Uses heap allocation instead of mmap scan index files:
-// - Entries are allocated on the heap with metadata but NO hash initially  
+// - Entries are allocated on the heap with metadata but NO hash initially
 // - Lazy hashing: hash is computed only if entry is selected for writing to index
 // - Standard Go garbage collection handles memory management
 // - No mremap/munmap complexity or file cleanup required
@@ -24,8 +24,8 @@ import (
 // - Better performance (only hash files that will be indexed)
 type BEScanEntry struct {
 	BinaryEntryBase
-	binaryData []byte      // Single contiguous buffer containing binaryEntry + path data
-	relPath    string      // Relative path (cached for convenience)
+	binaryData []byte       // Single contiguous buffer containing binaryEntry + path data
+	relPath    string       // Relative path (cached for convenience)
 	mutex      sync.RWMutex // Per-entry locking for hash coordination
 }
 
@@ -34,21 +34,21 @@ type BEScanEntry struct {
 func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat_t) *BEScanEntry {
 	// Calculate total size needed for binaryEntry + path + padding
 	totalSize := BESizeFromPathLen(len(relPath))
-	
+
 	// Debug: Print size calculation
 	if IsDebugEnabled("write") {
 		fmt.Fprintf(os.Stderr, "[DEBUG-SIZE] NewBEScanEntry for %s: pathLen=%d, totalSize=%d\n", relPath, len(relPath), totalSize)
 	}
-	
+
 	// Allocate single contiguous buffer for the complete binary entry
 	binaryData := make([]byte, totalSize)
-	
+
 	// Cast the beginning of the buffer as a binaryEntry struct
 	entry := (*binaryEntry)(unsafe.Pointer(&binaryData[0]))
-	
+
 	// Fill in metadata from file system scan
 	entry.Size = uint32(totalSize)
-	
+
 	// Debug: Verify size was set correctly
 	if IsDebugEnabled("write") {
 		fmt.Fprintf(os.Stderr, "[DEBUG-SIZE] NewBEScanEntry entry.Size set to: %d\n", entry.Size)
@@ -62,25 +62,25 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	entry.UID = statInfo.Uid
 	entry.GID = statInfo.Gid
 	entry.FileSize = uint64(fileInfo.Size())
-	entry.HashType = 0    // No hash type initially (lazy hashing)
+	entry.HashType = 0 // No hash type initially (lazy hashing)
 	// entry.Hash remains zero-valued (no hash initially)
-	entry.EntryFlags = 0  // Not deleted initially
-	
+	entry.EntryFlags = 0 // Not deleted initially
+
 	// Copy path starting after the struct (matching writeBinaryEntryToMmap and RelativePath)
 	pathOffset := int(unsafe.Sizeof(*entry))
 	pathBytes := []byte(relPath)
 	copy(binaryData[pathOffset:], pathBytes)
-	
+
 	// Add null terminator
 	if pathOffset+len(pathBytes) < len(binaryData) {
 		binaryData[pathOffset+len(pathBytes)] = 0
 	}
-	
+
 	return &BEScanEntry{
 		BinaryEntryBase: NewBinaryEntryBase(BEScan),
-		binaryData:     binaryData,
-		relPath:        relPath,
-		mutex:          sync.RWMutex{},
+		binaryData:      binaryData,
+		relPath:         relPath,
+		mutex:           sync.RWMutex{},
 	}
 }
 
@@ -92,7 +92,7 @@ func (sbe *BEScanEntry) getBinaryEntry() (*binaryEntry, error) {
 	if sbe.binaryData == nil {
 		return nil, ErrEntryInvalidated
 	}
-	
+
 	// Return pointer to binaryEntry struct at start of buffer
 	entry := (*binaryEntry)(unsafe.Pointer(&sbe.binaryData[0]))
 	return entry, nil
@@ -108,12 +108,12 @@ func (sbe *BEScanEntry) IsValid() bool {
 func (sbe *BEScanEntry) Size() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Size, nil
 }
 
@@ -121,12 +121,12 @@ func (sbe *BEScanEntry) Size() (uint32, error) {
 func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.CTimeWall, nil
 }
 
@@ -140,12 +140,12 @@ func (sbe *BEScanEntry) RelativePath() (string, error) {
 func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.MTimeWall, nil
 }
 
@@ -153,12 +153,12 @@ func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 func (sbe *BEScanEntry) Dev() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Dev, nil
 }
 
@@ -166,12 +166,12 @@ func (sbe *BEScanEntry) Dev() (uint32, error) {
 func (sbe *BEScanEntry) Ino() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Ino, nil
 }
 
@@ -179,12 +179,12 @@ func (sbe *BEScanEntry) Ino() (uint32, error) {
 func (sbe *BEScanEntry) Mode() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Mode, nil
 }
 
@@ -192,12 +192,12 @@ func (sbe *BEScanEntry) Mode() (uint32, error) {
 func (sbe *BEScanEntry) UID() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.UID, nil
 }
 
@@ -205,12 +205,12 @@ func (sbe *BEScanEntry) UID() (uint32, error) {
 func (sbe *BEScanEntry) GID() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.GID, nil
 }
 
@@ -218,12 +218,12 @@ func (sbe *BEScanEntry) GID() (uint32, error) {
 func (sbe *BEScanEntry) FileSize() (uint64, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.FileSize, nil
 }
 
@@ -231,12 +231,12 @@ func (sbe *BEScanEntry) FileSize() (uint64, error) {
 func (sbe *BEScanEntry) HashType() (uint16, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.HashType, nil
 }
 
@@ -244,12 +244,12 @@ func (sbe *BEScanEntry) HashType() (uint16, error) {
 func (sbe *BEScanEntry) Hash() ([20]byte, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return [20]byte{}, err
 	}
-	
+
 	// Convert from [64]byte to [20]byte (taking only first 20 bytes)
 	var hash [20]byte
 	copy(hash[:], entry.Hash[:20])
@@ -260,15 +260,14 @@ func (sbe *BEScanEntry) Hash() ([20]byte, error) {
 func (sbe *BEScanEntry) EntryFlags() (uint32, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint32(entry.EntryFlags), nil
 }
-
 
 // HashString returns the hash as a hexadecimal string
 func (sbe *BEScanEntry) HashString() (string, error) {
@@ -276,7 +275,7 @@ func (sbe *BEScanEntry) HashString() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return hex.EncodeToString(hash[:]), nil
 }
 
@@ -286,7 +285,7 @@ func (sbe *BEScanEntry) IsDeleted() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	// Check bit 0 for deletion flag (matching existing implementation)
 	return (flags & 1) != 0, nil
 }
@@ -296,12 +295,12 @@ func (sbe *BEScanEntry) IsDeleted() (bool, error) {
 func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	sbe.mutex.Lock()
 	defer sbe.mutex.Unlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Validate hash length based on hash type
 	var expectedSize int
 	switch hashType {
@@ -314,15 +313,15 @@ func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	default:
 		return fmt.Errorf("unknown hash type: %d", hashType)
 	}
-	
+
 	if len(hashBytes) != expectedSize {
 		return fmt.Errorf("invalid hash length for type %s: got %d, expected %d", HashTypeName(hashType), len(hashBytes), expectedSize)
 	}
-	
+
 	// Update hash and hash type in place
 	copy(entry.Hash[:], hashBytes)
 	entry.HashType = hashType
-	
+
 	return nil
 }
 
@@ -330,19 +329,19 @@ func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
 	sbe.mutex.Lock()
 	defer sbe.mutex.Unlock()
-	
+
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Update deletion flag (bit 0)
 	if deleted {
 		entry.EntryFlags |= 1
 	} else {
 		entry.EntryFlags &^= 1
 	}
-	
+
 	return nil
 }
 
@@ -367,7 +366,7 @@ func (sbe *BEScanEntry) IncRef() {
 	// Heap-allocated entries don't need reference counting
 }
 
-// DecRef decrements the reference count - no-op for heap entries  
+// DecRef decrements the reference count - no-op for heap entries
 func (sbe *BEScanEntry) DecRef() {
 	// Heap-allocated entries don't need reference counting
 }
@@ -403,11 +402,11 @@ func (sbe *BEScanEntry) Unlock() {
 func (sbe *BEScanEntry) GetBinaryData() ([]byte, error) {
 	sbe.mutex.RLock()
 	defer sbe.mutex.RUnlock()
-	
+
 	if sbe.binaryData == nil {
 		return nil, ErrEntryInvalidated
 	}
-	
+
 	// Return the actual contiguous buffer containing binaryEntry + path data
 	return sbe.binaryData, nil
 }

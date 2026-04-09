@@ -44,7 +44,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	dc := NewDirectoryCache(repoDir, repoDir)
-	
+
 	// Create initial ignore file with only .dcfh pattern
 	ignoreFile := filepath.Join(dcfhDir, "ignore")
 	if err := os.WriteFile(ignoreFile, []byte(`# Initial ignore patterns
@@ -59,7 +59,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	// First update - all files should be indexed
 	shutdownChan := make(<-chan struct{})
 	flags := map[string]string{}
-	
+
 	if err := dc.Update(shutdownChan, flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	for _, deleted := range status.Deleted {
 		deletedMap[deleted] = true
 	}
-	
+
 	if !deletedMap["file2.log"] {
 		t.Error("Expected file2.log to be marked as deleted")
 	}
@@ -194,7 +194,7 @@ mode = none
 
 	// Create a new DirectoryCache which will load the config automatically
 	dc := NewDirectoryCache(repoDir, repoDir)
-	
+
 	// Apply config
 	if err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply config: %v", err)
@@ -241,7 +241,7 @@ mode = none
 
 	// Reload config by recreating DirectoryCache
 	dc = NewDirectoryCache(repoDir, repoDir)
-	
+
 	// Apply config
 	if err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply updated config: %v", err)

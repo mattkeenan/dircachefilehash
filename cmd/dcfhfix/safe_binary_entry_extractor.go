@@ -97,10 +97,7 @@ func getBinaryEntryFromOffset(data []byte, entryIdx int, offset int) (*binaryEnt
 	// Note: The actual path is variable length and extends beyond the struct
 	// For now, store the first 8 bytes in the Path field for compatibility
 	if len(pathStr) > 0 {
-		copyLen := len(pathStr)
-		if copyLen > 8 {
-			copyLen = 8
-		}
+		copyLen := min(len(pathStr), 8)
 		copy(entry.Path[:copyLen], pathStr)
 	}
 

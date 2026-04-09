@@ -46,7 +46,7 @@ func VerboseEnter() func() {
 }
 
 // VerboseLog logs a message at the specified verbose level
-func VerboseLog(level int, format string, args ...interface{}) {
+func VerboseLog(level int, format string, args ...any) {
 	if globalVerboseLevel >= level {
 		fmt.Fprintf(os.Stderr, "[VERBOSE-%d] ", level)
 		fmt.Fprintf(os.Stderr, format, args...)
@@ -64,8 +64,8 @@ func SetDebugFlags(flagsStr string) {
 		return
 	}
 
-	flags := strings.Split(flagsStr, ",")
-	for _, flag := range flags {
+	flags := strings.SplitSeq(flagsStr, ",")
+	for flag := range flags {
 		flag = strings.TrimSpace(flag)
 		if flag == "" {
 			continue

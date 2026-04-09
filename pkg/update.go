@@ -17,7 +17,7 @@ func (dc *DirectoryCache) Update(shutdownChan <-chan struct{}, flags map[string]
 			dc.symlinkMode = symlinkMode
 		}
 	}
-	
+
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
 		return dc.updateFullRepositoryUnified(shutdownChan)
@@ -69,7 +69,7 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 	if err != nil {
 		return fmt.Errorf("failed to load main index: %w", err)
 	}
-	
+
 	// Load cache index and merge for comparison to avoid re-hashing
 	cacheSkiplist, err := dc.loadCacheIndex()
 	if err == nil && !cacheSkiplist.IsEmpty() {
@@ -101,7 +101,7 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 // only for recovery.go which still depends on it.
 func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struct{}, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
-	
+
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
 	dc.scanMutex.Lock()
 	defer dc.scanMutex.Unlock()
@@ -122,7 +122,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 
 	// v0.7: Generate timestamped main index filename for persistent strategy
 	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
-	
+
 	// Track operation success for proper cleanup strategy
 	var operationSuccessful bool
 	defer func() {
@@ -184,7 +184,7 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	// v0.7: UpdateCallback has written directly to temp main index file
 	// Mark operation as successful for atomic rename
 	operationSuccessful = true
-	
+
 	// For now, return empty skiplist to maintain compatibility
 	emptySkiplist := NewSkiplistWrapper(16, ScanContext)
 	dc.lastScanResult = emptySkiplist

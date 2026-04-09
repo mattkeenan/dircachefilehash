@@ -12,7 +12,7 @@ import (
 // Hash coordination is handled by callbacks, not the iterator.
 type UnifiedFilesystemScanIterator struct {
 	iteratorBase
-	
+
 	// Filesystem scanning
 	dc                *DirectoryCache
 	paths             []string
@@ -21,11 +21,11 @@ type UnifiedFilesystemScanIterator struct {
 	shutdownOnce      sync.Once
 	scanComplete      bool
 	scanError         error
-	scanIndexFileName string                         // Scan index file name
-	
+	scanIndexFileName string // Scan index file name
+
 	// Current state
-	nextScanned       *scannedPath
-	scanStarted       bool
+	nextScanned *scannedPath
+	scanStarted bool
 }
 
 // NewUnifiedFilesystemScanIterator creates a new iterator that scans
@@ -39,15 +39,15 @@ func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name s
 			},
 		}
 	}
-	
+
 	iterator := &UnifiedFilesystemScanIterator{
-		iteratorBase:   iteratorBase{name: name},
-		dc:             dc,
-		paths:          paths,
-		scanChan:       make(chan *scannedPath, 100), // Buffered for performance
-		shutdownChan:   make(chan struct{}),
+		iteratorBase: iteratorBase{name: name},
+		dc:           dc,
+		paths:        paths,
+		scanChan:     make(chan *scannedPath, 100), // Buffered for performance
+		shutdownChan: make(chan struct{}),
 	}
-	
+
 	return iterator
 }
 
@@ -56,12 +56,12 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 	if err := ufsi.checkClosed(); err != nil {
 		return nil, err
 	}
-	
+
 	// Check if we're already exhausted (e.g., due to nil DirectoryCache)
 	if ufsi.exhausted {
 		return nil, nil
 	}
-	
+
 	// Start scanning if not already started
 	if !ufsi.scanStarted {
 		if err := ufsi.startScan(); err != nil {
@@ -69,29 +69,28 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 			return nil, fmt.Errorf("failed to start filesystem scan: %w", err)
 		}
 	}
-	
-	
+
 	// Get the next scanned file
 	scanned, err := ufsi.getNextScannedFile()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if scanned == nil {
 		// No more files - exhausted
 		ufsi.markExhausted()
 		return nil, nil
 	}
-	
+
 	// Create BEScanEntry from scanned file
 	scanEntry, err := ufsi.createScanEntry(scanned)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scan entry: %w", err)
 	}
-	
+
 	// Iterator is synchronous: just creates entries with metadata
 	// Hash coordination happens in callbacks using CallbackHashCoordinator pattern
-	
+
 	// Update current path and return the interface
 	ufsi.updateCurrentPathFromInterface(scanEntry)
 	return scanEntry, nil
@@ -105,7 +104,7 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 		ufsi.nextScanned = nil
 		return current, nil
 	}
-	
+
 	// Read next entry from scan channel
 	select {
 	case scanned, ok := <-ufsi.scanChan:
@@ -117,7 +116,7 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 			return nil, nil
 		}
 		return scanned, nil
-		
+
 	default:
 		// No entry available yet, but scan might still be running
 		if ufsi.scanComplete {
@@ -126,7 +125,7 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 			}
 			return nil, nil
 		}
-		
+
 		// Wait for next entry with blocking read
 		select {
 		case scanned, ok := <-ufsi.scanChan:
@@ -137,7 +136,7 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 				return nil, nil
 			}
 			return scanned, nil
-			
+
 		case <-ufsi.shutdownChan:
 			return nil, fmt.Errorf("filesystem scan was shutdown")
 		}
@@ -153,46 +152,30 @@ func (ufsi *UnifiedFilesystemScanIterator) createScanEntry(scanned *scannedPath)
 	return bescanEntry, nil
 }
 
-// createScanIndex creates a new scan index for this iterator
-func (ufsi *UnifiedFilesystemScanIterator) createScanIndex() (string, error) {
-	// Generate unique scan index name using DirectoryCache method
-	scanFileName := ufsi.dc.generateScanFileName()
-	
-	// Initialize scan index file
-	if err := ufsi.dc.initialiseScanIndex(scanFileName); err != nil {
-		return "", fmt.Errorf("failed to initialize scan index %s: %w", scanFileName, err)
-	}
-	
-	return scanFileName, nil
-}
-
-
-
-
 // startScan begins the filesystem scanning in a separate goroutine
 func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 	if ufsi.scanStarted {
 		return nil
 	}
-	
+
 	if ufsi.dc == nil {
 		return fmt.Errorf("DirectoryCache is nil")
 	}
-	
+
 	ufsi.scanStarted = true
-	
+
 	// Start scanning in background goroutine
 	go func() {
 		defer func() {
 			ufsi.scanComplete = true
 			// scanPath already closes the channel, so we don't need to close it
 		}()
-		
+
 		if err := ufsi.dc.scanPath(ufsi.paths, ufsi.scanChan, ufsi.shutdownChan); err != nil {
 			ufsi.scanError = err
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -220,7 +203,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 		}
 		ufsi.scanIndexFileName = ""
 	}
-	
+
 	// Drain any remaining entries from the channel (non-blocking)
 	if ufsi.scanChan != nil {
 		// Non-blocking drain - just empty what's currently buffered.
@@ -247,12 +230,12 @@ func (ufsi *UnifiedFilesystemScanIterator) HasNext() bool {
 	if ufsi.exhausted || ufsi.closed {
 		return false
 	}
-	
+
 	// If we have a cached next entry, we definitely have more
 	if ufsi.nextScanned != nil {
 		return true
 	}
-	
+
 	// If scan is complete and channel is empty, no more entries
 	if ufsi.scanComplete {
 		select {
@@ -264,8 +247,7 @@ func (ufsi *UnifiedFilesystemScanIterator) HasNext() bool {
 			return false
 		}
 	}
-	
+
 	// Scan is still running, so there might be more entries
 	return true
 }
-

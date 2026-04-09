@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -412,22 +413,12 @@ func (p *ExpressionParser) isTestExpression(token string) bool {
 		"--valid", "--corrupt", "--hash", "--hash-prefix", "--hash-type",
 		"--mtime", "--mmin", "--ctime", "--cmin", "--not", "!", "(",
 	}
-	for _, test := range tests {
-		if token == test {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tests, token)
 }
 
 func (p *ExpressionParser) isGlobalOption(token string) bool {
 	globals := []string{"--repo", "--maxdepth", "--warn", "--nowarn"}
-	for _, global := range globals {
-		if token == global {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(globals, token)
 }
 
 func (p *ExpressionParser) parseGlobalOption() (Expression, error) {

@@ -96,7 +96,7 @@ func (p *ParsedOptions) Parse(args []string) error {
 	}
 
 	// Second pass: collect non-consumed arguments
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if !consumed[i] {
 			p.args = append(p.args, args[i])
 		}
@@ -299,12 +299,4 @@ func (p *ParsedOptions) ShowUsage(programName string) {
 			strings.Repeat(" ", max(0, 20-len(def.Long)-len(valueDesc))))
 		fmt.Fprintf(os.Stderr, "        %s\n", def.Description)
 	}
-}
-
-// max returns the maximum of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

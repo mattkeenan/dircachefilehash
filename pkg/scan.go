@@ -23,16 +23,6 @@ type scannedPath struct {
 	StatInfo *syscall.Stat_t
 }
 
-// hwangLinResult represents the result of Hwang-Lin comparison
-type hwangLinResult struct {
-	Type        hwangLinType
-	ScannedPath *scannedPath // nil for deletions
-	IndexEntry  *binaryEntry // nil for new files
-	JobID       uint64       // for tracking hash jobs
-	Hash        []byte       // computed hash (for new/modified files)
-	HashType    uint16       // hash algorithm type
-}
-
 // hwangLinType represents the type of change detected
 type hwangLinType int
 
@@ -56,13 +46,13 @@ type processedEntry struct {
 // hashJobStart represents a hash job being started
 type hashJobStart struct {
 	JobID       uint64
-	Cookie      uint64         // External cookie for caller tracking
+	Cookie      uint64 // External cookie for caller tracking
 	FilePath    string
 	IndexEntry  binaryEntryRef // Entry to update with hash (mremap-safe) - DEPRECATED for v0.7
 	ScannedPath *scannedPath
-	
+
 	// v0.7 unified entry support - works for both mmap and heap entries
-	Entry       BinaryEntryInterface // Unified interface for all entry types
+	Entry BinaryEntryInterface // Unified interface for all entry types
 }
 
 // mockFileInfo implements os.FileInfo for deleted entries
@@ -78,7 +68,7 @@ func (m *mockFileInfo) Size() int64        { return m.size }
 func (m *mockFileInfo) Mode() os.FileMode  { return m.mode }
 func (m *mockFileInfo) ModTime() time.Time { return m.modTime }
 func (m *mockFileInfo) IsDir() bool        { return m.mode.IsDir() }
-func (m *mockFileInfo) Sys() interface{}   { return nil }
+func (m *mockFileInfo) Sys() any           { return nil }
 
 // Helper function for efficient slice removal (order doesn't matter)
 func remove(s []uint64, i int) []uint64 {
@@ -181,7 +171,7 @@ func (dc *DirectoryCache) deduplicatePaths(paths []string) []string {
 		isRedundant := false
 
 		// Check if this path is a subdirectory/subfile of any previous path
-		for j := 0; j < i; j++ {
+		for j := range i {
 			prevPath := paths[j]
 
 			// Check if current path is under the previous path
@@ -255,19 +245,19 @@ func parseSymlinkMode(mode string) (baseMode string, strict bool) {
 	if len(parts) == 0 {
 		return "none", false
 	}
-	
+
 	baseMode = strings.TrimSpace(parts[0])
 	for i := 1; i < len(parts); i++ {
 		if strings.TrimSpace(parts[i]) == "strict" {
 			strict = true
 		}
 	}
-	
+
 	// Handle legacy "contained" mode by converting to "internal"
 	if baseMode == "contained" {
 		baseMode = "internal"
 	}
-	
+
 	return baseMode, strict
 }
 
@@ -278,42 +268,42 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 	// Start with assumption that chain could be either
 	allInternal = true
 	allExternal = true
-	
+
 	currentPath := symlinkPath
 	visited := make(map[string]bool) // Prevent infinite loops
-	
+
 	for {
 		// Check if we've seen this path before (loop detection)
 		if visited[currentPath] {
 			return false, false, fmt.Errorf("symlink loop detected at %s", currentPath)
 		}
 		visited[currentPath] = true
-		
+
 		// Check if current path is a symlink
 		info, err := os.Lstat(currentPath)
 		if err != nil {
 			return false, false, err
 		}
-		
+
 		if info.Mode()&os.ModeSymlink == 0 {
 			// Not a symlink, we've reached the end
 			break
 		}
-		
+
 		// Read the symlink target
 		target, err := os.Readlink(currentPath)
 		if err != nil {
 			return false, false, err
 		}
-		
+
 		// Make target absolute if it's relative
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(currentPath), target)
 		}
-		
+
 		// Check if this link is internal or external
 		isInternal := dc.isPathContained(target, dc.RootDir)
-		
+
 		if strict {
 			// In strict mode, all links must be of the same type
 			if isInternal {
@@ -321,16 +311,16 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 			} else {
 				allInternal = false
 			}
-			
+
 			// Early exit if we've determined the chain is mixed
 			if !allInternal && !allExternal {
 				return false, false, nil
 			}
 		}
-		
+
 		currentPath = target
 	}
-	
+
 	// For non-strict mode, only check the final target
 	if !strict {
 		finalTarget, err := filepath.EvalSymlinks(symlinkPath)
@@ -340,22 +330,22 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 		isInternal := dc.isPathContained(finalTarget, dc.RootDir)
 		return isInternal, !isInternal, nil
 	}
-	
+
 	return allInternal, allExternal, nil
 }
 
 // detectUnfollowedSymlinkDirs scans the index to find directories that are now unfollowed symlinks
 func (dc *DirectoryCache) detectUnfollowedSymlinkDirs(compareSkiplist *skiplistWrapper) map[string]bool {
 	unfollowedDirs := make(map[string]bool)
-	
+
 	// Parse current symlink mode
 	baseMode, _ := parseSymlinkMode(dc.symlinkMode)
-	
+
 	// If we're in "all" mode, no symlinks are unfollowed
 	if baseMode == "all" {
 		return unfollowedDirs
 	}
-	
+
 	// Scan through all entries in the comparison skiplist
 	current := compareSkiplist.skiplist.First()
 	for current != nil {
@@ -383,18 +373,18 @@ func (dc *DirectoryCache) detectUnfollowedSymlinkDirs(compareSkiplist *skiplistW
 		}
 		current = current.Next()
 	}
-	
+
 	return unfollowedDirs
 }
 
 // shouldFollowSymlink checks if a symlink should be followed based on current mode
 func (dc *DirectoryCache) shouldFollowSymlink(symlinkPath string) bool {
 	baseMode, strict := parseSymlinkMode(dc.symlinkMode)
-	
+
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "shouldFollowSymlink: path=%s, mode=%s (base=%s, strict=%v)", symlinkPath, dc.symlinkMode, baseMode, strict)
 	}
-	
+
 	switch baseMode {
 	case "none":
 		return false
@@ -442,7 +432,6 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 
 	return true
 }
-
 
 // scanPathRecursive recursively scans a path and streams results as they're found
 // This provides significant performance benefits:
@@ -499,7 +488,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 			if targetInfo.IsDir() {
 				// This is a directory symlink - apply symlink mode logic
 				baseMode, strict := parseSymlinkMode(dc.symlinkMode)
-				
+
 				switch baseMode {
 				case "none":
 					// Don't follow directory symlinks - skip them
@@ -507,7 +496,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 						fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (mode=none): %s\n", currentPath)
 					}
 					continue
-					
+
 				case "internal":
 					// Only follow if symlink chain is internal to rootDir
 					allInternal, _, err := dc.checkSymlinkChain(currentPath, strict)
@@ -517,23 +506,23 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 						}
 						continue // Skip problematic symlinks
 					}
-					
+
 					if !allInternal {
 						if IsDebugEnabled("symlinks") {
 							finalTarget, _ := filepath.EvalSymlinks(currentPath)
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not internal): %s -> %s (root: %s, strict: %v)\n", 
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not internal): %s -> %s (root: %s, strict: %v)\n",
 								currentPath, finalTarget, dc.RootDir, strict)
 						}
 						continue
 					}
-					
+
 					if IsDebugEnabled("symlinks") {
 						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following internal directory symlink: %s -> %s (root: %s, strict: %v)\n", 
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following internal directory symlink: %s -> %s (root: %s, strict: %v)\n",
 							currentPath, finalTarget, dc.RootDir, strict)
 					}
 					info = targetInfo
-					
+
 				case "external":
 					// Only follow if symlink chain is external to rootDir
 					_, allExternal, err := dc.checkSymlinkChain(currentPath, strict)
@@ -543,32 +532,32 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 						}
 						continue // Skip problematic symlinks
 					}
-					
+
 					if !allExternal {
 						if IsDebugEnabled("symlinks") {
 							finalTarget, _ := filepath.EvalSymlinks(currentPath)
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not external): %s -> %s (root: %s, strict: %v)\n", 
+							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not external): %s -> %s (root: %s, strict: %v)\n",
 								currentPath, finalTarget, dc.RootDir, strict)
 						}
 						continue
 					}
-					
+
 					if IsDebugEnabled("symlinks") {
 						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following external directory symlink: %s -> %s (root: %s, strict: %v)\n", 
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following external directory symlink: %s -> %s (root: %s, strict: %v)\n",
 							currentPath, finalTarget, dc.RootDir, strict)
 					}
 					info = targetInfo
-					
+
 				case "all":
 					// Follow all directory symlinks
 					if IsDebugEnabled("symlinks") {
 						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following directory symlink (mode=all): %s -> %s\n", 
+						fmt.Fprintf(os.Stderr, "[SYMLINK] Following directory symlink (mode=all): %s -> %s\n",
 							currentPath, finalTarget)
 					}
 					info = targetInfo
-					
+
 				default:
 					// Default to "all" for unknown modes
 					if IsDebugEnabled("symlinks") {
@@ -752,7 +741,7 @@ func (dc *DirectoryCache) newSimpleHashManager(numWorkers int, callFinishChan ch
 	}
 
 	// Start workers
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		manager.wg.Add(1)
 		go manager.hashWorker(dc)
 	}
@@ -790,7 +779,7 @@ func (hjm *simpleHashManager) FinishSubmitting() {
 // hashWorker processes hash jobs and updates entries directly in scan index mmap
 func (hjm *simpleHashManager) hashWorker(dc *DirectoryCache) {
 	defer hjm.wg.Done()
-	
+
 	var currentJob *hashJobStart // Track current job for interruption handling
 
 	for {
@@ -865,14 +854,14 @@ func (hjm *simpleHashManager) Shutdown() {
 		hjm.closed = true
 	}
 	hjm.closeMutex.Unlock()
-	
+
 	// Wait for all workers to exit with a timeout
 	done := make(chan struct{})
 	go func() {
 		hjm.wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		// All workers exited normally
@@ -883,7 +872,7 @@ func (hjm *simpleHashManager) Shutdown() {
 		// Timeout - workers didn't exit in time
 		fmt.Fprintf(os.Stderr, "[WARNING] Hash workers did not exit within 60 seconds, proceeding anyway\n")
 	}
-	
+
 	// After workers have exited (or timed out), close the completion channel
 	// This signals to the monitor that no more completions will come
 	close(hjm.callFinishChan)
@@ -915,7 +904,7 @@ func (dc *DirectoryCache) monitorJobs(
 	collectionStop <-chan struct{},
 	shutdownChan <-chan struct{},
 ) {
-	var jobs []uint64 // Track pending hash jobs
+	var jobs []uint64           // Track pending hash jobs
 	var preCompletions []uint64 // Queue for completions that arrived before their start
 	stopped := false
 	var stopTimer *time.Timer
@@ -932,7 +921,7 @@ func (dc *DirectoryCache) monitorJobs(
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Job %d started, pending jobs: %d\n", jobID, len(jobs))
 			}
-			
+
 			// Check if this job already completed prematurely
 			for i, preCompletedID := range preCompletions {
 				if preCompletedID == jobID {
@@ -954,7 +943,7 @@ func (dc *DirectoryCache) monitorJobs(
 				}
 				return
 			}
-			
+
 			// Remove completed job from jobs slice
 			found := false
 			for i, id := range jobs {
@@ -971,12 +960,12 @@ func (dc *DirectoryCache) monitorJobs(
 					fmt.Fprintf(os.Stderr, "[SCAN] Job %d completed prematurely, queuing completion\n", completedJobID)
 				}
 			}
-			
+
 			// If job not found, it completed before start signal - queue it
 			if !found {
 				preCompletions = append(preCompletions, completedJobID)
 			}
-			
+
 			// Check if we're done after processing a completion
 			if stopped && len(jobs) == 0 {
 				if IsDebugEnabled("scanning") {

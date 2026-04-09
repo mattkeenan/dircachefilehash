@@ -44,7 +44,6 @@ func NewBEIndexFileIOEntry(filePath string, fileOffset int64, entrySize uint32, 
 	}
 }
 
-
 // readEntryData reads the binary entry data from the file
 // Each read operation uses its own file handle for thread safety
 func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
@@ -54,12 +53,12 @@ func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 		return nil, fmt.Errorf("failed to open index file %s: %v", ife.filePath, err)
 	}
 	defer file.Close()
-	
+
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
 		return nil, fmt.Errorf("failed to seek to entry position %d: %v", ife.fileOffset, err)
 	}
-	
+
 	// Read the entry data
 	entryData := make([]byte, ife.entrySize)
 	n, err := file.Read(entryData)
@@ -69,15 +68,15 @@ func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 	if n != int(ife.entrySize) {
 		return nil, fmt.Errorf("incomplete read: got %d bytes, expected %d", n, ife.entrySize)
 	}
-	
+
 	// Cast to binaryEntry
 	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-	
+
 	// Validate entry size matches what we read
 	if entry.Size != ife.entrySize {
 		return nil, fmt.Errorf("entry size mismatch: entry reports %d, expected %d", entry.Size, ife.entrySize)
 	}
-	
+
 	return entry, nil
 }
 
@@ -90,12 +89,12 @@ func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 		return fmt.Errorf("failed to open index file for writing %s: %v", ife.filePath, err)
 	}
 	defer file.Close()
-	
+
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
 		return fmt.Errorf("failed to seek to entry position %d: %v", ife.fileOffset, err)
 	}
-	
+
 	// Write the entry data
 	entryData := (*[512]byte)(unsafe.Pointer(entry))[:ife.entrySize:ife.entrySize]
 	n, err := file.Write(entryData)
@@ -105,12 +104,12 @@ func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 	if n != int(ife.entrySize) {
 		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, ife.entrySize)
 	}
-	
+
 	// Sync to ensure data is written
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("failed to sync entry data: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -120,12 +119,12 @@ func (ife *BEIndexFileIOEntry) IsValid() bool {
 	if _, err := os.Stat(ife.filePath); err != nil {
 		return false
 	}
-	
+
 	// Check if offset and size are reasonable
 	if ife.fileOffset < HeaderSize || ife.entrySize == 0 {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -133,12 +132,12 @@ func (ife *BEIndexFileIOEntry) IsValid() bool {
 func (ife *BEIndexFileIOEntry) Size() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Size, nil
 }
 
@@ -146,12 +145,12 @@ func (ife *BEIndexFileIOEntry) Size() (uint32, error) {
 func (ife *BEIndexFileIOEntry) CTimeWall() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.CTimeWall, nil
 }
 
@@ -159,12 +158,12 @@ func (ife *BEIndexFileIOEntry) CTimeWall() (uint64, error) {
 func (ife *BEIndexFileIOEntry) MTimeWall() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.MTimeWall, nil
 }
 
@@ -172,12 +171,12 @@ func (ife *BEIndexFileIOEntry) MTimeWall() (uint64, error) {
 func (ife *BEIndexFileIOEntry) Dev() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Dev, nil
 }
 
@@ -185,12 +184,12 @@ func (ife *BEIndexFileIOEntry) Dev() (uint32, error) {
 func (ife *BEIndexFileIOEntry) Ino() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Ino, nil
 }
 
@@ -198,12 +197,12 @@ func (ife *BEIndexFileIOEntry) Ino() (uint32, error) {
 func (ife *BEIndexFileIOEntry) Mode() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Mode, nil
 }
 
@@ -211,12 +210,12 @@ func (ife *BEIndexFileIOEntry) Mode() (uint32, error) {
 func (ife *BEIndexFileIOEntry) UID() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.UID, nil
 }
 
@@ -224,12 +223,12 @@ func (ife *BEIndexFileIOEntry) UID() (uint32, error) {
 func (ife *BEIndexFileIOEntry) GID() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.GID, nil
 }
 
@@ -237,12 +236,12 @@ func (ife *BEIndexFileIOEntry) GID() (uint32, error) {
 func (ife *BEIndexFileIOEntry) FileSize() (uint64, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.FileSize, nil
 }
 
@@ -250,12 +249,12 @@ func (ife *BEIndexFileIOEntry) FileSize() (uint64, error) {
 func (ife *BEIndexFileIOEntry) HashType() (uint16, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.HashType, nil
 }
 
@@ -263,12 +262,12 @@ func (ife *BEIndexFileIOEntry) HashType() (uint16, error) {
 func (ife *BEIndexFileIOEntry) Hash() ([20]byte, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return [20]byte{}, err
 	}
-	
+
 	// Convert from [64]byte to [20]byte (taking only first 20 bytes)
 	var hash [20]byte
 	copy(hash[:], entry.Hash[:20])
@@ -279,12 +278,12 @@ func (ife *BEIndexFileIOEntry) Hash() ([20]byte, error) {
 func (ife *BEIndexFileIOEntry) EntryFlags() (uint32, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint32(entry.EntryFlags), nil
 }
 
@@ -292,35 +291,32 @@ func (ife *BEIndexFileIOEntry) EntryFlags() (uint32, error) {
 func (ife *BEIndexFileIOEntry) RelativePath() (string, error) {
 	ife.RLock()
 	defer ife.RUnlock()
-	
+
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Calculate path location after the fixed-size binaryEntry struct
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + unsafe.Sizeof(*entry))
+	pathPtr := unsafe.Add(unsafe.Pointer(entry), unsafe.Sizeof(*entry))
 	pathBytes := (*[256]byte)(pathPtr) // Max reasonable path length for bounds checking
-	
+
 	// Find null terminator to determine actual path length
 	pathLen := 0
-	maxPathLen := int(ife.entrySize) - int(unsafe.Sizeof(*entry))
-	if maxPathLen > 256 {
-		maxPathLen = 256
-	}
-	
+	maxPathLen := min(int(ife.entrySize)-int(unsafe.Sizeof(*entry)), 256)
+
 	for i := 0; i < maxPathLen; i++ {
 		if pathBytes[i] == 0 {
 			pathLen = i
 			break
 		}
 	}
-	
+
 	if pathLen == 0 {
 		// Empty path represents current directory - normalize to "." like ls -al
 		return ".", nil
 	}
-	
+
 	return string(pathBytes[:pathLen]), nil
 }
 
@@ -330,7 +326,7 @@ func (ife *BEIndexFileIOEntry) HashString() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return hex.EncodeToString(hash[:]), nil
 }
 
@@ -340,7 +336,7 @@ func (ife *BEIndexFileIOEntry) IsDeleted() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	// Check bit 0 for deletion flag (matching existing implementation)
 	return (flags & 1) != 0, nil
 }
@@ -349,22 +345,22 @@ func (ife *BEIndexFileIOEntry) IsDeleted() (bool, error) {
 func (ife *BEIndexFileIOEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	ife.Lock()
 	defer ife.Unlock()
-	
+
 	// Read current entry data
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return err
 	}
-	
+
 	// Validate hash length
 	if len(hashBytes) != 20 {
 		return fmt.Errorf("invalid hash length: got %d, expected 20", len(hashBytes))
 	}
-	
+
 	// Update hash and hash type
 	copy(entry.Hash[:], hashBytes)
 	entry.HashType = hashType
-	
+
 	// Write back to file
 	return ife.writeEntryData(entry)
 }
@@ -373,20 +369,20 @@ func (ife *BEIndexFileIOEntry) SetHash(hashBytes []byte, hashType uint16) error 
 func (ife *BEIndexFileIOEntry) SetDeleted(deleted bool) error {
 	ife.Lock()
 	defer ife.Unlock()
-	
+
 	// Read current entry data
 	entry, err := ife.readEntryData()
 	if err != nil {
 		return err
 	}
-	
+
 	// Update deletion flag (bit 0)
 	if deleted {
 		entry.EntryFlags |= 1
 	} else {
 		entry.EntryFlags &^= 1
 	}
-	
+
 	// Write back to file
 	return ife.writeEntryData(entry)
 }

@@ -58,7 +58,7 @@ func generateDeterministicData(size int64, seed int64) []byte {
 	data := make([]byte, size)
 
 	// Use seed to create deterministic but varied content
-	for i := int64(0); i < size; i++ {
+	for i := range size {
 		// Simple PRNG based on linear congruential generator
 		seed = (seed*1103515245 + 12345) & 0x7fffffff
 		data[i] = byte(seed >> 16)
@@ -119,7 +119,7 @@ func createBenchmarkDataset(rootDir string, config BenchmarkConfig) error {
 
 			// Create files in this directory
 			filesInThisDir := min(config.FilesPerDir, config.TotalFiles-fileIndex)
-			for fileNum := 0; fileNum < filesInThisDir; fileNum++ {
+			for range filesInThisDir {
 				fileName := fmt.Sprintf("file_%06d.dat", fileIndex)
 				filePath := filepath.Join(dirPath, fileName)
 
@@ -388,7 +388,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 
 		// Modify 10% of existing files
 		modifyCount := config.TotalFiles / 10
-		for j := 0; j < modifyCount; j++ {
+		for j := range modifyCount {
 			filePath := filepath.Join(datasetDir, fmt.Sprintf("file_%06d.dat", j))
 			if err := os.WriteFile(filePath, []byte("modified content"), 0644); err != nil {
 				b.Fatalf("Failed to modify file: %v", err)
@@ -397,7 +397,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 
 		// Add 5% new files
 		newCount := config.TotalFiles / 20
-		for j := 0; j < newCount; j++ {
+		for j := range newCount {
 			fileName := fmt.Sprintf("new_file_%d_%06d.dat", i, j)
 			filePath := filepath.Join(datasetDir, fileName)
 			content := generateDeterministicData(config.SmallFileSize, int64(j+config.TotalFiles))
@@ -449,7 +449,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		cache.Close()
 
 		// Clean up modified files for next iteration
-		for j := 0; j < newCount; j++ {
+		for j := range newCount {
 			fileName := fmt.Sprintf("new_file_%d_%06d.dat", i, j)
 			filePath := filepath.Join(datasetDir, fileName)
 			os.Remove(filePath)
@@ -511,12 +511,4 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			b.StartTimer()
 		}
 	})
-}
-
-// Helper function for min
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

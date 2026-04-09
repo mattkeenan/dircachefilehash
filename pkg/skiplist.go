@@ -38,7 +38,7 @@ func ResetStringCopyStats() {
 type skiplistWrapper struct {
 	skiplist          *zcsl.ZeroCopySkiplist[binaryEntryRef, string, string]
 	referencedIndices map[*mmapIndexFile]int32 // Atomic counters per index file
-	mutex            sync.RWMutex              // Protects the map operations
+	mutex             sync.RWMutex             // Protects the map operations
 }
 
 // NewSkiplistWrapper creates a new skiplist wrapper with context tracking
@@ -147,7 +147,7 @@ func (sw *skiplistWrapper) ForEachRef(callback func(binaryEntryRef, string) bool
 		default:
 			// Continue processing
 		}
-		
+
 		context := current.Context()
 		ref := current.Item()
 		if !callback(*ref, context) {
@@ -286,7 +286,7 @@ func (sw *skiplistWrapper) FilterNotByContext(context string) *skiplistWrapper {
 func (sw *skiplistWrapper) IncRef() {
 	sw.mutex.Lock()
 	defer sw.mutex.Unlock()
-	
+
 	for indexFile := range sw.referencedIndices {
 		indexFile.IncRef()
 		sw.referencedIndices[indexFile]++
@@ -297,7 +297,7 @@ func (sw *skiplistWrapper) IncRef() {
 func (sw *skiplistWrapper) DecRef() {
 	sw.mutex.Lock()
 	defer sw.mutex.Unlock()
-	
+
 	for indexFile := range sw.referencedIndices {
 		indexFile.DecRef()
 		sw.referencedIndices[indexFile]--
@@ -308,7 +308,7 @@ func (sw *skiplistWrapper) DecRef() {
 func (sw *skiplistWrapper) RefCount() int32 {
 	sw.mutex.RLock()
 	defer sw.mutex.RUnlock()
-	
+
 	var total int32
 	for _, localCount := range sw.referencedIndices {
 		total += localCount
@@ -321,10 +321,10 @@ func (sw *skiplistWrapper) AddIndexReference(indexFile *mmapIndexFile) {
 	if indexFile == nil {
 		return
 	}
-	
+
 	sw.mutex.Lock()
 	defer sw.mutex.Unlock()
-	
+
 	if _, exists := sw.referencedIndices[indexFile]; !exists {
 		sw.referencedIndices[indexFile] = 0
 	}

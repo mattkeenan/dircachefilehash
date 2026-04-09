@@ -46,35 +46,35 @@ func (ime *BEIndexFileMmapEntry) getBinaryEntry() (*binaryEntry, error) {
 		ime.entryRef.IndexFile.mutex.RLock()
 		defer ime.entryRef.IndexFile.mutex.RUnlock()
 	}
-	
+
 	// Get the actual entry pointer
 	entry := ime.entryRef.GetBinaryEntry()
 	if entry == nil {
 		return nil, ErrEntryInvalidated
 	}
-	
+
 	return entry, nil
 }
 
 // IsValid performs a quick check if the entry is accessible
 // For mmap entries, this checks the underlying mmap validity
 func (ime *BEIndexFileMmapEntry) IsValid() bool {
-	return ime.entryRef.IndexFile != nil && 
-		   ime.entryRef.IndexFile.Data != nil &&
-		   ime.entryRef.Offset >= 0 &&
-		   ime.entryRef.Offset < len(ime.entryRef.IndexFile.Data)
+	return ime.entryRef.IndexFile != nil &&
+		ime.entryRef.IndexFile.Data != nil &&
+		ime.entryRef.Offset >= 0 &&
+		ime.entryRef.Offset < len(ime.entryRef.IndexFile.Data)
 }
 
 // Size returns the entry size field
 func (ime *BEIndexFileMmapEntry) Size() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Size, nil
 }
 
@@ -82,12 +82,12 @@ func (ime *BEIndexFileMmapEntry) Size() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) CTimeWall() (uint64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.CTimeWall, nil
 }
 
@@ -95,12 +95,12 @@ func (ime *BEIndexFileMmapEntry) CTimeWall() (uint64, error) {
 func (ime *BEIndexFileMmapEntry) MTimeWall() (uint64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.MTimeWall, nil
 }
 
@@ -108,12 +108,12 @@ func (ime *BEIndexFileMmapEntry) MTimeWall() (uint64, error) {
 func (ime *BEIndexFileMmapEntry) Dev() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Dev, nil
 }
 
@@ -121,12 +121,12 @@ func (ime *BEIndexFileMmapEntry) Dev() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) Ino() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Ino, nil
 }
 
@@ -134,12 +134,12 @@ func (ime *BEIndexFileMmapEntry) Ino() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) Mode() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.Mode, nil
 }
 
@@ -147,12 +147,12 @@ func (ime *BEIndexFileMmapEntry) Mode() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) UID() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.UID, nil
 }
 
@@ -160,12 +160,12 @@ func (ime *BEIndexFileMmapEntry) UID() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) GID() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.GID, nil
 }
 
@@ -173,12 +173,12 @@ func (ime *BEIndexFileMmapEntry) GID() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) FileSize() (uint64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.FileSize, nil
 }
 
@@ -186,12 +186,12 @@ func (ime *BEIndexFileMmapEntry) FileSize() (uint64, error) {
 func (ime *BEIndexFileMmapEntry) HashType() (uint16, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return entry.HashType, nil
 }
 
@@ -199,12 +199,12 @@ func (ime *BEIndexFileMmapEntry) HashType() (uint16, error) {
 func (ime *BEIndexFileMmapEntry) Hash() ([20]byte, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return [20]byte{}, err
 	}
-	
+
 	// Convert from [64]byte to [20]byte (taking only first 20 bytes)
 	var hash [20]byte
 	copy(hash[:], entry.Hash[:20])
@@ -215,12 +215,12 @@ func (ime *BEIndexFileMmapEntry) Hash() ([20]byte, error) {
 func (ime *BEIndexFileMmapEntry) EntryFlags() (uint32, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint32(entry.EntryFlags), nil
 }
 
@@ -228,30 +228,30 @@ func (ime *BEIndexFileMmapEntry) EntryFlags() (uint32, error) {
 func (ime *BEIndexFileMmapEntry) RelativePath() (string, error) {
 	ime.RLock()
 	defer ime.RUnlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Calculate path location after the fixed-size binaryEntry struct
-	pathPtr := unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + unsafe.Sizeof(*entry))
+	pathPtr := unsafe.Add(unsafe.Pointer(entry), unsafe.Sizeof(*entry))
 	pathBytes := (*[256]byte)(pathPtr) // Max reasonable path length for bounds checking
-	
+
 	// Find null terminator to determine actual path length
 	pathLen := 0
-	for i := 0; i < len(pathBytes); i++ {
+	for i := range len(pathBytes) {
 		if pathBytes[i] == 0 {
 			pathLen = i
 			break
 		}
 	}
-	
+
 	if pathLen == 0 {
 		// Empty path represents current directory - normalize to "." like ls -al
 		return ".", nil
 	}
-	
+
 	return string(pathBytes[:pathLen]), nil
 }
 
@@ -261,7 +261,7 @@ func (ime *BEIndexFileMmapEntry) HashString() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return hex.EncodeToString(hash[:]), nil
 }
 
@@ -271,7 +271,7 @@ func (ime *BEIndexFileMmapEntry) IsDeleted() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	// Check bit 0 for deletion flag (matching existing implementation)
 	return (flags & 1) != 0, nil
 }
@@ -281,21 +281,21 @@ func (ime *BEIndexFileMmapEntry) IsDeleted() (bool, error) {
 func (ime *BEIndexFileMmapEntry) SetHash(hashBytes []byte, hashType uint16) error {
 	ime.Lock()
 	defer ime.Unlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Validate hash length
 	if len(hashBytes) != 20 {
 		return fmt.Errorf("invalid hash length: got %d, expected 20", len(hashBytes))
 	}
-	
+
 	// Update hash and hash type in place
 	copy(entry.Hash[:], hashBytes)
 	entry.HashType = hashType
-	
+
 	return nil
 }
 
@@ -304,19 +304,19 @@ func (ime *BEIndexFileMmapEntry) SetHash(hashBytes []byte, hashType uint16) erro
 func (ime *BEIndexFileMmapEntry) SetDeleted(deleted bool) error {
 	ime.Lock()
 	defer ime.Unlock()
-	
+
 	entry, err := ime.getBinaryEntry()
 	if err != nil {
 		return err
 	}
-	
+
 	// Update deletion flag (bit 0)
 	if deleted {
 		entry.EntryFlags |= 1
 	} else {
 		entry.EntryFlags &^= 1
 	}
-	
+
 	return nil
 }
 
@@ -363,7 +363,7 @@ func LoadIndexFileMmap(filePath string, dc *DirectoryCache) (*mmapIndexFile, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to load index file %s: %v", filePath, err)
 	}
-	
+
 	return indexFile, nil
 }
 
@@ -374,6 +374,6 @@ func CreateEntryFromOffset(indexFile *mmapIndexFile, entryOffset int) *BEIndexFi
 		Offset:    entryOffset,
 		IndexFile: indexFile,
 	}
-	
+
 	return NewBEIndexFileMmapEntry(entryRef, "mmap")
 }

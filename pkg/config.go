@@ -523,9 +523,9 @@ func ValidateSymlinkMode(mode string) error {
 	if len(parts) == 0 {
 		return fmt.Errorf("empty symlink mode")
 	}
-	
+
 	baseMode := strings.TrimSpace(parts[0])
-	
+
 	// Validate base mode
 	switch baseMode {
 	case "all", "internal", "external", "none":
@@ -535,7 +535,7 @@ func ValidateSymlinkMode(mode string) error {
 	default:
 		return fmt.Errorf("unsupported symlink mode: %s (supported: all, internal, external, none)", baseMode)
 	}
-	
+
 	// Validate additional flags
 	for i := 1; i < len(parts); i++ {
 		flag := strings.TrimSpace(parts[i])
@@ -551,7 +551,7 @@ func ValidateSymlinkMode(mode string) error {
 			return fmt.Errorf("unsupported symlink mode flag: %s (supported: strict)", flag)
 		}
 	}
-	
+
 	return nil
 }
 

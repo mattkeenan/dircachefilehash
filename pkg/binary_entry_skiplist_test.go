@@ -18,7 +18,7 @@ func TestBESkiplist(t *testing.T) {
 		SupportsSetDeleted: true,
 		IsEphemeral:        false, // Skiplist entries are stable
 	}
-	
+
 	suite.RunAllTests(t)
 }
 
@@ -31,61 +31,27 @@ type skiplistTestCleanupInfo struct {
 	skiplist *skiplistWrapper
 }
 
-// createMockBinaryEntryFromTestData creates a mock binaryEntry from TestEntryData
-// Similar to createMockBinaryEntry but uses TestEntryData for full field population
-func createMockBinaryEntryFromTestData(testData *TestEntryData) *binaryEntry {
-	// Create a properly sized buffer like the real system would
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(testData.RelativePath) + 1
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
-	
-	data := make([]byte, entrySize)
-	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-	
-	// Populate all fields from testData
-	entry.Size = uint32(entrySize)
-	entry.CTimeWall = testData.CTimeWall
-	entry.MTimeWall = testData.MTimeWall
-	entry.Dev = testData.Dev
-	entry.Ino = testData.Ino
-	entry.Mode = testData.Mode
-	entry.UID = testData.UID
-	entry.GID = testData.GID
-	entry.FileSize = testData.FileSize
-	entry.HashType = testData.HashType
-	copy(entry.Hash[:], testData.Hash[:])
-	entry.EntryFlags = uint16(testData.EntryFlags)
-	
-	// Copy path after the struct
-	pathStart := baseSize
-	copy(data[pathStart:], testData.RelativePath)
-	data[pathStart+len(testData.RelativePath)] = 0 // null terminator
-	
-	return entry
-}
-
 // createBESkiplist creates a BESkiplistEntry for testing
 // This creates a mock entry similar to how existing skiplist tests work
 func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	// Update the expected size to match what will be created
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 	entrySize := int(testData.Size)
-	
+
 	// Create mock index file data with header + entry
 	indexSize := HeaderSize + entrySize
 	indexData := make([]byte, indexSize)
-	
+
 	// Create mock mmap index file
 	mockIndexFile := &mmapIndexFile{
 		Data:  indexData,
 		Size:  indexSize,
 		mutex: sync.RWMutex{},
 	}
-	
+
 	// Create the entry within the index file data (after header)
 	entryPtr := (*binaryEntry)(unsafe.Pointer(&indexData[HeaderSize]))
-	
+
 	// Populate the entry with test data
 	entryPtr.Size = testData.Size
 	entryPtr.CTimeWall = testData.CTimeWall
@@ -99,28 +65,28 @@ func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterfac
 	entryPtr.HashType = testData.HashType
 	copy(entryPtr.Hash[:], testData.Hash[:20])
 	entryPtr.EntryFlags = uint16(testData.EntryFlags)
-	
+
 	// Copy path after the struct (within the index data)
 	pathStart := HeaderSize + int(unsafe.Sizeof(*entryPtr))
 	copy(indexData[pathStart:], testData.RelativePath)
 	indexData[pathStart+len(testData.RelativePath)] = 0 // null terminator
-	
+
 	// Create binaryEntryRef with offset 0 (first entry after header)
 	ref := binaryEntryRef{
 		Offset:    0,
 		IndexFile: mockIndexFile,
 	}
-	
+
 	// Create BESkiplistEntry (test doesn't need real skiplist for basic functionality)
 	skiplistEntry := NewBESkiplistEntry(ref, nil)
-	
+
 	// Store cleanup info (just need to track the allocated entry)
 	testCleanupDataSkiplist[skiplistEntry] = &skiplistTestCleanupInfo{
 		testDir:  "", // No directory to clean up
 		dc:       nil,
 		skiplist: nil,
 	}
-	
+
 	return skiplistEntry
 }
 
@@ -151,20 +117,20 @@ func testBESkiplistEntryStableBehavior(t *testing.T) {
 	helper := &skiplistTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
-	
+
 	// Should always be valid for stable entries
 	if !entry.IsValid() {
 		t.Error("Skiplist entry should always be valid")
 	}
-	
+
 	// Should be able to access all fields reliably
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if path, err := entry.RelativePath(); err != nil {
 			t.Errorf("RelativePath() iteration %d returned error: %v", i, err)
 		} else if path != "test/file.txt" {
 			t.Errorf("RelativePath() iteration %d = %q, want %q", i, path, "test/file.txt")
 		}
-		
+
 		if size, err := entry.Size(); err != nil {
 			t.Errorf("Size() iteration %d returned error: %v", i, err)
 		} else if size == 0 {
@@ -178,17 +144,17 @@ func testBESkiplistEntryReadOnlyPattern(t *testing.T) {
 	helper := &skiplistTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
-	
+
 	// Test batch read operations (typical skiplist usage)
 	entry.RLock()
-	
+
 	path, err1 := entry.RelativePath()
 	size, err2 := entry.Size()
 	hash, err3 := entry.HashString()
 	deleted, err4 := entry.IsDeleted()
-	
+
 	entry.RUnlock()
-	
+
 	// Verify all operations succeeded
 	if err1 != nil {
 		t.Errorf("RelativePath() in batch operation returned error: %v", err1)
@@ -202,7 +168,7 @@ func testBESkiplistEntryReadOnlyPattern(t *testing.T) {
 	if err4 != nil {
 		t.Errorf("IsDeleted() in batch operation returned error: %v", err4)
 	}
-	
+
 	// Verify results are sensible
 	if path != "test/file.txt" {
 		t.Errorf("Batch RelativePath() = %q, want %q", path, "test/file.txt")
@@ -223,35 +189,35 @@ func testBESkiplistEntryConcurrentAccess(t *testing.T) {
 	helper := &skiplistTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
-	
+
 	// This test verifies that concurrent read access works correctly
 	// (typical pattern for skiplist entries in production)
-	
+
 	const numReaders = 10
 	const numOperations = 100
-	
+
 	done := make(chan bool, numReaders)
-	
+
 	// Start concurrent readers
-	for i := 0; i < numReaders; i++ {
+	for range numReaders {
 		go func() {
-			for j := 0; j < numOperations; j++ {
+			for range numOperations {
 				// Test concurrent read access
 				if path, err := entry.RelativePath(); err != nil {
 					t.Errorf("Concurrent RelativePath() error: %v", err)
 				} else if path != "test/file.txt" {
 					t.Errorf("Concurrent RelativePath() = %q, want %q", path, "test/file.txt")
 				}
-				
+
 				// Small delay to encourage race conditions
 				time.Sleep(time.Microsecond)
 			}
 			done <- true
 		}()
 	}
-	
+
 	// Wait for all readers to complete
-	for i := 0; i < numReaders; i++ {
+	for range numReaders {
 		<-done
 	}
 }
@@ -261,25 +227,25 @@ func testBESkiplistEntryMmapSafety(t *testing.T) {
 	helper := &skiplistTestHelper{}
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
-	
+
 	// Test that the entry properly coordinates with underlying mmap
 	// This primarily tests that the locking doesn't deadlock or panic
-	
+
 	// Multiple readers should work fine
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
 			entry.RLock()
 			defer entry.RUnlock()
-			
+
 			entry.RelativePath()
 			entry.Size()
 			entry.HashString()
 		}()
 	}
-	
+
 	// Brief pause to let goroutines run
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Should still be accessible after concurrent access
 	if path, err := entry.RelativePath(); err != nil {
 		t.Errorf("RelativePath() after concurrent access returned error: %v", err)
@@ -303,22 +269,22 @@ func (h *skiplistTestHelper) createTestEntry(t *testing.T) (*BESkiplistEntry, fu
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	h.testDir = testDir
-	
+
 	// Create DirectoryCache
 	h.dc = NewDirectoryCache(testDir, testDir)
-	
+
 	// Create test data
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
-	
+
 	// Use the createBESkiplist helper to set up the full infrastructure
 	entry := createBESkiplist(t, testData).(*BESkiplistEntry)
-	
+
 	// Return entry and cleanup function
 	cleanup := func() {
 		cleanupBESkiplist(t, entry)
 	}
-	
+
 	return entry, cleanup
 }
 
@@ -328,7 +294,7 @@ func BenchmarkBESkiplist(b *testing.B) {
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 	entry := createBESkiplist(&testing.T{}, testData) // This is a hack, but works for benchmarks
-	
+
 	defer func() {
 		// Cleanup
 		if cleanupInfo, exists := testCleanupDataSkiplist[entry]; exists {
@@ -339,19 +305,19 @@ func BenchmarkBESkiplist(b *testing.B) {
 			delete(testCleanupDataSkiplist, entry)
 		}
 	}()
-	
+
 	b.Run("RelativePath", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			entry.RelativePath()
 		}
 	})
-	
+
 	b.Run("HashString", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			entry.HashString()
 		}
 	})
-	
+
 	b.Run("Size", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			entry.Size()

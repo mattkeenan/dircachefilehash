@@ -69,7 +69,7 @@ func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
 	// Start timing if debug=hash and verbose >= 3
 	var startTime time.Time
 	var fileSize int64
-	
+
 	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 {
 		startTime = time.Now()
 		// Get file size for rate calculation
@@ -97,9 +97,9 @@ func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
 		duration := time.Since(startTime)
 		if duration > 0 {
 			rate := float64(written) / duration.Seconds()
-			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n", 
-				filePath, 
-				FormatHumanSize(fileSize), 
+			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n",
+				filePath,
+				FormatHumanSize(fileSize),
 				duration,
 				FormatHumanRate(rate))
 		}
@@ -171,7 +171,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 	// Start timing if debug=hash and verbose >= 3
 	var startTime time.Time
 	var fileSize int64
-	
+
 	if IsDebugEnabled("hash") && GetVerboseLevel() >= 3 {
 		startTime = time.Now()
 		// Get file size for rate calculation
@@ -221,9 +221,9 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 		duration := time.Since(startTime)
 		if duration > 0 {
 			rate := float64(totalRead) / duration.Seconds()
-			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n", 
-				filePath, 
-				FormatHumanSize(fileSize), 
+			fmt.Fprintf(os.Stderr, "[HASH] %s: %s hashed in %v (%s)\n",
+				filePath,
+				FormatHumanSize(fileSize),
 				duration,
 				FormatHumanRate(rate))
 		}

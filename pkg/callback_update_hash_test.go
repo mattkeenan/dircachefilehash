@@ -15,14 +15,14 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	// Create a test DirectoryCache
 	dc := NewDirectoryCache(tempDir, tempDir)
 	defer dc.Close()
-	
+
 	// Create update callback
 	callback := NewUpdateCallback(dc, "test-scan", nil, nil)
-	
+
 	t.Run("ModifiedFileRequestsHash", func(t *testing.T) {
 		// Create a modified file scenario
 		existingEntry := &mockBinaryEntry{
@@ -31,14 +31,14 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			mtime:     time.Now().Add(-time.Hour), // Old time
 			hashValue: [20]byte{1, 2, 3, 4, 5},
 		}
-		
+
 		modifiedEntry := &mockBinaryEntry{
 			relPath:   "file.txt",
 			size:      1000,
 			mtime:     time.Now(), // New time - file modified
 			hashValue: [20]byte{}, // No hash yet
 		}
-		
+
 		// Process comparison - this should request hash because times differ
 		// The call will fail due to createScanEntryAndHash but should still request hash first
 		continueProcessing, err := callback.OnComparison(
@@ -48,7 +48,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			"file.txt",
 			"file.txt",
 		)
-		
+
 		// The operation should fail due to missing binaryEntryRef support in mock
 		// but we should verify that hash was requested before the failure
 		if err == nil {
@@ -62,7 +62,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 		}
-		
+
 		// Verify hash was requested on the modified entry (before createScanEntryAndHash)
 		requested, err := modifiedEntry.IsHashRequested()
 		if err != nil {
@@ -72,7 +72,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			t.Error("Expected hash to be requested for modified file")
 		}
 	})
-	
+
 	t.Run("NewFileRequestsHash", func(t *testing.T) {
 		newEntry := &mockBinaryEntry{
 			relPath:   "newfile.txt",
@@ -80,7 +80,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			mtime:     time.Now(),
 			hashValue: [20]byte{}, // No hash yet
 		}
-		
+
 		// Process new file scenario
 		continueProcessing, err := callback.OnComparison(
 			ComparisonRightFirst,
@@ -89,7 +89,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			"",
 			"newfile.txt",
 		)
-		
+
 		// Expected to fail due to mock limitations, but hash should be requested first
 		if err == nil {
 			if !continueProcessing {
@@ -101,7 +101,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 		}
-		
+
 		// Verify hash was requested on the new entry
 		requested, err := newEntry.IsHashRequested()
 		if err != nil {
@@ -111,7 +111,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			t.Error("Expected hash to be requested for new file")
 		}
 	})
-	
+
 	t.Run("UnchangedFileNoHashRequest", func(t *testing.T) {
 		// Create identical files (no change)
 		baseTime := time.Now()
@@ -121,14 +121,14 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			mtime:     baseTime,
 			hashValue: [20]byte{1, 2, 3, 4, 5},
 		}
-		
+
 		unchangedEntry2 := &mockBinaryEntry{
 			relPath:   "unchanged.txt",
 			size:      500,
 			mtime:     baseTime, // Same time
 			hashValue: [20]byte{1, 2, 3, 4, 5},
 		}
-		
+
 		// Process unchanged file scenario
 		continueProcessing, err := callback.OnComparison(
 			ComparisonMatch,
@@ -137,14 +137,14 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			"unchanged.txt",
 			"unchanged.txt",
 		)
-		
+
 		if err != nil {
 			t.Fatalf("OnComparison failed: %v", err)
 		}
 		if !continueProcessing {
 			t.Error("Expected to continue processing")
 		}
-		
+
 		// Verify hash was NOT requested (file unchanged)
 		requested1, err := unchangedEntry1.IsHashRequested()
 		if err != nil {
@@ -154,12 +154,12 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 		if err != nil {
 			t.Fatalf("IsHashRequested failed on entry2: %v", err)
 		}
-		
+
 		if requested1 || requested2 {
 			t.Error("Expected hash NOT to be requested for unchanged file")
 		}
 	})
-	
+
 	t.Run("OnRightOnlyRequestsHash", func(t *testing.T) {
 		newEntry := &mockBinaryEntry{
 			relPath:   "rightonly.txt",
@@ -167,10 +167,10 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			mtime:     time.Now(),
 			hashValue: [20]byte{}, // No hash yet
 		}
-		
+
 		// Process via OnRightOnly (remaining new files)
 		continueProcessing, err := callback.OnRightOnly(newEntry, "rightonly.txt")
-		
+
 		// Expected to fail due to mock limitations, but hash should be requested first
 		if err == nil {
 			if !continueProcessing {
@@ -182,7 +182,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 		}
-		
+
 		// Verify hash was requested
 		requested, err := newEntry.IsHashRequested()
 		if err != nil {
@@ -192,7 +192,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			t.Error("Expected hash to be requested for right-only file")
 		}
 	})
-	
+
 	t.Run("IgnoredFileSkipsHashing", func(t *testing.T) {
 		// Create a mock entry for a file that should be ignored
 		ignoredEntry := &mockBinaryEntry{
@@ -201,14 +201,14 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 			mtime:     time.Now(),
 			hashValue: [20]byte{},
 		}
-		
+
 		// Mock the shouldIndex to return false for ignored files
 		// Note: this test depends on the actual shouldIndex implementation
 		// but we'll test the logic flow
-		
+
 		// Process ignored file - behavior depends on shouldIndex implementation
 		continueProcessing, err := callback.OnRightOnly(ignoredEntry, ".git/config")
-		
+
 		// May fail due to mock limitations or may succeed if shouldIndex returns false
 		if err == nil {
 			if !continueProcessing {
@@ -220,7 +220,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 		}
-		
+
 		// The important part is that it doesn't crash and continues processing
 		// Actual hash request behavior depends on shouldIndex implementation
 	})

@@ -17,7 +17,7 @@ func TestReorderBufferInOrder(t *testing.T) {
 	bypass := make(chan *PipelineEntry, 10)
 	hashed := make(chan *PipelineEntry) // unused
 
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		bypass <- makeEntry(i)
 	}
 	close(bypass)
@@ -28,7 +28,7 @@ func TestReorderBufferInOrder(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		pe := <-output
 		if pe.SeqNum != i {
 			t.Errorf("expected SeqNum %d, got %d", i, pe.SeqNum)
@@ -64,7 +64,7 @@ func TestReorderBufferOutOfOrder(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		pe := <-output
 		if pe.SeqNum != i {
 			t.Errorf("expected SeqNum %d, got %d", i, pe.SeqNum)
@@ -93,7 +93,7 @@ func TestReorderBufferMixedChannels(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		pe := <-output
 		if pe.SeqNum != i {
 			t.Errorf("expected SeqNum %d, got %d", i, pe.SeqNum)
@@ -186,7 +186,7 @@ func TestReorderBufferLargeSequence(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range uint64(n) {
 		pe := <-output
 		if pe.SeqNum != i {
 			t.Errorf("expected SeqNum %d, got %d", i, pe.SeqNum)

@@ -16,12 +16,12 @@ import (
 // TempIndexWriter handles iterative IoVec batch writing to temp index files
 // Implements immediate batching - writes whatever entries are ready right now
 type TempIndexWriter struct {
-	file         *os.File
-	tempPath     string
-	headerWritten bool
-	entryCount   uint32
-	dc           *DirectoryCache
-	checksumWriter hash.Hash    // Incremental checksum calculation
+	file           *os.File
+	tempPath       string
+	headerWritten  bool
+	entryCount     uint32
+	dc             *DirectoryCache
+	checksumWriter hash.Hash // Incremental checksum calculation
 }
 
 // NewTempIndexWriter creates a new temp index writer for the specified temp file
@@ -47,12 +47,12 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 	}
 
 	return &TempIndexWriter{
-		file:         file,
-		tempPath:     tempPath,
-		headerWritten: false,
-		entryCount:   0,
-		dc:           dc,
-		checksumWriter: checksumWriter,  // Use new hasher instance
+		file:           file,
+		tempPath:       tempPath,
+		headerWritten:  false,
+		entryCount:     0,
+		dc:             dc,
+		checksumWriter: checksumWriter, // Use new hasher instance
 	}, nil
 }
 
@@ -79,11 +79,11 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 			entryBytes := unsafe.Slice((*byte)(unsafe.Pointer(iovec.Base)), int(iovec.Len))
 			tiw.checksumWriter.Write(entryBytes)
 		}
-		
+
 		if err := tiw.writeEntriesWithVectorIO(readyIoVecs); err != nil {
 			return fmt.Errorf("failed to write entries batch: %w", err)
 		}
-		
+
 		// Update entry count
 		tiw.entryCount += uint32(len(readyIoVecs))
 	}
@@ -136,10 +136,7 @@ func (tiw *TempIndexWriter) writeEntriesWithVectorIO(entryIovecs []syscall.Iovec
 
 	// Write in chunks respecting IOV_MAX limit
 	for offset := 0; offset < len(entryIovecs); offset += maxIovecs {
-		end := offset + maxIovecs
-		if end > len(entryIovecs) {
-			end = len(entryIovecs)
-		}
+		end := min(offset+maxIovecs, len(entryIovecs))
 
 		// Use slice without copying to avoid allocation
 		chunk := entryIovecs[offset:end]
@@ -222,10 +219,10 @@ func (tiw *TempIndexWriter) addHeaderToChecksum(header *indexHeader) error {
 	// Serialize header WITHOUT checksum field (following existing pattern from index.go)
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
-	
+
 	// Add header fields (up to but not including checksum) to running checksum
 	tiw.checksumWriter.Write(headerBytes[:checksumOffset])
-	
+
 	return nil
 }
 

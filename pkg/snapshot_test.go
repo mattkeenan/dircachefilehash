@@ -45,7 +45,7 @@ func TestSnapshotRepository_Initialise(t *testing.T) {
 		t.Fatalf("Failed to read config file: %v", err)
 	}
 
-	var config map[string]interface{}
+	var config map[string]any
 	if err := json.Unmarshal(configData, &config); err != nil {
 		t.Fatalf("Failed to parse config JSON: %v", err)
 	}
@@ -228,8 +228,8 @@ func TestRetentionPolicy_SelectSnapshotsToKeep(t *testing.T) {
 	var snapshots []*SnapshotMetadata
 
 	// Create multiple snapshots per day for 3 days
-	for day := 0; day < 3; day++ {
-		for hour := 0; hour < 3; hour++ {
+	for day := range 3 {
+		for hour := range 3 {
 			snapshot := &SnapshotMetadata{
 				ID:   baseTime.AddDate(0, 0, day).Add(time.Duration(hour) * time.Hour).Format("20060102T150405.000000000Z"),
 				Time: baseTime.AddDate(0, 0, day).Add(time.Duration(hour) * time.Hour),
@@ -293,7 +293,7 @@ func TestRetentionPolicy_ForgetSnapshots(t *testing.T) {
 	// Create multiple snapshots on different days by manipulating metadata
 	var snapshotIDs []string
 	baseTime := time.Now().UTC()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		// Create snapshot
 		snapshot, err := sr.CreateSnapshot("/test/repo", nil)
 		if err != nil {

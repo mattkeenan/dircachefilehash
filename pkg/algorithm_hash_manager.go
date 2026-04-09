@@ -25,50 +25,50 @@ type algorithmHashManager struct {
 	shutdownChan   <-chan struct{} // shutdown notification
 	closed         bool            // track if channel is closed
 	closeMutex     sync.Mutex      // protect closed flag
-	
+
 	// New fields for ordered completion notifications
-	completedQueue      []uint64               // Jobs completed but waiting for order
-	nextExpectedJobID   uint64                 // Next JobID expected in sequence
-	iteratorNotifyChans []chan<- uint64        // Channels to signal iterators
-	queueMutex          sync.Mutex             // Protect completed queue and iterator channels
-	
+	completedQueue      []uint64        // Jobs completed but waiting for order
+	nextExpectedJobID   uint64          // Next JobID expected in sequence
+	iteratorNotifyChans []chan<- uint64 // Channels to signal iterators
+	queueMutex          sync.Mutex      // Protect completed queue and iterator channels
+
 	// Cookie tracking for external callers
-	jobIDToCookie       map[uint64]uint64      // Maps JobID to caller's Cookie
+	jobIDToCookie          map[uint64]uint64      // Maps JobID to caller's Cookie
 	externalCompletionChan chan hashJobCompletion // External completion notifications with cookies
-	
+
 	// Internal coordination
-	completionChan chan uint64            // Internal channel for processing completions
-	processorWg    sync.WaitGroup         // Wait group for completion processor
-	
+	completionChan chan uint64    // Internal channel for processing completions
+	processorWg    sync.WaitGroup // Wait group for completion processor
+
 	// Job ID allocation
-	nextJobID      uint64                 // Monotonically increasing job ID counter (use atomic operations)
+	nextJobID uint64 // Monotonically increasing job ID counter (use atomic operations)
 }
 
 // newAlgorithmHashManager creates a new algorithm-specific hash manager
 func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <-chan struct{}) *algorithmHashManager {
 	manager := &algorithmHashManager{
-		hashJobChan:         make(chan *hashJobStart, 100),
-		callFinishChan:      make(chan uint64, 100),
-		shutdownChan:        shutdownChan,
-		completedQueue:      make([]uint64, 0),
-		nextExpectedJobID:   1, // JobIDs start at 1
-		iteratorNotifyChans: make([]chan<- uint64, 0),
-		jobIDToCookie:       make(map[uint64]uint64),
+		hashJobChan:            make(chan *hashJobStart, 100),
+		callFinishChan:         make(chan uint64, 100),
+		shutdownChan:           shutdownChan,
+		completedQueue:         make([]uint64, 0),
+		nextExpectedJobID:      1, // JobIDs start at 1
+		iteratorNotifyChans:    make([]chan<- uint64, 0),
+		jobIDToCookie:          make(map[uint64]uint64),
 		externalCompletionChan: make(chan hashJobCompletion, 100),
-		completionChan:      make(chan uint64, 100),
-		nextJobID:           0, // Start job ID allocation at 0 so first GetNextJobID() returns 1
+		completionChan:         make(chan uint64, 100),
+		nextJobID:              0, // Start job ID allocation at 0 so first GetNextJobID() returns 1
 	}
-	
+
 	// Start hash workers (same as simpleHashManager)
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		manager.wg.Add(1)
 		go manager.hashWorker(dc)
 	}
-	
+
 	// Start completion processor
 	manager.processorWg.Add(1)
 	go manager.completionProcessor()
-	
+
 	return manager
 }
 
@@ -76,7 +76,7 @@ func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <
 func (ahm *algorithmHashManager) RegisterIteratorNotification(notifyChan chan<- uint64) {
 	ahm.queueMutex.Lock()
 	defer ahm.queueMutex.Unlock()
-	
+
 	ahm.iteratorNotifyChans = append(ahm.iteratorNotifyChans, notifyChan)
 }
 
@@ -84,7 +84,7 @@ func (ahm *algorithmHashManager) RegisterIteratorNotification(notifyChan chan<- 
 func (ahm *algorithmHashManager) UnregisterIteratorNotification(notifyChan chan<- uint64) {
 	ahm.queueMutex.Lock()
 	defer ahm.queueMutex.Unlock()
-	
+
 	for i, ch := range ahm.iteratorNotifyChans {
 		if ch == notifyChan {
 			// Remove from slice
@@ -98,7 +98,7 @@ func (ahm *algorithmHashManager) UnregisterIteratorNotification(notifyChan chan<
 func (ahm *algorithmHashManager) completionProcessor() {
 	defer ahm.processorWg.Done()
 	defer close(ahm.externalCompletionChan) // Close external completion channel on exit
-	
+
 	for {
 		select {
 		case jobID, ok := <-ahm.completionChan:
@@ -106,9 +106,9 @@ func (ahm *algorithmHashManager) completionProcessor() {
 				// Channel closed, processor shutting down
 				return
 			}
-			
+
 			ahm.processCompletion(jobID)
-			
+
 		case <-ahm.shutdownChan:
 			// Shutdown requested - drain any remaining completions quickly
 			for {
@@ -131,22 +131,22 @@ func (ahm *algorithmHashManager) completionProcessor() {
 func (ahm *algorithmHashManager) processCompletion(jobID uint64) {
 	ahm.queueMutex.Lock()
 	defer ahm.queueMutex.Unlock()
-	
+
 	if IsDebugEnabled("algorithm") {
 		fmt.Fprintf(os.Stderr, "[ALGORITHM] Processing completion for JobID %d, expected %d\n", jobID, ahm.nextExpectedJobID)
 	}
-	
+
 	if jobID == ahm.nextExpectedJobID {
 		// This is the next expected job - signal it immediately
 		ahm.signalIterators(jobID)
 		ahm.nextExpectedJobID++
-		
+
 		// Now flush any consecutive jobs from the completed queue
 		ahm.flushCompletedQueue()
 	} else {
 		// This job completed out of order - add to completed queue
 		ahm.addToCompletedQueue(jobID)
-		
+
 		if IsDebugEnabled("algorithm") {
 			fmt.Fprintf(os.Stderr, "[ALGORITHM] JobID %d queued (out of order), queue size: %d\n", jobID, len(ahm.completedQueue))
 		}
@@ -163,7 +163,7 @@ func (ahm *algorithmHashManager) addToCompletedQueue(jobID uint64) {
 			break
 		}
 	}
-	
+
 	// Insert at the correct position
 	ahm.completedQueue = append(ahm.completedQueue, 0)
 	copy(ahm.completedQueue[insertPos+1:], ahm.completedQueue[insertPos:])
@@ -176,10 +176,10 @@ func (ahm *algorithmHashManager) flushCompletedQueue() {
 		// Found the next expected job in the queue
 		jobID := ahm.completedQueue[0]
 		ahm.completedQueue = ahm.completedQueue[1:] // Remove from front
-		
+
 		ahm.signalIterators(jobID)
 		ahm.nextExpectedJobID++
-		
+
 		if IsDebugEnabled("algorithm") {
 			fmt.Fprintf(os.Stderr, "[ALGORITHM] Flushed JobID %d from queue, queue size: %d\n", jobID, len(ahm.completedQueue))
 		}
@@ -191,7 +191,7 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 	if IsDebugEnabled("algorithm") {
 		fmt.Fprintf(os.Stderr, "[ALGORITHM] Signaling JobID %d to %d iterators\n", jobID, len(ahm.iteratorNotifyChans))
 	}
-	
+
 	// Send to iterator notification channels (existing behavior)
 	for _, ch := range ahm.iteratorNotifyChans {
 		select {
@@ -204,7 +204,7 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 			}
 		}
 	}
-	
+
 	// Send to external completion channel with both JobID and Cookie
 	cookie, hasCookie := ahm.jobIDToCookie[jobID]
 	if hasCookie {
@@ -212,7 +212,7 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 			JobID:  jobID,
 			Cookie: cookie,
 		}
-		
+
 		select {
 		case ahm.externalCompletionChan <- completion:
 			// Successfully sent external completion notification
@@ -225,7 +225,7 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 				fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Failed to send external completion (channel full)\n")
 			}
 		}
-		
+
 		// Remove the mapping since the job is completed
 		delete(ahm.jobIDToCookie, jobID)
 	}
@@ -250,24 +250,24 @@ func (ahm *algorithmHashManager) SubmitHashJob(job *hashJobStart) {
 	if IsDebugEnabled("hash") {
 		VerboseLog(3, "[HASH-MANAGER] SubmitHashJob called: JobID=%d, Cookie=%d, FilePath=%s", job.JobID, job.Cookie, job.FilePath)
 	}
-	
+
 	// Track the mapping from JobID to Cookie for completion notifications
 	if job.Cookie != 0 {
 		ahm.queueMutex.Lock()
 		ahm.jobIDToCookie[job.JobID] = job.Cookie
 		ahm.queueMutex.Unlock()
-		
+
 		if IsDebugEnabled("hash") {
 			VerboseLog(3, "[HASH-MANAGER] Mapped JobID %d to Cookie %d", job.JobID, job.Cookie)
 		}
 	}
-	
+
 	if IsDebugEnabled("hash") {
 		VerboseLog(3, "[HASH-MANAGER] Sending job to hash workers via hashJobChan")
 	}
-	
+
 	ahm.hashJobChan <- job
-	
+
 	if IsDebugEnabled("hash") {
 		VerboseLog(3, "[HASH-MANAGER] Hash job submitted successfully to workers")
 	}
@@ -288,7 +288,7 @@ func (ahm *algorithmHashManager) CompletionChannel() <-chan hashJobCompletion {
 func (ahm *algorithmHashManager) FinishSubmitting() {
 	ahm.closeMutex.Lock()
 	defer ahm.closeMutex.Unlock()
-	
+
 	if !ahm.closed {
 		close(ahm.hashJobChan)
 		ahm.closed = true
@@ -298,9 +298,9 @@ func (ahm *algorithmHashManager) FinishSubmitting() {
 // hashWorker processes hash jobs (same as simpleHashManager)
 func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 	defer ahm.wg.Done()
-	
+
 	var currentJob *hashJobStart // Track current job for interruption handling
-	
+
 	for {
 		select {
 		case job, ok := <-ahm.hashJobChan:
@@ -311,13 +311,13 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				}
 				return
 			}
-			
+
 			currentJob = job
-			
+
 			if IsDebugEnabled("algorithm") {
 				fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash started for file: %s (job %d)\n", job.FilePath, job.JobID)
 			}
-			
+
 			// Hash the file and update binaryEntry directly in mmap memory
 			// For symlinks, we hash the target path, not the target file contents
 			var hashBytes []byte
@@ -340,7 +340,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				err = fmt.Errorf("invalid hash job: no entry or scanned path")
 				goto hashComplete
 			}
-			
+
 			if os.FileMode(mode)&os.ModeSymlink != 0 {
 				// This is a symlink - hash the target path
 				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
@@ -348,7 +348,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				// Regular file - hash the file contents with interruptible hashing
 				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan)
 			}
-			
+
 		hashComplete:
 
 			if err == nil {
@@ -357,7 +357,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 					fmt.Fprintf(os.Stderr, "[ERROR] Failed to update entry hash: %v\n", updateErr)
 				}
 			}
-			
+
 			if err != nil {
 				if IsDebugEnabled("algorithm") {
 					fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash failed for file: %s (job %d): %v\n", job.FilePath, job.JobID, err)
@@ -367,11 +367,11 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 					fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash completed for file: %s (job %d)\n", job.FilePath, job.JobID)
 				}
 			}
-			
+
 			// Send completion notification to processor
 			ahm.completionChan <- job.JobID
 			currentJob = nil
-			
+
 		case <-ahm.shutdownChan:
 			// Shutdown requested
 			if currentJob != nil {
@@ -394,14 +394,14 @@ func (ahm *algorithmHashManager) Shutdown() {
 		ahm.closed = true
 	}
 	ahm.closeMutex.Unlock()
-	
+
 	// Wait for hash workers to finish with timeout
 	done := make(chan struct{})
 	go func() {
 		ahm.wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		// Workers completed normally
@@ -411,17 +411,17 @@ func (ahm *algorithmHashManager) Shutdown() {
 			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Hash worker shutdown timeout\n")
 		}
 	}
-	
+
 	// Close completion processor
 	close(ahm.completionChan)
-	
+
 	// Wait for completion processor with timeout
 	processorDone := make(chan struct{})
 	go func() {
 		ahm.processorWg.Wait()
 		close(processorDone)
 	}()
-	
+
 	select {
 	case <-processorDone:
 		// Completion processor finished normally
@@ -431,7 +431,7 @@ func (ahm *algorithmHashManager) Shutdown() {
 			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Completion processor shutdown timeout\n")
 		}
 	}
-	
+
 	// NOTE: externalCompletionChan is closed by completionProcessor via defer (line 100).
 	// Do NOT close it here — that would cause a double-close panic.
 
@@ -448,7 +448,7 @@ func (ahm *algorithmHashManager) Wait() {
 		ahm.wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		// Workers completed normally
@@ -458,14 +458,14 @@ func (ahm *algorithmHashManager) Wait() {
 			fmt.Fprintf(os.Stderr, "[ALGORITHM] Warning: Hash worker wait timeout\n")
 		}
 	}
-	
+
 	// Wait for completion processor with timeout
 	processorDone := make(chan struct{})
 	go func() {
 		ahm.processorWg.Wait()
 		close(processorDone)
 	}()
-	
+
 	select {
 	case <-processorDone:
 		// Completion processor finished normally
@@ -481,6 +481,6 @@ func (ahm *algorithmHashManager) Wait() {
 func (ahm *algorithmHashManager) GetQueueStats() (queueSize int, nextExpected uint64, registeredIterators int) {
 	ahm.queueMutex.Lock()
 	defer ahm.queueMutex.Unlock()
-	
+
 	return len(ahm.completedQueue), ahm.nextExpectedJobID, len(ahm.iteratorNotifyChans)
 }

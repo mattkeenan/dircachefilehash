@@ -19,7 +19,7 @@ func NewBinaryEntrySkiplistIterator(sl *skiplistWrapper, name string, shutdownCh
 			shutdownChan: shutdownChan,
 		}
 	}
-	
+
 	return &BinaryEntrySkiplistIterator{
 		iteratorBase: iteratorBase{name: name},
 		skiplist:     sl,
@@ -32,14 +32,14 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 	if err := bsi.checkClosed(); err != nil {
 		return nil, err
 	}
-	
+
 	if bsi.skiplist == nil {
 		bsi.markExhausted()
 		return nil, nil
 	}
-	
+
 	var foundEntry BinaryEntryInterface = nil
-	
+
 	// Use ForEachRef to find the next entry after our current position
 	iterationCount := 0
 	err := bsi.skiplist.ForEachRef(func(entryRef binaryEntryRef, context string) bool {
@@ -47,7 +47,7 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "[ITERATOR-DEBUG] ForEachRef iteration %d: currentPath='%s'", iterationCount, bsi.currentPath)
 		}
-		
+
 		// Get the path for comparison
 		entry := entryRef.GetBinaryEntry()
 		if entry == nil {
@@ -57,14 +57,13 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 			return true // Skip invalid entries
 		}
 		entryPath := entry.RelativePath()
-		
-		
+
 		// Check if entry is deleted
 		isDeleted := entry.IsDeleted()
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "[ITERATOR-DEBUG] Entry path='%s', deleted=%v, context='%s'", entryPath, isDeleted, context)
 		}
-		
+
 		// If we haven't started iterating yet (currentPath is empty), take the first entry
 		if bsi.currentPath == "" {
 			if IsDebugEnabled("load") {
@@ -77,7 +76,7 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 			}
 			return false // Stop iteration
 		}
-		
+
 		// If this path is lexicographically after our current position, take it
 		// (entryPath is already normalized, so this comparison will work correctly)
 		pathComparison := entryPath > bsi.currentPath
@@ -95,29 +94,29 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 			}
 			return false // Stop iteration
 		}
-		
+
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "[ITERATOR-DEBUG] Continuing search: '%s' <= '%s'", entryPath, bsi.currentPath)
 		}
 		return true // Continue looking
 	}, bsi.shutdownChan)
-	
+
 	if IsDebugEnabled("load") {
 		VerboseLog(3, "[ITERATOR-DEBUG] ForEachRef completed after %d iterations, foundEntry=%v, err=%v", iterationCount, foundEntry != nil, err)
 	}
-	
+
 	if err != nil {
 		// Signal handling interruption
 		bsi.markExhausted()
 		return nil, err
 	}
-	
+
 	if foundEntry == nil {
 		// No more entries found
 		bsi.markExhausted()
 		return nil, nil
 	}
-	
+
 	return foundEntry, nil
 }
 

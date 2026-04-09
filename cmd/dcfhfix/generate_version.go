@@ -50,7 +50,7 @@ func getVersionInfo() (version, commit string, err error) {
 		if !versionRegex.MatchString(localVersion) {
 			return "", "", fmt.Errorf("DCFH_VERSION_OVERRIDE must match format v[0-9]+\\.[0-9]+\\.[0-9]+ (e.g., v0.6.5)")
 		}
-		
+
 		// Still get the commit hash for reference
 		commitCmd := exec.Command("git", "rev-parse", "HEAD")
 		commitOutput, err := commitCmd.Output()
@@ -64,7 +64,7 @@ func getVersionInfo() (version, commit string, err error) {
 			}
 			commit = shortCommit
 		}
-		
+
 		// Build version string with "LOCAL" slug (uppercase to match goreleaser style)
 		version = fmt.Sprintf("%s-LOCAL-%s", localVersion, commit)
 		return version, commit, nil

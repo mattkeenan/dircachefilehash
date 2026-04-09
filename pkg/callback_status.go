@@ -13,26 +13,26 @@ import (
 // CRITICAL: Status command MUST hash files and cache results to cache.idx for performance.
 type StatusCallback struct {
 	CallbackBase
-	
+
 	// Results collected during processing
 	result *StatusResult
-	
+
 	// Mutex to protect concurrent access to result
 	mutex sync.Mutex
-	
+
 	// Directory cache reference for modification checking
 	dc *DirectoryCache
-	
+
 	// Hash coordination with existing hashJobManager (avoid maps where simple counter works)
-	hashJobManager   *algorithmHashManager   // Existing hash manager (passed from caller)
-	entryCounter     uint64                  // Internal counter for callback entries (used as cookie)
-	pendingEntries   []BinaryEntryInterface  // Entries indexed by (cookie-1), nil = completed/ready
-	nextFlushIndex   uint64                  // Next counter position to check for flushing
-	
+	hashJobManager *algorithmHashManager  // Existing hash manager (passed from caller)
+	entryCounter   uint64                 // Internal counter for callback entries (used as cookie)
+	pendingEntries []BinaryEntryInterface // Entries indexed by (cookie-1), nil = completed/ready
+	nextFlushIndex uint64                 // Next counter position to check for flushing
+
 	// Iterative cache index writing (following architecture-v0.7.md batched IoVec approach)
-	cacheTempFileName string                  // Temp cache index filename for iterative writing
-	backlog          []BinaryEntryInterface  // Ready entries waiting to write (maintains path order)
-	tempIndexWriter  interface{}             // IoVec writer for temp index output (TODO: implement TempIndexWriter)
+	cacheTempFileName string                 // Temp cache index filename for iterative writing
+	backlog           []BinaryEntryInterface // Ready entries waiting to write (maintains path order)
+	tempIndexWriter   any                    // IoVec writer for temp index output (TODO: implement TempIndexWriter)
 }
 
 // NewStatusCallback creates a new callback for status checking and cache writing
@@ -45,17 +45,17 @@ func NewStatusCallback(name string, dc *DirectoryCache, hashManager *algorithmHa
 			Deleted:  make([]string, 0),
 		},
 		dc: dc,
-		
+
 		// Hash coordination
 		hashJobManager: hashManager,
 		entryCounter:   0,
 		pendingEntries: make([]BinaryEntryInterface, 0),
 		nextFlushIndex: 0,
-		
+
 		// Iterative cache writing
 		cacheTempFileName: cacheTempFileName,
-		backlog:          make([]BinaryEntryInterface, 0),
-		tempIndexWriter:  nil, // Will be initialized when first entry is written
+		backlog:           make([]BinaryEntryInterface, 0),
+		tempIndexWriter:   nil, // Will be initialized when first entry is written
 	}
 }
 
@@ -66,7 +66,7 @@ func (sc *StatusCallback) OnComparison(
 	leftPath, rightPath string,
 ) (bool, error) {
 	sc.mutex.Lock()
-	
+
 	switch result {
 	case ComparisonMatch:
 		// Both entries exist - check if file was modified or deleted
@@ -79,32 +79,32 @@ func (sc *StatusCallback) OnComparison(
 				if needsHash(leftEntry, rightEntry) {
 					// File changed - categorize as modified and coordinate hashing
 					sc.result.Modified = append(sc.result.Modified, rightPath)
-					
+
 					// Release mutex before hash coordination to avoid deadlocks
 					sc.mutex.Unlock()
-					
+
 					// Use unified hash coordination for modified file
 					if err := sc.SubmitAndOrWriteHash(rightEntry, "modified"); err != nil {
 						return false, err
 					}
-					
+
 					// Re-acquire mutex for rest of method
 					sc.mutex.Lock()
 				} else {
 					// File unchanged - use unified coordination for unchanged file
 					sc.mutex.Unlock()
-					
+
 					// Use unified hash coordination for unchanged file (will add to backlog)
 					if err := sc.SubmitAndOrWriteHash(leftEntry, "unchanged"); err != nil {
 						return false, err
 					}
-					
+
 					// Re-acquire mutex for rest of method
 					sc.mutex.Lock()
 				}
 			}
 		}
-		
+
 	case ComparisonLeftFirst:
 		// Left entry exists but not on right - this is a deleted file
 		if leftEntry != nil {
@@ -113,7 +113,7 @@ func (sc *StatusCallback) OnComparison(
 				sc.result.Deleted = append(sc.result.Deleted, leftPath)
 			}
 		}
-		
+
 	case ComparisonRightFirst:
 		// Right entry exists but not on left - this is a new/added file
 		if rightEntry != nil {
@@ -132,7 +132,7 @@ func (sc *StatusCallback) OnComparison(
 				}
 			}
 		}
-		
+
 	case ComparisonLeftExhausted:
 		// Only right entries remain - these are all new/added files
 		if rightEntry != nil {
@@ -150,7 +150,7 @@ func (sc *StatusCallback) OnComparison(
 				}
 			}
 		}
-		
+
 	case ComparisonRightExhausted:
 		// Only left entries remain - these are all deleted files
 		if leftEntry != nil {
@@ -159,10 +159,10 @@ func (sc *StatusCallback) OnComparison(
 			}
 		}
 	}
-	
+
 	// Release mutex at end (it was already handled in SubmitAndOrWriteHash calls above)
 	sc.mutex.Unlock()
-	
+
 	return true, nil // Continue processing
 }
 
@@ -173,7 +173,7 @@ func (sc *StatusCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (b
 			sc.mutex.Lock()
 			sc.result.Deleted = append(sc.result.Deleted, path)
 			sc.mutex.Unlock()
-			
+
 			// Deleted files don't need hashing, but DO get written to cache.idx
 			// SubmitAndOrWriteHash will add to backlog for cache writing
 			if err := sc.SubmitAndOrWriteHash(entry, "deleted"); err != nil {
@@ -192,7 +192,7 @@ func (sc *StatusCallback) OnRightOnly(entry BinaryEntryInterface, path string) (
 			sc.mutex.Lock()
 			sc.result.Added = append(sc.result.Added, path)
 			sc.mutex.Unlock()
-			
+
 			// Use unified hash coordination for new file
 			if err := sc.SubmitAndOrWriteHash(entry, "new_file"); err != nil {
 				return false, err
@@ -207,23 +207,22 @@ func (sc *StatusCallback) OnRightOnly(entry BinaryEntryInterface, path string) (
 func (sc *StatusCallback) GetResult() *StatusResult {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
-	
+
 	// Return the result directly since StatusResult contains slices that are safe to share
 	return sc.result
 }
-
 
 // Clear resets the callback state for reuse
 func (sc *StatusCallback) Clear() {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
-	
+
 	sc.result = &StatusResult{
 		Modified: make([]string, 0),
 		Added:    make([]string, 0),
 		Deleted:  make([]string, 0),
 	}
-	
+
 	// Reset hash coordination state
 	sc.entryCounter = 0
 	sc.pendingEntries = make([]BinaryEntryInterface, 0)
@@ -237,11 +236,11 @@ func (sc *StatusCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 	if !ok {
 		return fmt.Errorf("entry doesn't support hash job submission")
 	}
-	
+
 	// Increment counter for this entry (used as external cookie)
 	sc.entryCounter++
 	cookie := sc.entryCounter
-	
+
 	// Store entry at cookie position for completion tracking
 	if int(cookie) > len(sc.pendingEntries) {
 		// Expand slice to accommodate new cookie position
@@ -250,19 +249,19 @@ func (sc *StatusCallback) submitHashJobToManager(entry BinaryEntryInterface) err
 		sc.pendingEntries = newSlice
 	}
 	sc.pendingEntries[cookie-1] = entry // Store at (cookie-1) since cookies start at 1
-	
+
 	// Request hash through the existing interface
 	if err := entry.RequestHash(); err != nil {
 		return err
 	}
-	
+
 	// TODO: Implement direct hash job submission with cookie to hashJobManager
 	// sc.hashJobManager.SubmitHashJob(&hashJobStart{
 	//     FilePath:    entry.AbsolutePath(),
 	//     IndexEntry:  ref,
 	//     Cookie:      cookie,
 	// })
-	
+
 	return nil
 }
 
@@ -284,30 +283,30 @@ func (sc *StatusCallback) flushInOrderEntries() error {
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "[STATUS-WRITE] Flushing entries: backlog=%d pending=%d", len(sc.backlog), len(sc.pendingEntries))
 	}
-	
+
 	// Use counter to check for contiguous completed entries (no gaps)
 	var readyIoVecs []syscall.Iovec
-	
+
 	// Process backlog entries that can be written in order
 	for len(sc.backlog) > 0 {
 		entry := sc.backlog[0]
-		
+
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
 				VerboseLog(3, "[STATUS-WRITE] Creating IoVec for backlog entry: %s", path)
 			}
 		}
-		
-		// Create zero-copy IoVec when possible  
+
+		// Create zero-copy IoVec when possible
 		ioVec, err := sc.createEntryIoVec(entry)
 		if err != nil {
 			return err
 		}
-		
+
 		readyIoVecs = append(readyIoVecs, ioVec)
 		sc.backlog = sc.backlog[1:] // Remove from backlog
 	}
-	
+
 	// Check pending entries from nextFlushIndex for contiguous completions (nil = ready)
 	for int(sc.nextFlushIndex) < len(sc.pendingEntries) {
 		if sc.pendingEntries[sc.nextFlushIndex] != nil {
@@ -317,7 +316,7 @@ func (sc *StatusCallback) flushInOrderEntries() error {
 		// Entry is nil (completed) - can skip it in flush sequence
 		sc.nextFlushIndex++
 	}
-	
+
 	// Write batch with single vectorio call to temp index
 	if len(readyIoVecs) > 0 {
 		if IsDebugEnabled("write") {
@@ -325,7 +324,7 @@ func (sc *StatusCallback) flushInOrderEntries() error {
 		}
 		return sc.writeIoVecBatchToTempIndex(readyIoVecs)
 	}
-	
+
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "[STATUS-WRITE] No IoVecs ready to write")
 	}
@@ -342,7 +341,7 @@ func (sc *StatusCallback) createEntryIoVec(entry BinaryEntryInterface) (syscall.
 			Len:  uint64(unsafe.Sizeof(binaryEntry{})),
 		}, nil
 	}
-	
+
 	return syscall.Iovec{}, fmt.Errorf("entry doesn't support binary entry reference")
 }
 
@@ -367,19 +366,19 @@ func (sc *StatusCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 			VerboseLog(3, "[STATUS-HASH] SubmitAndOrWriteHash called for %s: %s", operation, path)
 		}
 	}
-	
+
 	// Status callback always writes to cache temp index for performance optimization
 	if entry == nil {
 		return nil // Nothing to process
 	}
-	
+
 	// Check if this entry needs hashing and writing
 	needsHashing := (operation == "new_file") || (operation == "modified")
-	
+
 	// CRITICAL: Cache index excludes MainContext entries (no duplication with main.idx)
 	entryContext, _ := entry.GetContext()
 	needsWriting := (entryContext != MainContext)
-	
+
 	if needsHashing {
 		// Submit hash job using the existing infrastructure
 		if err := sc.submitHashJobToManager(entry); err != nil {
@@ -391,15 +390,15 @@ func (sc *StatusCallback) SubmitAndOrWriteHash(entry BinaryEntryInterface, opera
 		sc.appendToBacklog(entry)
 	}
 	// MainContext entries: no writing to cache (already in main.idx)
-	
+
 	// Process any completed hash jobs and write in-order entries
 	sc.processCompletedHashJobs()
-	
+
 	// Flush any ready entries to temp index
 	if err := sc.flushInOrderEntries(); err != nil {
 		return fmt.Errorf("failed to flush entries during hash coordination: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -408,14 +407,14 @@ func (sc *StatusCallback) processCompletedHashJobs() {
 	if sc.hashJobManager == nil {
 		return
 	}
-	
+
 	// Non-blocking check for completed jobs from existing hashJobManager
 	for {
 		select {
 		case completion := <-sc.hashJobManager.CompletionChannel():
 			// completion now contains both JobID and Cookie
 			cookie := completion.Cookie
-			
+
 			if cookie > 0 && int(cookie) <= len(sc.pendingEntries) {
 				// Mark entry as completed by setting to nil (ready for flush)
 				sc.pendingEntries[cookie-1] = nil
@@ -425,4 +424,3 @@ func (sc *StatusCallback) processCompletedHashJobs() {
 		}
 	}
 }
-

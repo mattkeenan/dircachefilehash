@@ -21,7 +21,7 @@ func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map
 			dc.symlinkMode = symlinkMode
 		}
 	}
-	
+
 	// Use the unified Status workflow which returns the scan result
 	// The scan result contains all current files (main + cache + new scan)
 	scanSkiplist, err := dc.runStatusWorkflowUnified(shutdownChan)
@@ -90,36 +90,35 @@ func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, fl
 			dc.symlinkMode = symlinkMode
 		}
 	}
-	
+
 	// Load merged main+cache indices using reusable utility function
 	mergedSkiplist, err := dc.LoadMergedMainCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load merged index: %w", err)
 	}
-	
+
 	// Create hash manager for coordinating async hash operations
 	hashManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
 	defer hashManager.Shutdown()
-	
+
 	// Create streaming iterators for unified algorithm - this is the key performance improvement
 	skiplistIterator := NewBinaryEntrySkiplistIterator(mergedSkiplist, "merged-main-cache", shutdownChan)
 	defer skiplistIterator.Close()
-	
+
 	filesystemIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "filesystem-scan")
 	defer filesystemIterator.Close()
-	
+
 	// Create callback for duplicate detection during streaming comparison
 	dupesCallback := NewDupesCallback("unified-dupes")
-	
+
 	// Run unified Hwang-Lin algorithm with streaming iterators (no memory loading!)
 	err = hwangLinUnified(skiplistIterator, filesystemIterator, dupesCallback, shutdownChan)
 	if err != nil {
 		return nil, fmt.Errorf("unified streaming algorithm failed: %w", err)
 	}
-	
+
 	// Extract results from streaming callback
 	result := dupesCallback.GetResults()
-	
+
 	return result, nil
 }
-

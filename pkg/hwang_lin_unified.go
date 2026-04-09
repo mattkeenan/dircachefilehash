@@ -25,31 +25,31 @@ func hwangLinUnified(
 	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
 		VerboseLog(3, "[HWANG-LIN] Starting hwangLinUnified: left=%s, right=%s", leftIter.Name(), rightIter.Name())
 	}
-	
+
 	if leftIter == nil || rightIter == nil || callback == nil {
 		return fmt.Errorf("hwangLinUnified: nil parameters not allowed")
 	}
-	
+
 	defer func() {
 		// Always close iterators, even on early return
 		leftIter.Close()
 		rightIter.Close()
 	}()
-	
+
 	// Initialize callback
 	if err := callback.OnStart(leftIter.Name(), rightIter.Name()); err != nil {
 		return fmt.Errorf("callback OnStart failed: %w", err)
 	}
-	
+
 	// Get initial entries from both iterators
 	leftEntry, leftErr := leftIter.Next()
 	rightEntry, rightErr := rightIter.Next()
-	
+
 	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-		VerboseLog(3, "[HWANG-LIN] Initial reads: leftEntry=%v leftErr=%v rightEntry=%v rightErr=%v", 
+		VerboseLog(3, "[HWANG-LIN] Initial reads: leftEntry=%v leftErr=%v rightEntry=%v rightErr=%v",
 			leftEntry != nil, leftErr, rightEntry != nil, rightErr)
 	}
-	
+
 	// Handle initial errors
 	if leftErr != nil {
 		return fmt.Errorf("left iterator initial read failed: %w", leftErr)
@@ -57,7 +57,7 @@ func hwangLinUnified(
 	if rightErr != nil {
 		return fmt.Errorf("right iterator initial read failed: %w", rightErr)
 	}
-	
+
 	// Main comparison loop - classic Hwang-Lin algorithm
 	for leftEntry != nil || rightEntry != nil {
 		// Check for shutdown signal at the beginning of each iteration
@@ -69,12 +69,12 @@ func hwangLinUnified(
 		default:
 			// Continue processing
 		}
-		
+
 		var result ComparisonResult
 		var leftPath, rightPath string
 		var continueProcessing bool
 		var err error
-		
+
 		// Get paths safely (handle nil entries)
 		if leftEntry != nil {
 			if path, err := leftEntry.RelativePath(); err == nil {
@@ -86,7 +86,7 @@ func hwangLinUnified(
 				rightPath = path
 			}
 		}
-		
+
 		// Determine comparison result
 		if leftEntry == nil {
 			// Left exhausted, only right entries remain
@@ -99,7 +99,7 @@ func hwangLinUnified(
 			if !continueProcessing {
 				return callback.OnComplete(nil)
 			}
-			
+
 			// Advance right iterator
 			rightEntry, rightErr = rightIter.Next()
 			if rightErr != nil {
@@ -107,7 +107,7 @@ func hwangLinUnified(
 				callback.OnComplete(iterErr)
 				return iterErr
 			}
-			
+
 		} else if rightEntry == nil {
 			// Right exhausted, only left entries remain
 			result = ComparisonLeftOnly
@@ -119,7 +119,7 @@ func hwangLinUnified(
 			if !continueProcessing {
 				return callback.OnComplete(nil)
 			}
-			
+
 			// Advance left iterator
 			leftEntry, leftErr = leftIter.Next()
 			if leftErr != nil {
@@ -127,11 +127,11 @@ func hwangLinUnified(
 				callback.OnComplete(iterErr)
 				return iterErr
 			}
-			
+
 		} else {
 			// Both entries present - compare paths
 			cmp := strings.Compare(leftPath, rightPath)
-			
+
 			if cmp == 0 {
 				// Paths match
 				result = ComparisonMatch
@@ -143,7 +143,7 @@ func hwangLinUnified(
 					callback.OnComplete(err)
 					return err
 				}
-				
+
 				// Advance both iterators
 				leftEntry, leftErr = leftIter.Next()
 				if leftErr != nil {
@@ -157,7 +157,7 @@ func hwangLinUnified(
 					callback.OnComplete(iterErr)
 					return iterErr
 				}
-				
+
 			} else if cmp < 0 {
 				// Left entry comes first
 				result = ComparisonLeftFirst
@@ -169,7 +169,7 @@ func hwangLinUnified(
 					callback.OnComplete(err)
 					return err
 				}
-				
+
 				// Advance left iterator only
 				leftEntry, leftErr = leftIter.Next()
 				if leftErr != nil {
@@ -177,7 +177,7 @@ func hwangLinUnified(
 					callback.OnComplete(iterErr)
 					return iterErr
 				}
-				
+
 			} else {
 				// Right entry comes first
 				result = ComparisonRightFirst
@@ -189,7 +189,7 @@ func hwangLinUnified(
 					callback.OnComplete(err)
 					return err
 				}
-				
+
 				// Advance right iterator only
 				rightEntry, rightErr = rightIter.Next()
 				if rightErr != nil {
@@ -200,7 +200,7 @@ func hwangLinUnified(
 			}
 		}
 	}
-	
+
 	// Algorithm completed successfully
 	return callback.OnComplete(nil)
 }

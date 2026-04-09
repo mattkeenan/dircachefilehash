@@ -36,7 +36,7 @@ type StatusResult struct {
 // Status compares the current directory state with the loaded index using the unified architecture
 func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]string) (*StatusResult, error) {
 	defer VerboseEnter()()
-	
+
 	// Apply flags before scanning
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// If no config loaded, apply symlink mode directly if provided
@@ -44,7 +44,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 			dc.symlinkMode = symlinkMode
 		}
 	}
-	
+
 	// Load main index as base for comparison
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -79,7 +79,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	if err := dc.initialiseScanIndex(cacheTempFileName); err != nil {
 		return nil, fmt.Errorf("failed to initialise cache temp index: %w", err)
 	}
-	
+
 	// Track operation success for proper cleanup strategy
 	var operationSuccessful bool
 	defer func() {
@@ -131,7 +131,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	// CRITICAL: Status command MUST write hashed results to cache for performance optimization
 	// Mark operation as successful only if scan completed without interruption
 	operationSuccessful = (scanErr == nil)
-	
+
 	if IsDebugEnabled("scan") {
 		if operationSuccessful {
 			fmt.Fprintf(os.Stderr, "[STATUS] Operation completed successfully - will rename to cache.idx and cleanup\n")
@@ -156,7 +156,7 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 				result.CleanStatus.MainIndex = false
 			}
 
-			// Check cache index clean status  
+			// Check cache index clean status
 			if _, err := os.Stat(dc.CacheFile); err == nil {
 				// Cache index exists - for now assume clean if it exists
 				result.CleanStatus.CacheIndex = true
