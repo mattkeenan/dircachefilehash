@@ -29,7 +29,7 @@ func TestUpdateCallback_BasicOperation(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil)
+	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
 
 	// Test Name method
 	if updateCallback.Name() != "update" {
@@ -75,7 +75,7 @@ func TestUpdateCallback_MockEntries(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil)
+	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
 
 	// Create mock entries for testing
 	leftEntry := createMockBinaryEntryForUpdate("test1.txt", 1024, false)
@@ -153,7 +153,7 @@ func TestUpdateCallback_RealFiles(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil)
+	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
 
 	// Create real scan entries using the unified iterator
 	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "test-scan")
@@ -211,7 +211,7 @@ func TestUpdateCallback_ErrorHandling(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil)
+	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
 
 	// Test with nil entries (edge case)
 	continueProcessing, err := updateCallback.OnComparison(

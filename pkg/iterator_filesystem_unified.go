@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 // UnifiedFilesystemScanIterator streams files directly from filesystem scanning
@@ -17,6 +18,7 @@ type UnifiedFilesystemScanIterator struct {
 	paths             []string
 	scanChan          chan *scannedPath
 	shutdownChan      chan struct{}
+	shutdownOnce      sync.Once
 	scanComplete      bool
 	scanError         error
 	scanIndexFileName string                         // Scan index file name
@@ -200,19 +202,16 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 	if err := ufsi.checkClosed(); err != nil {
 		return nil // Already closed, nothing to do
 	}
-	
+
 	ufsi.markClosed()
-	
-	// Signal shutdown to scanning goroutine (only if not already closed)
+
+	// Signal shutdown to scanning goroutine (sync.Once prevents double-close panic)
 	if !ufsi.scanComplete && ufsi.shutdownChan != nil {
-		select {
-		case <-ufsi.shutdownChan:
-			// Already closed
-		default:
+		ufsi.shutdownOnce.Do(func() {
 			close(ufsi.shutdownChan)
-		}
+		})
 	}
-	
+
 	// Clean up scan index
 	if ufsi.scanIndexFileName != "" {
 		if err := ufsi.dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
@@ -224,19 +223,22 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 	
 	// Drain any remaining entries from the channel (non-blocking)
 	if ufsi.scanChan != nil {
-		// Non-blocking drain - just empty what's currently buffered
+		// Non-blocking drain - just empty what's currently buffered.
+		// Must check ok to stop when channel is closed (closed channels
+		// return zero values on every read, causing infinite loops).
 	drainLoop:
 		for {
 			select {
-			case <-ufsi.scanChan:
-				// Drain buffered entry
+			case _, ok := <-ufsi.scanChan:
+				if !ok {
+					break drainLoop // channel closed
+				}
 			default:
-				// No more buffered entries, done
-				break drainLoop
+				break drainLoop // nothing buffered
 			}
 		}
 	}
-	
+
 	return nil
 }
 

@@ -229,6 +229,49 @@ func (tiw *TempIndexWriter) addHeaderToChecksum(header *indexHeader) error {
 	return nil
 }
 
+// WriteSerialised writes pre-serialised entry data to the temp index.
+// The data slices are kept alive internally until writev() completes,
+// preventing the dangling-pointer class of bugs that afflicts raw Iovec usage.
+// Each element of entries must be a complete wire-format binaryEntry (as
+// produced by EntrySerialiser.Serialise).
+func (tiw *TempIndexWriter) WriteSerialised(entries [][]byte) error {
+	if tiw.file == nil {
+		return fmt.Errorf("temp index writer is closed")
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Write placeholder header if not already written
+	if !tiw.headerWritten {
+		if err := tiw.writePlaceholderHeader(); err != nil {
+			return fmt.Errorf("failed to write placeholder header: %w", err)
+		}
+		tiw.headerWritten = true
+	}
+
+	// Build Iovecs from the provided data slices.
+	// The entries slice (and its []byte elements) stay on the stack frame
+	// of this function until after writev completes.
+	iovecs := make([]syscall.Iovec, len(entries))
+	for i, data := range entries {
+		// Update checksum before writing
+		tiw.checksumWriter.Write(data)
+
+		iovecs[i] = syscall.Iovec{
+			Base: &data[0],
+			Len:  uint64(len(data)),
+		}
+	}
+
+	if err := tiw.writeEntriesWithVectorIO(iovecs); err != nil {
+		return fmt.Errorf("failed to write serialised entries: %w", err)
+	}
+
+	tiw.entryCount += uint32(len(entries))
+	return nil
+}
+
 // GetTempPath returns the temp file path
 func (tiw *TempIndexWriter) GetTempPath() string {
 	return tiw.tempPath

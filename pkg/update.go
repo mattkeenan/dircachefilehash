@@ -46,14 +46,11 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 		}
 	}
 
-	// v0.7: Use unified scan workflow - UpdateCallback writes directly to temp main index
-	_, err = dc.performUnifiedScanToSkiplist(shutdownChan, []string{}, comparisonSkiplist)
+	// Pipeline: comparison → hash → reorder → write, with atomic rename on success
+	err = dc.performPipelineScan(shutdownChan, []string{}, comparisonSkiplist)
 	if err != nil {
-		return fmt.Errorf("unified scan failed: %w", err)
+		return fmt.Errorf("pipeline scan failed: %w", err)
 	}
-
-	// v0.7: UpdateCallback has already written and renamed the main index
-	// No skiplist merging or additional writing needed
 
 	// Remove cache file since everything is now in main index
 	os.Remove(dc.CacheFile) // Non-fatal if it fails
@@ -82,16 +79,11 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 		}
 	}
 
-	// v0.7 unified: Use performUnifiedScanToSkiplist which handles iterative writing via UpdateCallback
-	// This writes directly to temp main index during Hwang-Lin iteration - no skiplist handling needed
-	_, err = dc.performUnifiedScanToSkiplist(shutdownChan, paths, comparisonSkiplist)
+	// Pipeline: comparison → hash → reorder → write, with atomic rename on success
+	err = dc.performPipelineScan(shutdownChan, paths, comparisonSkiplist)
 	if err != nil {
-		// v0.7: On interruption, UpdateCallback handles cleanup and partial results are lost
-		// (This is the correct v0.7 behavior - no cache preservation for main index updates)
 		return fmt.Errorf("update interrupted: %w", err)
 	}
-
-	// v0.7: performUnifiedScanToSkiplist has already written and renamed temp index to main.idx
 	// Update cache using the unified workflow to reflect the new main index state
 	if _, err := dc.runStatusWorkflowUnified(shutdownChan); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
@@ -176,7 +168,9 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager, shutdownChan)
 
 	// Run unified algorithm (replaces the complex internal logic)
+	fmt.Fprintf(os.Stderr, "[UPDATE-DEBUG] Starting hwangLinUnified...\n")
 	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
+	fmt.Fprintf(os.Stderr, "[UPDATE-DEBUG] hwangLinUnified completed with error: %v\n", scanErr)
 	if scanErr != nil {
 		// v0.7: Mark operation as failed for proper cleanup
 		operationSuccessful = false

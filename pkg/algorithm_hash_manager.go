@@ -432,9 +432,9 @@ func (ahm *algorithmHashManager) Shutdown() {
 		}
 	}
 	
-	// Close external completion channel
-	close(ahm.externalCompletionChan)
-	
+	// NOTE: externalCompletionChan is closed by completionProcessor via defer (line 100).
+	// Do NOT close it here — that would cause a double-close panic.
+
 	if IsDebugEnabled("algorithm") {
 		fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash manager shutdown complete\n")
 	}

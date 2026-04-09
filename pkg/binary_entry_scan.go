@@ -66,8 +66,8 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	// entry.Hash remains zero-valued (no hash initially)
 	entry.EntryFlags = 0  // Not deleted initially
 	
-	// Copy path starting at the Path field offset
-	pathOffset := int(unsafe.Offsetof(entry.Path))
+	// Copy path starting after the struct (matching writeBinaryEntryToMmap and RelativePath)
+	pathOffset := int(unsafe.Sizeof(*entry))
 	pathBytes := []byte(relPath)
 	copy(binaryData[pathOffset:], pathBytes)
 	
