@@ -96,8 +96,9 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 // updateSpecificPaths has been moved to v0.6/pkg/update.go as part of the v0.7 unified
 // architecture migration. Use updateSpecificPathsUnified() instead.
 
-// performUnifiedScanToSkiplist performs scan using the unified hwangLinUnified architecture
-// This replaces the complex performHwangLinScanToSkiplist function (300+ lines) with the unified infrastructure
+// performUnifiedScanToSkiplist performs scan using the old callback-driven architecture.
+// Deprecated: The update path now uses performPipelineScan. This function is retained
+// only for recovery.go which still depends on it.
 func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struct{}, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 	
@@ -167,10 +168,8 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	// Create update callback for v0.7 direct temp index writing
 	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager, shutdownChan)
 
-	// Run unified algorithm (replaces the complex internal logic)
-	fmt.Fprintf(os.Stderr, "[UPDATE-DEBUG] Starting hwangLinUnified...\n")
+	// Run unified algorithm
 	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
-	fmt.Fprintf(os.Stderr, "[UPDATE-DEBUG] hwangLinUnified completed with error: %v\n", scanErr)
 	if scanErr != nil {
 		// v0.7: Mark operation as failed for proper cleanup
 		operationSuccessful = false

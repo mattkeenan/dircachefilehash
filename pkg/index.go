@@ -1250,18 +1250,6 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 	return nil
 }
 
-// TODO: Batch writing infrastructure removed - use callback-based writing with UpdateCallback/StatusCallback patterns
-
-
-// TODO: writeSkiplistWithVectorIOFiltered removed - contained problematic go func with loops
-// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
-
-// TODO: atomicWriteIndex removed - used problematic batch writing functions
-// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
-
-// TODO: MergeScanSkiplistsWithVectorIO removed - used problematic batch writing functions
-// Use callback-based writing with UpdateCallback/StatusCallback patterns instead
-
 // getSystemIOVMax returns the system's IOV_MAX limit using sysconf(_SC_IOV_MAX)
 // Falls back to conservative default if sysconf fails
 func getSystemIOVMax() (int, error) {

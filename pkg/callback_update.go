@@ -157,22 +157,6 @@ func (uc *UpdateCallback) OnComparison(
 
 
 
-// writeEntryToTempIndex writes a single entry to the temp index file using Iovec
-func (uc *UpdateCallback) writeEntryToTempIndex(entry BinaryEntryInterface) error {
-	if IsDebugEnabled("write") {
-		if path, err := entry.RelativePath(); err == nil {
-			VerboseLog(3, "[UPDATE-WRITE] writeEntryToTempIndex called for: %s", path)
-		}
-	}
-	
-	// TODO: Implement proper Iovec batch writing to temp index
-	// For now, just log that writing would happen here - this will be implemented when TempIndexWriter is available
-	if IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-WRITE] WARNING: writeEntryToTempIndex is not implemented - no entries written!")
-	}
-	return nil
-}
-
 // OnLeftOnly handles remaining entries from left iterator (when right is exhausted)
 func (uc *UpdateCallback) OnLeftOnly(entry BinaryEntryInterface, path string) (bool, error) {
 	// Left entry exists but no right entry - this is a deleted file
@@ -773,18 +757,5 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 		}
 	}
 
-	return nil
-}
-
-
-// ensureTempIndexWriter ensures the temp index writer is initialized
-func (uc *UpdateCallback) ensureTempIndexWriter() error {
-	if uc.tempIndexWriter == nil {
-		var err error
-		uc.tempIndexWriter, err = NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
-		if err != nil {
-			return fmt.Errorf("failed to create temp index writer: %w", err)
-		}
-	}
 	return nil
 }
