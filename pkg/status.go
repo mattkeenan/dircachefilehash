@@ -177,45 +177,32 @@ func deriveStatusFromCache(dc *DirectoryCache, mainSkiplist *skiplistWrapper, ca
 		Deleted:  make([]string, 0),
 	}
 
-	// Load the cache file that was just written
-	if _, err := os.Stat(cachePath); err != nil {
-		return result // No cache file (e.g. pipeline failed) — empty result
-	}
-
-	refs, indexFile, err := dc.loadIndexFromFileWithTracking(cachePath)
+	refs, _, err := dc.loadIndexFromFileWithTracking(cachePath)
 	if err != nil {
-		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to load cache for status derivation: %v\n", err)
-		}
+		// No cache file (pipeline failed or empty) — return empty result
 		return result
 	}
 
-	// Build a temporary skiplist from cache entries for iteration
-	cacheResult := NewSkiplistWrapper(16, CacheContext)
-	if indexFile != nil {
-		cacheResult.AddIndexReference(indexFile)
-	}
+	// Iterate refs directly — they're already path-sorted from the pipeline's
+	// reorder stage, so no skiplist needed.
 	for _, ref := range refs {
-		cacheResult.Insert(ref, CacheContext)
-	}
-
-	// Each cache entry is a change — categorise it
-	cacheResult.ForEach(func(entry *binaryEntry, _ string) bool {
+		entry := ref.GetBinaryEntry()
+		if entry == nil {
+			continue
+		}
 		path := entry.RelativePath()
 
 		if entry.IsDeleted() {
 			result.Deleted = append(result.Deleted, path)
-			return true
+			continue
 		}
 
-		// Check if this path exists in main
 		if mainEntry, _ := mainSkiplist.Find(path); mainEntry != nil {
 			result.Modified = append(result.Modified, path)
 		} else {
 			result.Added = append(result.Added, path)
 		}
-		return true
-	})
+	}
 
 	return result
 }

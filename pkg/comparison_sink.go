@@ -104,19 +104,7 @@ func (s *updateComparisonSink) Close() error {
 
 // emit creates a PipelineEntry and sends it to the appropriate channel.
 func (s *updateComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
-	pe := &PipelineEntry{
-		Entry:     entry,
-		SeqNum:    s.seqNum,
-		Operation: op,
-		NeedsHash: hash,
-	}
-	s.seqNum++
-
-	if hash {
-		s.hashCh <- pe
-	} else {
-		s.bypassCh <- pe
-	}
+	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
 }
 
 // statusComparisonSink implements ComparisonSink for the status pipeline.
@@ -231,18 +219,23 @@ func (s *statusComparisonSink) Close() error {
 
 // emit creates a PipelineEntry and sends it to the appropriate channel.
 func (s *statusComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
+	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
+}
+
+// emitPipelineEntry is the shared implementation used by both comparison sinks.
+func emitPipelineEntry(entry BinaryEntryInterface, op PipelineOp, hash bool, seqNum *uint64, hashCh, bypassCh chan<- *PipelineEntry) {
 	pe := &PipelineEntry{
 		Entry:     entry,
-		SeqNum:    s.seqNum,
+		SeqNum:    *seqNum,
 		Operation: op,
 		NeedsHash: hash,
 	}
-	s.seqNum++
+	*seqNum++
 
 	if hash {
-		s.hashCh <- pe
+		hashCh <- pe
 	} else {
-		s.bypassCh <- pe
+		bypassCh <- pe
 	}
 }
 

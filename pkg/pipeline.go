@@ -33,11 +33,12 @@ type PipelineEntry struct {
 // serialised binaryEntry byte slice. The data must be a heap-allocated copy,
 // not a pointer into mmap'd memory.
 func markSerialisedDeleted(data []byte) {
-	if len(data) < int(unsafe.Sizeof(binaryEntry{})) {
+	minSize := unsafe.Offsetof(binaryEntry{}.EntryFlags) + unsafe.Sizeof(binaryEntry{}.EntryFlags)
+	if len(data) < int(minSize) {
 		return
 	}
 	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
-	entry.EntryFlags |= 1
+	entry.EntryFlags |= EntryFlagDeleted
 }
 
 // ComparisonSink receives comparison results from hwangLinUnified.
