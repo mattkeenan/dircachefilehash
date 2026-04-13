@@ -106,6 +106,17 @@ func (sw *skiplistWrapper) Find(relativePath string) (*binaryEntry, string) {
 	return nil, ""
 }
 
+// FindAsInterface searches for an entry by relative path and returns it as a
+// BinaryEntryInterface suitable for metadata comparison via needsHash.
+func (sw *skiplistWrapper) FindAsInterface(relativePath string) BinaryEntryInterface {
+	itemPtr, _ := sw.skiplist.Find(relativePath)
+	if itemPtr == nil {
+		return nil
+	}
+	ref := itemPtr.Item()
+	return NewBESkiplistEntry(*ref, sw)
+}
+
 // Delete removes an entry by its relative path
 func (sw *skiplistWrapper) Delete(relativePath string) bool {
 	return sw.skiplist.Delete(relativePath)

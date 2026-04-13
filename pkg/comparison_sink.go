@@ -119,6 +119,133 @@ func (s *updateComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, h
 	}
 }
 
+// statusComparisonSink implements ComparisonSink for the status pipeline.
+// It compares main.idx (left) vs filesystem (right), using a pre-loaded
+// merged cache as a hash lookup to avoid redundant hashing.
+//
+// Check order for each file on disk:
+//  1. Check main — if metadata matches, file unchanged, skip entirely
+//  2. Check merged cache — if metadata matches, use cached hash (no re-hash)
+//  3. Neither matches — submit for hashing
+//
+// Only entries that differ from main are written to the new cache (sparse delta).
+// The resulting cache file IS the status: its entries are the changes.
+type statusComparisonSink struct {
+	dc            *DirectoryCache
+	cacheSkiplist *skiplistWrapper // pre-loaded merged cache for hash lookups
+	hashCh        chan<- *PipelineEntry
+	bypassCh      chan<- *PipelineEntry
+	seqNum        uint64
+}
+
+// newStatusComparisonSink creates a sink that routes entries into the status pipeline.
+// cacheSkiplist is the pre-loaded merge of all existing cache files, used to avoid
+// re-hashing files whose metadata hasn't changed since the last status run.
+func newStatusComparisonSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper, hashCh, bypassCh chan<- *PipelineEntry) *statusComparisonSink {
+	return &statusComparisonSink{
+		dc:            dc,
+		cacheSkiplist: cacheSkiplist,
+		hashCh:        hashCh,
+		bypassCh:      bypassCh,
+		seqNum:        0,
+	}
+}
+
+// OnMatch handles entries present in both main.idx and the filesystem scan.
+func (s *statusComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
+	// Skip already-deleted entries
+	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
+		return nil
+	}
+
+	rightPath, err := right.RelativePath()
+	if err != nil {
+		return fmt.Errorf("failed to get right path: %w", err)
+	}
+	if !s.dc.shouldIndex(rightPath) {
+		return nil
+	}
+
+	// Step 1: check main — if metadata matches, file unchanged, skip
+	if !needsHash(left, right) {
+		return nil
+	}
+
+	// File differs from main — check cache for a fresh entry
+	if cached := s.cacheSkiplist.FindAsInterface(rightPath); cached != nil {
+		if !needsHash(cached, right) {
+			// Cache has a fresh entry — use it, no re-hash needed
+			s.emit(cached, OpModified, false)
+			return nil
+		}
+	}
+
+	// Neither main nor cache is fresh — submit for hashing
+	s.emit(right, OpModified, true)
+	return nil
+}
+
+// OnLeftOnly handles entries only in main.idx (deleted from disk).
+// Deleted entries are written to cache so the cache reflects the deletion.
+func (s *statusComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
+	// Skip already-deleted entries
+	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
+		return nil
+	}
+
+	// Emit to bypass — cache retains deleted entries
+	s.emit(entry, OpDeleted, false)
+	return nil
+}
+
+// OnRightOnly handles entries only in the filesystem scan (new files, not in main).
+func (s *statusComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
+	rightPath, err := entry.RelativePath()
+	if err != nil {
+		return fmt.Errorf("failed to get right path: %w", err)
+	}
+	if !s.dc.shouldIndex(rightPath) {
+		return nil
+	}
+
+	// Check cache for a fresh entry
+	if cached := s.cacheSkiplist.FindAsInterface(rightPath); cached != nil {
+		if !needsHash(cached, entry) {
+			// Cache has a fresh entry — use it, no re-hash needed
+			s.emit(cached, OpNewFile, false)
+			return nil
+		}
+	}
+
+	// No fresh cache entry — submit for hashing
+	s.emit(entry, OpNewFile, true)
+	return nil
+}
+
+// Close signals that no more entries will arrive. Closes both output channels.
+func (s *statusComparisonSink) Close() error {
+	close(s.hashCh)
+	close(s.bypassCh)
+	return nil
+}
+
+// emit creates a PipelineEntry and sends it to the appropriate channel.
+func (s *statusComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
+	pe := &PipelineEntry{
+		Entry:     entry,
+		SeqNum:    s.seqNum,
+		Operation: op,
+		NeedsHash: hash,
+	}
+	s.seqNum++
+
+	if hash {
+		s.hashCh <- pe
+	} else {
+		s.bypassCh <- pe
+	}
+}
+
 // sinkCallbackAdapter wraps a ComparisonSink as a HwangLinCallback so it can
 // be used with the existing hwangLinUnified function without modifying it.
 type sinkCallbackAdapter struct {

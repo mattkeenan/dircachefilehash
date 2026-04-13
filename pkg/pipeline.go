@@ -1,5 +1,7 @@
 package dircachefilehash
 
+import "unsafe"
+
 // PipelineOp classifies what happened to a file during comparison.
 type PipelineOp uint8
 
@@ -25,6 +27,17 @@ type PipelineEntry struct {
 	// stage and kept alive until after writev() completes, preventing the GC from
 	// collecting backing memory while Iovec.Base still references it.
 	WriteData []byte
+}
+
+// markSerialisedDeleted sets the deleted flag (bit 0 of EntryFlags) on a
+// serialised binaryEntry byte slice. The data must be a heap-allocated copy,
+// not a pointer into mmap'd memory.
+func markSerialisedDeleted(data []byte) {
+	if len(data) < int(unsafe.Sizeof(binaryEntry{})) {
+		return
+	}
+	entry := (*binaryEntry)(unsafe.Pointer(&data[0]))
+	entry.EntryFlags |= 1
 }
 
 // ComparisonSink receives comparison results from hwangLinUnified.

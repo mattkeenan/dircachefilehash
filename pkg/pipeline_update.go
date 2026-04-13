@@ -148,6 +148,11 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 				return fmt.Errorf("failed to serialise entry: %w", err)
 			}
 
+			// Mark deleted entries in the serialised copy (safe — it's heap-allocated)
+			if pe.Operation == OpDeleted {
+				markSerialisedDeleted(data)
+			}
+
 			pe.WriteData = data
 			batch = append(batch, data)
 
