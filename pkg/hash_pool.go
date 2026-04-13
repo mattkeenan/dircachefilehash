@@ -15,10 +15,11 @@ import (
 // Ownership: each PipelineEntry is owned by exactly one worker while being
 // hashed, then ownership transfers to the output channel consumer.
 type hashPool struct {
-	dc      *DirectoryCache
-	input   <-chan *PipelineEntry
-	output  chan<- *PipelineEntry
-	workers int
+	dc         *DirectoryCache
+	input      <-chan *PipelineEntry
+	output     chan<- *PipelineEntry
+	workers    int
+	bufferSize int // read buffer size per worker; allocated once, reused across files
 }
 
 // newHashPool creates a hash pool. The caller must close input when no more
@@ -27,11 +28,16 @@ func newHashPool(dc *DirectoryCache, input <-chan *PipelineEntry, output chan<- 
 	if workers < 1 {
 		workers = 1
 	}
+	bufferSize := 2 * 1024 * 1024 // default 2MB
+	if size, err := dc.getHashBufferSize(); err == nil {
+		bufferSize = size
+	}
 	return &hashPool{
-		dc:      dc,
-		input:   input,
-		output:  output,
-		workers: workers,
+		dc:         dc,
+		input:      input,
+		output:     output,
+		workers:    workers,
+		bufferSize: bufferSize,
 	}
 }
 
@@ -67,6 +73,7 @@ func (hp *hashPool) Run(ctx context.Context) error {
 // worker processes entries from the input channel until it is closed or the
 // context is cancelled.
 func (hp *hashPool) worker(ctx context.Context) error {
+	buffer := make([]byte, hp.bufferSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,7 +82,7 @@ func (hp *hashPool) worker(ctx context.Context) error {
 			if !ok {
 				return nil // input closed
 			}
-			if err := hp.hashEntry(ctx, pe); err != nil {
+			if err := hp.hashEntry(ctx, pe, buffer); err != nil {
 				// Log hash errors but don't fail the pipeline — the entry
 				// will proceed with an empty hash (matching existing behaviour
 				// where hash failures are non-fatal).
@@ -93,8 +100,9 @@ func (hp *hashPool) worker(ctx context.Context) error {
 	}
 }
 
-// hashEntry computes the file hash and updates the entry.
-func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry) error {
+// hashEntry computes the file hash and updates the entry. The buffer is
+// pre-allocated per worker and reused across files to avoid GC pressure.
+func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []byte) error {
 	entry := pe.Entry
 
 	relPath, err := entry.RelativePath()
@@ -118,7 +126,7 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry) error {
 	} else {
 		// Use the context-derived shutdown channel for interruptible hashing
 		shutdownCh := ctx.Done()
-		hashBytes, hashType, err = hp.dc.HashFileInterruptibleToBytes(filePath, shutdownCh)
+		hashBytes, hashType, err = hp.dc.HashFileInterruptibleToBytes(filePath, shutdownCh, buffer)
 	}
 
 	if err != nil {

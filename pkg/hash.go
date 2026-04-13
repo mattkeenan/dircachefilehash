@@ -165,9 +165,11 @@ func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
 	return GetHashAlgorithmByType(hashType)
 }
 
-// HashFileInterruptible calculates the hash of a file using a configurable buffer size
-// and checks for shutdown signals between buffer reads for graceful interruption
-func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize int, shutdownChan <-chan struct{}) ([]byte, error) {
+// HashFileInterruptible calculates the hash of a file using a caller-supplied
+// buffer and checks for shutdown signals between buffer reads for graceful
+// interruption. Passing a pre-allocated buffer avoids per-file heap allocation,
+// which dramatically reduces GC pressure when hashing many files.
+func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, buffer []byte, shutdownChan <-chan struct{}) ([]byte, error) {
 	// Start timing if debug=hash and verbose >= 3
 	var startTime time.Time
 	var fileSize int64
@@ -187,7 +189,6 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 	defer func() { _ = file.Close() }()
 
 	hasher := algorithm.NewFunc()
-	buffer := make([]byte, bufferSize)
 	var totalRead int64
 
 	for {
@@ -232,21 +233,27 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 	return result, nil
 }
 
-// HashFileInterruptibleToBytes is a convenience function that also returns the type ID
-func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdownChan <-chan struct{}) ([]byte, uint16, error) {
+// HashFileInterruptibleToBytes is a convenience function that also returns the
+// type ID. If buffer is nil, a new buffer is allocated from the configured size.
+// Callers that hash many files (e.g. worker pools) should pre-allocate a buffer
+// and pass it here to avoid per-file allocation and GC pressure.
+func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdownChan <-chan struct{}, buffer []byte) ([]byte, uint16, error) {
 	// Get default algorithm
 	algorithm, err := dc.getDefaultHashAlgorithm()
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 	}
 
-	// Get buffer size from config
-	bufferSize, err := dc.getHashBufferSize()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get hash buffer size: %w", err)
+	// Allocate buffer if caller didn't provide one
+	if buffer == nil {
+		bufferSize, err := dc.getHashBufferSize()
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to get hash buffer size: %w", err)
+		}
+		buffer = make([]byte, bufferSize)
 	}
 
-	hashBytes, err := HashFileInterruptible(filePath, algorithm, bufferSize, shutdownChan)
+	hashBytes, err := HashFileInterruptible(filePath, algorithm, buffer, shutdownChan)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,10 +1,14 @@
 #!/bin/bash
 # benchmark-vs-git.sh — Compare dcfh performance against git
 #
-# Creates a representative test repository and benchmarks:
-#   - Initial index/add (full scan + hash)
+# Creates a single test directory and benchmarks both tools against the
+# exact same data. The .git and .dcfh directories are removed between
+# runs so neither tool's index files inflate the other's file count.
+#
+# Benchmarks:
+#   - Initial index/add (full scan + hash of all files)
+#   - Status check (no changes — clean working tree)
 #   - Incremental update (10% modified files)
-#   - Status check (no changes)
 #
 # Also captures pprof profiles and GC telemetry for dcfh.
 #
@@ -55,14 +59,16 @@ fi
 
 TOTAL_FILES=$((TINY_COUNT + SMALL_COUNT + MEDIUM_COUNT + LARGE_COUNT))
 TESTDIR=$(mktemp -d "/tmp/dcfh-bench-XXXXXX")
+REPODIR="$TESTDIR/repo"
+BACKUPDIR="$TESTDIR/backup"
 RESULTS_DIR="$REPO_ROOT/benchmark-results"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR" "$REPODIR"
 
 trap 'rm -rf "$TESTDIR"' EXIT
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  dcfh vs git benchmark ($LABEL)"
-echo "  Test directory: $TESTDIR"
+echo "  Test directory: $REPODIR"
 echo "  Files: $TOTAL_FILES"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
@@ -83,16 +89,23 @@ generate_files() {
 echo -n "Generating test data..."
 GENSTART=$(date +%s%N)
 
-generate_files "$TESTDIR/data" "tiny"   "$TINY_COUNT"   "$TINY_MIN"   "$TINY_MAX" &
-generate_files "$TESTDIR/data" "small"  "$SMALL_COUNT"  "$SMALL_MIN"  "$SMALL_MAX" &
-generate_files "$TESTDIR/data" "medium" "$MEDIUM_COUNT" "$MEDIUM_MIN" "$MEDIUM_MAX" &
-generate_files "$TESTDIR/data" "large"  "$LARGE_COUNT"  "$LARGE_MIN"  "$LARGE_MAX" &
+generate_files "$REPODIR" "tiny"   "$TINY_COUNT"   "$TINY_MIN"   "$TINY_MAX" &
+generate_files "$REPODIR" "small"  "$SMALL_COUNT"  "$SMALL_MIN"  "$SMALL_MAX" &
+generate_files "$REPODIR" "medium" "$MEDIUM_COUNT" "$MEDIUM_MIN" "$MEDIUM_MAX" &
+generate_files "$REPODIR" "large"  "$LARGE_COUNT"  "$LARGE_MIN"  "$LARGE_MAX" &
 wait
 
 GENEND=$(date +%s%N)
 GENMS=$(( (GENEND - GENSTART) / 1000000 ))
-DATASIZE=$(du -sh "$TESTDIR/data" | cut -f1)
-echo " done (${GENMS}ms, $DATASIZE)"
+DATASIZE=$(du -sh "$REPODIR" | cut -f1)
+FILECOUNT=$(find "$REPODIR" -type f | wc -l)
+echo " done (${GENMS}ms, $DATASIZE, $FILECOUNT files)"
+
+# Pre-select which files to modify for the incremental test (same for both tools)
+MODIFY_COUNT=$((TOTAL_FILES / 10))
+MODIFY_LIST="$TESTDIR/files-to-modify.txt"
+find "$REPODIR" -type f | shuf -n "$MODIFY_COUNT" > "$MODIFY_LIST"
+
 echo ""
 
 # ─── Timing helper ─────────────────────────────────────────────────────────
@@ -110,13 +123,40 @@ time_cmd() {
     printf "  %-35s %6d ms\n" "$label" "$LAST_MS"
 }
 
+# Modify the pre-selected files (overwrites first 100 bytes with random data)
+modify_files() {
+    while IFS= read -r f; do
+        dd if=/dev/urandom of="$f" bs=100 count=1 conv=notrunc 2>/dev/null
+    done < "$MODIFY_LIST"
+}
+
+# Back up the files that will be modified so we can restore them
+backup_modified_files() {
+    mkdir -p "$BACKUPDIR"
+    while IFS= read -r f; do
+        local relpath="${f#$REPODIR/}"
+        local backdir="$BACKUPDIR/$(dirname "$relpath")"
+        mkdir -p "$backdir"
+        cp "$f" "$BACKUPDIR/$relpath"
+    done < "$MODIFY_LIST"
+}
+
+# Restore modified files from backup
+restore_modified_files() {
+    while IFS= read -r f; do
+        local relpath="${f#$REPODIR/}"
+        cp "$BACKUPDIR/$relpath" "$f"
+    done < "$MODIFY_LIST"
+}
+
+# Back up the files before any modifications
+backup_modified_files
+
 # ─── Benchmark git ─────────────────────────────────────────────────────────
 
 echo "── git ──────────────────────────────────────────────────"
 
-# Copy data for git test
-cp -r "$TESTDIR/data" "$TESTDIR/git-repo"
-cd "$TESTDIR/git-repo"
+cd "$REPODIR"
 git init -q .
 
 time_cmd "git add . (initial)" git add .
@@ -126,23 +166,21 @@ time_cmd "git status (clean)" git status
 GIT_STATUS_CLEAN_MS=$LAST_MS
 
 # Modify 10% of files
-MODIFY_COUNT=$((TOTAL_FILES / 10))
-find "$TESTDIR/git-repo" -type f -not -path '*/.git/*' | shuf -n "$MODIFY_COUNT" > /tmp/dcfh-bench-modify.txt
-while IFS= read -r f; do
-    dd if=/dev/urandom of="$f" bs=100 count=1 conv=notrunc 2>/dev/null
-done < /tmp/dcfh-bench-modify.txt
+modify_files
 
 time_cmd "git add . (incremental, ${MODIFY_COUNT} changed)" git add .
 GIT_INCR_MS=$LAST_MS
 echo ""
 
+# Clean up git and restore files for dcfh run
+rm -rf "$REPODIR/.git"
+restore_modified_files
+
 # ─── Benchmark dcfh ────────────────────────────────────────────────────────
 
 echo "── dcfh ─────────────────────────────────────────────────"
 
-# Copy data for dcfh test (fresh copy, same original data)
-cp -r "$TESTDIR/data" "$TESTDIR/dcfh-repo"
-cd "$TESTDIR/dcfh-repo"
+cd "$REPODIR"
 "$DCFH" init . >/dev/null 2>&1
 
 time_cmd "dcfh update (initial)" "$DCFH" update
@@ -152,17 +190,18 @@ time_cmd "dcfh status (clean)" "$DCFH" status
 DCFH_STATUS_CLEAN_MS=$LAST_MS
 
 # Modify same 10% of files
-find "$TESTDIR/dcfh-repo" -type f -not -path '*/.dcfh/*' | shuf -n "$MODIFY_COUNT" > /tmp/dcfh-bench-modify2.txt
-while IFS= read -r f; do
-    dd if=/dev/urandom of="$f" bs=100 count=1 conv=notrunc 2>/dev/null
-done < /tmp/dcfh-bench-modify2.txt
+modify_files
 
 time_cmd "dcfh update (incremental, ${MODIFY_COUNT} changed)" "$DCFH" update
 DCFH_INCR_MS=$LAST_MS
 
-time_cmd "dcfh status (dirty)" "$DCFH" status
-DCFH_STATUS_DIRTY_MS=$LAST_MS
+time_cmd "dcfh status (after update)" "$DCFH" status
+DCFH_STATUS_AFTER_MS=$LAST_MS
 echo ""
+
+# Clean up dcfh
+rm -rf "$REPODIR/.dcfh"
+restore_modified_files
 
 # ─── Comparison ────────────────────────────────────────────────────────────
 
@@ -175,8 +214,14 @@ ratio() {
 }
 
 printf "  %-25s %8d %8d %8s\n" "Initial add/update" "$GIT_INIT_MS" "$DCFH_INIT_MS" "$(ratio "$GIT_INIT_MS" "$DCFH_INIT_MS")"
-printf "  %-25s %8d %8d %8s\n" "Incremental update" "$GIT_INCR_MS" "$DCFH_INCR_MS" "$(ratio "$GIT_INCR_MS" "$DCFH_INCR_MS")"
 printf "  %-25s %8d %8d %8s\n" "Status (clean)" "$GIT_STATUS_CLEAN_MS" "$DCFH_STATUS_CLEAN_MS" "$(ratio "$GIT_STATUS_CLEAN_MS" "$DCFH_STATUS_CLEAN_MS")"
+printf "  %-25s %8d %8d %8s\n" "Incremental update" "$GIT_INCR_MS" "$DCFH_INCR_MS" "$(ratio "$GIT_INCR_MS" "$DCFH_INCR_MS")"
+printf "  %-25s %8s %8s %8s\n" "" "────────" "────────" "────────"
+
+# Aggregate: full workflow = init + status + incremental
+GIT_TOTAL=$((GIT_INIT_MS + GIT_STATUS_CLEAN_MS + GIT_INCR_MS))
+DCFH_TOTAL=$((DCFH_INIT_MS + DCFH_STATUS_CLEAN_MS + DCFH_INCR_MS))
+printf "  %-25s %8d %8d %8s\n" "Aggregate (all 3)" "$GIT_TOTAL" "$DCFH_TOTAL" "$(ratio "$GIT_TOTAL" "$DCFH_TOTAL")"
 echo ""
 
 # ─── Profiling (optional) ─────────────────────────────────────────────────
@@ -184,10 +229,8 @@ echo ""
 if [ "$PROFILE" = true ]; then
     echo "── Profiling ────────────────────────────────────────────"
 
-    # Fresh copy for profiling
-    rm -rf "$TESTDIR/dcfh-profile"
-    cp -r "$TESTDIR/data" "$TESTDIR/dcfh-profile"
-    cd "$TESTDIR/dcfh-profile"
+    # Fresh dcfh init for profiling
+    cd "$REPODIR"
     "$DCFH" init . >/dev/null 2>&1
 
     # CPU + Memory profiles during update (initial scan — most allocation-heavy)
@@ -198,14 +241,17 @@ if [ "$PROFILE" = true ]; then
     echo "  → $RESULTS_DIR/cpu.prof (${CPU_SIZE} bytes)"
     echo "  → $RESULTS_DIR/mem.prof (${MEM_SIZE} bytes)"
 
+    # Clean up for GC trace run
+    rm -rf "$REPODIR/.dcfh"
+
     # GC trace
     echo "  Capturing GC trace..."
-    rm -rf "$TESTDIR/dcfh-gc"
-    cp -r "$TESTDIR/data" "$TESTDIR/dcfh-gc"
-    cd "$TESTDIR/dcfh-gc"
     "$DCFH" init . >/dev/null 2>&1
     GODEBUG=gctrace=1 "$DCFH" update >/dev/null 2>"$RESULTS_DIR/gc-trace.log"
     echo "  → $RESULTS_DIR/gc-trace.log"
+
+    # Clean up
+    rm -rf "$REPODIR/.dcfh"
 
     # Parse GC trace
     GC_CYCLES=$(grep -c "^gc " "$RESULTS_DIR/gc-trace.log" 2>/dev/null || echo 0)

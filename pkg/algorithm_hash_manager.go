@@ -346,7 +346,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
 				// Regular file - hash the file contents with interruptible hashing
-				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan)
+				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan, nil)
 			}
 
 		hashComplete:
