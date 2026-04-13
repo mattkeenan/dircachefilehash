@@ -89,7 +89,7 @@ nfpms:
   - id: dcfh-packages
     package_name: dcfh
     file_name_template: "{{ .ConventionalFileName }}"
-    builds:
+    ids:
       - dcfh
       - dcfhfind
       - dcfhfix
@@ -116,7 +116,6 @@ nfpms:
     bindir: /usr/bin
     section: utils
     priority: optional
-    meta: true
     contents:
       - src: ./README.md
         dst: /usr/share/doc/dcfh/README.md
