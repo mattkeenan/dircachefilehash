@@ -12,7 +12,7 @@ func InitDebugFlags(flagsStr string) {
 // LogDebugFlags logs the current debug flag status - for CLI compatibility
 func LogDebugFlags() {
 	// Log current debug state if verbose
-	if globalVerboseLevel > 0 {
+	if GetVerboseLevel() > 0 {
 		VerboseLog(1, "Debug flags initialised")
 	}
 }

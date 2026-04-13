@@ -5,24 +5,28 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
-var globalVerboseLevel int
+var globalVerboseLevel atomic.Int32
+
+var debugMu sync.RWMutex
 var debugFlags map[string]bool
 
 // SetVerboseLevel sets the global verbose level
 func SetVerboseLevel(level int) {
-	globalVerboseLevel = level
+	globalVerboseLevel.Store(int32(level))
 }
 
 // GetVerboseLevel returns the current verbose level
 func GetVerboseLevel() int {
-	return globalVerboseLevel
+	return int(globalVerboseLevel.Load())
 }
 
 // VerboseEnter logs function entry at level 3+ and returns a defer function for exit logging
 func VerboseEnter() func() {
-	if globalVerboseLevel < 3 {
+	if GetVerboseLevel() < 3 {
 		return func() {} // No-op
 	}
 
@@ -47,7 +51,7 @@ func VerboseEnter() func() {
 
 // VerboseLog logs a message at the specified verbose level
 func VerboseLog(level int, format string, args ...any) {
-	if globalVerboseLevel >= level {
+	if GetVerboseLevel() >= level {
 		fmt.Fprintf(os.Stderr, "[VERBOSE-%d] ", level)
 		fmt.Fprintf(os.Stderr, format, args...)
 		if !strings.HasSuffix(format, "\n") {
@@ -59,6 +63,9 @@ func VerboseLog(level int, format string, args ...any) {
 // SetDebugFlags sets the debug flags from a comma-separated string
 // Supports both simple flags ("scan,extravalidation") and key:value format ("scan:true,extravalidation:false")
 func SetDebugFlags(flagsStr string) {
+	debugMu.Lock()
+	defer debugMu.Unlock()
+
 	debugFlags = make(map[string]bool)
 	if flagsStr == "" {
 		return
@@ -94,6 +101,9 @@ func SetDebugFlags(flagsStr string) {
 
 // IsDebugEnabled returns true if the specified debug flag is enabled
 func IsDebugEnabled(flag string) bool {
+	debugMu.RLock()
+	defer debugMu.RUnlock()
+
 	if debugFlags == nil {
 		return false
 	}
