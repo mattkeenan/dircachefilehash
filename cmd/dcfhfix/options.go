@@ -125,13 +125,14 @@ func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consu
 	case OptionTypeBool:
 		if optValue != "" {
 			// --option=value format with boolean
-			if optValue == "true" || optValue == "1" {
+			switch optValue {
+			case "true", "1":
 				p.values[optName] = "true"
 				p.explicitlySet[optName] = true
-			} else if optValue == "false" || optValue == "0" {
+			case "false", "0":
 				p.values[optName] = "false"
 				p.explicitlySet[optName] = true
-			} else {
+			default:
 				return fmt.Errorf("invalid boolean value for --%s: %s", optName, optValue)
 			}
 		} else {

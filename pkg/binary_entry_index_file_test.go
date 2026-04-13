@@ -28,9 +28,8 @@ var testCleanupDataIndexFile = make(map[BinaryEntryInterface]*indexFileTestClean
 var cleanupMutex sync.Mutex
 
 type indexFileTestCleanupInfo struct {
-	testDir    string
-	indexFile  string
-	fileHandle *os.File
+	testDir   string
+	indexFile string
 }
 
 // createBEIndexFileIO creates a BEIndexFileIOEntry for testing
@@ -50,7 +49,7 @@ func createBEIndexFileIO(t *testing.T, testData *TestEntryData) BinaryEntryInter
 	indexFilePath := filepath.Join(testDir, "test.idx")
 	indexFile, err := os.Create(indexFilePath)
 	if err != nil {
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to create temp index file: %v", err)
 	}
 
@@ -58,8 +57,8 @@ func createBEIndexFileIO(t *testing.T, testData *TestEntryData) BinaryEntryInter
 	header := make([]byte, HeaderSize)
 	copy(header[0:4], "dcfh") // signature
 	if _, err := indexFile.Write(header); err != nil {
-		indexFile.Close()
-		os.RemoveAll(testDir)
+		_ = indexFile.Close()
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to write header: %v", err)
 	}
 
@@ -88,13 +87,13 @@ func createBEIndexFileIO(t *testing.T, testData *TestEntryData) BinaryEntryInter
 
 	// Write entry data to file
 	if _, err := indexFile.Write(entryData); err != nil {
-		indexFile.Close()
-		os.RemoveAll(testDir)
+		_ = indexFile.Close()
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to write entry data: %v", err)
 	}
 
 	// Close and reopen for reading
-	indexFile.Close()
+	_ = indexFile.Close()
 
 	// Create BEIndexFileIOEntry pointing to the entry (after header)
 	fileOffset := int64(HeaderSize)
@@ -120,7 +119,7 @@ func cleanupBEIndexFileIO(t *testing.T, entry BinaryEntryInterface) {
 	if cleanupInfo, exists := testCleanupDataIndexFile[entry]; exists {
 		// Clean up test directory (no file handles to close since each operation uses its own)
 		if cleanupInfo.testDir != "" {
-			os.RemoveAll(cleanupInfo.testDir)
+			_ = os.RemoveAll(cleanupInfo.testDir)
 		}
 
 		// Remove from map
@@ -308,8 +307,6 @@ func testBEIndexFileIOEntryConcurrentFileAccess(t *testing.T) {
 
 // indexFileTestHelper helps create index file entries for testing
 type indexFileTestHelper struct {
-	testDir   string
-	indexFile string
 }
 
 // createTestEntry creates a test index file entry and returns it with a cleanup function
@@ -341,7 +338,7 @@ func BenchmarkBEIndexFileIO(b *testing.B) {
 		cleanupMutex.Lock()
 		if cleanupInfo, exists := testCleanupDataIndexFile[entry]; exists {
 			if cleanupInfo.testDir != "" {
-				os.RemoveAll(cleanupInfo.testDir)
+				_ = os.RemoveAll(cleanupInfo.testDir)
 			}
 			delete(testCleanupDataIndexFile, entry)
 		}
@@ -350,26 +347,26 @@ func BenchmarkBEIndexFileIO(b *testing.B) {
 
 	b.Run("RelativePath", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.RelativePath()
+			_, _ = entry.RelativePath()
 		}
 	})
 
 	b.Run("HashString", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.HashString()
+			_, _ = entry.HashString()
 		}
 	})
 
 	b.Run("Size", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.Size()
+			_, _ = entry.Size()
 		}
 	})
 
 	b.Run("SetHash", func(b *testing.B) {
 		hash := [20]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 		for i := 0; i < b.N; i++ {
-			entry.SetHash(hash[:], uint16(HashTypeSHA1))
+			_ = entry.SetHash(hash[:], uint16(HashTypeSHA1))
 		}
 	})
 }

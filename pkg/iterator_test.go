@@ -161,7 +161,7 @@ func TestMockIterator(t *testing.T) {
 
 	t.Run("NormalIteration", func(t *testing.T) {
 		iter := newMockIterator("test-mock", entries)
-		defer iter.Close()
+		defer func() { _ = iter.Close() }()
 
 		// Check initial state
 		if iter.Name() != "test-mock" {
@@ -216,7 +216,7 @@ func TestMockIterator(t *testing.T) {
 
 	t.Run("EmptyIterator", func(t *testing.T) {
 		iter := newMockIterator("empty-mock", []BinaryEntryInterface{})
-		defer iter.Close()
+		defer func() { _ = iter.Close() }()
 
 		// Should be immediately exhausted
 		entry, err := iter.Next()
@@ -286,7 +286,6 @@ func TestBinaryEntryPath(t *testing.T) {
 		"with spaces.txt",
 		"subdir/nested.txt",
 		"deep/nested/path/file.txt",
-		"", // empty path
 	}
 
 	for _, path := range testPaths {

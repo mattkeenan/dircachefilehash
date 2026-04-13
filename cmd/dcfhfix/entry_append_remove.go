@@ -107,7 +107,7 @@ func processEntriesWithAppend(indexFile string, newEntry *ValidatedEntry, option
 	tmpIndexFile := indexFile + ".append.tmp"
 	defer func() {
 		if _, err := os.Stat(tmpIndexFile); err == nil {
-			os.Remove(tmpIndexFile)
+			_ = os.Remove(tmpIndexFile)
 		}
 	}()
 
@@ -163,7 +163,7 @@ func processEntriesWithRemoval(indexFile string, pathSet map[string]bool, option
 	tmpIndexFile := indexFile + ".remove.tmp"
 	defer func() {
 		if _, err := os.Stat(tmpIndexFile); err == nil {
-			os.Remove(tmpIndexFile)
+			_ = os.Remove(tmpIndexFile)
 		}
 	}()
 

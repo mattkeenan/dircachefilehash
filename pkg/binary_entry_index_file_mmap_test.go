@@ -55,7 +55,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 
 	// Initialize scan index using existing infrastructure
 	if err := dc.initialiseScanIndex(scanFileName); err != nil {
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to initialize scan index: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 		(testData.EntryFlags&1) != 0, // Extract deletion flag
 	)
 	if err != nil {
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to append entry to scan index: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func cleanupBEIndexFileMmap(t *testing.T, entry BinaryEntryInterface) {
 
 		// Clean up test directory
 		if cleanupInfo.testDir != "" {
-			os.RemoveAll(cleanupInfo.testDir)
+			_ = os.RemoveAll(cleanupInfo.testDir)
 		}
 
 		// Remove from map
@@ -221,9 +221,9 @@ func testBEIndexFileMmapMmapSafety(t *testing.T) {
 			entry.RLock()
 			defer entry.RUnlock()
 
-			entry.RelativePath()
-			entry.Size()
-			entry.HashString()
+			_, _ = entry.RelativePath()
+			_, _ = entry.Size()
+			_, _ = entry.HashString()
 		}()
 	}
 
@@ -326,9 +326,6 @@ func testBEIndexFileMmapConcurrentMmapAccess(t *testing.T) {
 
 // indexFileMmapTestHelper helps create mmap index file entries for testing
 type indexFileMmapTestHelper struct {
-	testDir   string
-	indexFile string
-	mmapIndex *mmapIndexFile
 }
 
 // createTestEntry creates a test mmap index file entry and returns it with a cleanup function
@@ -360,7 +357,7 @@ func BenchmarkBEIndexFileMmap(b *testing.B) {
 		cleanupMutexMmap.Lock()
 		if cleanupInfo, exists := testCleanupDataIndexFileMmap[entry]; exists {
 			if cleanupInfo.testDir != "" {
-				os.RemoveAll(cleanupInfo.testDir)
+				_ = os.RemoveAll(cleanupInfo.testDir)
 			}
 			delete(testCleanupDataIndexFileMmap, entry)
 		}
@@ -369,26 +366,26 @@ func BenchmarkBEIndexFileMmap(b *testing.B) {
 
 	b.Run("RelativePath", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.RelativePath()
+			_, _ = entry.RelativePath()
 		}
 	})
 
 	b.Run("HashString", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.HashString()
+			_, _ = entry.HashString()
 		}
 	})
 
 	b.Run("Size", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.Size()
+			_, _ = entry.Size()
 		}
 	})
 
 	b.Run("SetHash", func(b *testing.B) {
 		hash := [20]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 		for i := 0; i < b.N; i++ {
-			entry.SetHash(hash[:], uint16(HashTypeSHA1))
+			_ = entry.SetHash(hash[:], uint16(HashTypeSHA1))
 		}
 	})
 

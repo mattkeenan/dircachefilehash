@@ -45,7 +45,7 @@ func (im *IgnoreManager) LoadIgnorePatterns() error {
 	if err != nil {
 		return fmt.Errorf("failed to open ignore file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
@@ -108,7 +108,7 @@ func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write helpful header comments
 	_, err = file.WriteString(`# dcfh ignore patterns
@@ -151,7 +151,7 @@ func (im *IgnoreManager) SaveIgnorePatterns() error {
 	if err != nil {
 		return fmt.Errorf("failed to create ignore file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write header
 	_, err = file.WriteString(`# dcfh ignore patterns
@@ -178,7 +178,7 @@ func (im *IgnoreManager) SaveIgnorePatterns() error {
 // GetPatterns returns all loaded patterns
 func (im *IgnoreManager) GetPatterns() []*regexp.Regexp {
 	if !im.loaded {
-		im.LoadIgnorePatterns() // Load if not already loaded
+		_ = im.LoadIgnorePatterns() // Load if not already loaded
 	}
 	return im.patterns
 }
@@ -204,7 +204,7 @@ func (im *IgnoreManager) ValidatePattern(patternStr string) error {
 // HasPatterns returns true if there are any ignore patterns loaded
 func (im *IgnoreManager) HasPatterns() bool {
 	if !im.loaded {
-		im.LoadIgnorePatterns() // Load if not already loaded
+		_ = im.LoadIgnorePatterns() // Load if not already loaded
 	}
 	return len(im.patterns) > 0
 }

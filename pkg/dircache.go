@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"unsafe"
 )
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
@@ -409,54 +408,4 @@ func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndex
 			}
 		}
 	}
-}
-
-// getIndexForEntry identifies which mmap'd index file contains the given entry
-func (dc *DirectoryCache) getIndexForEntry(entry *binaryEntry) *mmapIndexFile {
-	entryPtr := uintptr(unsafe.Pointer(entry))
-
-	// Check main index
-	if dc.mainIndex != nil && dc.mainIndex.Data != nil {
-		dataStart := uintptr(unsafe.Pointer(&dc.mainIndex.Data[0]))
-		dataEnd := dataStart + uintptr(len(dc.mainIndex.Data))
-		if entryPtr >= dataStart && entryPtr < dataEnd {
-			return dc.mainIndex
-		}
-	}
-
-	// Check cache index
-	if dc.cacheIndex != nil && dc.cacheIndex.Data != nil {
-		dataStart := uintptr(unsafe.Pointer(&dc.cacheIndex.Data[0]))
-		dataEnd := dataStart + uintptr(len(dc.cacheIndex.Data))
-		if entryPtr >= dataStart && entryPtr < dataEnd {
-			return dc.cacheIndex
-		}
-	}
-
-	// Check scan indices
-	for _, scanIndex := range dc.scanIndices {
-		if scanIndex != nil && scanIndex.Data != nil {
-			dataStart := uintptr(unsafe.Pointer(&scanIndex.Data[0]))
-			dataEnd := dataStart + uintptr(len(scanIndex.Data))
-			if entryPtr >= dataStart && entryPtr < dataEnd {
-				return scanIndex
-			}
-		}
-	}
-
-	return nil
-}
-
-// getAllReferencedIndices collects all unique indices referenced by entries in a skiplist
-func (dc *DirectoryCache) getAllReferencedIndices(skiplist *skiplistWrapper) map[*mmapIndexFile]bool {
-	indices := make(map[*mmapIndexFile]bool)
-
-	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
-		if index := dc.getIndexForEntry(entry); index != nil {
-			indices[index] = true
-		}
-		return true // Continue iteration
-	})
-
-	return indices
 }

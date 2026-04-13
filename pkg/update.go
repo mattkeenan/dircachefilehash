@@ -53,8 +53,8 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 	}
 
 	// Remove cache file since everything is now in main index
-	os.Remove(dc.CacheFile) // Non-fatal if it fails
-	dc.checkForOrphanedIndexFiles()
+	_ = os.Remove(dc.CacheFile) // Non-fatal if it fails
+	_ = dc.checkForOrphanedIndexFiles()
 
 	return nil
 }
@@ -89,7 +89,7 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 		return fmt.Errorf("failed to update cache: %w", err)
 	}
 
-	dc.checkForOrphanedIndexFiles()
+	_ = dc.checkForOrphanedIndexFiles()
 	return nil
 }
 

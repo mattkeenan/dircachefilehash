@@ -281,7 +281,7 @@ func DetectEntryCorruption(entry *EntryInfo) (bool, []string) {
 	// Check hash string contains only hex characters
 	if entry.HashStr != "" {
 		for _, r := range entry.HashStr {
-			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 				issues = append(issues, "hash contains non-hex characters")
 				break
 			}

@@ -32,6 +32,15 @@ type BEScanEntry struct {
 // NewBEScanEntry creates a new heap-allocated BEScanEntry for filesystem scanning
 // Creates entry with metadata but NO hash (lazy hashing approach)
 func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat_t) *BEScanEntry {
+	// Handle nil inputs — return an invalid entry that will fail IsValid() checks
+	if fileInfo == nil || statInfo == nil {
+		return &BEScanEntry{
+			BinaryEntryBase: NewBinaryEntryBase(BEScan),
+			binaryData:      nil,
+			relPath:         relPath,
+		}
+	}
+
 	// Calculate total size needed for binaryEntry + path + padding
 	totalSize := BESizeFromPathLen(len(relPath))
 
@@ -133,6 +142,9 @@ func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
 // RelativePath returns the relative path for this entry
 // v0.7: Stored separately from binaryEntry for heap allocation
 func (sbe *BEScanEntry) RelativePath() (string, error) {
+	if sbe.binaryData == nil {
+		return "", ErrEntryInvalidated
+	}
 	return sbe.relPath, nil
 }
 

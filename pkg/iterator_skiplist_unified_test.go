@@ -9,10 +9,10 @@ import (
 func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 	// Create test directory and entries using existing infrastructure
 	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer dc.cleanupCurrentScanFile()
+	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create test files
 	writeTestFile(t, filepath.Join(tempDir, "file1.txt"), "content1")
@@ -55,7 +55,7 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 	shutdownChan := make(chan struct{})
 	defer close(shutdownChan)
 	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-unified-skiplist", shutdownChan)
-	defer iterator.Close()
+	defer func() { _ = iterator.Close() }()
 
 	var paths []string
 	entryCount := 0
@@ -107,7 +107,7 @@ func TestBinaryEntrySkiplistIterator_EmptySkiplist(t *testing.T) {
 	shutdownChan := make(chan struct{})
 	defer close(shutdownChan)
 	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-empty", shutdownChan)
-	defer iterator.Close()
+	defer func() { _ = iterator.Close() }()
 
 	// Should have no entries
 	if iterator.HasNext() {
@@ -129,7 +129,7 @@ func TestBinaryEntrySkiplistIterator_NilSkiplist(t *testing.T) {
 	shutdownChan := make(chan struct{})
 	defer close(shutdownChan)
 	iterator := NewBinaryEntrySkiplistIterator(nil, "test-nil", shutdownChan)
-	defer iterator.Close()
+	defer func() { _ = iterator.Close() }()
 
 	// Should be immediately exhausted
 	if iterator.HasNext() {
@@ -154,7 +154,7 @@ func TestBinaryEntrySkiplistIterator_ClosedIterator(t *testing.T) {
 	iterator := NewBinaryEntrySkiplistIterator(skiplist, "test-closed", shutdownChan)
 
 	// Close the iterator immediately
-	iterator.Close()
+	_ = iterator.Close()
 
 	// Should return error when trying to use closed iterator
 	entry, err := iterator.Next()
@@ -176,7 +176,7 @@ func TestBinaryEntrySkiplistIterator_InterfaceCompliance(t *testing.T) {
 	shutdownChan := make(chan struct{})
 	defer close(shutdownChan)
 	iterator := NewBinaryEntrySkiplistIterator(nil, "test-interface", shutdownChan)
-	defer iterator.Close()
+	defer func() { _ = iterator.Close() }()
 
 	// Test that it implements BinaryEntryIterator interface
 	var _ BinaryEntryIterator = iterator

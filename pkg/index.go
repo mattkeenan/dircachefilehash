@@ -31,11 +31,8 @@ type indexHeader struct {
 
 // mmapIndex represents a memory-mapped index file
 type mmapIndex struct {
-	data    []byte
-	file    *os.File
-	entries []byte // Raw entry data after header
-	size    int    // Current mapped size
-	offset  int    // Current write offset
+	data []byte
+	file *os.File
 }
 
 // mmapIndexFile represents a wrapper for index file lifecycle management
@@ -138,7 +135,7 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get file size
 	stat, err := file.Stat()
@@ -155,7 +152,7 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap file header: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer func() { _ = unix.Munmap(data) }()
 
 	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
@@ -351,19 +348,19 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if stat.Size() < HeaderSize {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
 	// Memory map the file for reading
 	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
@@ -617,13 +614,6 @@ func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
 	}
 }
 
-// LoadIndexFromFile loads and maps the specified index file, returns array of entry pointers
-// loadIndexFromFile loads an index file and returns binaryEntryRef instances (backward compatibility wrapper)
-func (dc *DirectoryCache) loadIndexFromFile(filePath string) ([]binaryEntryRef, error) {
-	// Use default processor for normal loading operations (no verbose output)
-	return dc.loadIndexFromFileWithProcessor(filePath, DefaultEntryProcessor())
-}
-
 // loadIndexFromFileWithTracking loads an index file and returns both entries and the mmapIndexFile for tracking
 func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]binaryEntryRef, *mmapIndexFile, error) {
 	file, err := os.Open(filePath)
@@ -634,19 +624,19 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if stat.Size() < HeaderSize {
-		file.Close()
+		_ = file.Close()
 		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
 	// Memory map the file for reading
 	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
@@ -799,34 +789,10 @@ func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader)
 	return nil
 }
 
-// verifyChecksumMmap verifies the SHA-1 checksum for mmap'd data (legacy function)
-func (dc *DirectoryCache) verifyChecksumMmap(data []byte, contentSize int) error {
-	if len(data) < contentSize+ChecksumSize {
-		return fmt.Errorf("insufficient data for checksum")
-	}
-
-	storedChecksum := data[contentSize : contentSize+ChecksumSize]
-	calculatedChecksum := dc.calculateChecksum(data[:contentSize])
-
-	for i := range ChecksumSize {
-		if storedChecksum[i] != calculatedChecksum[i] {
-			return fmt.Errorf("checksum mismatch at byte %d", i)
-		}
-	}
-	return nil
-}
-
-// calculateChecksum calculates SHA-1 checksum of data
-func (dc *DirectoryCache) calculateChecksum(data []byte) []byte {
-	dc.hasher.Reset()
-	dc.hasher.Write(data)
-	return dc.hasher.Sum(nil)
-}
-
 // Close cleans up mmap'd resources and checks for orphaned index files
 func (dc *DirectoryCache) Close() error {
 	// Check for orphaned index files first (ignore errors during check)
-	dc.checkForOrphanedIndexFiles()
+	_ = dc.checkForOrphanedIndexFiles()
 
 	// Clean up old mmapIndex if still present
 	if dc.mmapIndex != nil {
@@ -873,7 +839,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	if err != nil {
 		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if err := file.Truncate(int64(totalSize)); err != nil {
 		return fmt.Errorf("failed to truncate file: %w", err)
@@ -883,7 +849,7 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	if err != nil {
 		return fmt.Errorf("failed to mmap file: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer func() { _ = unix.Munmap(data) }()
 
 	// Zero out the entire memory region first
 	for i := range data {
@@ -902,71 +868,6 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 	}
 
 	return nil
-}
-
-// appendEntryToScanIndex appends a binaryEntry to the existing scan index mmap
-// Uses single mmap with mremap for efficient memory usage
-func (dc *DirectoryCache) appendEntryToScanIndex(scanFileName string, scannedPath *scannedPath) (*binaryEntry, error) {
-	// Verify we have an active scan index
-	if dc.currentScan == nil || dc.currentScan.FilePath != scanFileName {
-		return nil, fmt.Errorf("scan index not initialised for file %s", scanFileName)
-	}
-
-	// Calculate entry size
-	baseSize := int(unsafe.Sizeof(binaryEntry{}))
-	totalSize := baseSize + len(scannedPath.RelPath) + 1 // +1 for null terminator
-	padding := (8 - (totalSize % 8)) % 8
-	entrySize := totalSize + padding
-
-	// Calculate required new size
-	newSize := dc.currentScan.Offset + entrySize
-
-	// Expand file and mmap if necessary
-	if newSize > dc.currentScan.Size {
-		// Lock for mremap operation (write lock)
-		dc.currentScan.mutex.Lock()
-
-		// Expand the file using existing file descriptor
-		if err := dc.currentScan.File.Truncate(int64(newSize)); err != nil {
-			dc.currentScan.mutex.Unlock()
-			return nil, fmt.Errorf("failed to expand scan file: %w", err)
-		}
-
-		// Expand the mmap using mremap
-		newMmap, err := unix.Mremap(dc.currentScan.Data, newSize, unix.MREMAP_MAYMOVE)
-		if err != nil {
-			dc.currentScan.mutex.Unlock()
-			return nil, fmt.Errorf("failed to mremap scan file: %w", err)
-		}
-
-		// Update stored mmap info
-		dc.currentScan.Data = newMmap
-		dc.currentScan.Size = newSize
-
-		dc.currentScan.mutex.Unlock()
-	}
-
-	// Get header and update entry count
-	header := (*indexHeader)(unsafe.Pointer(&dc.currentScan.Data[0]))
-	entryOffset := dc.currentScan.Offset // Write at current offset
-	header.EntryCount++
-
-	// Write the new entry
-	entryData := dc.currentScan.Data[entryOffset:]
-	currentHashType := dc.GetCurrentHashType()
-	currentHashSize := GetHashSize(currentHashType)
-	dc.writeBinaryEntryToMmap(entryData, scannedPath.RelPath, make([]byte, currentHashSize), currentHashType, scannedPath.Info, scannedPath.StatInfo, false)
-
-	// Get pointer to the created entry
-	entry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-
-	// Update offset for next entry
-	dc.currentScan.Offset += entrySize
-
-	// Note: We don't update checksum here since it's only needed once at the end
-	// when all entries and hashes are complete
-
-	return entry, nil
 }
 
 // appendEntryToNamedIndex is a generic function that appends a binaryEntry to any named index file
@@ -1060,14 +961,14 @@ func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 	// Initial size is just the header
 	initialSize := HeaderSize
 	if err := file.Truncate(int64(initialSize)); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("failed to truncate scan file: %w", err)
 	}
 
 	// Create initial mmap
 	data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("failed to mmap scan file: %w", err)
 	}
 
@@ -1100,7 +1001,7 @@ func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create scan file %s: %w", scanFileName, err)
 	}
-	defer file.Close() // Close immediately after setup since recovery doesn't need persistent handle
+	defer func() { _ = file.Close() }() // Close immediately after setup since recovery doesn't need persistent handle
 
 	// Initial size is just the header
 	initialSize := HeaderSize
@@ -1113,7 +1014,7 @@ func (dc *DirectoryCache) createEmptyScanIndex(scanFileName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to mmap scan file: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer func() { _ = unix.Munmap(data) }()
 
 	// Initialise header for writable index (automatically clears Clean flag)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
@@ -1140,14 +1041,14 @@ func (dc *DirectoryCache) InitializeFixIndex(fixFileName string) (*mmapIndexFile
 	// Initial size is just the header
 	initialSize := HeaderSize
 	if err := file.Truncate(int64(initialSize)); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to truncate fix file: %w", err)
 	}
 
 	// Create initial mmap
 	data, err := unix.Mmap(int(file.Fd()), 0, initialSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to mmap fix file: %w", err)
 	}
 
@@ -1324,8 +1225,8 @@ func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, 
 	// If memory layout debugging is enabled, log layout information
 	if IsDebugEnabled("memorylayout") {
 		pathFieldOffset := uintptr(unsafe.Pointer(&entry.Path[0])) - entryPtr
-		os.Stderr.WriteString(fmt.Sprintf("Entry %d: size=%d, ptr=0x%x, path_offset=%d\n",
-			offset/int(minSize), entry.Size, entryPtr, pathFieldOffset))
+		fmt.Fprintf(os.Stderr, "Entry %d: size=%d, ptr=0x%x, path_offset=%d\n",
+			offset/int(minSize), entry.Size, entryPtr, pathFieldOffset)
 	}
 
 	return nil

@@ -247,8 +247,8 @@ func benchmarkDirectoryScan(b *testing.B, config BenchmarkConfig) {
 			hashingRate, fileRate, updateDuration)
 
 		// Clean up for next iteration
-		cache.Close()
-		os.RemoveAll(dcfhDir)
+		_ = cache.Close()
+		_ = os.RemoveAll(dcfhDir)
 	}
 
 	// Report string copy statistics
@@ -286,7 +286,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	if err := cache.Update(nil, map[string]string{}); err != nil {
 		b.Fatalf("Initial update failed: %v", err)
 	}
-	cache.Close()
+	_ = cache.Close()
 	b.StartTimer()
 
 	// Benchmark index loading operations
@@ -296,7 +296,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			if _, err := cache.LoadMainIndex(); err != nil {
 				b.Fatalf("LoadMainIndex failed: %v", err)
 			}
-			cache.Close()
+			_ = cache.Close()
 		}
 	})
 
@@ -307,7 +307,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			if _, err := cache.Status(nil, map[string]string{}); err != nil {
 				b.Fatalf("Status failed: %v", err)
 			}
-			cache.Close()
+			_ = cache.Close()
 		}
 	})
 
@@ -321,7 +321,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			if _, err := cache.FindDuplicates(nil, map[string]string{}); err != nil {
 				b.Fatalf("FindDuplicates failed: %v", err)
 			}
-			cache.Close()
+			_ = cache.Close()
 		}
 	})
 }
@@ -410,7 +410,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		deleteCount := config.TotalFiles / 50
 		for j := config.TotalFiles - deleteCount; j < config.TotalFiles; j++ {
 			filePath := filepath.Join(datasetDir, fmt.Sprintf("file_%06d.dat", j))
-			os.Remove(filePath) // Ignore errors if file doesn't exist
+			_ = os.Remove(filePath) // Ignore errors if file doesn't exist
 		}
 
 		modifyDuration := time.Since(modifyStart)
@@ -446,16 +446,16 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 		b.Logf("  Total Workflow Time: %v", totalDuration)
 
 		// Clean up for next iteration
-		cache.Close()
+		_ = cache.Close()
 
 		// Clean up modified files for next iteration
 		for j := range newCount {
 			fileName := fmt.Sprintf("new_file_%d_%06d.dat", i, j)
 			filePath := filepath.Join(datasetDir, fileName)
-			os.Remove(filePath)
+			_ = os.Remove(filePath)
 		}
 
-		os.RemoveAll(dcfhDir)
+		_ = os.RemoveAll(dcfhDir)
 	}
 
 	// Report string copy statistics
@@ -506,8 +506,8 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			b.ReportMetric(float64(memoryUsed)/(1024*1024), "MB_used")
 			b.ReportMetric(float64(memoryUsed)/float64(config.TotalFiles), "bytes_per_file")
 
-			cache.Close()
-			os.RemoveAll(dcfhDir)
+			_ = cache.Close()
+			_ = os.RemoveAll(dcfhDir)
 			b.StartTimer()
 		}
 	})

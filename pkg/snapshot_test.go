@@ -16,7 +16,7 @@ func TestSnapshotRepository_Initialise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create snapshot repository
 	sr := NewSnapshotRepository(tempDir)
@@ -65,7 +65,7 @@ func TestSnapshotRepository_CreateSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create test index files
 	testFiles := map[string]string{
@@ -150,7 +150,7 @@ func TestSnapshotRepository_ListSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create test index file
 	testFile := filepath.Join(tempDir, "main.idx")
@@ -213,7 +213,7 @@ func TestRetentionPolicy_SelectSnapshotsToKeep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create test index file
 	testFile := filepath.Join(tempDir, "main.idx")
@@ -280,7 +280,7 @@ func TestRetentionPolicy_ForgetSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create test index file
 	testFile := filepath.Join(tempDir, "main.idx")
@@ -536,7 +536,7 @@ func TestSnapshotRepository_RemoveSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create snapshot repository
 	repo := NewSnapshotRepository(tempDir)
@@ -583,7 +583,7 @@ func TestSnapshotRepository_RemoveNonexistentSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create snapshot repository
 	repo := NewSnapshotRepository(tempDir)

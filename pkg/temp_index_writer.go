@@ -163,7 +163,7 @@ func (tiw *TempIndexWriter) Close() error {
 	}
 
 	defer func() {
-		tiw.file.Close()
+		_ = tiw.file.Close()
 		tiw.file = nil
 	}()
 

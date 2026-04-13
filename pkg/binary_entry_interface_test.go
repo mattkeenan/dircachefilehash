@@ -52,10 +52,10 @@ func TestFrameworkCompilation(t *testing.T) {
 
 	// Test locking doesn't panic
 	base.RLock()
-	base.RUnlock()
+	base.RUnlock() //nolint:staticcheck // SA2001: intentional empty critical section - testing lock/unlock doesn't panic
 
 	base.Lock()
-	base.Unlock()
+	base.Unlock() //nolint:staticcheck // SA2001: intentional empty critical section - testing lock/unlock doesn't panic
 
 	t.Log("Test framework compilation and basic functionality verified")
 }

@@ -26,7 +26,7 @@ func processEntriesWithWorkflow(indexFile string, pathSet map[string]bool, field
 	tmpIndexFile := indexFile + ".fix.tmp"
 	defer func() {
 		if _, err := os.Stat(tmpIndexFile); err == nil {
-			os.Remove(tmpIndexFile)
+			_ = os.Remove(tmpIndexFile)
 		}
 	}()
 
@@ -65,7 +65,7 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Copy the header from the original file
 	// TODO: This should update entry count as we process entries
@@ -81,14 +81,14 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 func finalizeTempIndex(tmpIndexFile string) error {
 	// Create DirectoryCache instance to access pkg checksum functions
 	dc := dcfh.NewDirectoryCache("", "")
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	// Open file for reading and writing
 	file, err := os.OpenFile(tmpIndexFile, os.O_RDWR, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open temp index file: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get file size
 	stat, err := file.Stat()

@@ -122,22 +122,6 @@ func trySkipToNextEntry(data []byte, offset *int) bool {
 	return false // Cannot find next entry
 }
 
-// extractPathFromEntry safely extracts the path from a valid binaryEntry
-func extractPathFromEntry(entry *binaryEntry) string {
-	// The path is stored after the fixed struct fields, null-terminated
-	// For now, we'll use a simplified approach assuming the path was validated
-	// during getBinaryEntryFromOffset
-
-	// In the real implementation, the path extends beyond the Path[8] field
-	// and is null-terminated. Since getBinaryEntryFromOffset already validated
-	// the path, we can trust that it's properly structured.
-
-	// This is a placeholder - we need to properly extract the variable-length path
-	// For now, assume the accessor already validated and stored the path
-	// TODO: Implement proper path extraction from the variable-length region
-	return string(entry.Path[:]) // Temporary - needs proper implementation
-}
-
 // attemptErrorFixAtOffsetValidated tries to fix common corruption issues (ValidatedEntry version)
 func attemptErrorFixAtOffsetValidated(data []byte, entryIdx int, offset int, originalErr error) (*ValidatedEntry, error) {
 	// For now, just return the original error - corruption fixing is complex
@@ -155,7 +139,7 @@ func appendValidatedEntryToTmpIndex(tmpIndexFile string, ve *ValidatedEntry) err
 	if err != nil {
 		return fmt.Errorf("failed to open temp index file: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write the binaryEntry as raw bytes
 	// TODO: This is simplified - proper implementation would:

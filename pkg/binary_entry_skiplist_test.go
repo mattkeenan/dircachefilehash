@@ -96,7 +96,7 @@ func cleanupBESkiplist(t *testing.T, entry BinaryEntryInterface) {
 	if cleanupInfo, exists := testCleanupDataSkiplist[entry]; exists {
 		// Clean up directory if any was created
 		if cleanupInfo.testDir != "" {
-			os.RemoveAll(cleanupInfo.testDir)
+			_ = os.RemoveAll(cleanupInfo.testDir)
 		}
 		// Note: skiplist doesn't need explicit cleanup for mock entries
 		// Remove from map
@@ -237,9 +237,9 @@ func testBESkiplistEntryMmapSafety(t *testing.T) {
 			entry.RLock()
 			defer entry.RUnlock()
 
-			entry.RelativePath()
-			entry.Size()
-			entry.HashString()
+			_, _ = entry.RelativePath()
+			_, _ = entry.Size()
+			_, _ = entry.HashString()
 		}()
 	}
 
@@ -256,9 +256,8 @@ func testBESkiplistEntryMmapSafety(t *testing.T) {
 
 // skiplistTestHelper helps create skiplist entries for testing
 type skiplistTestHelper struct {
-	testDir  string
-	dc       *DirectoryCache
-	skiplist *skiplistWrapper
+	testDir string
+	dc      *DirectoryCache
 }
 
 // createTestEntry creates a test skiplist entry and returns it with a cleanup function
@@ -299,7 +298,7 @@ func BenchmarkBESkiplist(b *testing.B) {
 		// Cleanup
 		if cleanupInfo, exists := testCleanupDataSkiplist[entry]; exists {
 			if cleanupInfo.testDir != "" {
-				os.RemoveAll(cleanupInfo.testDir)
+				_ = os.RemoveAll(cleanupInfo.testDir)
 			}
 			// Note: skiplist doesn't need explicit cleanup for mock entries
 			delete(testCleanupDataSkiplist, entry)
@@ -308,19 +307,19 @@ func BenchmarkBESkiplist(b *testing.B) {
 
 	b.Run("RelativePath", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.RelativePath()
+			_, _ = entry.RelativePath()
 		}
 	})
 
 	b.Run("HashString", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.HashString()
+			_, _ = entry.HashString()
 		}
 	})
 
 	b.Run("Size", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			entry.Size()
+			_, _ = entry.Size()
 		}
 	})
 }

@@ -126,7 +126,7 @@ func TestDupesCallback(t *testing.T) {
 		entry1 := createTestBinaryEntry("file1.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
 		entry2 := createTestBinaryEntry("file2.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")   // Same hash
 		entry3 := createTestBinaryEntry("deleted.txt", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2") // Same hash but deleted
-		entry3.SetDeleted(true)                                                                    // Mark as deleted
+		_ = entry3.SetDeleted(true)                                                                // Mark as deleted
 
 		err := callback.OnStart("left", "right")
 		if err != nil {

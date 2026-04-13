@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 )
 
 // UnifiedFilesystemScanIterator streams files directly from filesystem scanning
@@ -19,7 +20,7 @@ type UnifiedFilesystemScanIterator struct {
 	scanChan          chan *scannedPath
 	shutdownChan      chan struct{}
 	shutdownOnce      sync.Once
-	scanComplete      bool
+	scanComplete      atomic.Bool
 	scanError         error
 	scanIndexFileName string // Scan index file name
 
@@ -119,7 +120,7 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 
 	default:
 		// No entry available yet, but scan might still be running
-		if ufsi.scanComplete {
+		if ufsi.scanComplete.Load() {
 			if ufsi.scanError != nil {
 				return nil, ufsi.scanError
 			}
@@ -167,7 +168,7 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 	// Start scanning in background goroutine
 	go func() {
 		defer func() {
-			ufsi.scanComplete = true
+			ufsi.scanComplete.Store(true)
 			// scanPath already closes the channel, so we don't need to close it
 		}()
 
@@ -189,7 +190,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 	ufsi.markClosed()
 
 	// Signal shutdown to scanning goroutine (sync.Once prevents double-close panic)
-	if !ufsi.scanComplete && ufsi.shutdownChan != nil {
+	if !ufsi.scanComplete.Load() && ufsi.shutdownChan != nil {
 		ufsi.shutdownOnce.Do(func() {
 			close(ufsi.shutdownChan)
 		})
@@ -237,7 +238,7 @@ func (ufsi *UnifiedFilesystemScanIterator) HasNext() bool {
 	}
 
 	// If scan is complete and channel is empty, no more entries
-	if ufsi.scanComplete {
+	if ufsi.scanComplete.Load() {
 		select {
 		case <-ufsi.scanChan:
 			// There was an entry available

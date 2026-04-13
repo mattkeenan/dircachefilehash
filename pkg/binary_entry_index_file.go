@@ -52,7 +52,7 @@ func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %v", ife.filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
@@ -88,7 +88,7 @@ func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 	if err != nil {
 		return fmt.Errorf("failed to open index file for writing %s: %v", ife.filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
@@ -305,7 +305,7 @@ func (ife *BEIndexFileIOEntry) RelativePath() (string, error) {
 	pathLen := 0
 	maxPathLen := min(int(ife.entrySize)-int(unsafe.Sizeof(*entry)), 256)
 
-	for i := 0; i < maxPathLen; i++ {
+	for i := range maxPathLen {
 		if pathBytes[i] == 0 {
 			pathLen = i
 			break

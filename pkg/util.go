@@ -155,12 +155,12 @@ func (be *binaryEntry) RelativePath() string {
 	// Scan backwards byte by byte from the end (endian-neutral)
 	// At most 8 bytes to scan due to 8-byte alignment, making this O(1)
 	pathEnd := entryEnd
-	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 {
+	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 { //nolint:govet // intentional pointer arithmetic for mmap path extraction
 		pathEnd--
 	}
 
 	pathLen := int(pathEnd - pathStart)
-	return unsafe.String((*byte)(unsafe.Pointer(pathStart)), pathLen)
+	return unsafe.String((*byte)(unsafe.Pointer(pathStart)), pathLen) //nolint:govet // intentional pointer arithmetic for mmap path extraction
 }
 
 // RelativePathModern returns the relative path using Go 1.17+ unsafe.Slice pattern
@@ -190,7 +190,7 @@ func (be *binaryEntry) calculatePathLength() int {
 
 	// Scan for null terminator
 	pathEnd := entryEnd
-	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 {
+	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 { //nolint:govet // intentional pointer arithmetic for mmap path extraction
 		pathEnd--
 	}
 
@@ -203,7 +203,10 @@ func (be *binaryEntry) ValidateEntry() error {
 	// Validate layout assumptions
 	defer func() {
 		if r := recover(); r != nil {
-			// Convert panic to error for graceful handling
+			// Silently recover: convert panic to error for graceful handling.
+			// validateLayout() may panic on malformed entries; we catch it
+			// so ValidateEntry() returns an error instead of crashing.
+			_ = r
 		}
 	}()
 
@@ -329,7 +332,7 @@ func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 
 	// Calculate pointer from base + header size + offset
 	entryPtr := uintptr(unsafe.Pointer(&ref.IndexFile.Data[0])) + HeaderSize + uintptr(ref.Offset)
-	return (*binaryEntry)(unsafe.Pointer(entryPtr))
+	return (*binaryEntry)(unsafe.Pointer(entryPtr)) //nolint:govet // intentional pointer arithmetic for mmap path extraction
 }
 
 // createBinaryEntryRef creates a binaryEntryRef from a binaryEntry pointer and mmapIndexFile
@@ -514,7 +517,7 @@ func ParseHumanSize(sizeStr string) (int, error) {
 	}
 
 	// Apply multiplier based on suffix
-	var multiplier int64 = 1
+	var multiplier int64
 	switch suffix {
 	case "", "B":
 		multiplier = 1

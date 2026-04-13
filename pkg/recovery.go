@@ -392,23 +392,6 @@ func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) e
 	return nil
 }
 
-// determineRecoveryType determines the type of recovery and target file based on source path
-func (dc *DirectoryCache) determineRecoveryType(indexPath string) (string, string) {
-	if indexPath == dc.IndexFile {
-		return "main", dc.IndexFile
-	} else if indexPath == dc.CacheFile {
-		return "cache", dc.CacheFile
-	} else if filepath.Base(indexPath) == "main.idx" {
-		return "main", dc.IndexFile
-	} else if filepath.Base(indexPath) == "cache.idx" {
-		return "cache", dc.CacheFile
-	} else if strings.Contains(filepath.Base(indexPath), "scan-") {
-		return "scan", dc.CacheFile // Scan files recover to cache
-	} else {
-		return "unknown", dc.CacheFile // Default to cache
-	}
-}
-
 // generateRecoveryBackupName creates a backup filename for recovery operations
 func (dc *DirectoryCache) generateRecoveryBackupName(recoveryType string) string {
 	dcfhDir := filepath.Dir(dc.IndexFile)
@@ -508,7 +491,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	if err := dc.createEmptyScanIndex(recoveryIndexPath); err != nil {
 		return fmt.Errorf("failed to create recovery index: %w", err)
 	}
-	defer os.Remove(recoveryIndexPath) // Always cleanup recovery index
+	defer func() { _ = os.Remove(recoveryIndexPath) }() // Always cleanup recovery index
 
 	// Load corrupted index with clean entry copying and fixing
 	recoverySkiplist, err := dc.loadIndexWithCleanCopyingAndFixes(indexPath, recoveryIndexPath, fixMode, verbosity)
@@ -539,7 +522,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	// Write to both main and cache indices for complete recovery
 
 	// 1. Write main index using vectorio (exclude deleted entries for main)
-	tempMainPath := dc.generateTempFileName("main")
+	tempMainPath := dc.generateTempFileName("main") //nolint:staticcheck // SA4006: used after os.Exit is removed when RecoveryCallback is implemented
 	// TODO: Replace with callback-based writing using RecoveryCallback pattern
 	// This batch writing approach uses problematic writeMainIndexWithVectorIO function
 	// if err := dc.writeMainIndexWithVectorIO(currentSkiplist, tempMainPath, MainContext); err != nil {
@@ -551,7 +534,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	os.Exit(1)
 
 	// 2. Write cache index using vectorio (include deleted entries for cache)
-	tempCachePath := dc.generateTempFileName("cache")
+	tempCachePath := dc.generateTempFileName("cache") //nolint:staticcheck // SA4006: used after os.Exit is removed
 	// TODO: Replace with callback-based writing using RecoveryCallback pattern
 	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
@@ -568,14 +551,14 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 
 	// 3. Atomic replace main index first
 	if err := os.Rename(tempMainPath, dc.IndexFile); err != nil {
-		os.Remove(tempMainPath) // Cleanup on failure
-		os.Remove(tempCachePath)
+		_ = os.Remove(tempMainPath) // Cleanup on failure
+		_ = os.Remove(tempCachePath)
 		return fmt.Errorf("failed to replace main index: %w", err)
 	}
 
 	// 4. Atomic replace cache index
 	if err := os.Rename(tempCachePath, dc.CacheFile); err != nil {
-		os.Remove(tempCachePath) // Cleanup on failure
+		_ = os.Remove(tempCachePath) // Cleanup on failure
 		return fmt.Errorf("failed to replace cache index: %w", err)
 	}
 
@@ -584,151 +567,6 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	}
 
 	return nil
-}
-
-// loadIndexWithCleanCopyingOriginal loads an index file and creates clean copies of entries that need fixing (original implementation)
-func (dc *DirectoryCache) loadIndexWithCleanCopyingOriginal(indexPath, recoveryIndexPath string, verbosity int) (*skiplistWrapper, error) {
-	// Open the corrupted index file
-	file, err := os.Open(indexPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open index file %s: %w", indexPath, err)
-	}
-	defer file.Close()
-
-	// Get file size
-	stat, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	if stat.Size() < HeaderSize {
-		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
-	}
-
-	// Memory map the file for reading
-	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mmap file: %w", err)
-	}
-	defer unix.Munmap(data)
-
-	// Get direct pointer to header in mmap'd memory
-	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-
-	// Basic header validation (signature, byte order, version)
-	if err := header.ValidateSignature(dc.signature); err != nil {
-		return nil, err
-	}
-	if err := header.ValidateByteOrder(); err != nil {
-		return nil, err
-	}
-	if err := header.ValidateVersion(dc.version); err != nil {
-		return nil, err
-	}
-
-	// Check Clean flag - we've already handled header checksum validation in loadIndexFromFileWithProcessor
-	isClean := (header.Flags & IndexFlagClean) != 0
-	if verbosity >= 2 {
-		if isClean {
-			VerboseLog(2, "Processing clean index file: %s", indexPath)
-		} else {
-			VerboseLog(2, "Processing unclean index file (likely interrupted): %s", indexPath)
-		}
-	}
-
-	// Create skiplist for recovery
-	skiplist := NewSkiplistWrapper(int(header.EntryCount), CacheContext)
-
-	// Parse entries and create clean copies when needed
-	offset := 0
-	entryData := data[HeaderSize:]
-	validEntryCount := 0
-
-	for i := uint32(0); i < header.EntryCount; i++ {
-		if offset >= len(entryData) {
-			if verbosity >= 2 {
-				VerboseLog(2, "Unexpected end of data at entry %d", i)
-			}
-			break
-		}
-
-		// Get direct pointer to binaryEntry in mmap'd memory
-		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-
-		// Validate this entry with recovery validation (allows fixable issues)
-		config := DefaultValidationConfig(ValidationRecovery, verbosity)
-		processor := UnifiedValidationProcessor(config)
-
-		shouldInclude, err := processor(entry, i, indexPath)
-		if err != nil {
-			if verbosity >= 2 {
-				VerboseLog(2, "Entry %d validation failed: %v", i, err)
-			}
-			// Try to skip to next entry - use entry size or estimate
-			if entry.Size > 0 && entry.Size < 4096 {
-				offset += int(entry.Size)
-			} else {
-				offset += 256 // Conservative skip
-			}
-			continue
-		}
-
-		if shouldInclude {
-			// Check if entry needs fixing (clean copying)
-			needsFixing := false
-			hashTypeFixed := false
-
-			// Entry needs fixing if:
-			// 1. File is unclean (header suggests corruption possible)
-			// 2. Entry has structural issues but recoverable data
-			// 3. Entry has invalid hash type that can be corrected
-			if !isClean {
-				needsFixing = true
-			}
-
-			// Check for hash type issues and fix if needed
-			if entry.HashType == 0 || !isValidHashType(entry.HashType) {
-				if verbosity >= 2 {
-					VerboseLog(2, "Entry %d has invalid hash type %d", i, entry.HashType)
-				}
-				needsFixing = true
-				hashTypeFixed = true
-			}
-
-			if needsFixing {
-				// Create clean copy in recovery index (with hash type fixing if needed)
-				cleanEntryRef, err := dc.createCleanEntryCopyWithFixes(entry, recoveryIndexPath, hashTypeFixed, verbosity)
-				if err != nil {
-					if verbosity >= 2 {
-						VerboseLog(2, "Failed to create clean copy of entry %d: %v", i, err)
-					}
-					offset += int(entry.Size)
-					continue
-				}
-
-				// Add clean copy to skiplist
-				skiplist.Insert(cleanEntryRef, CacheContext)
-				validEntryCount++
-
-				if verbosity >= 3 {
-					VerboseLog(3, "Created clean copy for entry %d: %s", i, entry.RelativePath())
-				}
-			} else {
-				// In recovery mode, we need clean copies of all entries from unclean files
-				// to ensure memory safety - force clean copying
-				needsFixing = true
-			}
-		}
-
-		// Move to next entry
-		offset += int(entry.Size)
-	}
-
-	if verbosity >= 1 {
-		VerboseLog(1, "Recovered %d valid entries from %d total entries", validEntryCount, header.EntryCount)
-	}
-
-	return skiplist, nil
 }
 
 // loadIndexWithCleanCopyingAndFixes loads an index file and creates clean copies with interactive fixing support
@@ -740,12 +578,6 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingAndFixes(indexPath, recoveryI
 	return dc.loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath, config)
 }
 
-// loadIndexWithCleanCopying loads an index file and creates clean copies of entries that need fixing (legacy compatibility)
-func (dc *DirectoryCache) loadIndexWithCleanCopying(indexPath, recoveryIndexPath string, verbosity int) (*skiplistWrapper, error) {
-	config := ValidationConfigWithFixes(ValidationRecovery, FixModeNone, verbosity, dc.RootDir)
-	return dc.loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath, config)
-}
-
 // loadIndexWithCleanCopyingEnhanced is the core implementation with full fix support
 func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryIndexPath string, config ValidationConfig) (*skiplistWrapper, error) {
 	// Open the corrupted index file
@@ -753,7 +585,7 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", indexPath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get file size
 	stat, err := file.Stat()
@@ -770,7 +602,7 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer func() { _ = unix.Munmap(data) }()
 
 	// Get direct pointer to header in mmap'd memory
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
@@ -914,53 +746,6 @@ func isValidHashType(hashType uint16) bool {
 	}
 }
 
-// createCleanEntryCopyWithFixes creates a clean copy of a binaryEntry with optional fixes applied
-func (dc *DirectoryCache) createCleanEntryCopyWithFixes(sourceEntry *binaryEntry, recoveryIndexPath string, fixHashType bool, verbosity int) (binaryEntryRef, error) {
-	// Copy the entry data to clean memory
-	entrySize := int(sourceEntry.Size)
-	entryData := make([]byte, entrySize)
-
-	// Copy from source entry
-	sourceBytes := (*[4096]byte)(unsafe.Pointer(sourceEntry))[:entrySize:entrySize]
-	copy(entryData, sourceBytes)
-
-	// Apply fixes if needed
-	if fixHashType {
-		// Get the clean entry pointer to modify
-		cleanEntry := (*binaryEntry)(unsafe.Pointer(&entryData[0]))
-
-		// Fix hash type - use current configured hash type
-		newHashType := dc.GetCurrentHashType()
-		if verbosity >= 2 {
-			VerboseLog(2, "Fixing hash type from %d to %d for entry: %s",
-				cleanEntry.HashType, newHashType, cleanEntry.RelativePath())
-		}
-		cleanEntry.HashType = newHashType
-	}
-
-	// Append the clean copy to recovery index using raw data append
-	_, cleanOffset, err := dc.appendRawEntryToScanIndex(recoveryIndexPath, entryData)
-	if err != nil {
-		return binaryEntryRef{}, fmt.Errorf("failed to append clean entry to recovery index: %w", err)
-	}
-
-	// For recovery operations, we create a temporary mmapIndexFile reference
-	// This is safe because the recovery index will be cleaned up after use
-	recoveryIndexFile := &mmapIndexFile{
-		File:     nil, // File will be closed by caller
-		Data:     nil, // Will be set when needed
-		Size:     0,   // Will be updated when accessed
-		Offset:   int(cleanOffset),
-		Type:     "recovery",
-		FilePath: recoveryIndexPath,
-	}
-
-	return binaryEntryRef{
-		Offset:    int(cleanOffset),
-		IndexFile: recoveryIndexFile,
-	}, nil
-}
-
 // analyzeEntryForFixes analyzes a binary entry and returns a list of fixable issues
 func (dc *DirectoryCache) analyzeEntryForFixes(entry *binaryEntry, entryIndex uint32, config ValidationConfig) ([]FixableIssue, error) {
 	var issues []FixableIssue
@@ -1093,7 +878,7 @@ func promptUserForFix(issue FixableIssue) bool {
 	fmt.Printf("Apply this fix? [y/N]: ")
 
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response)
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	return response == "y" || response == "yes"
@@ -1151,11 +936,6 @@ func (dc *DirectoryCache) applyFixesToEntry(entry *binaryEntry, entryIndex uint3
 	return appliedFixes, nil
 }
 
-// createCleanEntryCopy creates a clean copy of a binaryEntry in the recovery index file (legacy compatibility)
-func (dc *DirectoryCache) createCleanEntryCopy(sourceEntry *binaryEntry, recoveryIndexPath string) (binaryEntryRef, error) {
-	return dc.createCleanEntryCopyWithFixes(sourceEntry, recoveryIndexPath, false, 0)
-}
-
 // appendRawEntryToScanIndex appends raw binaryEntry data to a scan index file
 func (dc *DirectoryCache) appendRawEntryToScanIndex(scanIndexPath string, entryData []byte) (*binaryEntry, uint32, error) {
 	// Open scan index file for append
@@ -1163,7 +943,7 @@ func (dc *DirectoryCache) appendRawEntryToScanIndex(scanIndexPath string, entryD
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open scan index for append: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get current file size to determine append offset
 	stat, err := file.Stat()
@@ -1187,7 +967,7 @@ func (dc *DirectoryCache) appendRawEntryToScanIndex(scanIndexPath string, entryD
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to mmap extended scan index: %w", err)
 	}
-	defer unix.Munmap(data)
+	defer func() { _ = unix.Munmap(data) }()
 
 	// Copy entry data to the append position
 	copy(data[currentSize:], entryData)
@@ -1371,7 +1151,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 		for _, scanFile := range scanFiles {
 			scanBackup := dc.generateRecoveryBackupName("scan")
 			if err := dc.createRecoveryBackup(scanFile.Path, scanBackup, verbosity); err == nil {
-				backupPaths = append(backupPaths, scanBackup)
+				backupPaths = append(backupPaths, scanBackup) //nolint:staticcheck // SA4010: backupPaths accumulated for future recovery reporting
 
 				if scanSkiplist, err := dc.loadIndexWithProcessor(scanFile.Path, RecoveryValidationProcessor(verbosity)); err == nil && scanSkiplist.Length() > 0 {
 					recoveredSkiplists = append(recoveredSkiplists, scanSkiplist)
@@ -1402,13 +1182,13 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	}
 
 	// Step 5: Merge with current disk state via Hwang-Lin
-	finalSkiplist, err := dc.performUnifiedScanToSkiplist(nil, []string{}, mergedSkiplist)
+	finalSkiplist, err := dc.performUnifiedScanToSkiplist(nil, []string{}, mergedSkiplist) //nolint:staticcheck // SA4006: used after os.Exit is removed
 	if err != nil {
 		return fmt.Errorf("failed to merge recovered data with current state: %w", err)
 	}
 
 	// Step 6: Write recovered cache index
-	tempCachePath := dc.generateTempFileName("cache")
+	tempCachePath := dc.generateTempFileName("cache") //nolint:staticcheck // SA4006: used after os.Exit is removed
 	// TODO: Replace with callback-based writing using RecoveryCallback pattern
 	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
@@ -1416,7 +1196,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	os.Exit(1)
 
 	// Step 7: Write recovered main index (excluding deleted)
-	_ = dc.generateTempFileName("main") // tempMainPath - unused until RecoveryCallback implemented
+	tempMainPath := dc.generateTempFileName("main") //nolint:staticcheck // SA4006: used after os.Exit is removed
 	// TODO: Replace with callback-based writing using RecoveryCallback pattern
 	// This batch writing approach uses problematic writeMainIndexWithVectorIO function
 	// if err := dc.writeMainIndexWithVectorIO(finalSkiplist, tempMainPath, MainContext); err != nil {
@@ -1424,8 +1204,9 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	//	os.Remove(tempMainPath)
 	//	return fmt.Errorf("failed to write recovered main index: %w", err)
 	// }
-	_ = finalSkiplist // finalSkiplist - unused until RecoveryCallback implemented
-	_ = tempCachePath // tempCachePath - unused until RecoveryCallback implemented
+	_ = finalSkiplist //nolint:staticcheck // used after os.Exit is removed when RecoveryCallback is implemented
+	_ = tempCachePath //nolint:staticcheck // used after os.Exit is removed when RecoveryCallback is implemented
+	_ = tempMainPath  //nolint:staticcheck // used after os.Exit is removed when RecoveryCallback is implemented
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
 	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
 	os.Exit(1)

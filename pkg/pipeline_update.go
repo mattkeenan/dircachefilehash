@@ -130,13 +130,13 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 		select {
 		case <-ctx.Done():
 			// Don't close the writer properly — the temp file will be cleaned up
-			writer.Close()
+			_ = writer.Close()
 			return ctx.Err()
 		case pe, ok := <-retiredCh:
 			if !ok {
 				// All entries received — flush remaining and finalise
 				if err := flushBatch(); err != nil {
-					writer.Close()
+					_ = writer.Close()
 					return err
 				}
 				return writer.Close()
@@ -144,7 +144,7 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 
 			data, err := serialiser.Serialise(pe.Entry)
 			if err != nil {
-				writer.Close()
+				_ = writer.Close()
 				return fmt.Errorf("failed to serialise entry: %w", err)
 			}
 
@@ -153,7 +153,7 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 
 			if len(batch) >= batchSize {
 				if err := flushBatch(); err != nil {
-					writer.Close()
+					_ = writer.Close()
 					return err
 				}
 			}

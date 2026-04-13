@@ -15,7 +15,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -82,7 +82,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -151,7 +151,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -211,7 +211,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -275,7 +275,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -319,7 +319,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
-		defer os.RemoveAll(testDir)
+		defer func() { _ = os.RemoveAll(testDir) }()
 
 		dc := createTestDirectoryCache(t, testDir)
 
@@ -438,7 +438,7 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create test directory: %v", err)
 	}
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 
 	dc := createTestDirectoryCacheForBench(b, testDir)
 

@@ -32,8 +32,8 @@ func hwangLinUnified(
 
 	defer func() {
 		// Always close iterators, even on early return
-		leftIter.Close()
-		rightIter.Close()
+		_ = leftIter.Close()
+		_ = rightIter.Close()
 	}()
 
 	// Initialize callback
@@ -64,7 +64,7 @@ func hwangLinUnified(
 		select {
 		case <-shutdownChan:
 			shutdownErr := fmt.Errorf("operation interrupted by shutdown signal")
-			callback.OnComplete(shutdownErr)
+			_ = callback.OnComplete(shutdownErr)
 			return shutdownErr
 		default:
 			// Continue processing
@@ -93,7 +93,7 @@ func hwangLinUnified(
 			result = ComparisonRightOnly
 			continueProcessing, err = callback.OnRightOnly(rightEntry, rightPath)
 			if err != nil {
-				callback.OnComplete(err)
+				_ = callback.OnComplete(err)
 				return err
 			}
 			if !continueProcessing {
@@ -104,7 +104,7 @@ func hwangLinUnified(
 			rightEntry, rightErr = rightIter.Next()
 			if rightErr != nil {
 				iterErr := fmt.Errorf("right iterator read failed: %w", rightErr)
-				callback.OnComplete(iterErr)
+				_ = callback.OnComplete(iterErr)
 				return iterErr
 			}
 
@@ -113,7 +113,7 @@ func hwangLinUnified(
 			result = ComparisonLeftOnly
 			continueProcessing, err = callback.OnLeftOnly(leftEntry, leftPath)
 			if err != nil {
-				callback.OnComplete(err)
+				_ = callback.OnComplete(err)
 				return err
 			}
 			if !continueProcessing {
@@ -124,7 +124,7 @@ func hwangLinUnified(
 			leftEntry, leftErr = leftIter.Next()
 			if leftErr != nil {
 				iterErr := fmt.Errorf("left iterator read failed: %w", leftErr)
-				callback.OnComplete(iterErr)
+				_ = callback.OnComplete(iterErr)
 				return iterErr
 			}
 
@@ -140,7 +140,7 @@ func hwangLinUnified(
 				}
 				continueProcessing, err = callback.OnComparison(result, leftEntry, rightEntry, leftPath, rightPath)
 				if err != nil || !continueProcessing {
-					callback.OnComplete(err)
+					_ = callback.OnComplete(err)
 					return err
 				}
 
@@ -148,13 +148,13 @@ func hwangLinUnified(
 				leftEntry, leftErr = leftIter.Next()
 				if leftErr != nil {
 					iterErr := fmt.Errorf("left iterator read failed: %w", leftErr)
-					callback.OnComplete(iterErr)
+					_ = callback.OnComplete(iterErr)
 					return iterErr
 				}
 				rightEntry, rightErr = rightIter.Next()
 				if rightErr != nil {
 					iterErr := fmt.Errorf("right iterator read failed: %w", rightErr)
-					callback.OnComplete(iterErr)
+					_ = callback.OnComplete(iterErr)
 					return iterErr
 				}
 
@@ -166,7 +166,7 @@ func hwangLinUnified(
 				}
 				continueProcessing, err = callback.OnComparison(result, leftEntry, nil, leftPath, "")
 				if err != nil || !continueProcessing {
-					callback.OnComplete(err)
+					_ = callback.OnComplete(err)
 					return err
 				}
 
@@ -174,7 +174,7 @@ func hwangLinUnified(
 				leftEntry, leftErr = leftIter.Next()
 				if leftErr != nil {
 					iterErr := fmt.Errorf("left iterator read failed: %w", leftErr)
-					callback.OnComplete(iterErr)
+					_ = callback.OnComplete(iterErr)
 					return iterErr
 				}
 
@@ -186,7 +186,7 @@ func hwangLinUnified(
 				}
 				continueProcessing, err = callback.OnComparison(result, nil, rightEntry, "", rightPath)
 				if err != nil || !continueProcessing {
-					callback.OnComplete(err)
+					_ = callback.OnComplete(err)
 					return err
 				}
 
@@ -194,7 +194,7 @@ func hwangLinUnified(
 				rightEntry, rightErr = rightIter.Next()
 				if rightErr != nil {
 					iterErr := fmt.Errorf("right iterator read failed: %w", rightErr)
-					callback.OnComplete(iterErr)
+					_ = callback.OnComplete(iterErr)
 					return iterErr
 				}
 			}

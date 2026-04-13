@@ -166,7 +166,7 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create DirectoryCache instance - use tempDir as both root and dcfh location
 			dc := NewDirectoryCache(tempDir, tempDir)
-			defer dc.Close()
+			defer func() { _ = dc.Close() }()
 
 			// Initialise with empty index to avoid complex setup
 			if err := dc.createEmptyIndex(); err != nil {

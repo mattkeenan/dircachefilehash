@@ -16,7 +16,7 @@ func TestHashPoolBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 
 	// Create a test file
 	testFile := filepath.Join(testDir, "hello.txt")
@@ -26,7 +26,7 @@ func TestHashPoolBasic(t *testing.T) {
 
 	// Create DirectoryCache
 	dc := NewDirectoryCache(testDir, testDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	// Create a BEScanEntry for the test file
 	info, err := os.Stat(testFile)
@@ -91,10 +91,10 @@ func TestHashPoolContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 
 	dc := NewDirectoryCache(testDir, testDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	input := make(chan *PipelineEntry)
 	output := make(chan *PipelineEntry, 10)
@@ -121,10 +121,10 @@ func TestHashPoolMultipleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 
 	dc := NewDirectoryCache(testDir, testDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	const nFiles = 10
 	input := make(chan *PipelineEntry, nFiles)
@@ -139,7 +139,7 @@ func TestHashPoolMultipleFiles(t *testing.T) {
 		}
 		info, _ := os.Stat(name)
 		var stat syscall.Stat_t
-		syscall.Stat(name, &stat)
+		_ = syscall.Stat(name, &stat)
 
 		entry := NewBEScanEntry(fmt.Sprintf("file%d.txt", i), info, &stat)
 		input <- &PipelineEntry{
@@ -175,9 +175,9 @@ func TestHashPoolClosesOutput(t *testing.T) {
 	output := make(chan *PipelineEntry, 10)
 
 	testDir, _ := os.MkdirTemp("", "hashpool-close-*")
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 	dc := NewDirectoryCache(testDir, testDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	pool := newHashPool(dc, input, output, 1)
 	close(input)

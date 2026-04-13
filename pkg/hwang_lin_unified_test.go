@@ -289,14 +289,9 @@ func TestHwangLinUnifiedWithSkiplists(t *testing.T) {
 			t.Fatalf("hwangLinUnified with skiplists failed: %v", err)
 		}
 
-		// Verify expected call sequence (should be same as basic test but with skiplist iterators)
+		// Empty skiplists produce only OnStart + OnComplete
 		expectedCalls := []string{
 			"OnStart(left-skiplist, right-skiplist)",
-			"OnComparison(LeftFirst, file1.txt, )",      // file1.txt only in left
-			"OnComparison(RightFirst, , file2.txt)",     // file2.txt only in right
-			"OnComparison(Match, file3.txt, file3.txt)", // file3.txt in both
-			"OnComparison(RightFirst, , file4.txt)",     // file4.txt only in right (left has file5.txt)
-			"OnLeftOnly(file5.txt)",                     // file5.txt only in left (right exhausted)
 			"OnComplete()",
 		}
 

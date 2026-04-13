@@ -37,7 +37,7 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 
 	// Create DirectoryCache instance
 	dc := NewDirectoryCache(tempDir, tempDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	// Create empty index
 	if err := dc.createEmptyIndex(); err != nil {
@@ -66,7 +66,7 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	// Create DirectoryCache instance
 	dc := NewDirectoryCache(tempDir, tempDir)
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	// Create empty index
 	if err := dc.createEmptyIndex(); err != nil {

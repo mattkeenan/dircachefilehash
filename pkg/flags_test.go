@@ -298,7 +298,7 @@ func TestFlagsEdgeCases(t *testing.T) {
 					if key != "" && value != "" {
 						// This represents the type of processing done in real operations
 						if key == "v" {
-							strconv.Atoi(value) // Should not crash
+							_, _ = strconv.Atoi(value) // Should not crash
 						}
 					}
 				}

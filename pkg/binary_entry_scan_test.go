@@ -49,7 +49,7 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 
 	// Initialize scan index
 	if err := dc.initialiseScanIndex(scanFileName); err != nil {
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to initialize scan index: %v", err)
 	}
 
@@ -83,18 +83,31 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	)
 	if err != nil {
 		// Cleanup on error
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to create scan entry: %v", err)
 	}
 
 	// Get the scan index file to create binaryEntryRef
 	if dc.currentScan == nil {
-		os.RemoveAll(testDir)
+		_ = os.RemoveAll(testDir)
 		t.Fatalf("No current scan index after AppendEntryToScanIndex")
 	}
 
-	// Create and return BEScanEntry using the v0.7 constructor
+	// Create BEScanEntry using the v0.7 constructor (metadata only, no hash)
 	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
+
+	// Post-process: apply test data that NewBEScanEntry doesn't set.
+	// NewBEScanEntry is production code designed for lazy hashing — it only
+	// sets metadata from fileInfo/statInfo. Tests need hash, CTimeWall from
+	// stat (not modtime), and deleted flag to match CreateTestData().
+	entry, _ := scanEntry.getBinaryEntry()
+	entry.CTimeWall = testData.CTimeWall
+	if testData.HashType != 0 {
+		_ = scanEntry.SetHash(testData.Hash[:], testData.HashType)
+	}
+	if testData.IsDeleted {
+		_ = scanEntry.SetDeleted(true)
+	}
 
 	// Store cleanup info in global map
 	testCleanupData[scanEntry] = &scanTestCleanupInfo{
@@ -111,10 +124,10 @@ func cleanupBEScan(t *testing.T, entry BinaryEntryInterface) {
 	if cleanupInfo, exists := testCleanupData[entry]; exists {
 		// Clean up test directory
 		if cleanupInfo.dc != nil {
-			cleanupInfo.dc.cleanupCurrentScanFile()
+			_ = cleanupInfo.dc.cleanupCurrentScanFile()
 		}
 		if cleanupInfo.testDir != "" {
-			os.RemoveAll(cleanupInfo.testDir)
+			_ = os.RemoveAll(cleanupInfo.testDir)
 		}
 		// Remove from map
 		delete(testCleanupData, entry)
@@ -161,9 +174,9 @@ func testBEScanHashWorkerUpdates(t *testing.T) {
 	entry, cleanup := helper.createTestEntry(t)
 	defer cleanup()
 
-	// Test hash update (simulating hash worker)
+	// Test hash update (simulating hash worker — 20-byte hash matches SHA1 type)
 	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := uint16(HashTypeSHA256)
+	newHashType := uint16(HashTypeSHA1)
 
 	if err := entry.SetHash(newHash[:], newHashType); err != nil {
 		t.Errorf("SetHash() returned error: %v", err)
@@ -317,10 +330,10 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 	// Return entry and cleanup function
 	cleanup := func() {
 		if h.dc != nil {
-			h.dc.cleanupCurrentScanFile()
+			_ = h.dc.cleanupCurrentScanFile()
 		}
 		if h.testDir != "" {
-			os.RemoveAll(h.testDir)
+			_ = os.RemoveAll(h.testDir)
 		}
 	}
 
@@ -340,10 +353,10 @@ func BenchmarkBEScan(b *testing.B) {
 		if _, ok := entry.(*BEScanEntry); ok {
 			// Manually cleanup - this is a limitation of the benchmark approach
 			if helper.dc != nil {
-				helper.dc.cleanupCurrentScanFile()
+				_ = helper.dc.cleanupCurrentScanFile()
 			}
 			if helper.testDir != "" {
-				os.RemoveAll(helper.testDir)
+				_ = os.RemoveAll(helper.testDir)
 			}
 		}
 	}

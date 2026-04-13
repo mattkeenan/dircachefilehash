@@ -744,8 +744,7 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 		for i := range retiredEntries {
 			delete(uc.pathOrderToEntry, startIndex+uint64(i))
 		}
-		// Clear slices to allow GC
-		retiredEntries = nil
+		// retiredEntries goes out of scope here, allowing GC
 	} else {
 		if IsDebugEnabled("write") {
 			VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")

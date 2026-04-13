@@ -233,15 +233,15 @@ func (suite *BinaryEntryTestSuite) TestLocking(t *testing.T) {
 
 	// Test that locking doesn't panic or hang
 	entry.RLock()
-	entry.RUnlock()
+	entry.RUnlock() //nolint:staticcheck // SA2001: intentional empty critical section - testing lock/unlock doesn't panic
 
 	entry.Lock()
-	entry.Unlock()
+	entry.Unlock() //nolint:staticcheck // SA2001: intentional empty critical section - testing lock/unlock doesn't panic
 
 	// Test nested read locks (should work with RWMutex)
 	entry.RLock()
 	entry.RLock()
-	entry.RUnlock()
+	entry.RUnlock() //nolint:staticcheck // SA2001: intentional empty critical section - testing nested read locks
 	entry.RUnlock()
 }
 
@@ -297,9 +297,9 @@ func (suite *BinaryEntryTestSuite) TestHashUpdates(t *testing.T) {
 	entry := suite.CreateEntry(t, testData)
 	defer suite.CleanupEntry(t, entry)
 
-	// Test hash update
+	// Test hash update (20-byte hash matches SHA1 type)
 	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := uint16(HashTypeSHA256)
+	newHashType := uint16(HashTypeSHA1)
 
 	if err := entry.SetHash(newHash[:], newHashType); err != nil {
 		t.Errorf("SetHash() returned error: %v", err)
@@ -468,10 +468,10 @@ func (suite *BinaryEntryTestSuite) BenchmarkFieldAccess(b *testing.B, createFn f
 
 	for i := 0; i < b.N; i++ {
 		// Benchmark commonly accessed fields
-		entry.RelativePath()
-		entry.Size()
-		entry.HashString()
-		entry.IsDeleted()
+		_, _ = entry.RelativePath()
+		_, _ = entry.Size()
+		_, _ = entry.HashString()
+		_, _ = entry.IsDeleted()
 	}
 }
 
@@ -485,8 +485,8 @@ func (suite *BinaryEntryTestSuite) BenchmarkConcurrentAccess(b *testing.B, creat
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			// Test concurrent read access
-			entry.RelativePath()
-			entry.HashString()
+			_, _ = entry.RelativePath()
+			_, _ = entry.HashString()
 		}
 	})
 }

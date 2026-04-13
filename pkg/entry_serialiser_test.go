@@ -160,7 +160,7 @@ func TestEntrySerialiserSkiplistEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(testDir)
+	defer func() { _ = os.RemoveAll(testDir) }()
 
 	relPath := "skiplist/test.txt"
 	mockInfo := &mockFileInfo{
@@ -184,7 +184,9 @@ func TestEntrySerialiserSkiplistEntry(t *testing.T) {
 
 	// Write a minimal index file with this entry
 	indexPath := testDir + "/.dcfh/test-serialiser.idx"
-	os.MkdirAll(testDir+"/.dcfh", 0755)
+	if err := os.MkdirAll(testDir+"/.dcfh", 0755); err != nil {
+		t.Fatalf("Failed to create .dcfh directory: %v", err)
+	}
 
 	// Use the scan entry data to verify round-trip serialisation
 	// For this test, we just verify the fallback path works correctly

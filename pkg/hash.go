@@ -82,7 +82,7 @@ func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := algorithm.NewFunc()
 	written, err := io.Copy(hasher, file)
@@ -184,7 +184,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, bufferSize
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := algorithm.NewFunc()
 	buffer := make([]byte, bufferSize)

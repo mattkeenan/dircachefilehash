@@ -54,7 +54,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	dc.ignoreManager.Reload()
+	_ = dc.ignoreManager.Reload()
 
 	// First update - all files should be indexed
 	shutdownChan := make(<-chan struct{})
@@ -84,7 +84,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	dc.ignoreManager.Reload()
+	_ = dc.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
 	status, err := dc.Status(shutdownChan, flags)
@@ -138,7 +138,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	dc.ignoreManager.Reload()
+	_ = dc.ignoreManager.Reload()
 
 	// Check status again
 	status, err = dc.Status(shutdownChan, flags)
