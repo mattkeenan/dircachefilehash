@@ -122,6 +122,8 @@ func main() {
 		handleDupes(args[1:], shutdownChan)
 	case "snapshot":
 		handleSnapshot(args[1:])
+	case "subrepo":
+		handleSubrepo(args[1:])
 	case "config":
 		handleConfig(args[1:])
 	case "version":

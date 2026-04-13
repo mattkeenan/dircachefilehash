@@ -112,7 +112,7 @@ func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
 
 	// Write helpful header comments
 	_, err = file.WriteString(`# dcfh ignore patterns
-# 
+#
 # This file contains regular expression patterns for files and directories
 # that should be ignored by dcfh indexing operations.
 #
@@ -120,15 +120,14 @@ func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
 # Lines starting with # are comments and are ignored.
 # Empty lines are also ignored.
 #
+# Note: The repository's own .dcfh/ directory is automatically skipped
+# during scanning (hardcoded, not via ignore patterns). You do not need
+# to add a pattern for it here.
+#
 # Examples:
-# \.git/.*              # Ignore .git directory and all contents
 # \.DS_Store$           # Ignore .DS_Store files
 # .*\.tmp$              # Ignore all .tmp files
 # node_modules/.*       # Ignore node_modules directory
-# \.dcfh/.*             # Ignore .dcfh directory (automatically added)
-
-# Automatically ignore .dcfh directory
-\.dcfh/.*
 `)
 
 	return err

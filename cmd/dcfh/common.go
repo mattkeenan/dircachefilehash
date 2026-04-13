@@ -121,6 +121,7 @@ func showUsage() {
 	fmt.Fprintf(os.Stderr, "  update [paths...] Update the index with current file states\n")
 	fmt.Fprintf(os.Stderr, "  dupes            Find and display duplicate files\n")
 	fmt.Fprintf(os.Stderr, "  snapshot <subcommand> Create and manage index state snapshots (create, list, forget, remove, status)\n")
+	fmt.Fprintf(os.Stderr, "  subrepo <subcommand>  Discover and manage nested repositories (find, add)\n")
 	fmt.Fprintf(os.Stderr, "  config           Get and set repository configuration options\n")
 	fmt.Fprintf(os.Stderr, "  version          Show version information\n")
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
