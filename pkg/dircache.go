@@ -175,13 +175,13 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 	}
 	dc.config = config
 
-	// Initialise hash workers and index lock timeout from config (default to 4/5 if no config)
+	// Initialise hash workers and index lock timeout from config (default to 2/5 if no config)
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
 		dc.hashWorkers = performanceConfig.HashWorkers
 		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
 	} else {
-		dc.hashWorkers = 4      // fallback default
+		dc.hashWorkers = 2      // fallback default
 		dc.indexLockTimeout = 5 // fallback default (5 seconds)
 	}
 

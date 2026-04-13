@@ -43,7 +43,7 @@ type IgnoreConfig struct {
 
 // PerformanceConfig represents performance-related configuration
 type PerformanceConfig struct {
-	HashWorkers      int    // Number of concurrent hash workers (default: 4)
+	HashWorkers      int    // Number of concurrent hash workers (default: 2)
 	HashBuffer       string // Hash buffer size for interruptible hashing (default: "2M")
 	IndexLockTimeout int    // Timeout in seconds for index memory locks (default: 5)
 }
@@ -159,7 +159,7 @@ func (c *Config) setDefaults() error {
 	if err != nil {
 		return fmt.Errorf("failed to create performance section: %w", err)
 	}
-	_, err = performanceSection.NewKey("hash_workers", "4")
+	_, err = performanceSection.NewKey("hash_workers", "2")
 	if err != nil {
 		return fmt.Errorf("failed to set default hash workers: %w", err)
 	}
@@ -292,7 +292,7 @@ func (c *Config) GetIgnoreConfig() *IgnoreConfig {
 // GetPerformanceConfig returns the performance configuration
 func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 	performanceConfig := &PerformanceConfig{
-		HashWorkers:      4,    // fallback default
+		HashWorkers:      2,    // fallback default
 		HashBuffer:       "2M", // fallback default - 2MB buffer for interruptible hashing
 		IndexLockTimeout: 5,    // fallback default - 5 seconds
 	}
