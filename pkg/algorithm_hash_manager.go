@@ -299,6 +299,14 @@ func (ahm *algorithmHashManager) FinishSubmitting() {
 func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 	defer ahm.wg.Done()
 
+	// Pre-allocate hash buffer for reuse across all files this worker processes
+	bufferSize, err := dc.getHashBufferSize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Failed to get hash buffer size: %v\n", err)
+		return
+	}
+	buffer := make([]byte, bufferSize)
+
 	var currentJob *hashJobStart // Track current job for interruption handling
 
 	for {
@@ -346,7 +354,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
 				// Regular file - hash the file contents with interruptible hashing
-				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan, nil)
+				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan, buffer)
 			}
 
 		hashComplete:

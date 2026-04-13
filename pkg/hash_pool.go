@@ -15,11 +15,10 @@ import (
 // Ownership: each PipelineEntry is owned by exactly one worker while being
 // hashed, then ownership transfers to the output channel consumer.
 type hashPool struct {
-	dc         *DirectoryCache
-	input      <-chan *PipelineEntry
-	output     chan<- *PipelineEntry
-	workers    int
-	bufferSize int // read buffer size per worker; allocated once, reused across files
+	dc      *DirectoryCache
+	input   <-chan *PipelineEntry
+	output  chan<- *PipelineEntry
+	workers int
 }
 
 // newHashPool creates a hash pool. The caller must close input when no more
@@ -28,16 +27,11 @@ func newHashPool(dc *DirectoryCache, input <-chan *PipelineEntry, output chan<- 
 	if workers < 1 {
 		workers = 1
 	}
-	bufferSize := 2 * 1024 * 1024 // default 2MB
-	if size, err := dc.getHashBufferSize(); err == nil {
-		bufferSize = size
-	}
 	return &hashPool{
-		dc:         dc,
-		input:      input,
-		output:     output,
-		workers:    workers,
-		bufferSize: bufferSize,
+		dc:      dc,
+		input:   input,
+		output:  output,
+		workers: workers,
 	}
 }
 
@@ -73,7 +67,11 @@ func (hp *hashPool) Run(ctx context.Context) error {
 // worker processes entries from the input channel until it is closed or the
 // context is cancelled.
 func (hp *hashPool) worker(ctx context.Context) error {
-	buffer := make([]byte, hp.bufferSize)
+	bufferSize, err := hp.dc.getHashBufferSize()
+	if err != nil {
+		return fmt.Errorf("failed to get hash buffer size: %w", err)
+	}
+	buffer := make([]byte, bufferSize)
 	for {
 		select {
 		case <-ctx.Done():
