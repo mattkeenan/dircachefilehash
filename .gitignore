@@ -1,13 +1,12 @@
 .dcfh
 .*.swp
 
-# Build artifacts and binaries
-dcfh
-dcfhfind
-dcfhfix
-cmd/dcfh
-pkg.test
-dist/
+# Build artifacts and binaries (root-level only)
+/dcfh
+/dcfhfind
+/dcfhfix
+/pkg.test
+/dist/
 
 # test directories
 test-*/
@@ -15,9 +14,11 @@ test-*/
 # Generated files
 cmd/dcfh/constants_version.go
 cmd/dcfhfind/constants_version.go
+cmd/dcfhfix/constants_version.go
 
-# Profile data
+# Profile data and benchmark results
 *.prof
+/benchmark-results/
 
 # Log files
 *.log
