@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,7 @@ import (
 func handleSubrepo(args []string) {
 	// Default to "find" when no subcommand given
 	if len(args) < 1 {
-		handleSubrepoFind(nil)
+		handleSubrepoFind()
 		return
 	}
 
@@ -19,7 +18,7 @@ func handleSubrepo(args []string) {
 
 	switch subcommand {
 	case "find", "ls":
-		handleSubrepoFind(args[1:])
+		handleSubrepoFind()
 	case "add":
 		handleSubrepoAdd(args[1:])
 	case "help", "-h", "--help":
@@ -51,7 +50,7 @@ type subrepoEntry struct {
 }
 
 // handleSubrepoFind walks the repo tree and lists directories containing .git/
-func handleSubrepoFind(_ []string) {
+func handleSubrepoFind() {
 	repoRoot, _, err := findDcfhRepo()
 	if err != nil {
 		outputError(err.Error())
@@ -75,23 +74,19 @@ func handleSubrepoFind(_ []string) {
 			return nil
 		}
 
-		// Skip the repo's own .dcfh directory
-		if relPath == ".dcfh" || filepath.Base(path) == ".dcfh" && filepath.Dir(path) == repoRoot {
+		// Skip the repo's own .dcfh directory and .git internals
+		if relPath == ".dcfh" || d.Name() == ".git" {
 			return filepath.SkipDir
 		}
 
 		// Check if this directory contains a .git/ subdirectory
 		gitPath := filepath.Join(path, ".git")
 		if info, statErr := os.Stat(gitPath); statErr == nil && info.IsDir() {
-			entry := subrepoEntry{
+			entries = append(entries, subrepoEntry{
 				Path:   relPath,
 				Type:   "git",
-				Active: false, // subrepos not yet implemented
-			}
-			entries = append(entries, entry)
-
-			// Don't recurse into nested git repos' .git directories,
-			// but do continue scanning for nested subrepos within
+				Active: false,
+			})
 		}
 
 		return nil
@@ -103,17 +98,11 @@ func handleSubrepoFind(_ []string) {
 	}
 
 	if format == OutputJSON {
-		result := map[string]any{
+		outputJSON(map[string]any{
 			"repository": repoRoot,
 			"subrepos":   entries,
 			"count":      len(entries),
-		}
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		if encErr := encoder.Encode(result); encErr != nil {
-			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", encErr)
-			os.Exit(1)
-		}
+		})
 		return
 	}
 
