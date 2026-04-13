@@ -8,8 +8,14 @@
 /pkg.test
 /dist/
 
+# Build artifacts in cmd subdirectories
+cmd/dcfh/dcfh
+cmd/dcfhfind/dcfhfind
+cmd/dcfhfix/dcfhfix
+
 # test directories
 test-*/
+test_*/
 
 # Generated files
 cmd/dcfh/constants_version.go
