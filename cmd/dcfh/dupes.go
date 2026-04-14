@@ -62,8 +62,12 @@ func handleDupes(args []string, shutdownChan <-chan struct{}) {
 		os.Exit(1)
 	}
 
-	// Load existing index
-	cache := dcfh.NewDirectoryCache(repoRoot, repoRoot)
+	// Open existing repository
+	cache, err := dcfh.OpenDirectoryCache(repoRoot, repoRoot)
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to open repository: %v", err))
+		os.Exit(1)
+	}
 	defer func() { _ = cache.Close() }()
 
 	// Apply configuration overrides

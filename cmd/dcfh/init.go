@@ -82,7 +82,7 @@ func handleInit(args []string) {
 	}
 
 	// Create cache - this will automatically create .dcfh directory structure
-	cache := dcfh.NewDirectoryCache(absDir, absDir)
+	cache := dcfh.CreateDirectoryCache(absDir, absDir)
 	defer func() { _ = cache.Close() }()
 
 	// Apply configuration overrides

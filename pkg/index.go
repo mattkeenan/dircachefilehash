@@ -106,8 +106,12 @@ func (ih *indexHeader) ValidateSignature(expected [4]byte) error {
 	return nil
 }
 
-// ValidateVersion checks if the version is supported
+// ValidateVersion checks if the version is supported.
+// Pass expected=0 to accept any version (used by read-only tools like dcfhfind).
 func (ih *indexHeader) ValidateVersion(expected uint32) error {
+	if expected == 0 {
+		return nil
+	}
 	if ih.Version != expected {
 		return fmt.Errorf("unsupported version: got %d, expected %d", ih.Version, expected)
 	}

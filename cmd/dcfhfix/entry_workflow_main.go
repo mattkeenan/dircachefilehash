@@ -79,10 +79,6 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 
 // finalizeTempIndex calculates checksum and finalizes the temp index using pkg functions
 func finalizeTempIndex(tmpIndexFile string) error {
-	// Create DirectoryCache instance to access pkg checksum functions
-	dc := dcfh.NewDirectoryCache("", "")
-	defer func() { _ = dc.Close() }()
-
 	// Open file for reading and writing
 	file, err := os.OpenFile(tmpIndexFile, os.O_RDWR, 0644)
 	if err != nil {

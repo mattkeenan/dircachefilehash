@@ -77,7 +77,11 @@ func handleUpdate(args []string, shutdownChan <-chan struct{}) {
 	}
 
 	// Update the index
-	cache := dcfh.NewDirectoryCache(repoRoot, repoRoot)
+	cache, err := dcfh.OpenDirectoryCache(repoRoot, repoRoot)
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to open repository: %v", err))
+		os.Exit(1)
+	}
 	defer func() { _ = cache.Close() }()
 
 	// Apply configuration overrides

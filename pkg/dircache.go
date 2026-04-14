@@ -113,30 +113,54 @@ func (dc *DirectoryCache) Length() int {
 	return skiplist.Length()
 }
 
-// NewDirectoryCache creates a new directory cache instance
-// rootDir: the directory to be indexed
-// dcfhDir: the directory containing the .dcfh repository (if empty, uses rootDir)
-// Automatically creates the .dcfh directory and empty index file if they don't exist
-func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
-	// If dcfhDir is empty, use rootDir as the repository location
+// initDirectoryCacheBase creates a partially-initialised DirectoryCache with
+// struct fields set but no I/O performed (no directory creation, no config loading).
+// Returns the DirectoryCache and the resolved dcfhDir (defaulted to rootDir if empty).
+func initDirectoryCacheBase(rootDir, dcfhDir string) (*DirectoryCache, string) {
 	if dcfhDir == "" {
 		dcfhDir = rootDir
 	}
 
-	// The index file is always at dcfhDir/.dcfh/index
-	indexFile := filepath.Join(dcfhDir, ".dcfh", "main.idx")
-	cacheFile := filepath.Join(dcfhDir, ".dcfh", "cache.idx")
-
-	dc := &DirectoryCache{
+	return &DirectoryCache{
 		RootDir:       rootDir,
-		IndexFile:     indexFile,
-		CacheFile:     cacheFile,
+		IndexFile:     filepath.Join(dcfhDir, ".dcfh", "main.idx"),
+		CacheFile:     filepath.Join(dcfhDir, ".dcfh", "cache.idx"),
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
 		version:       2,
 		hasher:        sha1.New(),
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(dcfhDir),
+	}, dcfhDir
+}
+
+// configureDirectoryCache loads config and ignore patterns from an existing .dcfh directory.
+// All errors are non-fatal (logged to stderr) to match existing behaviour.
+func configureDirectoryCache(dc *DirectoryCache, dcfhPath string) {
+	config, err := LoadConfig(dcfhPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
 	}
+	dc.config = config
+
+	if config != nil {
+		performanceConfig := config.GetPerformanceConfig()
+		dc.hashWorkers = performanceConfig.HashWorkers
+		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
+	} else {
+		dc.hashWorkers = 2      // fallback default
+		dc.indexLockTimeout = 5 // fallback default (5 seconds)
+	}
+
+	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load ignore patterns: %v\n", err)
+	}
+}
+
+// CreateDirectoryCache creates a new dcfh repository on disk.
+// Creates the .dcfh directory and empty index file if they don't exist.
+// Use this for repository initialisation (dcfh init).
+func CreateDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
+	dc, dcfhDir := initDirectoryCacheBase(rootDir, dcfhDir)
 
 	// Prevent creating .dcfh inside .dcfh (nested repositories)
 	if filepath.Base(dcfhDir) == ".dcfh" {
@@ -153,54 +177,55 @@ func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached filesystem root
 			break
 		}
 		dir = parent
 	}
 
-	// Ensure the .dcfh directory exists
+	// Create the .dcfh directory
 	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
 	if err := os.MkdirAll(dcfhPath, 0755); err != nil {
-		// Non-fatal error - log but continue
 		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dcfhPath, err)
 		return dc
 	}
 
-	// Load configuration
-	config, err := LoadConfig(dcfhPath)
-	if err != nil {
-		// Non-fatal error - log but continue with default config
-		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
-	}
-	dc.config = config
+	configureDirectoryCache(dc, dcfhPath)
 
-	// Initialise hash workers and index lock timeout from config (default to 2/5 if no config)
-	if config != nil {
-		performanceConfig := config.GetPerformanceConfig()
-		dc.hashWorkers = performanceConfig.HashWorkers
-		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
-	} else {
-		dc.hashWorkers = 2      // fallback default
-		dc.indexLockTimeout = 5 // fallback default (5 seconds)
-	}
-
-	// Check if index file exists, create empty one if not
-	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
-		// Create empty main index file only
+	// Create empty index if it doesn't exist
+	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
 		if err := dc.createEmptyIndex(); err != nil {
-			// Non-fatal error - log but continue
-			fmt.Fprintf(os.Stderr, "Warning: Failed to create empty index file %s: %v\n", indexFile, err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create empty index file %s: %v\n", dc.IndexFile, err)
 		}
 	}
 
-	// Initialise ignore patterns
-	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
-		// Non-fatal error - log but continue
-		fmt.Fprintf(os.Stderr, "Warning: Failed to load ignore patterns: %v\n", err)
+	return dc
+}
+
+// OpenDirectoryCache opens an existing dcfh repository.
+// Returns an error if the .dcfh directory does not exist.
+// Use this for operations on existing repositories (status, update, dupes).
+func OpenDirectoryCache(rootDir, dcfhDir string) (*DirectoryCache, error) {
+	dc, dcfhDir := initDirectoryCacheBase(rootDir, dcfhDir)
+
+	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
+	info, err := os.Stat(dcfhPath)
+	if err != nil {
+		return nil, fmt.Errorf("repository not found: %s does not exist", dcfhPath)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("repository not found: %s is not a directory", dcfhPath)
 	}
 
-	return dc
+	configureDirectoryCache(dc, dcfhPath)
+
+	return dc, nil
+}
+
+// NewDirectoryCache creates a new directory cache instance.
+//
+// Deprecated: Use CreateDirectoryCache for new repositories or OpenDirectoryCache for existing ones.
+func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
+	return CreateDirectoryCache(rootDir, dcfhDir)
 }
 
 // ApplyConfigOverrides applies configuration overrides from the flags map

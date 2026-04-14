@@ -27,13 +27,20 @@ type EntryInfo struct {
 type EntryCallback func(entry *EntryInfo, indexType string) bool
 
 // IterateIndexFile loads an index file and calls the callback for each entry
-// This function is specifically provided for dcfhfind and similar tools
+// This function is specifically provided for dcfhfind and similar tools.
+// Unlike normal index loading, this bypasses NewDirectoryCache entirely to avoid
+// .dcfh nesting checks and directory creation — it only needs read-only access.
+// It also accepts any supported index version (v1 and v2) for cross-machine compatibility.
 func IterateIndexFile(indexPath string, callback EntryCallback) error {
-	// Create a temporary DirectoryCache to use for loading
-	tempDir := filepath.Dir(indexPath)
-	dc := NewDirectoryCache(tempDir, "")
+	// Minimal DirectoryCache for read-only index parsing — bypasses constructors
+	// because indexPath is inside .dcfh/ (nesting check would reject it) and we
+	// need to accept any index version (v1 and v2) for cross-machine compatibility.
+	dc := &DirectoryCache{
+		signature: [4]byte{'d', 'c', 'f', 'h'},
+		version:   0, // Accept any version
+	}
 
-	// Load the index file into a skiplist
+	// Load the index file
 	refs, err := dc.LoadIndexFromFileForValidation(indexPath)
 	if err != nil {
 		return fmt.Errorf("failed to load index: %w", err)
