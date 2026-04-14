@@ -1,11 +1,19 @@
 package dircachefilehash
 
-// BinaryEntrySkiplistIterator iterates through an existing skiplist using BinaryEntryInterface
-// This is the unified version of SkiplistIterator that returns BinaryEntryInterface entries
+import (
+	"fmt"
+
+	zcsl "github.com/mattkeenan/zerocopyskiplist"
+)
+
+// BinaryEntrySkiplistIterator iterates through an existing skiplist using BinaryEntryInterface.
+// Holds a cursor into the skiplist and advances it on each Next() call — O(1) per call.
 type BinaryEntrySkiplistIterator struct {
 	iteratorBase
 	skiplist     *skiplistWrapper
+	cursor       *zcsl.ItemPtr[binaryEntryRef, string, string]
 	shutdownChan <-chan struct{}
+	started      bool
 }
 
 // NewBinaryEntrySkiplistIterator creates a new unified iterator for the given skiplist
@@ -38,92 +46,38 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 		return nil, nil
 	}
 
-	var foundEntry BinaryEntryInterface = nil
-
-	// Use ForEachRef to find the next entry after our current position
-	iterationCount := 0
-	err := bsi.skiplist.ForEachRef(func(entryRef binaryEntryRef, context string) bool {
-		iterationCount++
-		if IsDebugEnabled("load") {
-			VerboseLog(3, "[ITERATOR-DEBUG] ForEachRef iteration %d: currentPath='%s'", iterationCount, bsi.currentPath)
-		}
-
-		// Get the path for comparison
-		entry := entryRef.GetBinaryEntry()
-		if entry == nil {
-			if IsDebugEnabled("load") {
-				VerboseLog(3, "[ITERATOR-DEBUG] Skipping invalid entry (nil)")
-			}
-			return true // Skip invalid entries
-		}
-		entryPath := entry.RelativePath()
-
-		// Check if entry is deleted
-		isDeleted := entry.IsDeleted()
-		if IsDebugEnabled("load") {
-			VerboseLog(3, "[ITERATOR-DEBUG] Entry path='%s', deleted=%v, context='%s'", entryPath, isDeleted, context)
-		}
-
-		// If we haven't started iterating yet (currentPath is empty), take the first entry
-		if bsi.currentPath == "" {
-			if IsDebugEnabled("load") {
-				VerboseLog(3, "[ITERATOR-DEBUG] Taking first entry: path='%s', deleted=%v", entryPath, isDeleted)
-			}
-			foundEntry = NewBESkiplistEntry(entryRef, bsi.skiplist)
-			bsi.updateCurrentPathFromInterface(foundEntry)
-			if IsDebugEnabled("load") {
-				VerboseLog(3, "[ITERATOR-DEBUG] Updated currentPath to: '%s'", bsi.currentPath)
-			}
-			return false // Stop iteration
-		}
-
-		// If this path is lexicographically after our current position, take it
-		// (entryPath is already normalized, so this comparison will work correctly)
-		pathComparison := entryPath > bsi.currentPath
-		if IsDebugEnabled("load") {
-			VerboseLog(3, "[ITERATOR-DEBUG] Path comparison: '%s' > '%s' = %v", entryPath, bsi.currentPath, pathComparison)
-		}
-		if pathComparison {
-			if IsDebugEnabled("load") {
-				VerboseLog(3, "[ITERATOR-DEBUG] Taking next entry: path='%s', deleted=%v", entryPath, isDeleted)
-			}
-			foundEntry = NewBESkiplistEntry(entryRef, bsi.skiplist)
-			bsi.updateCurrentPathFromInterface(foundEntry)
-			if IsDebugEnabled("load") {
-				VerboseLog(3, "[ITERATOR-DEBUG] Updated currentPath to: '%s'", bsi.currentPath)
-			}
-			return false // Stop iteration
-		}
-
-		if IsDebugEnabled("load") {
-			VerboseLog(3, "[ITERATOR-DEBUG] Continuing search: '%s' <= '%s'", entryPath, bsi.currentPath)
-		}
-		return true // Continue looking
-	}, bsi.shutdownChan)
-
-	if IsDebugEnabled("load") {
-		VerboseLog(3, "[ITERATOR-DEBUG] ForEachRef completed after %d iterations, foundEntry=%v, err=%v", iterationCount, foundEntry != nil, err)
-	}
-
-	if err != nil {
-		// Signal handling interruption
+	// Check for shutdown
+	select {
+	case <-bsi.shutdownChan:
 		bsi.markExhausted()
-		return nil, err
+		return nil, fmt.Errorf("iteration interrupted by shutdown signal")
+	default:
 	}
 
-	if foundEntry == nil {
-		// No more entries found
+	// Advance cursor
+	if !bsi.started {
+		bsi.cursor = bsi.skiplist.skiplist.First()
+		bsi.started = true
+	} else {
+		if bsi.cursor != nil {
+			bsi.cursor = bsi.cursor.Next()
+		}
+	}
+
+	if bsi.cursor == nil {
 		bsi.markExhausted()
 		return nil, nil
 	}
 
-	return foundEntry, nil
+	ref := bsi.cursor.Item()
+	entry := NewBESkiplistEntry(*ref, bsi.skiplist)
+	bsi.updateCurrentPathFromInterface(entry)
+	return entry, nil
 }
 
 // Close releases any resources held by the iterator
 func (bsi *BinaryEntrySkiplistIterator) Close() error {
 	bsi.markClosed()
-	// Skiplist iterators don't need special cleanup since they reference existing data
 	return nil
 }
 
