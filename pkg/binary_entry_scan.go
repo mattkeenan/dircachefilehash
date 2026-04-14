@@ -64,9 +64,8 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	if IsDebugEnabled("write") {
 		fmt.Fprintf(os.Stderr, "[DEBUG-SIZE] NewBEScanEntry entry.Size set to: %d\n", entry.Size)
 	}
-	modTime := fileInfo.ModTime()
-	entry.CTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
-	entry.MTimeWall = encodeWallTime(modTime.Unix(), int64(modTime.Nanosecond()))
+	entry.CTimeWall = encodeWallTime(statInfo.Ctim.Sec, statInfo.Ctim.Nsec)
+	entry.MTimeWall = encodeWallTime(statInfo.Mtim.Sec, statInfo.Mtim.Nsec)
 	entry.Dev = uint32(statInfo.Dev)
 	entry.Ino = uint32(statInfo.Ino)
 	entry.Mode = uint32(fileInfo.Mode())
