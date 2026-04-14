@@ -14,6 +14,11 @@ var globalVerboseLevel atomic.Int32
 var debugMu sync.RWMutex
 var debugFlags map[string]bool
 
+// debugActive is a plain bool for the hot-path check. Debug flags are set
+// once at startup from CLI args and never change during execution, so no
+// atomic or lock is needed for reads.
+var debugActive bool
+
 // SetVerboseLevel sets the global verbose level
 func SetVerboseLevel(level int) {
 	globalVerboseLevel.Store(int32(level))
@@ -68,10 +73,12 @@ func SetDebugFlags(flagsStr string) {
 
 	debugFlags = make(map[string]bool)
 	if flagsStr == "" {
+		debugActive = false
 		return
 	}
 
 	flags := strings.SplitSeq(flagsStr, ",")
+	anyEnabled := false
 	for flag := range flags {
 		flag = strings.TrimSpace(flag)
 		if flag == "" {
@@ -96,16 +103,22 @@ func SetDebugFlags(flagsStr string) {
 		}
 
 		debugFlags[flagName] = flagValue
+		if flagValue {
+			anyEnabled = true
+		}
 	}
+	debugActive = anyEnabled
 }
 
-// IsDebugEnabled returns true if the specified debug flag is enabled
+// IsDebugEnabled returns true if the specified debug flag is enabled.
+// Fast path: if no debug flags are set (the common case), returns false
+// without acquiring any locks or allocating.
 func IsDebugEnabled(flag string) bool {
+	if !debugActive {
+		return false
+	}
 	debugMu.RLock()
 	defer debugMu.RUnlock()
 
-	if debugFlags == nil {
-		return false
-	}
 	return debugFlags[strings.ToLower(flag)]
 }
