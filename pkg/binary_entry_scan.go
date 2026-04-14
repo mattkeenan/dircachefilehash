@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -16,17 +15,20 @@ import (
 // - Lazy hashing: hash is computed only if entry is selected for writing to index
 // - Standard Go garbage collection handles memory management
 // - No mremap/munmap complexity or file cleanup required
-// - Simpler locking model (per-entry mutex only)
+// - No locking needed (pipeline channels provide synchronisation)
 //
 // Key benefits over v0.6 mmap approach:
 // - Eliminates scan index file creation and cleanup
 // - Reduces memory usage (no sparse index files)
 // - Better performance (only hash files that will be indexed)
+//
+// Thread safety: BEScanEntry has single-owner semantics in the pipeline.
+// Ownership transfers through channels (compare → hash → reorder → write).
+// Channel send/receive provides the happens-before guarantee.
 type BEScanEntry struct {
 	BinaryEntryBase
-	binaryData []byte       // Single contiguous buffer containing binaryEntry + path data
-	relPath    string       // Relative path (cached for convenience)
-	mutex      sync.RWMutex // Per-entry locking for hash coordination
+	binaryData []byte // Single contiguous buffer containing binaryEntry + path data
+	relPath    string // Relative path (cached for convenience)
 }
 
 // NewBEScanEntry creates a new heap-allocated BEScanEntry for filesystem scanning
@@ -89,7 +91,6 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 		BinaryEntryBase: NewBinaryEntryBase(BEScan),
 		binaryData:      binaryData,
 		relPath:         relPath,
-		mutex:           sync.RWMutex{},
 	}
 }
 
@@ -115,9 +116,6 @@ func (sbe *BEScanEntry) IsValid() bool {
 
 // Size returns the entry size field
 func (sbe *BEScanEntry) Size() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -128,9 +126,6 @@ func (sbe *BEScanEntry) Size() (uint32, error) {
 
 // CTimeWall returns the creation time wall clock value
 func (sbe *BEScanEntry) CTimeWall() (uint64, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -150,9 +145,6 @@ func (sbe *BEScanEntry) RelativePath() (string, error) {
 
 // MTimeWall returns the modification time wall clock value
 func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -163,9 +155,6 @@ func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 
 // Dev returns the device ID
 func (sbe *BEScanEntry) Dev() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -176,9 +165,6 @@ func (sbe *BEScanEntry) Dev() (uint32, error) {
 
 // Ino returns the inode number
 func (sbe *BEScanEntry) Ino() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -189,9 +175,6 @@ func (sbe *BEScanEntry) Ino() (uint32, error) {
 
 // Mode returns the file mode
 func (sbe *BEScanEntry) Mode() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -202,9 +185,6 @@ func (sbe *BEScanEntry) Mode() (uint32, error) {
 
 // UID returns the user ID
 func (sbe *BEScanEntry) UID() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -215,9 +195,6 @@ func (sbe *BEScanEntry) UID() (uint32, error) {
 
 // GID returns the group ID
 func (sbe *BEScanEntry) GID() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -228,9 +205,6 @@ func (sbe *BEScanEntry) GID() (uint32, error) {
 
 // FileSize returns the file size in bytes
 func (sbe *BEScanEntry) FileSize() (uint64, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -241,9 +215,6 @@ func (sbe *BEScanEntry) FileSize() (uint64, error) {
 
 // HashType returns the hash algorithm type
 func (sbe *BEScanEntry) HashType() (uint16, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -254,9 +225,6 @@ func (sbe *BEScanEntry) HashType() (uint16, error) {
 
 // Hash returns the file hash as a byte array
 func (sbe *BEScanEntry) Hash() ([20]byte, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return [20]byte{}, err
@@ -270,9 +238,6 @@ func (sbe *BEScanEntry) Hash() ([20]byte, error) {
 
 // EntryFlags returns the entry flags
 func (sbe *BEScanEntry) EntryFlags() (uint32, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -305,9 +270,6 @@ func (sbe *BEScanEntry) IsDeleted() (bool, error) {
 // SetHash updates the entry's hash and hash type
 // This is used by hash workers to update entries in-place during scanning
 func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
-	sbe.mutex.Lock()
-	defer sbe.mutex.Unlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return err
@@ -339,9 +301,6 @@ func (sbe *BEScanEntry) SetHash(hashBytes []byte, hashType uint16) error {
 
 // SetDeleted updates the entry's deletion flag
 func (sbe *BEScanEntry) SetDeleted(deleted bool) error {
-	sbe.mutex.Lock()
-	defer sbe.mutex.Unlock()
-
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return err
@@ -389,32 +348,21 @@ func (sbe *BEScanEntry) RefCount() int32 {
 	return 1
 }
 
-// RLock provides manual read locking for batch operations
-func (sbe *BEScanEntry) RLock() {
-	sbe.mutex.RLock()
-}
+// RLock is a no-op for heap-allocated entries (single-owner pipeline semantics)
+func (sbe *BEScanEntry) RLock() {}
 
-// RUnlock releases the read lock
-func (sbe *BEScanEntry) RUnlock() {
-	sbe.mutex.RUnlock()
-}
+// RUnlock is a no-op for heap-allocated entries
+func (sbe *BEScanEntry) RUnlock() {}
 
-// Lock provides manual write locking for batch operations
-func (sbe *BEScanEntry) Lock() {
-	sbe.mutex.Lock()
-}
+// Lock is a no-op for heap-allocated entries (single-owner pipeline semantics)
+func (sbe *BEScanEntry) Lock() {}
 
-// Unlock releases the write lock
-func (sbe *BEScanEntry) Unlock() {
-	sbe.mutex.Unlock()
-}
+// Unlock is a no-op for heap-allocated entries
+func (sbe *BEScanEntry) Unlock() {}
 
 // GetBinaryData returns the heap-allocated binaryEntry as binary data for IoVec writing
 // This returns the actual contiguous buffer - no copying needed
 func (sbe *BEScanEntry) GetBinaryData() ([]byte, error) {
-	sbe.mutex.RLock()
-	defer sbe.mutex.RUnlock()
-
 	if sbe.binaryData == nil {
 		return nil, ErrEntryInvalidated
 	}

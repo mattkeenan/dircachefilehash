@@ -1,9 +1,6 @@
 package dircachefilehash
 
-import (
-	"fmt"
-	"os"
-)
+import "fmt"
 
 // updateComparisonSink implements ComparisonSink for the update pipeline.
 // It classifies comparison results, determines which entries need hashing,
@@ -31,19 +28,12 @@ func newUpdateComparisonSink(dc *DirectoryCache, hashCh, bypassCh chan<- *Pipeli
 }
 
 // OnMatch handles entries present in both the existing index and the scan.
+// No shouldIndex check needed — the scanner already filters by symlink mode
+// and ignore patterns before entries reach this sink.
 func (s *updateComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 	// Skip already-deleted entries
 	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
 		return nil
-	}
-
-	// Check if file should still be indexed
-	rightPath, err := right.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get right path: %w", err)
-	}
-	if !s.dc.shouldIndex(rightPath) {
-		return nil // skip, main.idx excludes unindexed files
 	}
 
 	if needsHash(left, right) {
@@ -58,38 +48,15 @@ func (s *updateComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 
 // OnLeftOnly handles entries only in the existing index (deleted from disk).
 // For main.idx updates, deleted files are simply omitted (not written).
-func (s *updateComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
-	// Skip already-deleted entries
-	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
-		return nil
-	}
-
-	leftPath, err := entry.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get left path: %w", err)
-	}
-	if !s.dc.shouldIndex(leftPath) {
-		return nil
-	}
-
+func (s *updateComparisonSink) OnLeftOnly(_ BinaryEntryInterface) error {
 	// Deleted files are excluded from main.idx — do not emit
 	return nil
 }
 
 // OnRightOnly handles entries only in the scan (new files).
+// No shouldIndex check needed — the scanner already filters by symlink mode
+// and ignore patterns before entries reach this sink.
 func (s *updateComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
-	rightPath, err := entry.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get right path: %w", err)
-	}
-
-	if !s.dc.shouldIndex(rightPath) {
-		if IsDebugEnabled("verbose-3") {
-			fmt.Fprintf(os.Stderr, "[VERBOSE-3] ComparisonSink: Skipping %s - shouldIndex returned false\n", rightPath)
-		}
-		return nil
-	}
-
 	// New file — needs hashing
 	s.emit(entry, OpNewFile, true)
 	return nil
@@ -140,6 +107,8 @@ func newStatusComparisonSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper,
 }
 
 // OnMatch handles entries present in both main.idx and the filesystem scan.
+// No shouldIndex check needed — the scanner already filters by symlink mode
+// and ignore patterns before entries reach this sink.
 func (s *statusComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 	// Skip already-deleted entries
 	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
@@ -149,9 +118,6 @@ func (s *statusComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 	rightPath, err := right.RelativePath()
 	if err != nil {
 		return fmt.Errorf("failed to get right path: %w", err)
-	}
-	if !s.dc.shouldIndex(rightPath) {
-		return nil
 	}
 
 	// Step 1: check main — if metadata matches, file unchanged, skip
@@ -187,13 +153,12 @@ func (s *statusComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
 }
 
 // OnRightOnly handles entries only in the filesystem scan (new files, not in main).
+// No shouldIndex check needed — the scanner already filters by symlink mode
+// and ignore patterns before entries reach this sink.
 func (s *statusComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
 	rightPath, err := entry.RelativePath()
 	if err != nil {
 		return fmt.Errorf("failed to get right path: %w", err)
-	}
-	if !s.dc.shouldIndex(rightPath) {
-		return nil
 	}
 
 	// Check cache for a fresh entry
