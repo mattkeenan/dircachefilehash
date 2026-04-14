@@ -110,6 +110,150 @@ func TestBESkiplistSpecific(t *testing.T) {
 	t.Run("ReadOnlyPattern", testBESkiplistEntryReadOnlyPattern)
 	t.Run("ConcurrentAccess", testBESkiplistEntryConcurrentAccess)
 	t.Run("MmapSafety", testBESkiplistEntryMmapSafety)
+	t.Run("IterationVisitsAllPathLengths", testSkiplistIterationAllPathLengths)
+}
+
+// testSkiplistIterationAllPathLengths verifies that skiplist iteration via
+// First()/Next() visits every inserted entry, regardless of path length.
+// Reproducer for a bug where files with filenames at NAME_MAX (255 bytes)
+// were found by Find() but skipped by sequential iteration.
+func testSkiplistIterationAllPathLengths(t *testing.T) {
+	const dirPrefix = "Desktop/Agent Anderson Scott – Posts _ Facebook_files/"
+	const maxNameLen = 255
+
+	// Build mock index data containing entries with filename lengths 1..255
+	// All entries go into one contiguous buffer (header + entries)
+	type entryInfo struct {
+		path   string
+		offset int // offset from start of entry data (after header)
+	}
+
+	var entries []entryInfo
+	totalEntryBytes := 0
+
+	for nameLen := 1; nameLen <= maxNameLen; nameLen++ {
+		// Generate a filename of exactly nameLen bytes using printable ASCII
+		name := make([]byte, nameLen)
+		for i := range name {
+			// Use letters that produce varied sort positions
+			name[i] = byte('A' + (i+nameLen)%26)
+		}
+		// Ensure .js extension for realism
+		if nameLen >= 4 {
+			copy(name[nameLen-3:], ".js")
+		}
+
+		path := dirPrefix + string(name)
+		entrySize := BESizeFromPathLen(len(path))
+
+		entries = append(entries, entryInfo{
+			path:   path,
+			offset: totalEntryBytes,
+		})
+		totalEntryBytes += entrySize
+	}
+
+	// Allocate contiguous buffer: header + all entries
+	indexSize := HeaderSize + totalEntryBytes
+	indexData := make([]byte, indexSize)
+
+	// Create mock mmap index file
+	mockIndexFile := &mmapIndexFile{
+		Data:  indexData,
+		Size:  indexSize,
+		mutex: sync.RWMutex{},
+	}
+
+	// Populate each entry in the buffer
+	for _, ei := range entries {
+		entrySize := BESizeFromPathLen(len(ei.path))
+		entryPtr := (*binaryEntry)(unsafe.Pointer(&indexData[HeaderSize+ei.offset]))
+		entryPtr.Size = uint32(entrySize)
+		entryPtr.Mode = 0100644
+		entryPtr.FileSize = 1000
+		entryPtr.HashType = HashTypeSHA1
+
+		// Copy path after the struct
+		pathStart := HeaderSize + ei.offset + int(unsafe.Sizeof(*entryPtr))
+		copy(indexData[pathStart:], ei.path)
+		indexData[pathStart+len(ei.path)] = 0 // null terminator
+	}
+
+	// Insert all entries into a skiplist
+	skiplist := NewSkiplistWrapper(16, MainContext)
+	for _, ei := range entries {
+		ref := binaryEntryRef{
+			Offset:    ei.offset,
+			IndexFile: mockIndexFile,
+		}
+		if !skiplist.Insert(ref, MainContext) {
+			t.Fatalf("Failed to insert entry with path length %d: %s", len(ei.path), ei.path)
+		}
+	}
+
+	// Verify skiplist has all entries
+	if skiplist.Length() != maxNameLen {
+		t.Fatalf("Skiplist length = %d, want %d", skiplist.Length(), maxNameLen)
+	}
+
+	// Verify all entries are reachable by Find()
+	for _, ei := range entries {
+		if entry, _ := skiplist.Find(ei.path); entry == nil {
+			t.Errorf("Find() failed for path length %d: %s", len(ei.path), ei.path)
+		}
+	}
+
+	// Verify all entries are reachable by ForEach iteration
+	visitedByForEach := make(map[string]bool)
+	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
+		path := entry.RelativePath()
+		visitedByForEach[path] = true
+		return true
+	})
+
+	if len(visitedByForEach) != maxNameLen {
+		t.Errorf("ForEach visited %d entries, want %d", len(visitedByForEach), maxNameLen)
+	}
+
+	// Verify all entries are reachable by BinaryEntrySkiplistIterator (First/Next cursor)
+	// This is the iterator used by the status pipeline via Hwang-Lin
+	shutdownChan := make(chan struct{})
+	iter := NewBinaryEntrySkiplistIterator(skiplist, "test", shutdownChan)
+	defer func() { _ = iter.Close() }()
+
+	visitedByIterator := make(map[string]bool)
+	for {
+		entry, err := iter.Next()
+		if err != nil {
+			t.Fatalf("Iterator error: %v", err)
+		}
+		if entry == nil {
+			break
+		}
+		path, err := entry.RelativePath()
+		if err != nil {
+			t.Fatalf("RelativePath error: %v", err)
+		}
+		if path == "." || path == "" {
+			t.Errorf("Iterator returned empty/dot path")
+		}
+		visitedByIterator[path] = true
+	}
+
+	if len(visitedByIterator) != maxNameLen {
+		t.Errorf("Iterator visited %d unique paths, want %d", len(visitedByIterator), maxNameLen)
+	}
+
+	// Report which entries were missed by each method
+	for _, ei := range entries {
+		nameLen := len(ei.path) - len(dirPrefix)
+		if !visitedByForEach[ei.path] {
+			t.Errorf("ForEach missed entry with filename length %d", nameLen)
+		}
+		if !visitedByIterator[ei.path] {
+			t.Errorf("Iterator missed entry with filename length %d", nameLen)
+		}
+	}
 }
 
 // testBESkiplistEntryStableBehavior tests stable (non-ephemeral) behavior

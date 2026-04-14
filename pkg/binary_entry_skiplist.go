@@ -3,7 +3,6 @@ package dircachefilehash
 import (
 	"encoding/hex"
 	"fmt"
-	"unsafe"
 )
 
 // BESkiplistEntry implements BinaryEntryInterface for mmap-backed entries in skiplist
@@ -221,7 +220,12 @@ func (sle *BESkiplistEntry) EntryFlags() (uint32, error) {
 	return uint32(entry.EntryFlags), nil
 }
 
-// RelativePath returns the relative file path
+// RelativePath returns the relative file path.
+// Delegates to binaryEntry.RelativePath() which uses the entry's Size field to
+// determine path bounds. This is safe without additional bounds checking because
+// (non-obvious at first glance) every entry has already passed validateEntryChaining
+// during index loading, which enforces Size <= 4096 and validates alignment. The
+// Size field is therefore guaranteed to be reasonable before an entry reaches a skiplist.
 func (sle *BESkiplistEntry) RelativePath() (string, error) {
 	sle.RLock()
 	defer sle.RUnlock()
@@ -231,25 +235,7 @@ func (sle *BESkiplistEntry) RelativePath() (string, error) {
 		return "", err
 	}
 
-	// Calculate path location after the fixed-size binaryEntry struct
-	pathPtr := unsafe.Add(unsafe.Pointer(entry), unsafe.Sizeof(*entry))
-	pathBytes := (*[256]byte)(pathPtr) // Max reasonable path length for bounds checking
-
-	// Find null terminator to determine actual path length
-	pathLen := 0
-	for i := range len(pathBytes) {
-		if pathBytes[i] == 0 {
-			pathLen = i
-			break
-		}
-	}
-
-	if pathLen == 0 {
-		// Empty path represents current directory - normalize to "." like ls -al
-		return ".", nil
-	}
-
-	return string(pathBytes[:pathLen]), nil
+	return entry.RelativePath(), nil
 }
 
 // HashString returns the hash as a hexadecimal string
