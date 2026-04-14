@@ -53,10 +53,13 @@ type StatusOutput struct {
 }
 
 type StatusSummary struct {
-	ModifiedCount int  `json:"modified_count"`
-	AddedCount    int  `json:"added_count"`
-	DeletedCount  int  `json:"deleted_count"`
-	HasChanges    bool `json:"has_changes"`
+	ModifiedCount int   `json:"modified_count"`
+	AddedCount    int   `json:"added_count"`
+	DeletedCount  int   `json:"deleted_count"`
+	ModifiedBytes int64 `json:"modified_bytes"`
+	AddedBytes    int64 `json:"added_bytes"`
+	DeletedBytes  int64 `json:"deleted_bytes"`
+	HasChanges    bool  `json:"has_changes"`
 }
 
 type IndexInfo struct {

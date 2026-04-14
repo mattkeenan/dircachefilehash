@@ -97,6 +97,9 @@ func handleStatus(args []string, shutdownChan <-chan struct{}) {
 				ModifiedCount: len(status.Modified),
 				AddedCount:    len(status.Added),
 				DeletedCount:  len(status.Deleted),
+				ModifiedBytes: status.ModifiedBytes,
+				AddedBytes:    status.AddedBytes,
+				DeletedBytes:  status.DeletedBytes,
 				HasChanges:    status.HasChanges(),
 			},
 			IndexInfo: IndexInfo{
@@ -153,6 +156,8 @@ func handleStatus(args []string, shutdownChan <-chan struct{}) {
 		fmt.Println()
 	}
 
-	fmt.Printf("Summary: %d modified, %d added, %d deleted\n",
-		len(status.Modified), len(status.Added), len(status.Deleted))
+	fmt.Printf("Summary: %d modified (%s), %d added (%s), %d deleted (%s)\n",
+		len(status.Modified), formatFileSize(status.ModifiedBytes),
+		len(status.Added), formatFileSize(status.AddedBytes),
+		len(status.Deleted), formatFileSize(status.DeletedBytes))
 }

@@ -28,10 +28,13 @@ type CleanStatus struct {
 
 // StatusResult represents the result of a status check
 type StatusResult struct {
-	Modified    []string     `json:"modified"`
-	Added       []string     `json:"added"`
-	Deleted     []string     `json:"deleted"`
-	CleanStatus *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
+	Modified      []string     `json:"modified"`
+	Added         []string     `json:"added"`
+	Deleted       []string     `json:"deleted"`
+	ModifiedBytes int64        `json:"modified_bytes"`
+	AddedBytes    int64        `json:"added_bytes"`
+	DeletedBytes  int64        `json:"deleted_bytes"`
+	CleanStatus   *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
 }
 
 // Status compares main.idx against the current filesystem, writing changes to cache.idx.
@@ -191,16 +194,20 @@ func deriveStatusFromCache(dc *DirectoryCache, mainSkiplist *skiplistWrapper, ca
 			continue
 		}
 		path := entry.RelativePath()
+		size := int64(entry.FileSize)
 
 		if entry.IsDeleted() {
 			result.Deleted = append(result.Deleted, path)
+			result.DeletedBytes += size
 			continue
 		}
 
 		if mainEntry, _ := mainSkiplist.Find(path); mainEntry != nil {
 			result.Modified = append(result.Modified, path)
+			result.ModifiedBytes += size
 		} else {
 			result.Added = append(result.Added, path)
+			result.AddedBytes += size
 		}
 	}
 
