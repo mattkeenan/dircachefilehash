@@ -436,8 +436,6 @@ func (dc *DirectoryCache) GenerateTimestampedFileName(prefix string) string {
 // ScanForTimestampedCacheFiles finds all cache-{timestamp}.idx files in chronological order
 func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
 	dcfhDir := dc.DcfhDir
-
-	// Read directory contents
 	entries, err := os.ReadDir(dcfhDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .dcfh directory: %w", err)

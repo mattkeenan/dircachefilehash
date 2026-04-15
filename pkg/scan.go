@@ -375,6 +375,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 	// Use a priority queue (sorted slice) to ensure we process paths in alphabetical order
 	// This ensures the output is naturally sorted
 	pathQueue := []string{rootPath}
+	dcfhDir := dc.DcfhDir
 
 	for len(pathQueue) > 0 {
 		// Check for shutdown
@@ -502,8 +503,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 
 		if info.IsDir() {
 			// Skip the .dcfh directory
-			indexDir := dc.DcfhDir
-			if currentPath == indexDir {
+			if currentPath == dcfhDir {
 				continue
 			}
 

@@ -1161,11 +1161,7 @@ func getSystemIOVMax() (int, error) {
 func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
 	var tempFiles []string
 
-	// Get the .dcfh directory
-	dcfhDir := dc.DcfhDir
-
-	// Read the .dcfh directory
-	entries, err := os.ReadDir(dcfhDir)
+	entries, err := os.ReadDir(dc.DcfhDir)
 	if err != nil {
 		return nil, err
 	}

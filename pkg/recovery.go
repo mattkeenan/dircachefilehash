@@ -394,8 +394,7 @@ func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) e
 
 // generateRecoveryBackupName creates a backup filename for recovery operations
 func (dc *DirectoryCache) generateRecoveryBackupName(recoveryType string) string {
-	dcfhDir := dc.DcfhDir
-	return filepath.Join(dcfhDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
+	return filepath.Join(dc.DcfhDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
 }
 
 // createRecoveryBackup creates a backup copy of a broken index file
