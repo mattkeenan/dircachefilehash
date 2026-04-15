@@ -314,7 +314,7 @@ func DiagnosticValidationProcessor(verbosity int) EntryProcessor {
 
 // createPreRecoverySnapshot creates a complete backup of all index files before recovery
 func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
-	dcfhDir := filepath.Dir(dc.IndexFile)
+	dcfhDir := dc.DcfhDir
 	recoveryDir := filepath.Join(dcfhDir, "recovery")
 
 	// Create recovery directory if it doesn't exist
@@ -394,7 +394,7 @@ func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) e
 
 // generateRecoveryBackupName creates a backup filename for recovery operations
 func (dc *DirectoryCache) generateRecoveryBackupName(recoveryType string) string {
-	dcfhDir := filepath.Dir(dc.IndexFile)
+	dcfhDir := dc.DcfhDir
 	return filepath.Join(dcfhDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
 }
 

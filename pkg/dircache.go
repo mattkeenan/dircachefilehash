@@ -12,7 +12,7 @@ import (
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
 func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {
-	dcfhDir := filepath.Dir(dc.IndexFile)
+	dcfhDir := dc.DcfhDir
 
 	entries, err := os.ReadDir(dcfhDir)
 	if err != nil {
@@ -123,6 +123,7 @@ func initDirectoryCacheBase(rootDir, dcfhDir string) (*DirectoryCache, string) {
 
 	return &DirectoryCache{
 		RootDir:       rootDir,
+		DcfhDir:       filepath.Join(dcfhDir, ".dcfh"),
 		IndexFile:     filepath.Join(dcfhDir, ".dcfh", "main.idx"),
 		CacheFile:     filepath.Join(dcfhDir, ".dcfh", "cache.idx"),
 		signature:     [4]byte{'d', 'c', 'f', 'h'},

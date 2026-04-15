@@ -5,85 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.5] - 2025-07-07
+## [0.8.0] - 2026-04-15
 
-### Fixed
-- Fixed signal handling to properly handle interrupted scans
-  - Status command now correctly creates cache.idx when interrupted by SIGINT/SIGTERM
-  - Update command now writes partial index data when interrupted instead of losing progress
-  - Fixed race condition where hash job submission could cause "send on closed channel" panic
-  - Fixed deadlock in scan channel when comparison exits early due to shutdown
-  - Both status and update commands now handle partial data gracefully
-- Added proper signal handling tests to verify shutdown behavior
-  - Tests verify index files are created with partial data on interruption
-  - Tests ensure process exits within specified time limits (typically <10ms)
-  - Tests check for panics and race conditions during concurrent operations
+Migrate CLI from custom option parser to cobra/viper. GNU longopt support (`--option value`), built-in shell completion (`dcfh completion [bash|zsh]`), viper config binding, and `--version` flag.
 
-### Changed
-- Improved debug logging for interrupted operations
-  - Added concise messages showing when scans are interrupted and partial data counts
-  - Debug messages only appear with `--debug=scan` flag
-- Added Development section to README.md
-  - Documented that AI tools are used as a personal preference by the maintainer
-  - Clarified that contributors can use any development tools they prefer
+## [0.7.9] - 2026-04-14
 
-## [0.6.4] - 2025-07-06
+Fix `BESkiplistEntry.RelativePath()` truncating paths longer than 256 bytes.
 
-### Changed
-- Applied `gofmt -s` formatting to all Go source files for consistency
+## [0.7.8] - 2026-04-14
 
-## [0.6.3] - 2025-07-06
+Split `NewDirectoryCache` into `CreateDirectoryCache` and `OpenDirectoryCache` with clear semantics.
 
-### Fixed
-- Added maintainer email to goreleaser configuration
-- Updated .gitignore to properly exclude dcfhfix binary
-- Corrected goreleaser nfpm configuration for debian package generation
+## [0.7.7] - 2026-04-14
 
-## [0.6.2] - 2025-07-06
+Fix: use real ctime from stat instead of mtime for `BEScanEntry`.
 
-### Changed
-- Updated goreleaser configuration to properly build all three tools
-  - Fixed build configuration to handle multi-binary structure
-  - All three binaries (dcfh, dcfhfind, dcfhfix) now included in single package
-  - Corrected go generate hooks for each tool directory
+## [0.7.6] - 2026-04-14
 
-## [0.6.1] - 2025-07-06
+Show file sizes in status summary output.
 
-### Fixed
-- Signal handling now properly interrupts filesystem scanning operations (brown paper bag fix)
-  - Added shutdown channel checks to `scanPath`, `scanPathRecursive`, and `monitorJobs` functions
-  - Process now exits within milliseconds of receiving SIGINT/SIGTERM instead of timing out
-  - Ensures graceful shutdown during concurrent hash operations
+## [0.7.5] - 2026-04-14
 
-## [0.6.0] - 2025-07-06
+Fix O(n^2) skiplist iterator (cursor-based instead of restart-from-beginning). Add plain-bool fast path to `IsDebugEnabled`.
 
-### Added
-- Initial public release of dircachefilehash
-- Three specialized CLI tools:
-  - `dcfh` - Daily operations (init, status, update, dupes, snapshots)
-  - `dcfhfind` - Unix find(1)-style search interface for index files
-  - `dcfhfix` - Index repair and recovery tool
-- Core features:
-  - Binary index format with selectable hash algorithms (SHA-1, SHA-256, SHA-512)
-  - Zero-copy skiplist operations for memory efficiency
-  - Concurrent file scanning with configurable worker pools
-  - Signal handling for graceful shutdown (SIGINT/SIGTERM)
-  - Atomic updates via temporary files and rename
-  - Memory-mapped file operations for performance
-  - Snapshot system for index state preservation
-  - Duplicate detection with fdupes-compatible output
-  - JSON output support for automation
-- Index format version 1 with:
-  - Host byte order for performance
-  - 64-bit file size support
-  - Custom time format (34-bit seconds since 1885 + 30-bit nanoseconds)
-  - Variable-length path storage
-  - SHA-1 checksums for integrity
-- Comprehensive test suite
-- Makefile-based build system
-- MIT License
+## [0.7.4] - 2026-04-14
 
-### Technical Notes
-- Requires Go 1.24.3 or later
-- Unix-only (Linux, macOS, BSD)
-- Time format supports dates from 1885 to ~2429
+Remove redundant `shouldIndex` calls and per-entry mutex from `BEScanEntry`.
+
+## [0.7.3] - 2026-04-13
+
+Migrate status command to channel-based pipeline architecture.
+
+## [0.7.2] - 2026-04-13
+
+Add `dcfh subrepo` command scaffold. Unified JSON output. Skip `.git` internals during scan.
+
+## [0.7.1] - 2026-04-13
+
+Reduce default hash workers from 4 to 2.
+
+## [0.7.0] - 2026-04-13
+
+Major architecture rewrite: unified `BinaryEntryInterface` system with `BESkiplistEntry`, `BEScanEntry`, and `BEIndexFileEntry`. Channel-based pipeline, two-phase hash coordination, `TempIndexWriter` with IoVec batching, per-worker hash buffer reuse. Fix signal handling livelock and empty `.deb` packages.
+
+## [0.6.5] and earlier
+
+See git history.

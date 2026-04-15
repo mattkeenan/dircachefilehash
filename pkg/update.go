@@ -221,8 +221,8 @@ type ScanFileInfo struct {
 
 // findScanIndexFiles finds all scan index files and returns them sorted by modification time (newest first)
 func (dc *DirectoryCache) findScanIndexFiles() ([]ScanFileInfo, error) {
-	// Get the .dcfh directory from the IndexFile path
-	dcfhDir := filepath.Dir(dc.IndexFile)
+	// Get the .dcfh directory
+	dcfhDir := dc.DcfhDir
 
 	// Read the .dcfh directory
 	entries, err := os.ReadDir(dcfhDir)

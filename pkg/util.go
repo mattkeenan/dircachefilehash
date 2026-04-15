@@ -37,6 +37,7 @@ type ScanIndexInfo struct {
 // Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
 	RootDir         string
+	DcfhDir         string // Path to .dcfh metadata directory
 	IndexFile       string
 	CacheFile       string         // Path to index.cache file
 	signature       [4]byte        // "dcfh" signature
@@ -404,7 +405,7 @@ func encodeWallTime(sec int64, nsec int64) uint64 {
 func (dc *DirectoryCache) generateTempFileName(prefix string) string {
 	pid := os.Getpid()
 	timestamp := time.Now().UnixNano()
-	return filepath.Join(filepath.Dir(dc.IndexFile),
+	return filepath.Join(dc.DcfhDir,
 		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
 }
 
@@ -421,20 +422,20 @@ func getGoroutineID() uint64 {
 func (dc *DirectoryCache) generateScanFileName() string {
 	pid := os.Getpid()
 	tid := getGoroutineID()
-	return filepath.Join(filepath.Dir(dc.IndexFile),
+	return filepath.Join(dc.DcfhDir,
 		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
 }
 
 // GenerateTimestampedFileName generates a timestamped filename using ISO 8601 format
 func (dc *DirectoryCache) GenerateTimestampedFileName(prefix string) string {
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	return filepath.Join(filepath.Dir(dc.IndexFile),
+	return filepath.Join(dc.DcfhDir,
 		fmt.Sprintf("%s-%s.idx", prefix, timestamp))
 }
 
 // ScanForTimestampedCacheFiles finds all cache-{timestamp}.idx files in chronological order
 func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
-	dcfhDir := filepath.Dir(dc.IndexFile)
+	dcfhDir := dc.DcfhDir
 
 	// Read directory contents
 	entries, err := os.ReadDir(dcfhDir)

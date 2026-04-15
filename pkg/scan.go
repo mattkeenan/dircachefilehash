@@ -502,7 +502,7 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 
 		if info.IsDir() {
 			// Skip the .dcfh directory
-			indexDir := filepath.Dir(dc.IndexFile)
+			indexDir := dc.DcfhDir
 			if currentPath == indexDir {
 				continue
 			}

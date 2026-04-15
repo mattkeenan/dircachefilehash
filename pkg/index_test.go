@@ -133,6 +133,7 @@ func TestDirectoryCache_scanForTempIndices(t *testing.T) {
 
 	// Create DirectoryCache instance
 	dc := &DirectoryCache{
+		DcfhDir:   dcfhDir,
 		IndexFile: filepath.Join(dcfhDir, "main.idx"),
 	}
 
