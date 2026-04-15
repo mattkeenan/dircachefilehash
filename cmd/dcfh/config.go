@@ -2,125 +2,97 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strconv"
+
+	"github.com/spf13/cobra"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// handleConfig handles the "dcfh config" command and its subcommands
-func handleConfig(args []string) {
-	// Check for help request first (before parsing options)
-	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
-		showConfigUsage()
-		return
-	}
+var configListFlag bool
 
-	// Create options parser for config subcommand
-	configOptions := NewParsedOptions()
-	configOptions.DefineOption("list", "", OptionTypeBool, "", "list all configuration variables")
-	configOptions.DefineOption("global", "", OptionTypeBool, "", "use global configuration (not implemented)")
+var configCmd = &cobra.Command{
+	Use:   "config [key] [value]",
+	Short: "Get and set repository configuration options",
+	Long: `Get and set repository configuration options.
 
-	// Parse config-specific options
-	if err := configOptions.Parse(args); err != nil {
-		outputError(fmt.Sprintf("Error parsing config options: %v", err))
-		os.Exit(1)
-	}
+Configuration keys:
+  filehash.default     Default hash algorithm (sha1, sha256, sha512)
+  output.format        Default output format (human, json, fdupes)
+  verbose.level        Default verbose level (0-3)
+  verbose.debug        Default debug flags (comma-separated)
+  symlink.mode         Default symlink handling (all, internal, external, none)
 
-	configArgs := configOptions.GetArgs()
-
-	// Handle --list flag
-	if configOptions.GetBool("list") {
-		if len(configArgs) > 0 {
-			outputError("Cannot specify configuration keys with --list flag")
-			os.Exit(1)
+Examples:
+  dcfh config --list
+  dcfh config filehash.default
+  dcfh config filehash.default sha256
+  dcfh config output.format fdupes`,
+	Args: cobra.MaximumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Handle --list flag
+		if configListFlag {
+			if len(args) > 0 {
+				return fmt.Errorf("cannot specify configuration keys with --list flag")
+			}
+			return handleConfigList()
 		}
-		handleConfigList()
-		return
-	}
 
-	// Handle get/set operations
-	switch len(configArgs) {
-	case 0:
-		// No args with no --list means show usage
-		showConfigUsage()
-		os.Exit(1)
-	case 1:
-		// Get operation: dcfh config key
-		handleConfigGet(configArgs[0])
-	case 2:
-		// Set operation: dcfh config key value
-		handleConfigSet(configArgs[0], configArgs[1])
-	default:
-		outputError("Too many arguments for config command")
-		os.Exit(1)
-	}
+		switch len(args) {
+		case 0:
+			return cmd.Help()
+		case 1:
+			return handleConfigGet(args[0])
+		case 2:
+			return handleConfigSet(args[0], args[1])
+		default:
+			return fmt.Errorf("too many arguments for config command")
+		}
+	},
 }
 
-// showConfigUsage displays usage information for the config command
-func showConfigUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh config [OPTIONS] [<key>] [<value>]\n\n")
-	fmt.Fprintf(os.Stderr, "Options:\n")
-	fmt.Fprintf(os.Stderr, "  --list       List all configuration variables\n")
-	fmt.Fprintf(os.Stderr, "  --global     Use global configuration (not implemented)\n")
-	fmt.Fprintf(os.Stderr, "\nConfiguration Keys:\n")
-	fmt.Fprintf(os.Stderr, "  filehash.default     Default hash algorithm (sha1, sha256, sha512)\n")
-	fmt.Fprintf(os.Stderr, "  output.format        Default output format (human, json, fdupes)\n")
-	fmt.Fprintf(os.Stderr, "  verbose.level        Default verbose level (0-3)\n")
-	fmt.Fprintf(os.Stderr, "  verbose.debug        Default debug flags (comma-separated)\n")
-	fmt.Fprintf(os.Stderr, "  symlink.mode         Default symlink handling (all, internal, external, none; can append ,strict)\n")
-	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  dcfh config --list\n")
-	fmt.Fprintf(os.Stderr, "  dcfh config filehash.default\n")
-	fmt.Fprintf(os.Stderr, "  dcfh config filehash.default sha256\n")
-	fmt.Fprintf(os.Stderr, "  dcfh config output.format fdupes\n")
+func init() {
+	rootCmd.AddCommand(configCmd)
+	configCmd.Flags().BoolVar(&configListFlag, "list", false, "list all configuration variables")
 }
 
 // handleConfigList lists all configuration variables
-func handleConfigList() {
-	// Find the dcfh repository root
+func handleConfigList() error {
 	_, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		outputError(err.Error())
-		os.Exit(1)
+		return err
 	}
 
-	// Load configuration
 	config, err := dcfh.LoadConfig(dcfhDir)
 	if err != nil {
-		outputError(fmt.Sprintf("Failed to load configuration: %v", err))
-		os.Exit(1)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	allConfig := config.GetAllConfig()
 
-	// List all configuration in git config format
 	fmt.Printf("filehash.default=%s\n", allConfig.Hash.Default)
 	fmt.Printf("output.format=%s\n", allConfig.Output.Format)
 	fmt.Printf("verbose.level=%d\n", allConfig.Verbose.Level)
 	fmt.Printf("verbose.debug=%s\n", allConfig.Verbose.Debug)
 	fmt.Printf("symlink.mode=%s\n", allConfig.Symlink.Mode)
+
+	return nil
 }
 
 // handleConfigGet retrieves a specific configuration value
-func handleConfigGet(key string) {
-	// Find the dcfh repository root
+func handleConfigGet(key string) error {
 	_, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		outputError(err.Error())
-		os.Exit(1)
+		return err
 	}
 
-	// Load configuration
 	config, err := dcfh.LoadConfig(dcfhDir)
 	if err != nil {
-		outputError(fmt.Sprintf("Failed to load configuration: %v", err))
-		os.Exit(1)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	allConfig := config.GetAllConfig()
 
-	// Get the requested configuration value
 	switch key {
 	case "filehash.default":
 		fmt.Println(allConfig.Hash.Default)
@@ -133,84 +105,69 @@ func handleConfigGet(key string) {
 	case "symlink.mode":
 		fmt.Println(allConfig.Symlink.Mode)
 	default:
-		outputError(fmt.Sprintf("Unknown configuration key: %s", key))
-		os.Exit(1)
+		return fmt.Errorf("unknown configuration key: %s", key)
 	}
+
+	return nil
 }
 
 // handleConfigSet sets a configuration value
-func handleConfigSet(key, value string) {
-	// Find the dcfh repository root
+func handleConfigSet(key, value string) error {
 	_, dcfhDir, err := findDcfhRepo()
 	if err != nil {
-		outputError(err.Error())
-		os.Exit(1)
+		return err
 	}
 
-	// Load configuration
 	config, err := dcfh.LoadConfig(dcfhDir)
 	if err != nil {
-		outputError(fmt.Sprintf("Failed to load configuration: %v", err))
-		os.Exit(1)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Set the configuration value with validation
 	switch key {
 	case "filehash.default":
 		if err := dcfh.ValidateHashAlgorithm(value); err != nil {
-			outputError(fmt.Sprintf("Invalid hash algorithm: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("invalid hash algorithm: %w", err)
 		}
 		if err := config.SetHashDefault(value); err != nil {
-			outputError(fmt.Sprintf("Failed to set filehash.default: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("failed to set filehash.default: %w", err)
 		}
 	case "output.format":
 		if err := dcfh.ValidateOutputFormat(value); err != nil {
-			outputError(fmt.Sprintf("Invalid output format: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("invalid output format: %w", err)
 		}
 		if err := config.SetOutputFormat(value); err != nil {
-			outputError(fmt.Sprintf("Failed to set output.format: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("failed to set output.format: %w", err)
 		}
 	case "verbose.level":
 		level, err := strconv.Atoi(value)
 		if err != nil {
-			outputError(fmt.Sprintf("Invalid verbose level '%s': must be a number", value))
-			os.Exit(1)
+			return fmt.Errorf("invalid verbose level '%s': must be a number", value)
 		}
 		if err := dcfh.ValidateVerboseLevel(level); err != nil {
-			outputError(fmt.Sprintf("Invalid verbose level: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("invalid verbose level: %w", err)
 		}
 		if err := config.SetVerboseLevel(level); err != nil {
-			outputError(fmt.Sprintf("Failed to set verbose.level: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("failed to set verbose.level: %w", err)
 		}
 	case "verbose.debug":
 		if err := dcfh.ValidateDebugFlags(value); err != nil {
-			outputError(fmt.Sprintf("Invalid debug flags: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("invalid debug flags: %w", err)
 		}
 		if err := config.SetDebugFlags(value); err != nil {
-			outputError(fmt.Sprintf("Failed to set verbose.debug: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("failed to set verbose.debug: %w", err)
 		}
 	case "symlink.mode":
 		if err := dcfh.ValidateSymlinkMode(value); err != nil {
-			outputError(fmt.Sprintf("Invalid symlink mode: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("invalid symlink mode: %w", err)
 		}
 		if err := config.SetSymlinkMode(value); err != nil {
-			outputError(fmt.Sprintf("Failed to set symlink.mode: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("failed to set symlink.mode: %w", err)
 		}
 	default:
-		outputError(fmt.Sprintf("Unknown configuration key: %s", key))
-		showConfigUsage()
-		os.Exit(1)
+		return fmt.Errorf("unknown configuration key: %s", key)
 	}
 
 	fmt.Printf("Configuration updated: %s = %s\n", key, value)
+
+	return nil
 }

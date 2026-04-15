@@ -6,9 +6,11 @@ Store `dcfhDir` explicitly on the `DirectoryCache` struct instead of discarding 
 
 **Files:** `pkg/util.go`, `pkg/dircache.go`, `pkg/scan.go`, `pkg/recovery.go`, `pkg/index.go`, `pkg/update.go`
 
-## Investigate modified+deleted overlap in status output
+## Migrate pkg/ shutdown from chan to context.Context
 
-Files with UTF-8 en-dash characters appear in both modified AND deleted lists in `dcfh status` output. Needs investigation with `dcfhfind` (now fixed).
+The `pkg/` layer passes `shutdownChan <-chan struct{}` through hash workers, scan pipelines, and Hwang-Lin comparisons. The Go-idiomatic approach since 1.16 is `context.Context`, which integrates with HTTP servers, database calls, gRPC, and the broader ecosystem. The cobra migration bridges the gap at the CLI boundary (context → channel), but long-term each `pkg/` function should switch from `<-chan struct{}` to `context.Context` independently.
+
+**Files:** `pkg/scan.go`, `pkg/update.go`, `pkg/status.go`, `pkg/file.go`, `pkg/middleware.go`, and all callers of `shutdownChan`
 
 ## Fix slow pre-commit hook
 

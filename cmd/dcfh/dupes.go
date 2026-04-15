@@ -5,206 +5,173 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// showDupesUsage displays usage information for the dupes command
-func showDupesUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh dupes\n\n")
-	fmt.Fprintf(os.Stderr, "Find and display duplicate files in the repository.\n\n")
-	fmt.Fprintf(os.Stderr, "Description:\n")
-	fmt.Fprintf(os.Stderr, "  Analyzes the index to identify files with identical content (same hash)\n")
-	fmt.Fprintf(os.Stderr, "  but different paths. Groups duplicate files and shows file counts and\n")
-	fmt.Fprintf(os.Stderr, "  total duplicate space that could be reclaimed.\n\n")
-	fmt.Fprintf(os.Stderr, "Output formats:\n")
-	fmt.Fprintf(os.Stderr, "  --output=human       Human-readable grouped format (default)\n")
-	fmt.Fprintf(os.Stderr, "  --output=json        JSON format with detailed group information\n")
-	fmt.Fprintf(os.Stderr, "  --output=fdupes      fdupes-compatible format for scripting\n\n")
-	fmt.Fprintf(os.Stderr, "Global options:\n")
-	fmt.Fprintf(os.Stderr, "  --verbose, -v        Show additional information about duplicate groups\n")
-	fmt.Fprintf(os.Stderr, "  --json               Output result in JSON format (alias for --output=json)\n\n")
-	fmt.Fprintf(os.Stderr, "Examples:\n")
-	fmt.Fprintf(os.Stderr, "  dcfh dupes                           # Find duplicates in human format\n")
-	fmt.Fprintf(os.Stderr, "  dcfh --json dupes                    # Find duplicates in JSON format\n")
-	fmt.Fprintf(os.Stderr, "  dcfh --output=fdupes dupes           # fdupes-compatible output\n")
-	fmt.Fprintf(os.Stderr, "  dcfh --verbose dupes                 # Show detailed duplicate information\n\n")
-	fmt.Fprintf(os.Stderr, "Output information:\n")
-	fmt.Fprintf(os.Stderr, "  Each group shows files with identical content\n")
-	fmt.Fprintf(os.Stderr, "  Group size indicates number of duplicate copies\n")
-	fmt.Fprintf(os.Stderr, "  Summary shows total groups and potential space savings\n\n")
-	fmt.Fprintf(os.Stderr, "Notes:\n")
-	fmt.Fprintf(os.Stderr, "  Requires up-to-date index - run 'dcfh update' if files have changed\n")
-	fmt.Fprintf(os.Stderr, "  Only finds duplicates of indexed files (ignores .dcfhignore patterns)\n")
-}
+var dupesCmd = &cobra.Command{
+	Use:   "dupes",
+	Short: "Find and display duplicate files",
+	Long: `Find and display duplicate files in the repository.
 
-// handleDupes handles the "dcfh dupes" command
-func handleDupes(args []string, shutdownChan <-chan struct{}) {
-	// Check for help request
-	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
-		showDupesUsage()
-		return
-	}
+Analyses the index to identify files with identical content (same hash)
+but different paths. Groups duplicate files and shows file counts and
+total duplicate space that could be reclaimed.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		shutdownChan := shutdownFromContext(cmd.Context())
 
-	if len(args) != 0 {
-		outputError("Usage: dcfh dupes")
-		outputError("Use 'dcfh dupes --help' for detailed usage information")
-		os.Exit(1)
-	}
-
-	// Find the dcfh repository root
-	repoRoot, _, err := findDcfhRepo()
-	if err != nil {
-		outputError(err.Error())
-		format := validateOutputFormat()
-		if format == OutputHuman {
-			fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialise a repository\n")
+		// Find the dcfh repository root
+		repoRoot, _, err := findDcfhRepo()
+		if err != nil {
+			if getOutputFormat() == OutputHuman {
+				fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialise a repository\n")
+			}
+			return err
 		}
-		os.Exit(1)
-	}
 
-	// Open existing repository
-	cache, err := dcfh.OpenDirectoryCache(repoRoot, repoRoot)
-	if err != nil {
-		outputError(fmt.Sprintf("Failed to open repository: %v", err))
-		os.Exit(1)
-	}
-	defer func() { _ = cache.Close() }()
+		// Open existing repository
+		cache, err := dcfh.OpenDirectoryCache(repoRoot, repoRoot)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = cache.Close() }()
 
-	// Apply configuration overrides
-	flags := buildFlags()
-	if err := cache.ApplyConfigOverrides(flags); err != nil {
-		outputError(fmt.Sprintf("Failed to apply configuration overrides: %v", err))
-		os.Exit(1)
-	}
+		// Apply configuration overrides
+		flags := buildFlags()
+		if err := cache.ApplyConfigOverrides(flags); err != nil {
+			return fmt.Errorf("failed to apply configuration overrides: %w", err)
+		}
 
-	if _, err := cache.LoadMainIndex(); err != nil {
-		outputError(fmt.Sprintf("Failed to load index: %v", err))
-		os.Exit(1)
-	}
+		if _, err := cache.LoadMainIndex(); err != nil {
+			return fmt.Errorf("failed to load index: %w", err)
+		}
 
-	// Find duplicates using unified streaming architecture
-	duplicates, err := cache.FindDuplicatesUnified(shutdownChan, flags)
-	if err != nil {
-		outputError(fmt.Sprintf("Failed to find duplicates: %v", err))
-		os.Exit(1)
-	}
+		// Find duplicates using unified streaming architecture
+		duplicates, err := cache.FindDuplicatesUnified(shutdownChan, flags)
+		if err != nil {
+			return fmt.Errorf("failed to find duplicates: %w", err)
+		}
 
-	format := getEffectiveOutputFormat(cache)
-	if len(duplicates) == 0 {
-		if format == OutputJSON {
+		format := getOutputFormat()
+		if len(duplicates) == 0 {
+			if format == OutputJSON {
+				output := DupesOutput{
+					Repository:      repoRoot,
+					DuplicateGroups: []dcfh.DuplicateGroup{},
+					Summary: DuplicateSummary{
+						GroupCount: 0,
+						FileCount:  0,
+					},
+				}
+				outputJSON(output)
+			}
+			return nil // No output if no duplicates found (like fdupes in text mode)
+		}
+
+		// Bubble sort: data arrives mostly sorted from the skiplist/index,
+		// so this is effectively an O(n) verification pass. Don't replace
+		// with slices.Sort — pdqsort has higher constant overhead on
+		// already-sorted input.
+		for i := range duplicates {
+			for j := i + 1; j < len(duplicates); j++ {
+				if duplicates[i].Hash > duplicates[j].Hash {
+					duplicates[i], duplicates[j] = duplicates[j], duplicates[i]
+				}
+			}
+		}
+
+		switch format {
+		case OutputJSON:
+			var groups []dcfh.DuplicateGroup
+			totalFiles := 0
+
+			for _, group := range duplicates {
+				filePaths := append([]string{}, group.Files...)
+
+				// Sort the file paths
+				for k := range filePaths {
+					for l := k + 1; l < len(filePaths); l++ {
+						if filePaths[k] > filePaths[l] {
+							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
+						}
+					}
+				}
+
+				groups = append(groups, dcfh.DuplicateGroup{
+					Hash:  group.Hash,
+					Files: filePaths,
+					Count: len(filePaths),
+				})
+
+				totalFiles += len(filePaths)
+			}
+
 			output := DupesOutput{
 				Repository:      repoRoot,
-				DuplicateGroups: []dcfh.DuplicateGroup{},
+				DuplicateGroups: groups,
 				Summary: DuplicateSummary{
-					GroupCount: 0,
-					FileCount:  0,
+					GroupCount: len(duplicates),
+					FileCount:  totalFiles,
 				},
 			}
 			outputJSON(output)
-		}
-		return // No output if no duplicates found (like fdupes in text mode)
-	}
 
-	// Sort groups by hash for consistent output
-	for i := range duplicates {
-		for j := i + 1; j < len(duplicates); j++ {
-			if duplicates[i].Hash > duplicates[j].Hash {
-				duplicates[i], duplicates[j] = duplicates[j], duplicates[i]
-			}
-		}
-	}
+		case OutputFdupes:
+			// fdupes format: absolute paths, one line per file, blank line between groups
+			for i, group := range duplicates {
+				var filePaths []string
+				for _, relPath := range group.Files {
+					absPath := filepath.Join(repoRoot, relPath)
+					filePaths = append(filePaths, absPath)
+				}
 
-	switch format {
-	case OutputJSON:
-		var groups []dcfh.DuplicateGroup
-		totalFiles := 0
-
-		for _, group := range duplicates {
-			// Use relative paths directly (like git)
-			filePaths := append([]string{}, group.Files...)
-
-			// Sort the file paths
-			for k := range filePaths {
-				for l := k + 1; l < len(filePaths); l++ {
-					if filePaths[k] > filePaths[l] {
-						filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
+				// Sort the file paths
+				for k := 0; k < len(filePaths); k++ {
+					for l := k + 1; l < len(filePaths); l++ {
+						if filePaths[k] > filePaths[l] {
+							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
+						}
 					}
+				}
+
+				for _, absPath := range filePaths {
+					fmt.Println(absPath)
+				}
+
+				if i < len(duplicates)-1 {
+					fmt.Println()
 				}
 			}
 
-			groups = append(groups, dcfh.DuplicateGroup{
-				Hash:  group.Hash,
-				Files: filePaths,
-				Count: len(filePaths),
-			})
+		default: // OutputHuman
+			for i, group := range duplicates {
+				filePaths := append([]string{}, group.Files...)
 
-			totalFiles += len(filePaths)
-		}
-
-		output := DupesOutput{
-			Repository:      repoRoot,
-			DuplicateGroups: groups,
-			Summary: DuplicateSummary{
-				GroupCount: len(duplicates),
-				FileCount:  totalFiles,
-			},
-		}
-		outputJSON(output)
-
-	case OutputFdupes:
-		// fdupes format: absolute paths, one line per file, blank line between groups
-		for i, group := range duplicates {
-			// Convert to absolute paths and sort them
-			var filePaths []string
-			for _, relPath := range group.Files {
-				absPath := filepath.Join(repoRoot, relPath)
-				filePaths = append(filePaths, absPath)
-			}
-
-			// Sort the file paths
-			for k := 0; k < len(filePaths); k++ {
-				for l := k + 1; l < len(filePaths); l++ {
-					if filePaths[k] > filePaths[l] {
-						filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
+				// Sort the file paths
+				for k := range filePaths {
+					for l := k + 1; l < len(filePaths); l++ {
+						if filePaths[k] > filePaths[l] {
+							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
+						}
 					}
 				}
-			}
 
-			// Print each file in the duplicate group (absolute paths)
-			for _, absPath := range filePaths {
-				fmt.Println(absPath)
-			}
+				for _, relPath := range filePaths {
+					fmt.Println(relPath)
+				}
 
-			// Add blank line between groups (except after the last group)
-			if i < len(duplicates)-1 {
-				fmt.Println()
-			}
-		}
-
-	default: // OutputHuman
-		// Human format: relative paths with context
-		for i, group := range duplicates {
-			// Use relative paths directly and sort them
-			filePaths := append([]string{}, group.Files...)
-
-			// Sort the file paths
-			for k := range filePaths {
-				for l := k + 1; l < len(filePaths); l++ {
-					if filePaths[k] > filePaths[l] {
-						filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
-					}
+				if i < len(duplicates)-1 {
+					fmt.Println()
 				}
 			}
-
-			// Print each file in the duplicate group (relative paths)
-			for _, relPath := range filePaths {
-				fmt.Println(relPath)
-			}
-
-			// Add blank line between groups (except after the last group)
-			if i < len(duplicates)-1 {
-				fmt.Println()
-			}
 		}
-	}
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(dupesCmd)
 }

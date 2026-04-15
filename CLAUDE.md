@@ -538,6 +538,7 @@ This reasoning pattern is fundamental to effective development and must be consc
 ### Constraints and Design Rules
 
 **Development Anti-Patterns (Learn from Repeated Mistakes)**:
+- **Shell command suffixes**: Do **NOT** use `; echo "exit: $?"` in Bash tool commands. It causes blocking and unnecessary permissions checks.
 - **Repeated Similar Errors**: If you encounter the same class of errors multiple times (e.g., offset calculation bugs, checksum errors), this indicates a fundamental approach problem. Stop and redesign the approach rather than fixing individual instances.
 - **Manual Offset Calculations**: Never manually calculate struct field offsets (e.g., `offset+4`, `offset+28`). Use `unsafe.Offsetof()` and centralized field accessors.
 - **Unsafe Data Access in Repair Tools**: Repair tools must assume data is corrupted. Always validate bounds, alignment, and reasonableness before accessing any field.

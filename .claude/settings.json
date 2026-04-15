@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash(go mod tidy:*)",
       "Bash($(git rev-parse --show-toplevel)/dcfhfix:*)"
     ],
     "deny": []

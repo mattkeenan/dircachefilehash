@@ -4,42 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
 
-// handleSubrepo handles the subrepo command with various subcommands
-func handleSubrepo(args []string) {
-	// Default to "find" when no subcommand given
-	if len(args) < 1 {
-		handleSubrepoFind()
-		return
-	}
+var subrepoCmd = &cobra.Command{
+	Use:   "subrepo",
+	Short: "Discover and manage nested repositories",
+	Long: `Discover and manage nested repositories.
 
-	subcommand := args[0]
-
-	switch subcommand {
-	case "find", "ls":
-		handleSubrepoFind()
-	case "add":
-		handleSubrepoAdd(args[1:])
-	case "help", "-h", "--help":
-		showSubrepoUsage()
-	default:
-		outputError(fmt.Sprintf("Unknown subrepo subcommand: %s", subcommand))
-		showSubrepoUsage()
-		os.Exit(1)
-	}
-}
-
-// showSubrepoUsage displays usage information for the subrepo command
-func showSubrepoUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: dcfh subrepo <subcommand> [options]\n\n")
-	fmt.Fprintf(os.Stderr, "Subrepo management subcommands:\n")
-	fmt.Fprintf(os.Stderr, "  find, ls         Discover potential subrepos (directories containing .git)\n")
-	fmt.Fprintf(os.Stderr, "  add <path>       Register a subrepo for delegated hashing (not yet implemented)\n")
-	fmt.Fprintf(os.Stderr, "  help             Show this help message\n")
-	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  dcfh subrepo find\n")
-	fmt.Fprintf(os.Stderr, "  dcfh subrepo add repo/myproject\n")
+Subcommands:
+  find    Discover potential subrepos (directories containing .git)
+  add     Register a subrepo for delegated hashing (not yet implemented)`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Default to "find" when no subcommand given
+		return subrepoFindCmd.RunE(cmd, args)
+	},
 }
 
 // subrepoEntry represents a discovered subrepo for JSON output
@@ -49,85 +29,92 @@ type subrepoEntry struct {
 	Active bool   `json:"active"`
 }
 
-// handleSubrepoFind walks the repo tree and lists directories containing .git/
-func handleSubrepoFind() {
-	repoRoot, _, err := findDcfhRepo()
-	if err != nil {
-		outputError(err.Error())
-		os.Exit(1)
-	}
-
-	format := validateOutputFormat()
-	var entries []subrepoEntry
-
-	err = filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+var subrepoFindCmd = &cobra.Command{
+	Use:     "find",
+	Aliases: []string{"ls"},
+	Short:   "Discover potential subrepos",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, _, err := findDcfhRepo()
 		if err != nil {
-			return nil // skip inaccessible directories
+			return err
 		}
 
-		if !d.IsDir() {
+		format := getOutputFormat()
+		var entries []subrepoEntry
+
+		err = filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil // skip inaccessible directories
+			}
+
+			if !d.IsDir() {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(repoRoot, path)
+			if err != nil {
+				return nil
+			}
+
+			// Skip the repo's own .dcfh directory and .git internals
+			if relPath == ".dcfh" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+
+			// Check if this directory contains a .git/ subdirectory
+			gitPath := filepath.Join(path, ".git")
+			if info, statErr := os.Stat(gitPath); statErr == nil && info.IsDir() {
+				entries = append(entries, subrepoEntry{
+					Path:   relPath,
+					Type:   "git",
+					Active: false,
+				})
+			}
+
 			return nil
-		}
+		})
 
-		relPath, err := filepath.Rel(repoRoot, path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("failed to scan for subrepos: %w", err)
 		}
 
-		// Skip the repo's own .dcfh directory and .git internals
-		if relPath == ".dcfh" || d.Name() == ".git" {
-			return filepath.SkipDir
-		}
-
-		// Check if this directory contains a .git/ subdirectory
-		gitPath := filepath.Join(path, ".git")
-		if info, statErr := os.Stat(gitPath); statErr == nil && info.IsDir() {
-			entries = append(entries, subrepoEntry{
-				Path:   relPath,
-				Type:   "git",
-				Active: false,
+		if format == OutputJSON {
+			outputJSON(map[string]any{
+				"repository": repoRoot,
+				"subrepos":   entries,
+				"count":      len(entries),
 			})
+			return nil
 		}
+
+		if len(entries) == 0 {
+			fmt.Println("No potential subrepos found.")
+			return nil
+		}
+
+		fmt.Printf("Potential subrepos in %s:\n\n", repoRoot)
+		for _, e := range entries {
+			status := "(inactive)"
+			fmt.Printf("  %-10s %s %s\n", e.Type, e.Path, status)
+		}
+		fmt.Printf("\n%d potential subrepo(s) found.\n", len(entries))
 
 		return nil
-	})
-
-	if err != nil {
-		outputError(fmt.Sprintf("failed to scan for subrepos: %v", err))
-		os.Exit(1)
-	}
-
-	if format == OutputJSON {
-		outputJSON(map[string]any{
-			"repository": repoRoot,
-			"subrepos":   entries,
-			"count":      len(entries),
-		})
-		return
-	}
-
-	if len(entries) == 0 {
-		fmt.Println("No potential subrepos found.")
-		return
-	}
-
-	fmt.Printf("Potential subrepos in %s:\n\n", repoRoot)
-	for _, e := range entries {
-		status := "(inactive)"
-		fmt.Printf("  %-10s %s %s\n", e.Type, e.Path, status)
-	}
-	fmt.Printf("\n%d potential subrepo(s) found.\n", len(entries))
+	},
 }
 
-// handleSubrepoAdd is a stub for the future subrepo add command
-func handleSubrepoAdd(args []string) {
-	if len(args) < 1 {
-		outputError("subrepo add requires a path argument")
-		fmt.Fprintf(os.Stderr, "\nUsage: dcfh subrepo add <path>\n")
-		os.Exit(1)
-	}
+var subrepoAddCmd = &cobra.Command{
+	Use:   "add <path>",
+	Short: "Register a subrepo for delegated hashing",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return fmt.Errorf("subrepo add is not yet implemented. Use 'dcfh subrepo find' to discover potential subrepos")
+	},
+}
 
-	fmt.Fprintf(os.Stderr, "Error: subrepo add is not yet implemented.\n")
-	fmt.Fprintf(os.Stderr, "Use 'dcfh subrepo find' to discover potential subrepos.\n")
-	os.Exit(1)
+func init() {
+	rootCmd.AddCommand(subrepoCmd)
+	subrepoCmd.AddCommand(subrepoFindCmd)
+	subrepoCmd.AddCommand(subrepoAddCmd)
 }
