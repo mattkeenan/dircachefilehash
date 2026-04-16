@@ -464,6 +464,9 @@ func TestSignalHandlingTiming(t *testing.T) {
 
 // TestSignalHandlingRaceCondition specifically tests for the hash job submission race
 func TestSignalHandlingRaceCondition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping signal handling test in short mode")
+	}
 	tempDir := t.TempDir()
 
 	// Build binary in temp directory to avoid conflicts
@@ -573,6 +576,9 @@ func TestSignalHandlingRaceCondition(t *testing.T) {
 
 // TestSignalHandlingConcurrent tests signal handling during concurrent operations
 func TestSignalHandlingConcurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping signal handling test in short mode")
+	}
 	tempDir := t.TempDir()
 
 	repoRoot := getRepoRoot(t)

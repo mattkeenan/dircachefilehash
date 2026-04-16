@@ -216,6 +216,9 @@ func TestUpdateInterruption(t *testing.T) {
 
 // TestMemoryMappingIssues tests for memory mapping problems during interruptions
 func TestMemoryMappingIssues(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping interruption test in short mode")
+	}
 	// This test specifically targets the scan index memory mapping issue
 	tempDir, err := os.MkdirTemp("", "dcfh_mmap_test_*")
 	if err != nil {
@@ -1040,6 +1043,9 @@ func logAdaptiveTestResults(t *testing.T, result AdaptiveTestResult) {
 
 // TestAdaptiveUpdateInterruption tests update operations with adaptive parameters
 func TestAdaptiveUpdateInterruption(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping interruption test in short mode")
+	}
 	config := DefaultAdaptiveConfig("update")
 	config.ExtraArgs = []string{"-vvv", "--debug=algorithm,extravalidation,hash,indexchaining,load,memorylayout,scan,scanning,symlinks,write"}
 	AdaptiveInterruptTest(t, config)
@@ -1047,6 +1053,9 @@ func TestAdaptiveUpdateInterruption(t *testing.T) {
 
 // TestAdaptiveStatusInterruptionRefactored tests status operations using the refactored framework
 func TestAdaptiveStatusInterruptionRefactored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping interruption test in short mode")
+	}
 	config := DefaultAdaptiveConfig("status")
 	config.ExtraArgs = []string{"--debug=scan,scanning"}
 	AdaptiveInterruptTest(t, config)
