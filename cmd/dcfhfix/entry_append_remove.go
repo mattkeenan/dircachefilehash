@@ -99,7 +99,7 @@ func processEntriesWithAppend(indexFile string, newEntry *ValidatedEntry, option
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}
 
-	if len(data) < dcfh.HeaderSize {
+	if len(data) < dcfh.V2HeaderSize {
 		return 0, 0, fmt.Errorf("index file too small: %d bytes", len(data))
 	}
 
@@ -155,7 +155,7 @@ func processEntriesWithRemoval(indexFile string, pathSet map[string]bool, option
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}
 
-	if len(data) < dcfh.HeaderSize {
+	if len(data) < dcfh.V2HeaderSize {
 		return 0, 0, fmt.Errorf("index file too small: %d bytes", len(data))
 	}
 
@@ -200,8 +200,9 @@ func processEntriesWithRemoval(indexFile string, pathSet map[string]bool, option
 func processAllEntriesForAppend(data []byte, tmpIndexFile string, entriesDiscarded *int, options *ParsedOptions) error {
 	// Extract header information
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
 	entryCount := header.EntryCount
-	entryData := data[dcfh.HeaderSize:]
+	entryData := data[hdrSize:]
 
 	offset := 0
 	unfixableEntryCount := 0
@@ -246,8 +247,9 @@ func processAllEntriesForAppend(data []byte, tmpIndexFile string, entriesDiscard
 func processAllEntriesForRemoval(data []byte, pathSet map[string]bool, tmpIndexFile string, entriesRemoved, entriesDiscarded *int, options *ParsedOptions) error {
 	// Extract header information
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
 	entryCount := header.EntryCount
-	entryData := data[dcfh.HeaderSize:]
+	entryData := data[hdrSize:]
 
 	offset := 0
 	unfixableEntryCount := 0

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+	"unsafe"
 )
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
@@ -113,6 +115,24 @@ func (dc *DirectoryCache) Length() int {
 	return skiplist.Length()
 }
 
+// IndexTimestamp returns the timestamp stored in the main index header (v3+).
+// Returns zero time and false if the index is not loaded or is v2.
+func (dc *DirectoryCache) IndexTimestamp() (time.Time, bool) {
+	if dc.mainIndex == nil {
+		return time.Time{}, false
+	}
+	dc.mainIndex.mutex.RLock()
+	defer dc.mainIndex.mutex.RUnlock()
+	if dc.mainIndex.Data == nil {
+		return time.Time{}, false
+	}
+	header := (*indexHeader)(unsafe.Pointer(&dc.mainIndex.Data[0]))
+	if header.Version < TimestampMinVersion || header.Timestamp == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(int64(header.Timestamp), 0).UTC(), true
+}
+
 // initDirectoryCacheBase creates a partially-initialised DirectoryCache with
 // struct fields set but no I/O performed (no directory creation, no config loading).
 // Returns the DirectoryCache and the resolved dcfhDir (defaulted to rootDir if empty).
@@ -127,7 +147,7 @@ func initDirectoryCacheBase(rootDir, dcfhDir string) (*DirectoryCache, string) {
 		IndexFile:     filepath.Join(dcfhDir, ".dcfh", "main.idx"),
 		CacheFile:     filepath.Join(dcfhDir, ".dcfh", "cache.idx"),
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
-		version:       2,
+		version:       CurrentIndexVersion,
 		hasher:        sha1.New(),
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(dcfhDir),

@@ -13,20 +13,54 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-// indexHeader represents the file header in host byte order (cast directly to mmap'd memory)
+// indexHeader represents the file header in host byte order (cast directly to mmap'd memory).
+//
+// On-disk layout (64-bit little-endian):
+//
+//	Offset  Size  Field
+//	0       4     Signature      "dcfh"
+//	4       4     _Pad0          alignment padding for ByteOrder
+//	8       8     ByteOrder      0x0102030405060708
+//	16      4     Version        2 or 3
+//	20      4     EntryCount
+//	24      2     Flags
+//	26      2     ChecksumType
+//	28      64    Checksum       SHA-1/256/512 (v2 entry data starts at offset 88, inside unused tail)
+//	92      4     _Pad1          alignment padding for Timestamp (v3 only)
+//	96      8     Timestamp      Unix seconds (v3 only, not covered by checksum)
+//	---     ---   ---
+//	v2 total: 88 bytes used (entries start here; overlaps Checksum[60:64] + _Pad1)
+//	v3 total: 104 bytes
 type indexHeader struct {
-	Signature    [4]byte  // "dcfh" signature
-	ByteOrder    uint64   // Byte order detection magic (0x0102030405060708) - MUST be checked before other fields
-	Version      uint32   // Index version (host order)
-	EntryCount   uint32   // Number of entries (host order)
-	Flags        uint16   // Index flags (host order) - matches binaryEntry.EntryFlags size
-	ChecksumType uint16   // Checksum algorithm type (matches binaryEntry.HashType size)
-	Checksum     [64]byte // Checksum of header+entries (up to 512-bit support)
+	Signature    [4]byte  // offset 0:   "dcfh" signature
+	_Pad0        [4]byte  // offset 4:   alignment padding for ByteOrder
+	ByteOrder    uint64   // offset 8:   byte order detection magic - MUST be checked before other fields
+	Version      uint32   // offset 16:  index version (host order)
+	EntryCount   uint32   // offset 20:  number of entries (host order)
+	Flags        uint16   // offset 24:  index flags (host order)
+	ChecksumType uint16   // offset 26:  checksum algorithm type
+	Checksum     [64]byte // offset 28:  checksum of header+entries (up to 512-bit)
+	_Pad1        [4]byte  // offset 92:  alignment padding for Timestamp
+	Timestamp    uint64   // offset 96:  unix timestamp of last write (v3+, not covered by checksum)
+}
+
+// headerSizeForVersion returns the header size for a given index version.
+func headerSizeForVersion(version uint32) int {
+	if version <= 2 {
+		return V2HeaderSize
+	}
+	return HeaderSize
+}
+
+// HeaderSizeForVersion returns the header size for a given index version (exported for dcfhfix).
+func HeaderSizeForVersion(version uint32) int {
+	return headerSizeForVersion(version)
 }
 
 // mmapIndex represents a memory-mapped index file
@@ -37,14 +71,15 @@ type mmapIndex struct {
 
 // mmapIndexFile represents a wrapper for index file lifecycle management
 type mmapIndexFile struct {
-	File     *os.File     // File descriptor (nil for read-only main/cache indices)
-	Data     []byte       // Memory-mapped data
-	Size     int          // Current size of the mapping
-	Offset   int          // Current write offset for scan indices
-	Type     string       // Index type: "main", "cache", "scan"
-	FilePath string       // File path for debugging/cleanup
-	mutex    sync.RWMutex // Protects Data/Size during mremap operations
-	refCount int32        // Atomic reference counter for safe cleanup
+	File       *os.File     // File descriptor (nil for read-only main/cache indices)
+	Data       []byte       // Memory-mapped data
+	Size       int          // Current size of the mapping
+	Offset     int          // Current write offset for scan indices
+	Type       string       // Index type: "main", "cache", "scan"
+	FilePath   string       // File path for debugging/cleanup
+	headerSize int          // Version-dependent header size (V2HeaderSize or HeaderSize)
+	mutex      sync.RWMutex // Protects Data/Size during mremap operations
+	refCount   int32        // Atomic reference counter for safe cleanup
 }
 
 // Cleanup safely unmaps and closes the index file
@@ -108,12 +143,13 @@ func (ih *indexHeader) ValidateSignature(expected [4]byte) error {
 
 // ValidateVersion checks if the version is supported.
 // Pass expected=0 to accept any version (used by read-only tools like dcfhfind).
+// Otherwise accepts versions in range [MinIndexVersion, expected].
 func (ih *indexHeader) ValidateVersion(expected uint32) error {
 	if expected == 0 {
 		return nil
 	}
-	if ih.Version != expected {
-		return fmt.Errorf("unsupported version: got %d, expected %d", ih.Version, expected)
+	if ih.Version < MinIndexVersion || ih.Version > expected {
+		return fmt.Errorf("unsupported version: got %d, expected %d-%d", ih.Version, MinIndexVersion, expected)
 	}
 	return nil
 }
@@ -147,18 +183,28 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	if stat.Size() < HeaderSize {
+	if stat.Size() < int64(V2HeaderSize) {
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
-	// Memory map just the header for reading
-	data, err := unix.Mmap(int(file.Fd()), 0, HeaderSize, unix.PROT_READ, unix.MAP_PRIVATE)
+	// Mmap enough for a v3 header. For v2 files smaller than HeaderSize,
+	// mmap the file size — POSIX zero-fills beyond EOF for MAP_PRIVATE.
+	mmapSize := HeaderSize
+	if stat.Size() < int64(mmapSize) {
+		mmapSize = int(stat.Size())
+	}
+
+	// Memory map the header for reading
+	data, err := unix.Mmap(int(file.Fd()), 0, mmapSize, unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap file header: %w", err)
 	}
 	defer func() { _ = unix.Munmap(data) }()
 
-	// Get direct pointer to header in mmap'd memory (zero-copy)
+	// Get direct pointer to header in mmap'd memory (zero-copy).
+	// For v2 files where mmapSize < sizeof(indexHeader), the Timestamp field
+	// at the end of the struct may read beyond the mmap. This is safe because
+	// mmap rounds up to page size, and those bytes read as zero.
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 
 	// Verify header using the standard validation methods
@@ -199,18 +245,22 @@ func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) 
 	// Calculate expected checksum using same order as TempIndexWriter iterative approach
 	hasher := sha1.New()
 
+	// Entry data starts after the version-specific header
+	hdrSize := int64(headerSizeForVersion(header.Version))
+
 	// First: Hash entry data (matches TempIndexWriter.WriteIoVecBatch order)
-	entryDataSize := fileSize - HeaderSize
+	entryDataSize := fileSize - hdrSize
 	if entryDataSize > 0 {
 		// Read entry data
 		entryData := make([]byte, entryDataSize)
-		if _, err := file.ReadAt(entryData, HeaderSize); err != nil {
+		if _, err := file.ReadAt(entryData, hdrSize); err != nil {
 			return fmt.Errorf("failed to read entry data for checksum validation: %w", err)
 		}
 		hasher.Write(entryData)
 	}
 
-	// Second: Hash header up to checksum field (matches TempIndexWriter.Close order)
+	// Second: Hash header up to checksum field (matches TempIndexWriter.Close order).
+	// checksumOffset is the same for v2 and v3 (Timestamp is after Checksum).
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 	hasher.Write(headerBytes[:checksumOffset])
@@ -232,6 +282,7 @@ func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount u
 	ih.EntryCount = entryCount
 	ih.Flags = flags
 	ih.ChecksumType = checksumType
+	ih.Timestamp = uint64(time.Now().Unix())
 }
 
 // SetHeaderForWritableIndex initialises the header for write operations (scan/temp indices)
@@ -356,7 +407,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	if stat.Size() < HeaderSize {
+	if stat.Size() < int64(V2HeaderSize) {
 		_ = file.Close()
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
@@ -368,38 +419,41 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create mmapIndexFile wrapper
-	indexFile := &mmapIndexFile{
-		File:     file,
-		Data:     data,
-		Size:     int(stat.Size()),
-		Type:     "loaded", // Generic type for loaded indices
-		FilePath: filePath,
-	}
-
 	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 
-	// Verify header using helper methods in logical order
+	// Verify header; on failure, clean up both mmap and file
 	if err := header.ValidateSignature(dc.signature); err != nil {
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, err
 	}
 	if err := header.ValidateByteOrder(); err != nil {
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, err
 	}
 	if err := header.ValidateVersion(dc.version); err != nil {
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, err
 	}
 
-	// Check Clean flag to determine if we should trust the header checksum
+	hdrSize := headerSizeForVersion(header.Version)
+	indexFile := &mmapIndexFile{
+		File:       file,
+		Data:       data,
+		Size:       int(stat.Size()),
+		Type:       "loaded",
+		FilePath:   filePath,
+		headerSize: hdrSize,
+	}
+
 	isClean := (header.Flags & IndexFlagClean) != 0
 
 	if !isClean {
-		// File wasn't closed cleanly - header checksum is likely incorrect
-		// Skip checksum validation for recovery purposes
 		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
 	} else {
-		// File was closed cleanly - verify checksum from header
 		if err := dc.verifyHeaderChecksum(data, header); err != nil {
 			return nil, fmt.Errorf("checksum verification failed: %w", err)
 		}
@@ -408,7 +462,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, proces
 	// Parse entries with callback processing
 	var refs []binaryEntryRef
 	offset := 0
-	entryData := data[HeaderSize:]
+	entryData := data[hdrSize:]
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
@@ -632,7 +686,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	if stat.Size() < HeaderSize {
+	if stat.Size() < int64(V2HeaderSize) {
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
@@ -644,41 +698,40 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Create mmapIndexFile wrapper
-	indexFile := &mmapIndexFile{
-		File:     file,
-		Data:     data,
-		Size:     int(stat.Size()),
-		Type:     "loaded", // Will be updated by caller
-		FilePath: filePath,
-	}
-
-	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 
-	// Verify header using helper methods in logical order
+	// Verify header; on failure, clean up both mmap and file
 	if err := header.ValidateSignature(dc.signature); err != nil {
-		indexFile.DecRef()
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, nil, err
 	}
 	if err := header.ValidateByteOrder(); err != nil {
-		indexFile.DecRef()
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, nil, err
 	}
 	if err := header.ValidateVersion(dc.version); err != nil {
-		indexFile.DecRef()
+		_ = unix.Munmap(data)
+		_ = file.Close()
 		return nil, nil, err
 	}
 
-	// Check Clean flag to determine if we should trust the header checksum
+	hdrSize := headerSizeForVersion(header.Version)
+	indexFile := &mmapIndexFile{
+		File:       file,
+		Data:       data,
+		Size:       int(stat.Size()),
+		Type:       "loaded",
+		FilePath:   filePath,
+		headerSize: hdrSize,
+	}
+
 	isClean := (header.Flags & IndexFlagClean) != 0
 
 	if !isClean {
-		// File wasn't closed cleanly - header checksum is likely incorrect
-		// Skip checksum validation for recovery purposes
 		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
 	} else {
-		// File was closed cleanly - verify checksum from header
 		if err := dc.verifyHeaderChecksum(data, header); err != nil {
 			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
@@ -688,7 +741,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 	// Parse entries
 	var refs []binaryEntryRef
 	offset := 0
-	entryData := data[HeaderSize:]
+	entryData := data[hdrSize:]
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
@@ -774,7 +827,8 @@ func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader)
 	hasher.Reset()
 
 	// Hash entry data first (matches TempIndexWriter.WriteIoVecBatch)
-	entryData := data[HeaderSize:]
+	hdrSize := headerSizeForVersion(header.Version)
+	entryData := data[hdrSize:]
 	hasher.Write(entryData)
 
 	// Hash header fields before checksum field (matches TempIndexWriter.addHeaderToChecksum)
@@ -982,13 +1036,14 @@ func (dc *DirectoryCache) initialiseScanIndex(scanFileName string) error {
 
 	// Create scan index wrapper (keep file open)
 	dc.currentScan = &mmapIndexFile{
-		File:     file,
-		Data:     data,
-		Size:     initialSize,
-		Offset:   HeaderSize, // Start writing entries after header
-		Type:     "scan",
-		FilePath: scanFileName,
-		refCount: 1, // Start with ref count = 1 to prevent premature cleanup
+		File:       file,
+		Data:       data,
+		Size:       initialSize,
+		Offset:     HeaderSize, // Start writing entries after header
+		Type:       "scan",
+		FilePath:   scanFileName,
+		headerSize: HeaderSize,
+		refCount:   1, // Start with ref count = 1 to prevent premature cleanup
 	}
 
 	// Register the scan index for tracking
@@ -1062,12 +1117,13 @@ func (dc *DirectoryCache) InitializeFixIndex(fixFileName string) (*mmapIndexFile
 
 	// Create mmapIndexFile for fix index
 	fixInfo := &mmapIndexFile{
-		FilePath: fixFileName,
-		File:     file,
-		Data:     data,
-		Size:     initialSize,
-		Offset:   HeaderSize, // Start writing after header
-		Type:     "fix",
+		FilePath:   fixFileName,
+		File:       file,
+		Data:       data,
+		Size:       initialSize,
+		Offset:     HeaderSize, // Start writing after header
+		Type:       "fix",
+		headerSize: HeaderSize,
 	}
 
 	return fixInfo, nil

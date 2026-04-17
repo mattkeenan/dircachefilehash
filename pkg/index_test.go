@@ -93,17 +93,35 @@ func TestIndexHeader_ValidateByteOrder(t *testing.T) {
 
 func TestIndexHeader_ValidateVersion(t *testing.T) {
 	var header indexHeader
-	version := uint32(1)
-	header.Version = version
 
-	// Test valid version
-	if err := header.ValidateVersion(version); err != nil {
-		t.Errorf("Expected no error for valid version, got %v", err)
+	// Test current version passes
+	header.Version = CurrentIndexVersion
+	if err := header.ValidateVersion(CurrentIndexVersion); err != nil {
+		t.Errorf("Expected no error for current version, got %v", err)
 	}
 
-	// Test invalid version
-	if err := header.ValidateVersion(version + 1); err == nil {
-		t.Error("Expected error for invalid version")
+	// Test v2 (minimum supported) passes when expected is current
+	header.Version = 2
+	if err := header.ValidateVersion(CurrentIndexVersion); err != nil {
+		t.Errorf("Expected no error for v2 (min supported), got %v", err)
+	}
+
+	// Test version below minimum fails
+	header.Version = 1
+	if err := header.ValidateVersion(CurrentIndexVersion); err == nil {
+		t.Error("Expected error for version below minimum")
+	}
+
+	// Test version above expected fails
+	header.Version = CurrentIndexVersion + 1
+	if err := header.ValidateVersion(CurrentIndexVersion); err == nil {
+		t.Error("Expected error for version above expected")
+	}
+
+	// Test expected=0 accepts any version (dcfhfind compatibility)
+	header.Version = 999
+	if err := header.ValidateVersion(0); err != nil {
+		t.Errorf("Expected no error with expected=0, got %v", err)
 	}
 }
 

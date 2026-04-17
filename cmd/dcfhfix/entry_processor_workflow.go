@@ -12,8 +12,9 @@ import (
 func processAllEntriesWorkflow(data []byte, pathSet map[string]bool, field, value string, tmpIndexFile string, entriesFixed, entriesDiscarded *int, options *ParsedOptions) error {
 	// Extract header information
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
 	entryCount := header.EntryCount
-	entryData := data[dcfh.HeaderSize:]
+	entryData := data[hdrSize:]
 
 	offset := 0
 	unfixableEntryCount := 0

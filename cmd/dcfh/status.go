@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -56,6 +57,14 @@ since the last update operation.`,
 			return err
 		}
 
+		// Get "since" timestamp from index header (v3+) or file mtime (v2 fallback)
+		sinceStr := ""
+		if ts, ok := cache.IndexTimestamp(); ok {
+			sinceStr = ts.Format(time.RFC3339)
+		} else if info, err := os.Stat(cache.IndexFile); err == nil {
+			sinceStr = info.ModTime().UTC().Format(time.RFC3339)
+		}
+
 		format := getOutputFormat()
 		if format == OutputJSON {
 			fileCount := cache.Length()
@@ -73,6 +82,7 @@ since the last update operation.`,
 					AddedBytes:    status.AddedBytes,
 					DeletedBytes:  status.DeletedBytes,
 					HasChanges:    status.HasChanges(),
+					Since:         sinceStr,
 				},
 				IndexInfo: IndexInfo{
 					FileCount: fileCount,
@@ -94,7 +104,11 @@ since the last update operation.`,
 		if !status.HasChanges() {
 			fmt.Println("Nothing to commit, working tree clean")
 			fileCount := cache.Length()
-			fmt.Printf("Index contains %d files\n", fileCount)
+			if sinceStr != "" {
+				fmt.Printf("Index contains %d files since %s\n", fileCount, sinceStr)
+			} else {
+				fmt.Printf("Index contains %d files\n", fileCount)
+			}
 			return nil
 		}
 
@@ -128,10 +142,15 @@ since the last update operation.`,
 			fmt.Println()
 		}
 
-		fmt.Printf("Summary: %d modified (%s), %d added (%s), %d deleted (%s)\n",
+		sinceSuffix := ""
+		if sinceStr != "" {
+			sinceSuffix = " since " + sinceStr
+		}
+		fmt.Printf("Summary: %d modified (%s), %d added (%s), %d deleted (%s)%s\n",
 			len(status.Modified), formatFileSize(status.ModifiedBytes),
 			len(status.Added), formatFileSize(status.AddedBytes),
-			len(status.Deleted), formatFileSize(status.DeletedBytes))
+			len(status.Deleted), formatFileSize(status.DeletedBytes),
+			sinceSuffix)
 
 		return nil
 	},

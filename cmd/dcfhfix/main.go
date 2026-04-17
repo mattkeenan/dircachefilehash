@@ -516,7 +516,7 @@ func openIndexFile(filePath string) (*indexFileAccess, error) {
 		return nil, fmt.Errorf("failed to stat file: %v", err)
 	}
 
-	if stat.Size() < int64(dircachefilehash.HeaderSize) {
+	if stat.Size() < int64(dircachefilehash.V2HeaderSize) {
 		_ = file.Close()
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
@@ -1515,7 +1515,7 @@ func loadIndexIntoSkiplist(indexFile string) (*EntryData, error) {
 	}
 
 	// Validate minimum size
-	if len(data) < dircachefilehash.HeaderSize {
+	if len(data) < dircachefilehash.V2HeaderSize {
 		return nil, fmt.Errorf("index file too small: %d bytes", len(data))
 	}
 
@@ -1599,9 +1599,11 @@ func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customH
 		return fmt.Errorf("failed to write header: %w", err)
 	}
 
-	// Write original entry data (skip original header)
-	if len(entryData.OriginalData) > dircachefilehash.HeaderSize {
-		entryBytes := entryData.OriginalData[dircachefilehash.HeaderSize:]
+	// Write original entry data (skip original header using its version)
+	origHeader := (*indexHeader)(unsafe.Pointer(&entryData.OriginalData[0]))
+	origHdrSize := dircachefilehash.HeaderSizeForVersion(origHeader.Version)
+	if len(entryData.OriginalData) > origHdrSize {
+		entryBytes := entryData.OriginalData[origHdrSize:]
 		if _, err := file.Write(entryBytes); err != nil {
 			return fmt.Errorf("failed to write entries: %w", err)
 		}

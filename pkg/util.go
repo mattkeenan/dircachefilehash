@@ -332,7 +332,7 @@ func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
 	}
 
 	// Calculate pointer from base + header size + offset
-	entryPtr := uintptr(unsafe.Pointer(&ref.IndexFile.Data[0])) + HeaderSize + uintptr(ref.Offset)
+	entryPtr := uintptr(unsafe.Pointer(&ref.IndexFile.Data[0])) + uintptr(ref.IndexFile.headerSize) + uintptr(ref.Offset)
 	return (*binaryEntry)(unsafe.Pointer(entryPtr)) //nolint:govet // intentional pointer arithmetic for mmap path extraction
 }
 
@@ -352,7 +352,7 @@ func createBinaryEntryRef(entry *binaryEntry, indexFile *mmapIndexFile) binaryEn
 
 	// Calculate offset from base of entry data (after header)
 	entryPtr := uintptr(unsafe.Pointer(entry))
-	basePtr := uintptr(unsafe.Pointer(&indexFile.Data[0])) + HeaderSize
+	basePtr := uintptr(unsafe.Pointer(&indexFile.Data[0])) + uintptr(indexFile.headerSize)
 	offset := int(entryPtr - basePtr)
 
 	return binaryEntryRef{

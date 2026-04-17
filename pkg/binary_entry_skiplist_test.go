@@ -45,9 +45,10 @@ func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterfac
 
 	// Create mock mmap index file
 	mockIndexFile := &mmapIndexFile{
-		Data:  indexData,
-		Size:  indexSize,
-		mutex: sync.RWMutex{},
+		Data:       indexData,
+		Size:       indexSize,
+		headerSize: HeaderSize,
+		mutex:      sync.RWMutex{},
 	}
 
 	// Create the entry within the index file data (after header)
@@ -160,9 +161,10 @@ func testSkiplistIterationAllPathLengths(t *testing.T) {
 
 	// Create mock mmap index file
 	mockIndexFile := &mmapIndexFile{
-		Data:  indexData,
-		Size:  indexSize,
-		mutex: sync.RWMutex{},
+		Data:       indexData,
+		Size:       indexSize,
+		headerSize: HeaderSize,
+		mutex:      sync.RWMutex{},
 	}
 
 	// Populate each entry in the buffer

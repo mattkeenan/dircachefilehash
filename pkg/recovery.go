@@ -593,7 +593,7 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	if stat.Size() < HeaderSize {
+	if stat.Size() < int64(V2HeaderSize) {
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
@@ -633,7 +633,7 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 
 	// Parse entries and apply fixes
 	offset := 0
-	entryData := data[HeaderSize:]
+	entryData := data[headerSizeForVersion(header.Version):]
 	validEntryCount := 0
 	fixesApplied := 0
 
@@ -703,12 +703,13 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 
 			// Create skiplist reference to the clean copy
 			recoveryIndexFile := &mmapIndexFile{
-				File:     nil,
-				Data:     nil,
-				Size:     0,
-				Offset:   int(cleanOffset),
-				Type:     "recovery",
-				FilePath: recoveryIndexPath,
+				File:       nil,
+				Data:       nil,
+				Size:       0,
+				Offset:     int(cleanOffset),
+				Type:       "recovery",
+				FilePath:   recoveryIndexPath,
+				headerSize: headerSizeForVersion(header.Version),
 			}
 
 			cleanEntryRef := binaryEntryRef{

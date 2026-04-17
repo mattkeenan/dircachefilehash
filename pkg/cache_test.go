@@ -82,8 +82,8 @@ func TestCacheSystem(t *testing.T) {
 		stat, err := os.Stat(cacheFile)
 		if err != nil {
 			t.Errorf("Cache file should exist after status: %v", err)
-		} else if stat.Size() <= 88 { // Header is 88 bytes, should have more content
-			t.Errorf("Cache file too small: %d bytes (should be > 88)", stat.Size())
+		} else if stat.Size() <= int64(HeaderSize) {
+			t.Errorf("Cache file too small: %d bytes (should be > %d)", stat.Size(), HeaderSize)
 		}
 	})
 
@@ -123,8 +123,8 @@ func TestCacheSystem(t *testing.T) {
 		stat, err := os.Stat(mainFile)
 		if err != nil {
 			t.Errorf("Main index should exist after update: %v", err)
-		} else if stat.Size() <= 88 {
-			t.Errorf("Main index too small: %d bytes", stat.Size())
+		} else if stat.Size() <= int64(HeaderSize) {
+			t.Errorf("Main index too small: %d bytes (should be > %d)", stat.Size(), HeaderSize)
 		}
 	})
 

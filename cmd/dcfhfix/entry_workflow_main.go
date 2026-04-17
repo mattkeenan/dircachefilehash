@@ -18,7 +18,7 @@ func processEntriesWithWorkflow(indexFile string, pathSet map[string]bool, field
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}
 
-	if len(data) < dcfh.HeaderSize {
+	if len(data) < dcfh.V2HeaderSize {
 		return 0, 0, fmt.Errorf("index file too small: %d bytes", len(data))
 	}
 
@@ -67,9 +67,12 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 	}
 	defer func() { _ = file.Close() }()
 
+	// Determine header size from version in the original data
+	header := (*indexHeader)(unsafe.Pointer(&originalData[0]))
+	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
+
 	// Copy the header from the original file
-	// TODO: This should update entry count as we process entries
-	_, err = file.Write(originalData[:dcfh.HeaderSize])
+	_, err = file.Write(originalData[:hdrSize])
 	if err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
@@ -93,7 +96,7 @@ func finalizeTempIndex(tmpIndexFile string) error {
 	}
 	fileSize := stat.Size()
 
-	if fileSize < dcfh.HeaderSize {
+	if fileSize < int64(dcfh.V2HeaderSize) {
 		return fmt.Errorf("temp index file too small: %d bytes", fileSize)
 	}
 
@@ -103,11 +106,12 @@ func finalizeTempIndex(tmpIndexFile string) error {
 		return fmt.Errorf("failed to read temp index file: %v", err)
 	}
 
-	// Get header
+	// Get header and determine version-dependent header size
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
+	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
 
 	// Count actual entries by parsing the file
-	entryData := data[dcfh.HeaderSize:]
+	entryData := data[hdrSize:]
 	var actualEntryCount uint32
 	offset := 0
 
@@ -148,7 +152,7 @@ func finalizeTempIndex(tmpIndexFile string) error {
 	copy(header.Checksum[:], checksumBytes)
 
 	// Write the updated header back to file
-	if _, err := file.WriteAt(data[:dcfh.HeaderSize], 0); err != nil {
+	if _, err := file.WriteAt(data[:hdrSize], 0); err != nil {
 		return fmt.Errorf("failed to write updated header: %v", err)
 	}
 

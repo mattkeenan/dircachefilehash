@@ -22,10 +22,20 @@ const (
 )
 
 // Header and file format constants
+//
+// See indexHeader struct in index.go for the full on-disk layout diagram.
+// Sizes account for explicit alignment padding fields (_Pad0, _Pad1).
 const (
-	HeaderSize          = 88 // signature(4) + byte_order(8) + version(4) + entry_count(4) + flags(2) + checksum_type(2) + checksum(64)
-	ChecksumSize        = 64 // Maximum checksum size (512 bits)
-	CurrentIndexVersion = 2  // Current index file format version
+	// V2HeaderSize is 88 bytes — this is technically a bug: the full v2 struct
+	// is 96 bytes (including tail padding), so entry data starts 8 bytes inside
+	// the Checksum[60:64] + struct padding region. This works because SHA-1 (20 bytes)
+	// and SHA-256 (32 bytes) never use Checksum[60:]. Shipped in v2, now frozen.
+	V2HeaderSize        = 88  // see comment above
+	HeaderSize          = 104 // v2 fields + checksum(4 remaining) + pad(4) + timestamp(8)
+	ChecksumSize        = 64  // Maximum checksum size (512 bits)
+	CurrentIndexVersion = 3   // Current index file format version
+	MinIndexVersion     = 2   // Minimum supported index version
+	TimestampMinVersion = 3   // First version with Timestamp field in header
 )
 
 // Byte order magic for file format validation
