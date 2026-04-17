@@ -64,6 +64,38 @@ if command -v golangci-lint &>/dev/null; then
     fi
 fi
 
+# Run govulncheck for known vulnerabilities in dependencies.
+if command -v govulncheck &>/dev/null; then
+    echo "Running govulncheck..."
+    if ! govulncheck ./... 2>&1; then
+        echo "ERROR: govulncheck found vulnerabilities"
+        exit 1
+    fi
+fi
+
+# Run gocyclo to catch high-complexity functions early.
+# Threshold 25: flags the worst offenders without blocking existing algorithmic code.
+if command -v gocyclo &>/dev/null; then
+    echo "Running gocyclo..."
+    CYCLO_OUTPUT=$(gocyclo -over 25 . 2>&1 | grep -v _test.go || true)
+    if [ -n "$CYCLO_OUTPUT" ]; then
+        echo "WARNING: High cyclomatic complexity (>25) in non-test code:"
+        echo "$CYCLO_OUTPUT"
+        # Warn but don't block — complexity in algorithmic code is sometimes unavoidable.
+    fi
+fi
+
+# Run godot on staged files only (861 existing violations; enforce on new/modified code).
+if command -v godot &>/dev/null; then
+    echo "Running godot..."
+    GODOT_OUTPUT=$(echo "$STAGED_GO_FILES" | xargs godot 2>&1 || true)
+    if [ -n "$GODOT_OUTPUT" ]; then
+        echo "WARNING: Comments should end in a period:"
+        echo "$GODOT_OUTPUT"
+        # Warn but don't block — existing code has many violations.
+    fi
+fi
+
 # Run go test with race detector.
 # Disable checkptr: this codebase uses intentional unsafe.Pointer arithmetic
 # for mmap/zero-copy operations that checkptr incorrectly flags as invalid.
