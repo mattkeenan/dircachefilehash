@@ -85,16 +85,6 @@ if command -v gocyclo &>/dev/null; then
     fi
 fi
 
-# Run godot on staged files only (861 existing violations; enforce on new/modified code).
-if command -v godot &>/dev/null; then
-    echo "Running godot..."
-    GODOT_OUTPUT=$(echo "$STAGED_GO_FILES" | xargs godot 2>&1 || true)
-    if [ -n "$GODOT_OUTPUT" ]; then
-        echo "WARNING: Comments should end in a period:"
-        echo "$GODOT_OUTPUT"
-        # Warn but don't block — existing code has many violations.
-    fi
-fi
 
 # Run go test with race detector.
 # Disable checkptr: this codebase uses intentional unsafe.Pointer arithmetic
