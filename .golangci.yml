@@ -1,0 +1,46 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  default: standard
+  enable:
+    - bidichk        # dangerous unicode sequences
+    - copyloopvar    # loop variable capture bugs
+    - durationcheck  # duration multiplication mistakes
+    - errname        # sentinel error naming conventions
+    - errorlint      # error wrapping best practices
+    - gocritic       # broad set of style and correctness checks
+    - misspell       # spelling mistakes in comments/strings
+    - nilerr         # returning nil when err is not nil
+    - prealloc       # suggest preallocating slices
+    - unconvert      # unnecessary type conversions
+    - unparam        # unused function parameters
+    - usestdlibvars  # use stdlib constants (http.StatusOK, etc.)
+    - wastedassign   # assignments that are never read
+
+  settings:
+    govet:
+      disable:
+        - unsafeptr  # intentional unsafe.Pointer arithmetic for mmap/zero-copy
+
+    gocritic:
+      disabled-checks:
+        - ifElseChain  # too opinionated for algorithmic code with clear branch logic
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # dcfhfix uses %v intentionally in some error paths (repair tool, errors not wrapped).
+      - linters: [errorlint]
+        path: cmd/dcfhfix/
+        text: "non-wrapping format verb"
+      # Test code: direct error comparison and type assertions are fine for sentinel errors.
+      - linters: [errorlint]
+        path: _test\.go
+
+formatters:
+  enable:
+    - gofmt

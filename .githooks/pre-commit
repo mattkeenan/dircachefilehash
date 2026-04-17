@@ -55,10 +55,10 @@ if ! go vet -unsafeptr=false ./...; then
     exit 1
 fi
 
-# Run golangci-lint
+# Run golangci-lint (--new: only flag issues in changed code, not legacy).
 if command -v golangci-lint &>/dev/null; then
     echo "Running golangci-lint..."
-    if ! golangci-lint run ./...; then
+    if ! golangci-lint run --new ./...; then
         echo "ERROR: golangci-lint found issues"
         exit 1
     fi
