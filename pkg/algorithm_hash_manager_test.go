@@ -382,7 +382,7 @@ func createTestDirectoryCache(t *testing.T, testDir string) *DirectoryCache {
 
 // Helper function to create test hash jobs
 func createTestHashJobs(t *testing.T, _ *DirectoryCache, filePaths []string) []*hashJobStart {
-	var jobs []*hashJobStart
+	jobs := make([]*hashJobStart, 0, len(filePaths))
 
 	for i, filePath := range filePaths {
 		// Get file info for the test file

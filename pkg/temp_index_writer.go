@@ -105,7 +105,7 @@ func (tiw *TempIndexWriter) writePlaceholderHeader() error {
 	}
 
 	// Write header using vectorio
-	if nw, err := vectorio.WritevRaw(uintptr(tiw.file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
+	if nw, err := vectorio.WritevRaw(tiw.file.Fd(), []syscall.Iovec{headerIovec}); err != nil {
 		return fmt.Errorf("failed to write placeholder header with vectorio: %w", err)
 	} else if nw != HeaderSize {
 		return fmt.Errorf("placeholder header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
@@ -121,10 +121,7 @@ func (tiw *TempIndexWriter) writeEntriesWithVectorIO(entryIovecs []syscall.Iovec
 	}
 
 	// Get system IOV_MAX limit for chunking
-	maxIovecs, err := getSystemIOVMax()
-	if err != nil {
-		return fmt.Errorf("failed to get system IOV_MAX: %w", err)
-	}
+	maxIovecs := getSystemIOVMax()
 
 	// Calculate expected total size for verification
 	expectedTotal := 0
@@ -141,7 +138,7 @@ func (tiw *TempIndexWriter) writeEntriesWithVectorIO(entryIovecs []syscall.Iovec
 		// Use slice without copying to avoid allocation
 		chunk := entryIovecs[offset:end]
 
-		if nw, err := vectorio.WritevRaw(uintptr(tiw.file.Fd()), chunk); err != nil {
+		if nw, err := vectorio.WritevRaw(tiw.file.Fd(), chunk); err != nil {
 			return fmt.Errorf("failed to write entries chunk with vectorio: %w", err)
 		} else {
 			totalWritten += nw
@@ -182,9 +179,7 @@ func (tiw *TempIndexWriter) Close() error {
 	header.setClean()
 
 	// Add header fields (excluding checksum) to running checksum
-	if err := tiw.addHeaderToChecksum(&header); err != nil {
-		return fmt.Errorf("failed to add header to checksum: %w", err)
-	}
+	tiw.addHeaderToChecksum(&header)
 
 	// Finalize checksum and store in header
 	finalChecksum := tiw.checksumWriter.Sum(nil)
@@ -200,7 +195,7 @@ func (tiw *TempIndexWriter) Close() error {
 		Len:  uint64(HeaderSize),
 	}
 
-	if nw, err := vectorio.WritevRaw(uintptr(tiw.file.Fd()), []syscall.Iovec{headerIovec}); err != nil {
+	if nw, err := vectorio.WritevRaw(tiw.file.Fd(), []syscall.Iovec{headerIovec}); err != nil {
 		return fmt.Errorf("failed to write final header with vectorio: %w", err)
 	} else if nw != HeaderSize {
 		return fmt.Errorf("final header write incomplete: wrote %d bytes, expected %d", nw, HeaderSize)
@@ -215,15 +210,13 @@ func (tiw *TempIndexWriter) Close() error {
 }
 
 // addHeaderToChecksum adds header fields (excluding checksum field) to running checksum
-func (tiw *TempIndexWriter) addHeaderToChecksum(header *indexHeader) error {
+func (tiw *TempIndexWriter) addHeaderToChecksum(header *indexHeader) {
 	// Serialize header WITHOUT checksum field (following existing pattern from index.go)
 	headerBytes := (*[HeaderSize]byte)(unsafe.Pointer(header))
 	checksumOffset := unsafe.Offsetof(header.Checksum)
 
 	// Add header fields (up to but not including checksum) to running checksum
 	tiw.checksumWriter.Write(headerBytes[:checksumOffset])
-
-	return nil
 }
 
 // WriteSerialised writes pre-serialised entry data to the temp index.

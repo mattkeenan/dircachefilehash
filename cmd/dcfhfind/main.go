@@ -53,11 +53,7 @@ func main() {
 	}
 
 	// Execute the find operation
-	err = executeFind(indexFiles, args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dcfhfind: %v\n", err)
-		os.Exit(1)
-	}
+	executeFind(indexFiles, args)
 }
 
 func showUsage() {
@@ -487,7 +483,7 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 			return nil, fmt.Errorf("--size requires a size specification")
 		}
 		sizeSpec := p.next()
-		expr, _, err := parseSizeTest(sizeSpec)
+		expr, err := parseSizeTest(sizeSpec)
 		return expr, err
 
 	case "--empty":
@@ -600,9 +596,9 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 	}
 }
 
-func parseSizeTest(sizeSpec string) (Expression, int, error) {
+func parseSizeTest(sizeSpec string) (Expression, error) {
 	if len(sizeSpec) == 0 {
-		return nil, 0, fmt.Errorf("empty size specification")
+		return nil, fmt.Errorf("empty size specification")
 	}
 
 	var mode string
@@ -622,7 +618,7 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 	}
 
 	if len(sizeStr) == 0 {
-		return nil, 0, fmt.Errorf("size specification missing numeric value")
+		return nil, fmt.Errorf("size specification missing numeric value")
 	}
 
 	// Parse unit suffix
@@ -663,7 +659,7 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 	}
 
 	if len(numStr) == 0 {
-		return nil, 0, fmt.Errorf("size specification missing numeric value")
+		return nil, fmt.Errorf("size specification missing numeric value")
 	}
 
 	// Parse the numeric part
@@ -675,23 +671,23 @@ func parseSizeTest(sizeSpec string) (Expression, int, error) {
 		var floatSize float64
 		floatSize, err = strconv.ParseFloat(numStr, 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid size number: %s", numStr)
+			return nil, fmt.Errorf("invalid size number: %s", numStr)
 		}
 		size = int64(floatSize * float64(multiplier))
 	} else {
 		var intSize int64
 		intSize, err = strconv.ParseInt(numStr, 10, 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid size number: %s", numStr)
+			return nil, fmt.Errorf("invalid size number: %s", numStr)
 		}
 		size = intSize * multiplier
 	}
 
 	if size < 0 {
-		return nil, 0, fmt.Errorf("size cannot be negative")
+		return nil, fmt.Errorf("size cannot be negative")
 	}
 
-	return &SizeTest{Size: size, Mode: mode}, 2, nil
+	return &SizeTest{Size: size, Mode: mode}, nil
 }
 
 func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
@@ -850,7 +846,7 @@ func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFil
 	return result, nil
 }
 
-func executeFind(indexFiles []IndexFile, args *Arguments) error {
+func executeFind(indexFiles []IndexFile, args *Arguments) {
 	for _, indexFile := range indexFiles {
 		err := processIndexFile(indexFile, args)
 		if err != nil {
@@ -860,7 +856,6 @@ func executeFind(indexFiles []IndexFile, args *Arguments) error {
 			continue
 		}
 	}
-	return nil
 }
 
 func processIndexFile(indexFile IndexFile, args *Arguments) error {

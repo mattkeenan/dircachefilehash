@@ -137,7 +137,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 	// Otherwise, discover repository and resolve index type
 	repoRoot, err := FindRepositoryRootFrom("")
 	if err != nil {
-		return "", fmt.Errorf("not in a dcfh repository: %v", err)
+		return "", fmt.Errorf("not in a dcfh repository: %w", err)
 	}
 
 	dcfhDir := filepath.Join(repoRoot, ".dcfh")

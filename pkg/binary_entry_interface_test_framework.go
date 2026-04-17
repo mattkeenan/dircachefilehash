@@ -53,7 +53,7 @@ func CreateTestData() *TestEntryData {
 		UID:          1000,
 		GID:          1000,
 		FileSize:     1024,
-		HashType:     uint16(HashTypeSHA1),
+		HashType:     HashTypeSHA1,
 		Hash:         [20]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67},
 		EntryFlags:   0,
 		IsDeleted:    false,
@@ -265,7 +265,7 @@ func (suite *BinaryEntryTestSuite) TestConcurrentAccess(t *testing.T) {
 			for range numOperations {
 				// Test concurrent read access
 				if path, err := entry.RelativePath(); err != nil {
-					errors <- fmt.Errorf("concurrent RelativePath() error: %v", err)
+					errors <- fmt.Errorf("concurrent RelativePath() error: %w", err)
 					return
 				} else if path != testData.RelativePath {
 					errors <- fmt.Errorf("concurrent RelativePath() = %q, want %q", path, testData.RelativePath)
@@ -299,7 +299,7 @@ func (suite *BinaryEntryTestSuite) TestHashUpdates(t *testing.T) {
 
 	// Test hash update (20-byte hash matches SHA1 type)
 	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := uint16(HashTypeSHA1)
+	newHashType := HashTypeSHA1
 
 	if err := entry.SetHash(newHash[:], newHashType); err != nil {
 		t.Errorf("SetHash() returned error: %v", err)

@@ -50,20 +50,20 @@ func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 	// Open file for this specific read operation
 	file, err := os.Open(ife.filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open index file %s: %v", ife.filePath, err)
+		return nil, fmt.Errorf("failed to open index file %s: %w", ife.filePath, err)
 	}
 	defer func() { _ = file.Close() }()
 
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
-		return nil, fmt.Errorf("failed to seek to entry position %d: %v", ife.fileOffset, err)
+		return nil, fmt.Errorf("failed to seek to entry position %d: %w", ife.fileOffset, err)
 	}
 
 	// Read the entry data
 	entryData := make([]byte, ife.entrySize)
 	n, err := file.Read(entryData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read entry data: %v", err)
+		return nil, fmt.Errorf("failed to read entry data: %w", err)
 	}
 	if n != int(ife.entrySize) {
 		return nil, fmt.Errorf("incomplete read: got %d bytes, expected %d", n, ife.entrySize)
@@ -86,20 +86,20 @@ func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 	// Open file for this specific write operation
 	file, err := os.OpenFile(ife.filePath, os.O_RDWR, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to open index file for writing %s: %v", ife.filePath, err)
+		return fmt.Errorf("failed to open index file for writing %s: %w", ife.filePath, err)
 	}
 	defer func() { _ = file.Close() }()
 
 	// Seek to the entry position
 	if _, err := file.Seek(ife.fileOffset, 0); err != nil {
-		return fmt.Errorf("failed to seek to entry position %d: %v", ife.fileOffset, err)
+		return fmt.Errorf("failed to seek to entry position %d: %w", ife.fileOffset, err)
 	}
 
 	// Write the entry data
 	entryData := (*[512]byte)(unsafe.Pointer(entry))[:ife.entrySize:ife.entrySize]
 	n, err := file.Write(entryData)
 	if err != nil {
-		return fmt.Errorf("failed to write entry data: %v", err)
+		return fmt.Errorf("failed to write entry data: %w", err)
 	}
 	if n != int(ife.entrySize) {
 		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", n, ife.entrySize)
@@ -107,7 +107,7 @@ func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 
 	// Sync to ensure data is written
 	if err := file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync entry data: %v", err)
+		return fmt.Errorf("failed to sync entry data: %w", err)
 	}
 
 	return nil

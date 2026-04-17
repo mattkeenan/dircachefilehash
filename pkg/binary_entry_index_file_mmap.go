@@ -361,7 +361,7 @@ func LoadIndexFileMmap(filePath string, dc *DirectoryCache) (*mmapIndexFile, err
 	// Use the existing infrastructure to load the index file
 	_, indexFile, err := dc.loadIndexFromFileWithTracking(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load index file %s: %v", filePath, err)
+		return nil, fmt.Errorf("failed to load index file %s: %w", filePath, err)
 	}
 
 	return indexFile, nil

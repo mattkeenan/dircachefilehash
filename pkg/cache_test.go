@@ -201,7 +201,7 @@ func TestCachePortability(t *testing.T) {
 	// Test that struct size calculation is consistent
 	var be binaryEntry
 	structSize := uintptr(136) // Expected size from structlayout
-	actualSize := uintptr(unsafe.Sizeof(be))
+	actualSize := unsafe.Sizeof(be)
 
 	if actualSize != structSize {
 		t.Errorf("Binary entry struct size changed: expected %d, got %d", structSize, actualSize)

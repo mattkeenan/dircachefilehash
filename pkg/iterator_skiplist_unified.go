@@ -59,10 +59,8 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 	if !bsi.started {
 		bsi.cursor = bsi.skiplist.skiplist.First()
 		bsi.started = true
-	} else {
-		if bsi.cursor != nil {
-			bsi.cursor = bsi.cursor.Next()
-		}
+	} else if bsi.cursor != nil {
+		bsi.cursor = bsi.cursor.Next()
 	}
 
 	if bsi.cursor == nil {

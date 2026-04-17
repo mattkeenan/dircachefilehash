@@ -12,7 +12,7 @@ import (
 )
 
 // Test helper to create mock entry
-func createMockEntry(path string, size uint64, mTimeWall uint64, deleted bool) *dircachefilehash.EntryInfo {
+func createMockEntry(path string, size uint64, deleted bool) *dircachefilehash.EntryInfo {
 	return &dircachefilehash.EntryInfo{
 		Path:      path,
 		IsDeleted: deleted,
@@ -21,8 +21,8 @@ func createMockEntry(path string, size uint64, mTimeWall uint64, deleted bool) *
 		UID:       1000,
 		GID:       1000,
 		Dev:       123,
-		MTimeWall: mTimeWall,
-		CTimeWall: mTimeWall,
+		MTimeWall: 0,
+		CTimeWall: 0,
 		HashStr:   "abc123def456",
 		HashType:  1, // SHA1
 	}
@@ -76,7 +76,7 @@ func TestParseSizeTest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			expr, _, err := parseSizeTest(tt.input)
+			expr, err := parseSizeTest(tt.input)
 
 			if tt.wantErr {
 				if err == nil {
@@ -194,7 +194,7 @@ func TestParseTimeTest(t *testing.T) {
 
 // Test expression evaluation
 func TestExpressionEvaluation(t *testing.T) {
-	entry := createMockEntry("test.go", 1024, 0, false)
+	entry := createMockEntry("test.go", 1024, false)
 	context := createMockContext()
 
 	tests := []struct {
@@ -275,7 +275,7 @@ func TestExpressionEvaluation(t *testing.T) {
 
 // Test logical operators
 func TestLogicalOperators(t *testing.T) {
-	entry := createMockEntry("test.go", 1024, 0, false)
+	entry := createMockEntry("test.go", 1024, false)
 	context := createMockContext()
 
 	tests := []struct {
@@ -617,7 +617,7 @@ func BenchmarkParseArguments(b *testing.B) {
 }
 
 func BenchmarkExpressionEvaluation(b *testing.B) {
-	entry := createMockEntry("test.go", 1048576, 0, false)
+	entry := createMockEntry("test.go", 1048576, false)
 	context := createMockContext()
 
 	expr := &AndExpression{

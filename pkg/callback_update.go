@@ -509,10 +509,8 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 					remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
 					VerboseLog(3, "[HASH-COMPLETE] Entry added to retireSkiplist, remaining jobs: %d", remainingJobs)
 				}
-			} else {
-				if IsDebugEnabled("hash") {
-					VerboseLog(1, "[HASH-COMPLETE] WARNING: Received completion for unknown pathOrderID: %d (job counted as complete)", pathOrderID)
-				}
+			} else if IsDebugEnabled("hash") {
+				VerboseLog(1, "[HASH-COMPLETE] WARNING: Received completion for unknown pathOrderID: %d (job counted as complete)", pathOrderID)
 			}
 			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Completed processing completion %d, looping back...\n", completionCount)
 		default:
@@ -746,10 +744,8 @@ func (uc *UpdateCallback) retireContiguousEntries() error {
 			delete(uc.pathOrderToEntry, startIndex+uint64(i))
 		}
 		// retiredEntries goes out of scope here, allowing GC
-	} else {
-		if IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")
-		}
+	} else if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")
 	}
 
 	return nil

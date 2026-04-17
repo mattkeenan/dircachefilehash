@@ -597,7 +597,7 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 	// Create backup before editing
 	description := fmt.Sprintf("Edit header.%s = %s", field, value)
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "header-edit", description, options)
+		err := createBackup(indexFile, "header-edit", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -689,7 +689,7 @@ func headerEditJSON(indexFile string, jsonData string, options *ParsedOptions) e
 	}
 
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "header-edit-json", description, options)
+		err := createBackup(indexFile, "header-edit-json", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -774,7 +774,7 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 	description := fmt.Sprintf("Edit entry.%s = %s for %s", field, value, pathsDesc)
 
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "entry-edit", description, options)
+		err := createBackup(indexFile, "entry-edit", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -874,7 +874,7 @@ func entryEditJSON(indexFile string, jsonData string, paths []string, options *P
 	description := fmt.Sprintf("Edit entries with JSON %s for %s", jsonDesc, pathsDesc)
 
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "entry-edit-json", description, options)
+		err := createBackup(indexFile, "entry-edit-json", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -892,7 +892,7 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 	description := fmt.Sprintf("Append entry: %s", jsonDesc)
 
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "entry-append", description, options)
+		err := createBackup(indexFile, "entry-append", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -935,7 +935,7 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 	description := fmt.Sprintf("Remove entries: %s", pathsDesc)
 
 	if !options.GetBool("dry-run") {
-		_, err := createBackup(indexFile, "entry-remove", description, options)
+		err := createBackup(indexFile, "entry-remove", description, options)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
@@ -1015,19 +1015,19 @@ func getBackupDir(indexFile string) (string, error) {
 }
 
 // createBackup creates a backup of the index file and returns the backup metadata
-func createBackup(indexFile string, operation string, description string, options *ParsedOptions) (*BackupMetadata, error) {
+func createBackup(indexFile string, operation string, description string, options *ParsedOptions) error {
 	if !options.GetBool("backup") {
-		return nil, nil // backup disabled
+		return nil // backup disabled
 	}
 
 	backupDir, err := getBackupDir(indexFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find backup directory: %v", err)
+		return fmt.Errorf("failed to find backup directory: %v", err)
 	}
 
 	// Create backup directory if it doesn't exist
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create backup directory: %v", err)
+		return fmt.Errorf("failed to create backup directory: %v", err)
 	}
 
 	// Generate backup filename with timestamp
@@ -1037,7 +1037,7 @@ func createBackup(indexFile string, operation string, description string, option
 
 	// Copy the index file to backup location
 	if err := copyFile(indexFile, backupPath); err != nil {
-		return nil, fmt.Errorf("failed to create backup: %v", err)
+		return fmt.Errorf("failed to create backup: %v", err)
 	}
 
 	// Create metadata
@@ -1054,14 +1054,14 @@ func createBackup(indexFile string, operation string, description string, option
 	if err := saveMetadata(metadata, metadataPath); err != nil {
 		// Remove the backup file if metadata save fails
 		_ = os.Remove(backupPath)
-		return nil, fmt.Errorf("failed to save backup metadata: %v", err)
+		return fmt.Errorf("failed to save backup metadata: %v", err)
 	}
 
 	if options.GetInt("verbose") > 0 && !options.GetBool("quiet") {
 		fmt.Printf("Created backup: %s\n", backupFilename)
 	}
 
-	return metadata, nil
+	return nil
 }
 
 // copyFile copies a file from src to dst
@@ -1551,7 +1551,7 @@ func getIndexHeader(indexFile string) (*indexHeader, error) {
 }
 
 // writeIndexWithModifiedHeader writes an index with a modified header
-func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHeader *indexHeader, options *ParsedOptions) error {
+func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHeader *indexHeader, _ *ParsedOptions) error {
 	// Create temporary file path
 	tempFile := indexFile + ".tmp"
 	defer func() {

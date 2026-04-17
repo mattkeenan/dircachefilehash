@@ -387,8 +387,8 @@ func AdaptiveInterruptTest(t *testing.T, config AdaptiveTestConfig) {
 
 		// Adjust parameters for next attempt if needed
 		if !result.Interrupted {
-			numFiles = numFiles * 2
-			numLargeFiles = numLargeFiles * 3
+			numFiles *= 2
+			numLargeFiles *= 3
 			interruptDelay = time.Duration(float64(interruptDelay) * 0.75)
 
 			// Safety check — if we've exhausted the file count limit,
@@ -502,7 +502,8 @@ func runAdaptiveInterruptAttempt(t *testing.T, dcfhBinary, repoDir, command stri
 	straceFile := filepath.Join(tempDir, fmt.Sprintf("strace_%s_%d.log", command, attempt))
 
 	// Build command arguments
-	args := []string{"-f", "-s", "1500", "-o", straceFile, dcfhBinary}
+	args := make([]string, 0, 6+len(extraArgs)+1)
+	args = append(args, "-f", "-s", "1500", "-o", straceFile, dcfhBinary)
 	args = append(args, extraArgs...)
 	args = append(args, command)
 
@@ -701,7 +702,7 @@ func analyzeInterruptResult(t *testing.T, straceFile, repoDir, stdout, stderr st
 }
 
 // parseStraceTimeline parses strace output into a timeline of events for enhanced analysis
-func parseStraceTimeline(straceStr string, patterns map[string]*regexp.Regexp) StraceAnalysis {
+func parseStraceTimeline(straceStr string, _ map[string]*regexp.Regexp) StraceAnalysis {
 	analysis := StraceAnalysis{
 		fdToFile:   make(map[int]string),
 		preSignal:  []StraceEvent{},

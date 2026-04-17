@@ -945,7 +945,7 @@ func (dc *DirectoryCache) appendEntryToNamedIndex(indexFileName string, indexInf
 	requiredSize := (*indexInfo).Offset + entrySize
 	newSize := (*indexInfo).Size
 	for newSize < requiredSize {
-		newSize = newSize * 2
+		newSize *= 2
 		if newSize > 1<<30 { // Cap at 1GB
 			newSize = requiredSize + (1 << 20) // Add 1MB at a time
 		}
@@ -1191,7 +1191,7 @@ func (dc *DirectoryCache) cleanupCurrentScanFile() error {
 
 // getSystemIOVMax returns the system's IOV_MAX limit using sysconf(_SC_IOV_MAX)
 // Falls back to conservative default if sysconf fails
-func getSystemIOVMax() (int, error) {
+func getSystemIOVMax() int {
 	// _SC_IOV_MAX constant for sysconf() - platform specific
 	const SC_IOV_MAX = 60       // Linux value, may vary on other platforms
 	const fallbackIOVMax = 1024 // Conservative default per golang/go#58623
@@ -1200,17 +1200,17 @@ func getSystemIOVMax() (int, error) {
 	r1, _, errno := unix.Syscall(99, uintptr(SC_IOV_MAX), 0, 0)
 	if errno != 0 {
 		// Fall back to conservative default if sysconf fails
-		return fallbackIOVMax, nil
+		return fallbackIOVMax
 	}
 
 	iovMax := int(r1)
 
 	// Validate the result is reasonable, fall back if not
 	if iovMax <= 0 || iovMax > 1<<20 { // Sanity check: between 1 and 1M
-		return fallbackIOVMax, nil
+		return fallbackIOVMax
 	}
 
-	return iovMax, nil
+	return iovMax
 }
 
 // scanForTempIndices scans the .dcfh directory for temporary index files

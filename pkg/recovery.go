@@ -291,9 +291,10 @@ func validateEntryLogical(entry *binaryEntry, config ValidationConfig) error {
 	return nil
 }
 
-// RecoveryValidationProcessor validates binary entries for recovery operations
-// Filters out corrupted or invalid entries while preserving valid ones
-// DEPRECATED: Use UnifiedValidationProcessor with ValidationLenient mode instead
+// RecoveryValidationProcessor validates binary entries for recovery operations.
+// Filters out corrupted or invalid entries while preserving valid ones.
+//
+// Deprecated: Use UnifiedValidationProcessor with ValidationLenient mode instead.
 func RecoveryValidationProcessor(verbosity int) EntryProcessor {
 	config := DefaultValidationConfig(ValidationLenient, verbosity)
 	return UnifiedValidationProcessor(config)
@@ -440,7 +441,7 @@ func (dc *DirectoryCache) CreateEmptyMainIndex() error {
 	// }
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
 	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
-	os.Exit(1)
+	os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional fatal exit for unimplemented recovery path
 
 	// Unreachable code after os.Exit(1) - commented out until RecoveryCallback implemented
 	// Atomic replace main index
@@ -531,7 +532,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	// }
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery main index writing not yet implemented with v0.7 callback architecture\n")
 	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for main index writing\n")
-	os.Exit(1)
+	os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional fatal exit for unimplemented recovery path
 
 	// 2. Write cache index using vectorio (include deleted entries for cache)
 	tempCachePath := dc.generateTempFileName("cache") //nolint:staticcheck // SA4006: used after os.Exit is removed
@@ -539,7 +540,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
 	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for cache index writing\n")
-	os.Exit(1)
+	os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional fatal exit for unimplemented recovery path
 
 	// Cleanup scan index file now that temp indices are written
 	if err := dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
@@ -1194,7 +1195,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	// This batch writing approach uses problematic writeSkiplistWithVectorIOFiltered with go func loops
 	fmt.Fprintf(os.Stderr, "FATAL: Recovery batch writing not yet implemented with v0.7 callback architecture\n")
 	fmt.Fprintf(os.Stderr, "TODO: Implement RecoveryCallback pattern for cache index writing\n")
-	os.Exit(1)
+	os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional fatal exit for unimplemented recovery path
 
 	// Step 7: Write recovered main index (excluding deleted)
 	tempMainPath := dc.generateTempFileName("main") //nolint:staticcheck // SA4006: used after os.Exit is removed

@@ -98,8 +98,9 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths 
 // architecture migration. Use updateSpecificPathsUnified() instead.
 
 // performUnifiedScanToSkiplist performs scan using the old callback-driven architecture.
-// Deprecated: The update path now uses performPipelineScan. This function is retained
-// only for recovery.go which still depends on it.
+// This function is retained only for recovery.go which still depends on it.
+//
+// Deprecated: The update path now uses performPipelineScan.
 func (dc *DirectoryCache) performUnifiedScanToSkiplist(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 

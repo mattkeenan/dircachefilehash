@@ -91,7 +91,6 @@ func hwangLinUnified(
 		// Determine comparison result
 		if leftEntry == nil {
 			// Left exhausted, only right entries remain
-			result = ComparisonRightOnly
 			continueProcessing, err = callback.OnRightOnly(rightEntry, rightPath)
 			if err != nil {
 				_ = callback.OnComplete(err)
@@ -111,7 +110,6 @@ func hwangLinUnified(
 
 		} else if rightEntry == nil {
 			// Right exhausted, only left entries remain
-			result = ComparisonLeftOnly
 			continueProcessing, err = callback.OnLeftOnly(leftEntry, leftPath)
 			if err != nil {
 				_ = callback.OnComplete(err)

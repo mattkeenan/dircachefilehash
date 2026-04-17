@@ -225,7 +225,7 @@ func TestRetentionPolicy_SelectSnapshotsToKeep(t *testing.T) {
 
 	// Create snapshots with different timestamps
 	baseTime := time.Date(2023, 6, 15, 12, 0, 0, 0, time.UTC)
-	var snapshots []*SnapshotMetadata
+	snapshots := make([]*SnapshotMetadata, 0, 9)
 
 	// Create multiple snapshots per day for 3 days
 	for day := range 3 {
@@ -291,7 +291,7 @@ func TestRetentionPolicy_ForgetSnapshots(t *testing.T) {
 	sr := NewSnapshotRepository(tempDir)
 
 	// Create multiple snapshots on different days by manipulating metadata
-	var snapshotIDs []string
+	snapshotIDs := make([]string, 0, 5)
 	baseTime := time.Now().UTC()
 	for i := range 5 {
 		// Create snapshot

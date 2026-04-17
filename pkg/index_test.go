@@ -13,7 +13,7 @@ func TestIndexHeader_SetHeader(t *testing.T) {
 	version := uint32(1)
 	entryCount := uint32(10)
 	flags := uint16(0)
-	checksumType := uint16(HashTypeSHA1)
+	checksumType := HashTypeSHA1
 
 	header.SetHeader(signature, version, entryCount, flags, checksumType)
 

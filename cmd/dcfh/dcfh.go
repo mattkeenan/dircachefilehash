@@ -58,6 +58,7 @@ func main() {
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cancel()
+		os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel() called explicitly above
 	}
 }

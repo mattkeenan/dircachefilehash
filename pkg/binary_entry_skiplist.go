@@ -319,7 +319,7 @@ func (sle *BESkiplistEntry) GetContext() (string, error) {
 	// Get the path for this entry to look up its context
 	path, err := sle.RelativePath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get relative path for context lookup: %v", err)
+		return "", fmt.Errorf("failed to get relative path for context lookup: %w", err)
 	}
 
 	// Find the entry in the skiplist to get its context

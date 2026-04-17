@@ -528,7 +528,7 @@ func createTestBinaryEntry(relativePath, hashStr string) BinaryEntryInterface {
 		UID:          1000,
 		GID:          1000,
 		FileSize:     100,
-		HashType:     uint16(HashTypeSHA1),
+		HashType:     HashTypeSHA1,
 		EntryFlags:   0, // Not deleted
 		IsDeleted:    false,
 	}

@@ -316,7 +316,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				return
 			}
 
-			currentJob = job
+			currentJob = job //nolint:wastedassign // read in ctx.Done case for shutdown signalling
 
 			if IsDebugEnabled("algorithm") {
 				fmt.Fprintf(os.Stderr, "[ALGORITHM] Hash started for file: %s (job %d)\n", job.FilePath, job.JobID)

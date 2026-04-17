@@ -106,7 +106,7 @@ func (p *ParsedOptions) Parse(args []string) error {
 }
 
 // parseLongOption parses a long option (--option or --option=value)
-func (p *ParsedOptions) parseLongOption(arg string, args []string, i *int, consumed []bool) error {
+func (p *ParsedOptions) parseLongOption(arg string, _ []string, _ *int, _ []bool) error {
 	optName := strings.TrimPrefix(arg, "--")
 	var optValue string
 

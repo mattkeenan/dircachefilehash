@@ -69,8 +69,9 @@ func isProcessRunning(pid int) bool {
 		return true // Process exists and we can signal it
 	}
 
-	// Check the specific error
-	if errno, ok := err.(syscall.Errno); ok {
+	// Check the specific error — syscall.Kill returns raw syscall.Errno,
+	// never wrapped, so direct type assertion is correct and cheaper than errors.As.
+	if errno, ok := err.(syscall.Errno); ok { //nolint:errorlint // syscall.Kill never wraps errors
 		if errno == syscall.ESRCH {
 			return false // No such process
 		}

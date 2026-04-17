@@ -72,9 +72,7 @@ func NewSkiplistWrapper(maxLevels int, defaultContext string) *skiplistWrapper {
 	}
 
 	// String comparator function
-	cmpKey := func(a, b string) int {
-		return strings.Compare(a, b)
-	}
+	cmpKey := strings.Compare
 
 	skiplist := zcsl.MakeZeroCopySkiplist[binaryEntryRef, string, string](
 		maxLevels,

@@ -144,7 +144,7 @@ func testPhase1HashRequests(t *testing.T, dc *DirectoryCache, _ string) {
 }
 
 // testPhase2HashCoordination verifies that hash coordination happens at write time
-func testPhase2HashCoordination(t *testing.T, dc *DirectoryCache, tempDir string) {
+func testPhase2HashCoordination(t *testing.T, dc *DirectoryCache, _ string) {
 	// This tests the second phase: actual hash coordination and computation
 	// We'll use the Update command which should trigger hash computation
 

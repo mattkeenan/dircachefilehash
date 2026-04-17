@@ -124,7 +124,7 @@ func trySkipToNextEntry(data []byte, offset *int) bool {
 }
 
 // attemptErrorFixAtOffsetValidated tries to fix common corruption issues (ValidatedEntry version)
-func attemptErrorFixAtOffsetValidated(data []byte, entryIdx int, offset int, originalErr error) (*ValidatedEntry, error) {
+func attemptErrorFixAtOffsetValidated(_ []byte, _ int, _ int, originalErr error) (*ValidatedEntry, error) { //nolint:unparam // result 0 is always nil: stub awaiting corruption-fix implementation
 	// For now, just return the original error - corruption fixing is complex
 	// TODO: Implement specific corruption fixes based on error type
 	return nil, fmt.Errorf("unfixable corruption: %w", originalErr)

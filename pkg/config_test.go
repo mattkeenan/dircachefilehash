@@ -122,10 +122,8 @@ func TestGetHashAlgorithm(t *testing.T) {
 			if algo.Size != tc.size {
 				t.Errorf("GetHashAlgorithm('%s') size = %d, expected %d", tc.name, algo.Size, tc.size)
 			}
-		} else {
-			if err == nil {
-				t.Errorf("GetHashAlgorithm('%s') should fail but succeeded", tc.name)
-			}
+		} else if err == nil {
+			t.Errorf("GetHashAlgorithm('%s') should fail but succeeded", tc.name)
 		}
 	}
 }

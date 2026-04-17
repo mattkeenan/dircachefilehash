@@ -87,10 +87,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 	}
 
 	// Create BEScanEntry from scanned file
-	scanEntry, err := ufsi.createScanEntry(scanned)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create scan entry: %w", err)
-	}
+	scanEntry := ufsi.createScanEntry(scanned)
 
 	// Iterator is synchronous: just creates entries with metadata
 	// Hash coordination happens in callbacks using CallbackHashCoordinator pattern
@@ -149,11 +146,10 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 
 // createScanEntry creates a heap-allocated BEScanEntry from scannedPath
 // v0.7: No scan index file needed - direct heap allocation with lazy hashing
-func (ufsi *UnifiedFilesystemScanIterator) createScanEntry(scanned *scannedPath) (BinaryEntryInterface, error) {
+func (ufsi *UnifiedFilesystemScanIterator) createScanEntry(scanned *scannedPath) BinaryEntryInterface {
 	// v0.7: Create heap-allocated entry directly (no scan index file)
 	// Entry will have metadata but no hash initially (lazy hashing)
-	bescanEntry := NewBEScanEntry(scanned.RelPath, scanned.Info, scanned.StatInfo)
-	return bescanEntry, nil
+	return NewBEScanEntry(scanned.RelPath, scanned.Info, scanned.StatInfo)
 }
 
 // startScan begins the filesystem scanning in a separate goroutine
@@ -187,7 +183,7 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 	// Check if already closed to prevent double-close
 	if err := ufsi.checkClosed(); err != nil {
-		return nil // Already closed, nothing to do
+		return nil //nolint:nilerr // intentional: double-close is a no-op, not an error
 	}
 
 	ufsi.markClosed()

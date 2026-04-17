@@ -246,7 +246,7 @@ func testBEIndexFileMmapWriteOperations(t *testing.T) {
 
 	// Test hash update (simulating iterative processing)
 	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := uint16(HashTypeSHA256)
+	newHashType := HashTypeSHA256
 
 	if err := entry.SetHash(newHash[:], newHashType); err != nil {
 		t.Errorf("SetHash() returned error: %v", err)
@@ -385,7 +385,7 @@ func BenchmarkBEIndexFileMmap(b *testing.B) {
 	b.Run("SetHash", func(b *testing.B) {
 		hash := [20]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 		for i := 0; i < b.N; i++ {
-			_ = entry.SetHash(hash[:], uint16(HashTypeSHA1))
+			_ = entry.SetHash(hash[:], HashTypeSHA1)
 		}
 	})
 

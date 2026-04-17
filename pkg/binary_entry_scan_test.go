@@ -176,7 +176,7 @@ func testBEScanHashWorkerUpdates(t *testing.T) {
 
 	// Test hash update (simulating hash worker — 20-byte hash matches SHA1 type)
 	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := uint16(HashTypeSHA1)
+	newHashType := HashTypeSHA1
 
 	if err := entry.SetHash(newHash[:], newHashType); err != nil {
 		t.Errorf("SetHash() returned error: %v", err)

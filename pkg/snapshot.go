@@ -459,7 +459,7 @@ func (sr *SnapshotRepository) copyFileWithHash(src, dst string) (string, int64, 
 
 func (sr *SnapshotRepository) calculateTreeHash(files map[string]string) string {
 	// Create deterministic hash of file structure
-	var items []string
+	items := make([]string, 0, len(files))
 	for filename, hash := range files {
 		items = append(items, fmt.Sprintf("%s:%s", filename, hash))
 	}

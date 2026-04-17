@@ -77,7 +77,7 @@ func TestPathMatching(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.path+"_"+tc.pattern, func(t *testing.T) {
-			entry := createMockEntry(tc.path, 1024, 0, false)
+			entry := createMockEntry(tc.path, 1024, false)
 
 			// Test NameTest
 			nameTest := &NameTest{Pattern: tc.pattern, CaseSensitive: true}
@@ -109,7 +109,7 @@ func TestPathMatching(t *testing.T) {
 // Test case insensitive matching
 func TestCaseInsensitiveMatching(t *testing.T) {
 	context := createMockContext()
-	entry := createMockEntry("Test.GO", 1024, 0, false)
+	entry := createMockEntry("Test.GO", 1024, false)
 
 	tests := []struct {
 		name string
@@ -261,25 +261,25 @@ func TestExpressionEdgeCases(t *testing.T) {
 	}{
 		{
 			name:    "empty filename pattern",
-			entry:   createMockEntry("", 1024, 0, false),
+			entry:   createMockEntry("", 1024, false),
 			expr:    &NameTest{Pattern: "*", CaseSensitive: true},
 			wantErr: false,
 		},
 		{
 			name:    "invalid pattern",
-			entry:   createMockEntry("test.go", 1024, 0, false),
+			entry:   createMockEntry("test.go", 1024, false),
 			expr:    &NameTest{Pattern: "[", CaseSensitive: true}, // Invalid glob pattern
 			wantErr: true,
 		},
 		{
 			name:    "zero size file",
-			entry:   createMockEntry("empty.txt", 0, 0, false),
+			entry:   createMockEntry("empty.txt", 0, false),
 			expr:    &EmptyTest{},
 			wantErr: false,
 		},
 		{
 			name:    "deleted file",
-			entry:   createMockEntry("deleted.txt", 1024, 0, true),
+			entry:   createMockEntry("deleted.txt", 1024, true),
 			expr:    &DeletedTest{},
 			wantErr: false,
 		},

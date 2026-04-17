@@ -30,21 +30,21 @@ func GetHashAlgorithm(name string) (*HashAlgorithm, error) {
 			Name:    "sha1",
 			TypeID:  HashTypeSHA1,
 			Size:    HashSizeSHA1,
-			NewFunc: func() hash.Hash { return sha1.New() },
+			NewFunc: sha1.New,
 		}, nil
 	case "sha256":
 		return &HashAlgorithm{
 			Name:    "sha256",
 			TypeID:  HashTypeSHA256,
 			Size:    HashSizeSHA256,
-			NewFunc: func() hash.Hash { return sha256.New() },
+			NewFunc: sha256.New,
 		}, nil
 	case "sha512":
 		return &HashAlgorithm{
 			Name:    "sha512",
 			TypeID:  HashTypeSHA512,
 			Size:    HashSizeSHA512,
-			NewFunc: func() hash.Hash { return sha512.New() },
+			NewFunc: sha512.New,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported hash algorithm: %s", name)
