@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 
 	// Run status to add existing.txt to cache.idx
 	t.Logf("Running initial status to add existing.txt to cache index")
-	_, err := dc.Status(nil, map[string]string{})
+	_, err := dc.Status(context.Background(), map[string]string{})
 	if err != nil {
 		t.Fatalf("Failed to run initial status: %v", err)
 	}
@@ -69,16 +70,15 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 		t.Fatalf("Failed to create large file: %v", err)
 	}
 
-	// Create shutdown channel
-	shutdownChan := make(chan struct{})
+	// Create context with timeout for shutdown signal
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
 
-	// Start a timer to send shutdown signal after a short delay
-	// This should trigger during the hashing of the large file
+	// Track whether timer fired
 	timerFired := false
 	shutdownTimer := time.AfterFunc(10*time.Millisecond, func() {
 		t.Logf("Timer fired - sending shutdown signal")
 		timerFired = true
-		close(shutdownChan)
 	})
 	defer shutdownTimer.Stop()
 
@@ -87,7 +87,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 	start := time.Now()
 
 	// This should be interrupted by the shutdown signal
-	_, err = dc.Status(shutdownChan, map[string]string{})
+	_, err = dc.Status(ctx, map[string]string{})
 
 	elapsed := time.Since(start)
 	t.Logf("Status completed in %v", elapsed)

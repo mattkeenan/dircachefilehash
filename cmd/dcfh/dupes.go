@@ -20,7 +20,7 @@ but different paths. Groups duplicate files and shows file counts and
 total duplicate space that could be reclaimed.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shutdownChan := shutdownFromContext(cmd.Context())
+		ctx := cmd.Context()
 
 		// Find the dcfh repository root
 		repoRoot, _, err := findDcfhRepo()
@@ -49,7 +49,7 @@ total duplicate space that could be reclaimed.`,
 		}
 
 		// Find duplicates using unified streaming architecture
-		duplicates, err := cache.FindDuplicatesUnified(shutdownChan, flags)
+		duplicates, err := cache.FindDuplicatesUnified(ctx, flags)
 		if err != nil {
 			return fmt.Errorf("failed to find duplicates: %w", err)
 		}

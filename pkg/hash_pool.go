@@ -122,9 +122,7 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 	if os.FileMode(mode)&os.ModeSymlink != 0 {
 		hashBytes, hashType, err = hp.dc.hashSymlinkTargetToBytes(filePath)
 	} else {
-		// Use the context-derived shutdown channel for interruptible hashing
-		shutdownCh := ctx.Done()
-		hashBytes, hashType, err = hp.dc.HashFileInterruptibleToBytes(filePath, shutdownCh, buffer)
+		hashBytes, hashType, err = hp.dc.HashFileInterruptibleToBytes(ctx, filePath, buffer)
 	}
 
 	if err != nil {

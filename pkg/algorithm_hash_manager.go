@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -22,9 +23,9 @@ type algorithmHashManager struct {
 	hashJobChan    chan *hashJobStart
 	callFinishChan chan uint64 // job completion notifications (internal)
 	wg             sync.WaitGroup
-	shutdownChan   <-chan struct{} // shutdown notification
-	closed         bool            // track if channel is closed
-	closeMutex     sync.Mutex      // protect closed flag
+	ctx            context.Context
+	closed         bool       // track if channel is closed
+	closeMutex     sync.Mutex // protect closed flag
 
 	// New fields for ordered completion notifications
 	completedQueue      []uint64        // Jobs completed but waiting for order
@@ -45,11 +46,11 @@ type algorithmHashManager struct {
 }
 
 // newAlgorithmHashManager creates a new algorithm-specific hash manager
-func (dc *DirectoryCache) newAlgorithmHashManager(numWorkers int, shutdownChan <-chan struct{}) *algorithmHashManager {
+func (dc *DirectoryCache) newAlgorithmHashManager(ctx context.Context, numWorkers int) *algorithmHashManager {
 	manager := &algorithmHashManager{
 		hashJobChan:            make(chan *hashJobStart, 100),
 		callFinishChan:         make(chan uint64, 100),
-		shutdownChan:           shutdownChan,
+		ctx:                    ctx,
 		completedQueue:         make([]uint64, 0),
 		nextExpectedJobID:      1, // JobIDs start at 1
 		iteratorNotifyChans:    make([]chan<- uint64, 0),
@@ -109,7 +110,7 @@ func (ahm *algorithmHashManager) completionProcessor() {
 
 			ahm.processCompletion(jobID)
 
-		case <-ahm.shutdownChan:
+		case <-ahm.ctx.Done():
 			// Shutdown requested - drain any remaining completions quickly
 			for {
 				select {
@@ -233,12 +234,7 @@ func (ahm *algorithmHashManager) signalIterators(jobID uint64) {
 
 // IsShuttingDown checks if the hash manager is shutting down
 func (ahm *algorithmHashManager) IsShuttingDown() bool {
-	select {
-	case <-ahm.shutdownChan:
-		return true
-	default:
-		return false
-	}
+	return ahm.ctx.Err() != nil
 }
 
 // SubmitHashJob submits a hash job to the worker pool
@@ -354,7 +350,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
 				// Regular file - hash the file contents with interruptible hashing
-				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(job.FilePath, ahm.shutdownChan, buffer)
+				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(ahm.ctx, job.FilePath, buffer)
 			}
 
 		hashComplete:
@@ -380,7 +376,7 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 			ahm.completionChan <- job.JobID
 			currentJob = nil
 
-		case <-ahm.shutdownChan:
+		case <-ahm.ctx.Done():
 			// Shutdown requested
 			if currentJob != nil {
 				if IsDebugEnabled("algorithm") {

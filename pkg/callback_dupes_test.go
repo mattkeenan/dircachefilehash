@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"encoding/hex"
 	"testing"
 )
@@ -462,7 +463,7 @@ func TestDupesCallbackIntegration(t *testing.T) {
 		dupesCallback := NewDupesCallback("integration-test")
 
 		// Run unified algorithm
-		err := hwangLinUnified(leftIter, rightIter, dupesCallback, nil)
+		err := hwangLinUnified(leftIter, rightIter, dupesCallback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified failed: %v", err)
 		}

@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestUpdateCallback_BasicOperation(t *testing.T) {
 	dc := createTestDirectoryCacheForUpdate(t, tempDir)
 
 	// Create hash manager for testing
-	hashManager := dc.newAlgorithmHashManager(2, make(chan struct{}))
+	hashManager := dc.newAlgorithmHashManager(context.Background(), 2)
 	defer hashManager.Shutdown()
 
 	// Create scan index filename
@@ -30,7 +31,7 @@ func TestUpdateCallback_BasicOperation(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
+	updateCallback := NewUpdateCallback(context.Background(), dc, scanFileName, nil)
 
 	// Test Name method
 	if updateCallback.Name() != "update" {
@@ -67,7 +68,7 @@ func TestUpdateCallback_MockEntries(t *testing.T) {
 	dc := createTestDirectoryCacheForUpdate(t, tempDir)
 
 	// Create hash manager for testing
-	hashManager := dc.newAlgorithmHashManager(2, make(chan struct{}))
+	hashManager := dc.newAlgorithmHashManager(context.Background(), 2)
 	defer hashManager.Shutdown()
 
 	// Create scan index filename
@@ -77,7 +78,7 @@ func TestUpdateCallback_MockEntries(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
+	updateCallback := NewUpdateCallback(context.Background(), dc, scanFileName, nil)
 
 	// Create mock entries for testing
 	leftEntry := createMockBinaryEntryForUpdate("test1.txt", 1024, false)
@@ -146,7 +147,7 @@ func TestUpdateCallback_RealFiles(t *testing.T) {
 	dc := createTestDirectoryCacheForUpdate(t, tempDir)
 
 	// Create hash manager for testing
-	hashManager := dc.newAlgorithmHashManager(2, make(chan struct{}))
+	hashManager := dc.newAlgorithmHashManager(context.Background(), 2)
 	defer hashManager.Shutdown()
 
 	// Create scan index filename
@@ -156,10 +157,10 @@ func TestUpdateCallback_RealFiles(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
+	updateCallback := NewUpdateCallback(context.Background(), dc, scanFileName, nil)
 
 	// Create real scan entries using the unified iterator
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "test-scan")
+	scanIterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{}, "test-scan")
 	defer func() { _ = scanIterator.Close() }()
 
 	// Get first file entry
@@ -205,7 +206,7 @@ func TestUpdateCallback_ErrorHandling(t *testing.T) {
 	dc := createTestDirectoryCacheForUpdate(t, tempDir)
 
 	// Create hash manager for testing
-	hashManager := dc.newAlgorithmHashManager(2, make(chan struct{}))
+	hashManager := dc.newAlgorithmHashManager(context.Background(), 2)
 	defer hashManager.Shutdown()
 
 	// Create scan index filename
@@ -215,7 +216,7 @@ func TestUpdateCallback_ErrorHandling(t *testing.T) {
 	}
 
 	// Create update callback
-	updateCallback := NewUpdateCallback(dc, scanFileName, nil, nil)
+	updateCallback := NewUpdateCallback(context.Background(), dc, scanFileName, nil)
 
 	// Test with nil entries (edge case)
 	continueProcessing, err := updateCallback.OnComparison(

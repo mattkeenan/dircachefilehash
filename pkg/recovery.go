@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -509,7 +510,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 
 	// Now use Hwang-Lin workflow to merge with current disk state
 	// This ensures we have the most up-to-date information
-	currentSkiplist, err := dc.performUnifiedScanToSkiplist(nil, []string{}, recoverySkiplist)
+	currentSkiplist, err := dc.performUnifiedScanToSkiplist(context.Background(), []string{}, recoverySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan current state for recovery: %w", err)
 	}
@@ -1181,7 +1182,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	}
 
 	// Step 5: Merge with current disk state via Hwang-Lin
-	finalSkiplist, err := dc.performUnifiedScanToSkiplist(nil, []string{}, mergedSkiplist) //nolint:staticcheck // SA4006: used after os.Exit is removed
+	finalSkiplist, err := dc.performUnifiedScanToSkiplist(context.Background(), []string{}, mergedSkiplist) //nolint:staticcheck // SA4006: used after os.Exit is removed
 	if err != nil {
 		return fmt.Errorf("failed to merge recovered data with current state: %w", err)
 	}

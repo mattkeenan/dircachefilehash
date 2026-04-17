@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -169,7 +170,7 @@ func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
 // buffer and checks for shutdown signals between buffer reads for graceful
 // interruption. Passing a pre-allocated buffer avoids per-file heap allocation,
 // which dramatically reduces GC pressure when hashing many files.
-func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, buffer []byte, shutdownChan <-chan struct{}) ([]byte, error) {
+func HashFileInterruptible(ctx context.Context, filePath string, algorithm *HashAlgorithm, buffer []byte) ([]byte, error) {
 	// Start timing if debug=hash and verbose >= 3
 	var startTime time.Time
 	var fileSize int64
@@ -194,8 +195,8 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, buffer []b
 	for {
 		// Check for shutdown signal before each read
 		select {
-		case <-shutdownChan:
-			return nil, fmt.Errorf("hash operation interrupted by shutdown")
+		case <-ctx.Done():
+			return nil, fmt.Errorf("hash operation interrupted: %w", ctx.Err())
 		default:
 			// Continue with read
 		}
@@ -237,7 +238,7 @@ func HashFileInterruptible(filePath string, algorithm *HashAlgorithm, buffer []b
 // type ID. If buffer is nil, a new buffer is allocated from the configured size.
 // Callers that hash many files (e.g. worker pools) should pre-allocate a buffer
 // and pass it here to avoid per-file allocation and GC pressure.
-func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdownChan <-chan struct{}, buffer []byte) ([]byte, uint16, error) {
+func (dc *DirectoryCache) HashFileInterruptibleToBytes(ctx context.Context, filePath string, buffer []byte) ([]byte, uint16, error) {
 	// Get default algorithm
 	algorithm, err := dc.getDefaultHashAlgorithm()
 	if err != nil {
@@ -253,7 +254,7 @@ func (dc *DirectoryCache) HashFileInterruptibleToBytes(filePath string, shutdown
 		buffer = make([]byte, bufferSize)
 	}
 
-	hashBytes, err := HashFileInterruptible(filePath, algorithm, buffer, shutdownChan)
+	hashBytes, err := HashFileInterruptible(ctx, filePath, algorithm, buffer)
 	if err != nil {
 		return nil, 0, err
 	}

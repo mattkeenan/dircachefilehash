@@ -1,9 +1,9 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"sync"
 	"sync/atomic"
 )
 
@@ -18,8 +18,8 @@ type UnifiedFilesystemScanIterator struct {
 	dc                *DirectoryCache
 	paths             []string
 	scanChan          chan *scannedPath
-	shutdownChan      chan struct{}
-	shutdownOnce      sync.Once
+	ctx               context.Context
+	cancel            context.CancelFunc
 	scanComplete      atomic.Bool
 	scanError         error
 	scanIndexFileName string // Scan index file name
@@ -31,7 +31,7 @@ type UnifiedFilesystemScanIterator struct {
 
 // NewUnifiedFilesystemScanIterator creates a new iterator that scans
 // the specified paths using BinaryEntryInterface.
-func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name string) *UnifiedFilesystemScanIterator {
+func NewUnifiedFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, paths []string, name string) *UnifiedFilesystemScanIterator {
 	if dc == nil {
 		return &UnifiedFilesystemScanIterator{
 			iteratorBase: iteratorBase{
@@ -41,12 +41,15 @@ func NewUnifiedFilesystemScanIterator(dc *DirectoryCache, paths []string, name s
 		}
 	}
 
+	childCtx, cancel := context.WithCancel(ctx)
+
 	iterator := &UnifiedFilesystemScanIterator{
 		iteratorBase: iteratorBase{name: name},
 		dc:           dc,
 		paths:        paths,
 		scanChan:     make(chan *scannedPath, 100), // Buffered for performance
-		shutdownChan: make(chan struct{}),
+		ctx:          childCtx,
+		cancel:       cancel,
 	}
 
 	return iterator
@@ -138,8 +141,8 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 			}
 			return scanned, nil
 
-		case <-ufsi.shutdownChan:
-			return nil, fmt.Errorf("filesystem scan was shutdown")
+		case <-ufsi.ctx.Done():
+			return nil, fmt.Errorf("filesystem scan interrupted: %w", ufsi.ctx.Err())
 		}
 	}
 }
@@ -172,7 +175,7 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 			// scanPath already closes the channel, so we don't need to close it
 		}()
 
-		if err := ufsi.dc.scanPath(ufsi.paths, ufsi.scanChan, ufsi.shutdownChan); err != nil {
+		if err := ufsi.dc.scanPath(ufsi.ctx, ufsi.paths, ufsi.scanChan); err != nil {
 			ufsi.scanError = err
 		}
 	}()
@@ -189,11 +192,9 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 
 	ufsi.markClosed()
 
-	// Signal shutdown to scanning goroutine (sync.Once prevents double-close panic)
-	if !ufsi.scanComplete.Load() && ufsi.shutdownChan != nil {
-		ufsi.shutdownOnce.Do(func() {
-			close(ufsi.shutdownChan)
-		})
+	// Signal shutdown to scanning goroutine
+	if ufsi.cancel != nil {
+		ufsi.cancel()
 	}
 
 	// Clean up scan index

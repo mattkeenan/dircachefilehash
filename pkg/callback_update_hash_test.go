@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestUpdateCallbackHashRequests(t *testing.T) {
 	defer func() { _ = dc.Close() }()
 
 	// Create update callback
-	callback := NewUpdateCallback(dc, "test-scan", nil, nil)
+	callback := NewUpdateCallback(context.Background(), dc, "test-scan", nil)
 
 	t.Run("ModifiedFileRequestsHash", func(t *testing.T) {
 		// Create a modified file scenario

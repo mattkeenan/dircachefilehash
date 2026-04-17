@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -53,7 +54,7 @@ func TestPublicAPI(t *testing.T) {
 			t.Logf("Stats: %d entries, %d bytes", stats, size)
 		}
 
-		result, err := dc.Status(nil, map[string]string{})
+		result, err := dc.Status(context.Background(), map[string]string{})
 		if err != nil {
 			t.Logf("Status() returned error (acceptable for uninitialised repo): %v", err)
 		}

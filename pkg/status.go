@@ -39,7 +39,7 @@ type StatusResult struct {
 
 // Status compares main.idx against the current filesystem, writing changes to cache.idx.
 // The cache is a sparse delta — its entries ARE the status (modified, added, deleted).
-func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]string) (*StatusResult, error) {
+func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (*StatusResult, error) {
 	defer VerboseEnter()()
 
 	// Apply flags before scanning
@@ -98,19 +98,8 @@ func (dc *DirectoryCache) Status(shutdownChan <-chan struct{}, flags map[string]
 	}()
 
 	// Create iterators: main.idx (left) vs filesystem (right)
-	existingIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "existing", shutdownChan)
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
-
-	// Convert shutdown channel to context for the pipeline
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		select {
-		case <-shutdownChan:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "scan")
 
 	// Run the 4-stage pipeline: Compare → Hash → Reorder → Write
 	// The pipeline writes only changes (vs main) to the cache file.

@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestHwangLinUnified(t *testing.T) {
 		callback := newMockCallback("test-callback")
 
 		// Run unified algorithm
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified failed: %v", err)
 		}
@@ -59,7 +60,7 @@ func TestHwangLinUnified(t *testing.T) {
 		rightIter := newMockIterator("empty-right", []BinaryEntryInterface{})
 		callback := newMockCallback("empty-callback")
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified failed: %v", err)
 		}
@@ -90,7 +91,7 @@ func TestHwangLinUnified(t *testing.T) {
 		rightIter := newMockIterator("empty-right", []BinaryEntryInterface{})
 		callback := newMockCallback("left-only-callback")
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified failed: %v", err)
 		}
@@ -123,7 +124,7 @@ func TestHwangLinUnified(t *testing.T) {
 		rightIter := newMockIterator("right-iter", rightEntries)
 		callback := newMockCallback("right-only-callback")
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified failed: %v", err)
 		}
@@ -167,7 +168,7 @@ func TestHwangLinUnified(t *testing.T) {
 		callback.shouldStop = true
 		callback.stopAfterCalls = 3
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified should not error on early stop: %v", err)
 		}
@@ -211,7 +212,7 @@ func TestHwangLinUnified(t *testing.T) {
 		callback.shouldError = true
 		callback.errorAfterCalls = 1
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err == nil {
 			t.Fatal("hwangLinUnified should error when callback errors")
 		}
@@ -235,7 +236,7 @@ func TestHwangLinUnified(t *testing.T) {
 
 		callback.onStartError = true
 
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err == nil {
 			t.Fatal("hwangLinUnified should error when OnStart errors")
 		}
@@ -251,19 +252,19 @@ func TestHwangLinUnified(t *testing.T) {
 		callback := newMockCallback("callback")
 
 		// Test nil left iterator
-		err := hwangLinUnified(nil, rightIter, callback, nil)
+		err := hwangLinUnified(nil, rightIter, callback, context.Background())
 		if err == nil {
 			t.Error("Should error with nil left iterator")
 		}
 
 		// Test nil right iterator
-		err = hwangLinUnified(leftIter, nil, callback, nil)
+		err = hwangLinUnified(leftIter, nil, callback, context.Background())
 		if err == nil {
 			t.Error("Should error with nil right iterator")
 		}
 
 		// Test nil callback
-		err = hwangLinUnified(leftIter, rightIter, nil, nil)
+		err = hwangLinUnified(leftIter, rightIter, nil, context.Background())
 		if err == nil {
 			t.Error("Should error with nil callback")
 		}
@@ -277,14 +278,14 @@ func TestHwangLinUnifiedWithSkiplists(t *testing.T) {
 		rightSkiplist := NewSkiplistWrapper(16, MainContext)
 
 		// Create skiplist iterators
-		leftIter := NewBinaryEntrySkiplistIterator(leftSkiplist, "left-skiplist", nil)
-		rightIter := NewBinaryEntrySkiplistIterator(rightSkiplist, "right-skiplist", nil)
+		leftIter := NewBinaryEntrySkiplistIterator(context.Background(), leftSkiplist, "left-skiplist")
+		rightIter := NewBinaryEntrySkiplistIterator(context.Background(), rightSkiplist, "right-skiplist")
 
 		// Create callback
 		callback := newMockCallback("skiplist-callback")
 
 		// Run unified algorithm
-		err := hwangLinUnified(leftIter, rightIter, callback, nil)
+		err := hwangLinUnified(leftIter, rightIter, callback, context.Background())
 		if err != nil {
 			t.Fatalf("hwangLinUnified with skiplists failed: %v", err)
 		}

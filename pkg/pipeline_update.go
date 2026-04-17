@@ -50,8 +50,7 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, leftIter, rightI
 		defer wg.Done()
 		sink := newUpdateComparisonSink(dc, hashCh, bypassCh)
 		adapter := newSinkCallbackAdapter(sink)
-		// Use context's Done() channel as the shutdown signal
-		err := hwangLinUnified(leftIter, rightIter, adapter, ctx.Done())
+		err := hwangLinUnified(leftIter, rightIter, adapter, ctx)
 		if err != nil {
 			// If the error is from context cancellation, don't double-report
 			if ctx.Err() == nil {
@@ -167,7 +166,7 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 }
 
 // performPipelineScan replaces performUnifiedScanToSkiplist with the pipeline architecture.
-func (dc *DirectoryCache) performPipelineScan(shutdownChan <-chan struct{}, paths []string, compareSkiplist *skiplistWrapper) error {
+func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) error {
 	defer VerboseEnter()()
 
 	// Synchronise concurrent scans
@@ -216,19 +215,8 @@ func (dc *DirectoryCache) performPipelineScan(shutdownChan <-chan struct{}, path
 	}()
 
 	// Create iterators
-	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing", shutdownChan)
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
-
-	// Convert shutdown channel to context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		select {
-		case <-shutdownChan:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, paths, "scan")
 
 	// Run the pipeline
 	err := RunUpdatePipeline(ctx, dc, existingIterator, scanIterator, tempMainIndexFileName)

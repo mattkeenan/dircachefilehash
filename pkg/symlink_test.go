@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 
 	// First update with "all" - should follow symlinks
 	flags := map[string]string{"symlinks": "all"}
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 
 	// Apply flags to configure symlink mode
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
@@ -89,7 +90,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	t.Logf("Before first update, symlink mode is: %s", dc.symlinkMode)
 
 	// Update entire repository (no specific paths)
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed initial update with symlinks=all: %v", err)
 	}
 
@@ -122,7 +123,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	SetDebugFlags("scan,scanning,symlinks")
 	defer SetDebugFlags("")
 
-	status, err := dc.Status(shutdownChan, flags)
+	status, err := dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after symlinks=none: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 
 	// Switch back to "all" - status should show no changes
 	flags["symlinks"] = "all"
-	status, err = dc.Status(shutdownChan, flags)
+	status, err = dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after switching back to all: %v", err)
 	}
@@ -218,9 +219,9 @@ func TestSymlinkModeInternal(t *testing.T) {
 	SetDebugFlags("symlinks")
 	defer SetDebugFlags("")
 
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 	flags := map[string]string{"symlinks": "internal"}
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed update with symlinks=internal: %v", err)
 	}
 
@@ -236,7 +237,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 		t.Errorf("Expected %d files with symlinks=internal, got %d", expectedCount, fileCount)
 
 		// Debug: List all files found
-		status, err := dc.Status(shutdownChan, flags)
+		status, err := dc.Status(ctx, flags)
 		if err == nil {
 			t.Logf("Modified: %v", status.Modified)
 			t.Logf("Added: %v", status.Added)
@@ -310,9 +311,9 @@ func TestSymlinkModeExternal(t *testing.T) {
 	}
 	dc := NewDirectoryCache(repoDir, repoDir)
 
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 	flags := map[string]string{"symlinks": "external"}
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed update with symlinks=external: %v", err)
 	}
 
@@ -380,16 +381,16 @@ func TestSymlinkCacheRadixBehavior(t *testing.T) {
 	}
 	dc := NewDirectoryCache(repoDir, repoDir)
 
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
 	// Switch to none and check status before updating
 	flags["symlinks"] = "none"
 
-	status, err := dc.Status(shutdownChan, flags)
+	status, err := dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}
@@ -453,9 +454,9 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 	SetDebugFlags("scanning")
 	defer SetDebugFlags("")
 
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -467,12 +468,12 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 
 	// Update with symlinks=none - the modified file should NOT be hashed
 	flags["symlinks"] = "none"
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed update with symlinks=none: %v", err)
 	}
 
 	// The file should be marked as deleted without being hashed
-	status, err := dc.Status(shutdownChan, flags)
+	status, err := dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

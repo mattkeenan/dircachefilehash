@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"sync"
 	"testing"
@@ -217,8 +218,8 @@ func testSkiplistIterationAllPathLengths(t *testing.T) {
 
 	// Verify all entries are reachable by BinaryEntrySkiplistIterator (First/Next cursor)
 	// This is the iterator used by the status pipeline via Hwang-Lin
-	shutdownChan := make(chan struct{})
-	iter := NewBinaryEntrySkiplistIterator(skiplist, "test", shutdownChan)
+	ctx := context.Background()
+	iter := NewBinaryEntrySkiplistIterator(ctx, skiplist, "test")
 	defer func() { _ = iter.Close() }()
 
 	visitedByIterator := make(map[string]bool)

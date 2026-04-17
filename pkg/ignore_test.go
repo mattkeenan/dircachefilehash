@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,10 +58,10 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// First update - all files should be indexed
-	shutdownChan := make(<-chan struct{})
+	ctx := context.Background()
 	flags := map[string]string{}
 
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -87,7 +88,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
-	status, err := dc.Status(shutdownChan, flags)
+	status, err := dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after ignore update: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Update to apply the ignore changes
-	if err := dc.Update(shutdownChan, flags); err != nil {
+	if err := dc.Update(ctx, flags); err != nil {
 		t.Fatalf("Failed update after ignore change: %v", err)
 	}
 
@@ -141,7 +142,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status again
-	status, err = dc.Status(shutdownChan, flags)
+	status, err = dc.Status(ctx, flags)
 	if err != nil {
 		t.Fatalf("Failed to get status after second ignore update: %v", err)
 	}
@@ -214,8 +215,8 @@ mode = none
 	}
 
 	// Initial update
-	shutdownChan := make(<-chan struct{})
-	if err := dc.Update(shutdownChan, map[string]string{}); err != nil {
+	ctx := context.Background()
+	if err := dc.Update(ctx, map[string]string{}); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -248,7 +249,7 @@ mode = none
 	}
 
 	// Check status - .log file should now be marked for deletion
-	status, err := dc.Status(shutdownChan, map[string]string{})
+	status, err := dc.Status(ctx, map[string]string{})
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

@@ -145,18 +145,6 @@ func applyViperDefaults(cmd *cobra.Command) {
 	}
 }
 
-// shutdownFromContext bridges cobra's context.Context to the <-chan struct{}
-// expected by all pkg/ functions. The returned channel is closed when the
-// context is cancelled (e.g. on SIGINT/SIGTERM).
-func shutdownFromContext(ctx context.Context) <-chan struct{} {
-	shutdown := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		close(shutdown)
-	}()
-	return shutdown
-}
-
 // setupSignalContext creates a context that is cancelled on SIGINT, SIGTERM, or SIGPIPE.
 // Used in main() to wire signal handling into cobra's context.
 func setupSignalContext() (context.Context, context.CancelFunc) {

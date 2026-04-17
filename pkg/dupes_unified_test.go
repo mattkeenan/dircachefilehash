@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,16 +33,15 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
 		// Run initial update to populate cache
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
-		_, err = dc.runStatusWorkflowUnified(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(ctx)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
 
 		// Test unified duplicate detection
-		results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
+		results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed: %v", err)
 		}
@@ -99,16 +99,15 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
 		// Run initial update to populate cache
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
-		_, err = dc.runStatusWorkflowUnified(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(ctx)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
 
 		// Test unified duplicate detection
-		results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
+		results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed: %v", err)
 		}
@@ -133,10 +132,9 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, map[string]string{})
 
 		// Test unified duplicate detection on empty repository
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
-		results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
+		results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed on empty repository: %v", err)
 		}
@@ -171,26 +169,24 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
 		// Run initial update to populate cache
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
-		_, err = dc.runStatusWorkflowUnified(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(ctx)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
 
 		// Test original implementation
-		originalResults, err := dc.FindDuplicates(shutdownChan, map[string]string{})
+		originalResults, err := dc.FindDuplicates(ctx, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicates (original) failed: %v", err)
 		}
 
 		// Reset state for unified test
-		shutdownChan2 := make(chan struct{})
-		defer close(shutdownChan2)
+		ctx2 := t.Context()
 
 		// Test unified implementation
-		unifiedResults, err := dc.FindDuplicatesUnified(shutdownChan2, map[string]string{})
+		unifiedResults, err := dc.FindDuplicatesUnified(ctx2, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed: %v", err)
 		}
@@ -261,12 +257,12 @@ func TestFindDuplicatesUnified(t *testing.T) {
 
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
-		// Create shutdown channel and close it immediately to simulate interruption
-		shutdownChan := make(chan struct{})
-		close(shutdownChan)
+		// Create cancelled context immediately to simulate interruption
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
 		// Test should handle interruption gracefully
-		results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
+		results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 
 		// Should either succeed with partial results or fail gracefully
 		if err != nil {
@@ -301,16 +297,15 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
 		// Run initial update to populate cache
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
-		_, err = dc.runStatusWorkflowUnified(shutdownChan)
+		_, err = dc.runStatusWorkflowUnified(ctx)
 		if err != nil {
 			t.Fatalf("Initial cache update failed: %v", err)
 		}
 
 		// Test unified duplicate detection
-		results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
+		results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed with large files: %v", err)
 		}
@@ -345,14 +340,13 @@ func TestFindDuplicatesUnified(t *testing.T) {
 		dc := setupTestRepositoryWithFiles(t, testDir, files)
 
 		// Test with symlink mode flag
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		ctx := t.Context()
 
 		flags := map[string]string{
 			"symlinks": "none", // Specific symlink mode
 		}
 
-		results, err := dc.FindDuplicatesUnified(shutdownChan, flags)
+		results, err := dc.FindDuplicatesUnified(ctx, flags)
 		if err != nil {
 			t.Fatalf("FindDuplicatesUnified failed with symlink flag: %v", err)
 		}
@@ -422,19 +416,16 @@ func BenchmarkFindDuplicates(b *testing.B) {
 	dc := setupTestRepositoryWithFilesB(b, testDir, files)
 
 	// Run initial update
-	shutdownChan := make(chan struct{})
-	defer close(shutdownChan)
+	ctx := context.Background()
 
-	_, err = dc.runStatusWorkflowUnified(shutdownChan)
+	_, err = dc.runStatusWorkflowUnified(ctx)
 	if err != nil {
 		b.Fatalf("Initial cache update failed: %v", err)
 	}
 
 	b.Run("Original", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			shutdownChan := make(chan struct{})
-			results, err := dc.FindDuplicates(shutdownChan, map[string]string{})
-			close(shutdownChan)
+			results, err := dc.FindDuplicates(ctx, map[string]string{})
 			if err != nil {
 				b.Fatalf("FindDuplicates failed: %v", err)
 			}
@@ -444,9 +435,7 @@ func BenchmarkFindDuplicates(b *testing.B) {
 
 	b.Run("Unified", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			shutdownChan := make(chan struct{})
-			results, err := dc.FindDuplicatesUnified(shutdownChan, map[string]string{})
-			close(shutdownChan)
+			results, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
 			if err != nil {
 				b.Fatalf("FindDuplicatesUnified failed: %v", err)
 			}

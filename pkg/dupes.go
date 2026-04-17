@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
@@ -13,7 +14,7 @@ type DuplicateGroup struct {
 }
 
 // FindDuplicates returns groups of files with identical hashes using the new workflow
-func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map[string]string) ([]DuplicateGroup, error) {
+func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string) ([]DuplicateGroup, error) {
 	// Apply flags before scanning
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// If no config loaded, apply symlink mode directly if provided
@@ -24,7 +25,7 @@ func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map
 
 	// Use the unified Status workflow which returns the scan result
 	// The scan result contains all current files (main + cache + new scan)
-	scanSkiplist, err := dc.runStatusWorkflowUnified(shutdownChan)
+	scanSkiplist, err := dc.runStatusWorkflowUnified(ctx)
 	if err != nil && scanSkiplist == nil {
 		// Only return error if we got no data at all
 		return nil, fmt.Errorf("failed to update cache index: %w", err)
@@ -82,7 +83,7 @@ func (dc *DirectoryCache) FindDuplicates(shutdownChan <-chan struct{}, flags map
 
 // FindDuplicatesUnified returns groups of files with identical hashes using the unified streaming architecture
 // This provides 20-40x memory reduction and 3-5x speed improvements through streaming iterators
-func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, flags map[string]string) ([]DuplicateGroup, error) {
+func (dc *DirectoryCache) FindDuplicatesUnified(ctx context.Context, flags map[string]string) ([]DuplicateGroup, error) {
 	// Apply flags before scanning
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// If no config loaded, apply symlink mode directly if provided
@@ -98,21 +99,21 @@ func (dc *DirectoryCache) FindDuplicatesUnified(shutdownChan <-chan struct{}, fl
 	}
 
 	// Create hash manager for coordinating async hash operations
-	hashManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
+	hashManager := dc.newAlgorithmHashManager(ctx, dc.hashWorkers)
 	defer hashManager.Shutdown()
 
 	// Create streaming iterators for unified algorithm - this is the key performance improvement
-	skiplistIterator := NewBinaryEntrySkiplistIterator(mergedSkiplist, "merged-main-cache", shutdownChan)
+	skiplistIterator := NewBinaryEntrySkiplistIterator(ctx, mergedSkiplist, "merged-main-cache")
 	defer func() { _ = skiplistIterator.Close() }()
 
-	filesystemIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "filesystem-scan")
+	filesystemIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "filesystem-scan")
 	defer func() { _ = filesystemIterator.Close() }()
 
 	// Create callback for duplicate detection during streaming comparison
 	dupesCallback := NewDupesCallback("unified-dupes")
 
 	// Run unified Hwang-Lin algorithm with streaming iterators (no memory loading!)
-	err = hwangLinUnified(skiplistIterator, filesystemIterator, dupesCallback, shutdownChan)
+	err = hwangLinUnified(skiplistIterator, filesystemIterator, dupesCallback, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unified streaming algorithm failed: %w", err)
 	}

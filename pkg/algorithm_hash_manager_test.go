@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -19,12 +20,11 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		// Create context for hash manager
+		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(2, shutdownChan) // 2 workers
+		manager := dc.newAlgorithmHashManager(ctx, 2) // 2 workers
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -86,12 +86,11 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		// Create context for hash manager
+		ctx := t.Context()
 
 		// Create algorithm hash manager with 1 worker to control execution order
-		manager := dc.newAlgorithmHashManager(1, shutdownChan)
+		manager := dc.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -155,12 +154,11 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		// Create context for hash manager
+		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(2, shutdownChan)
+		manager := dc.newAlgorithmHashManager(ctx, 2)
 		defer manager.Shutdown()
 
 		// Create multiple notification channels
@@ -215,12 +213,11 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		// Create context for hash manager
+		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(1, shutdownChan)
+		manager := dc.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Test registration
@@ -279,19 +276,19 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
+		// Create context for hash manager
+		ctx, cancel := context.WithCancel(context.Background())
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(2, shutdownChan)
+		manager := dc.newAlgorithmHashManager(ctx, 2)
 
 		// Test that IsShuttingDown returns false initially
 		if manager.IsShuttingDown() {
 			t.Error("Expected IsShuttingDown to return false initially")
 		}
 
-		// Close shutdown channel
-		close(shutdownChan)
+		// Cancel context
+		cancel()
 
 		// Test that IsShuttingDown returns true after shutdown
 		if !manager.IsShuttingDown() {
@@ -323,12 +320,11 @@ func TestAlgorithmHashManager(t *testing.T) {
 
 		dc := createTestDirectoryCache(t, testDir)
 
-		// Create shutdown channel
-		shutdownChan := make(chan struct{})
-		defer close(shutdownChan)
+		// Create context for hash manager
+		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(1, shutdownChan)
+		manager := dc.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -444,11 +440,11 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 
 	b.Run("OrderedCompletions", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			// Create shutdown channel
-			shutdownChan := make(chan struct{})
+			// Create context for hash manager
+			ctx, cancel := context.WithCancel(context.Background())
 
 			// Create algorithm hash manager
-			manager := dc.newAlgorithmHashManager(1, shutdownChan)
+			manager := dc.newAlgorithmHashManager(ctx, 1)
 
 			// Create notification channel
 			notifyChan := make(chan uint64, 100)
@@ -465,18 +461,18 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 			}
 
 			// Cleanup
-			close(shutdownChan)
+			cancel()
 			manager.Shutdown()
 		}
 	})
 
 	b.Run("ReverseOrderCompletions", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			// Create shutdown channel
-			shutdownChan := make(chan struct{})
+			// Create context for hash manager
+			ctx, cancel := context.WithCancel(context.Background())
 
 			// Create algorithm hash manager
-			manager := dc.newAlgorithmHashManager(1, shutdownChan)
+			manager := dc.newAlgorithmHashManager(ctx, 1)
 
 			// Create notification channel
 			notifyChan := make(chan uint64, 100)
@@ -493,7 +489,7 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 			}
 
 			// Cleanup
-			close(shutdownChan)
+			cancel()
 			manager.Shutdown()
 		}
 	})

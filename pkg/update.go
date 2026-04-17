@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 )
 
 // Update scans the directory and updates the index file using the new workflow
-func (dc *DirectoryCache) Update(shutdownChan <-chan struct{}, flags map[string]string, paths ...string) error {
+func (dc *DirectoryCache) Update(ctx context.Context, flags map[string]string, paths ...string) error {
 	// Apply flags before scanning
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// If no config loaded, apply symlink mode directly if provided
@@ -20,15 +21,15 @@ func (dc *DirectoryCache) Update(shutdownChan <-chan struct{}, flags map[string]
 
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
-		return dc.updateFullRepositoryUnified(shutdownChan)
+		return dc.updateFullRepositoryUnified(ctx)
 	} else {
 		// Specific paths: selective update - manage main vs cache indices
-		return dc.updateSpecificPathsUnified(shutdownChan, paths)
+		return dc.updateSpecificPathsUnified(ctx, paths)
 	}
 }
 
 // updateFullRepositoryUnified updates the entire repository using the unified hwangLinUnified architecture
-func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct{}) error {
+func (dc *DirectoryCache) updateFullRepositoryUnified(ctx context.Context) error {
 	// Load main index to use as comparison base (avoid re-hashing unchanged files)
 	comparisonSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -47,7 +48,7 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 	}
 
 	// Pipeline: comparison → hash → reorder → write, with atomic rename on success
-	err = dc.performPipelineScan(shutdownChan, []string{}, comparisonSkiplist)
+	err = dc.performPipelineScan(ctx, []string{}, comparisonSkiplist)
 	if err != nil {
 		return fmt.Errorf("pipeline scan failed: %w", err)
 	}
@@ -63,7 +64,7 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(shutdownChan <-chan struct
 // architecture migration. Use updateFullRepositoryUnified() instead.
 
 // updateSpecificPathsUnified updates only specified paths using the unified hwangLinUnified architecture
-func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{}, paths []string) error {
+func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths []string) error {
 	// Load main index for comparison (avoid re-hashing unchanged files)
 	comparisonSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -80,12 +81,12 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 	}
 
 	// Pipeline: comparison → hash → reorder → write, with atomic rename on success
-	err = dc.performPipelineScan(shutdownChan, paths, comparisonSkiplist)
+	err = dc.performPipelineScan(ctx, paths, comparisonSkiplist)
 	if err != nil {
 		return fmt.Errorf("update interrupted: %w", err)
 	}
 	// Update cache using the unified workflow to reflect the new main index state
-	if _, err := dc.runStatusWorkflowUnified(shutdownChan); err != nil {
+	if _, err := dc.runStatusWorkflowUnified(ctx); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
 	}
 
@@ -99,7 +100,7 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(shutdownChan <-chan struct{
 // performUnifiedScanToSkiplist performs scan using the old callback-driven architecture.
 // Deprecated: The update path now uses performPipelineScan. This function is retained
 // only for recovery.go which still depends on it.
-func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struct{}, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) performUnifiedScanToSkiplist(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
@@ -158,18 +159,18 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(shutdownChan <-chan struc
 	// v0.7: No scan index needed - UpdateCallback writes directly to temp main index
 
 	// Create hash job manager for concurrent hashing (reuse existing infrastructure)
-	hashJobManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
+	hashJobManager := dc.newAlgorithmHashManager(ctx, dc.hashWorkers)
 	defer hashJobManager.Shutdown()
 
 	// Create iterators for unified algorithm
-	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing", shutdownChan)
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, paths, "scan")
+	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, paths, "scan")
 
 	// Create update callback for v0.7 direct temp index writing
-	updateCallback := NewUpdateCallback(dc, tempMainIndexFileName, hashJobManager, shutdownChan)
+	updateCallback := NewUpdateCallback(ctx, dc, tempMainIndexFileName, hashJobManager)
 
 	// Run unified algorithm
-	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, shutdownChan)
+	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, ctx)
 	if scanErr != nil {
 		// v0.7: Mark operation as failed for proper cleanup
 		operationSuccessful = false

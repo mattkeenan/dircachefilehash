@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"testing"
 )
 
@@ -46,7 +47,7 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 
 	// Test FindDuplicates with empty flags
 	flags := map[string]string{}
-	duplicates, err := dc.FindDuplicates(nil, flags)
+	duplicates, err := dc.FindDuplicates(context.Background(), flags)
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	for i, flags := range testFlags {
 		t.Run("flags_test_"+string(rune(i+'0')), func(t *testing.T) {
-			duplicates, err := dc.FindDuplicates(nil, flags)
+			duplicates, err := dc.FindDuplicates(context.Background(), flags)
 			if err != nil {
 				t.Fatalf("FindDuplicates failed with flags %v: %v", flags, err)
 			}

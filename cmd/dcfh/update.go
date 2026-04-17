@@ -19,7 +19,7 @@ Scans the repository (or specified paths) and updates the index
 with current file information including hashes, sizes, and timestamps.
 This operation synchronises the index with the actual file system state.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shutdownChan := shutdownFromContext(cmd.Context())
+		ctx := cmd.Context()
 
 		// Find the dcfh repository root
 		repoRoot, _, err := findDcfhRepo()
@@ -66,7 +66,7 @@ This operation synchronises the index with the actual file system state.`,
 
 		start := time.Now()
 
-		if err := cache.Update(shutdownChan, flags, args...); err != nil {
+		if err := cache.Update(ctx, flags, args...); err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
 		}
 

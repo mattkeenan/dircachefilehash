@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
@@ -10,28 +11,28 @@ import (
 // Holds a cursor into the skiplist and advances it on each Next() call — O(1) per call.
 type BinaryEntrySkiplistIterator struct {
 	iteratorBase
-	skiplist     *skiplistWrapper
-	cursor       *zcsl.ItemPtr[binaryEntryRef, string, string]
-	shutdownChan <-chan struct{}
-	started      bool
+	skiplist *skiplistWrapper
+	cursor   *zcsl.ItemPtr[binaryEntryRef, string, string]
+	ctx      context.Context
+	started  bool
 }
 
 // NewBinaryEntrySkiplistIterator creates a new unified iterator for the given skiplist
-func NewBinaryEntrySkiplistIterator(sl *skiplistWrapper, name string, shutdownChan <-chan struct{}) *BinaryEntrySkiplistIterator {
+func NewBinaryEntrySkiplistIterator(ctx context.Context, sl *skiplistWrapper, name string) *BinaryEntrySkiplistIterator {
 	if sl == nil || sl.Length() == 0 {
 		return &BinaryEntrySkiplistIterator{
 			iteratorBase: iteratorBase{
 				name:      name,
 				exhausted: true, // Empty/nil skiplist is immediately exhausted
 			},
-			shutdownChan: shutdownChan,
+			ctx: ctx,
 		}
 	}
 
 	return &BinaryEntrySkiplistIterator{
 		iteratorBase: iteratorBase{name: name},
 		skiplist:     sl,
-		shutdownChan: shutdownChan,
+		ctx:          ctx,
 	}
 }
 
@@ -48,9 +49,9 @@ func (bsi *BinaryEntrySkiplistIterator) Next() (BinaryEntryInterface, error) {
 
 	// Check for shutdown
 	select {
-	case <-bsi.shutdownChan:
+	case <-bsi.ctx.Done():
 		bsi.markExhausted()
-		return nil, fmt.Errorf("iteration interrupted by shutdown signal")
+		return nil, fmt.Errorf("iteration interrupted: %w", bsi.ctx.Err())
 	default:
 	}
 

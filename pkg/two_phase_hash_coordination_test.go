@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"os"
 	"slices"
 	"testing"
@@ -50,7 +51,7 @@ func TestTwoPhaseHashCoordination(t *testing.T) {
 // testPhase1HashRequests verifies that callbacks properly request hashing when needsHash() returns true
 func testPhase1HashRequests(t *testing.T, dc *DirectoryCache, _ string) {
 	// Create hash manager
-	hashManager := dc.newAlgorithmHashManager(2, nil)
+	hashManager := dc.newAlgorithmHashManager(context.Background(), 2)
 	defer hashManager.Shutdown()
 
 	// Create iterators - main index (empty) vs filesystem scan
@@ -59,8 +60,8 @@ func testPhase1HashRequests(t *testing.T, dc *DirectoryCache, _ string) {
 		t.Fatalf("Failed to load main index: %v", err)
 	}
 
-	existingIterator := NewBinaryEntrySkiplistIterator(mainSkiplist, "existing", nil)
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
+	existingIterator := NewBinaryEntrySkiplistIterator(context.Background(), mainSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{}, "scan")
 	defer func() { _ = existingIterator.Close() }()
 	defer func() { _ = scanIterator.Close() }()
 
@@ -148,7 +149,7 @@ func testPhase2HashCoordination(t *testing.T, dc *DirectoryCache, tempDir string
 	// We'll use the Update command which should trigger hash computation
 
 	// First, do an update to populate the main index using unified architecture
-	updateResult, err := dc.runStatusWorkflowUnified(nil)
+	updateResult, err := dc.runStatusWorkflowUnified(context.Background())
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
@@ -206,7 +207,7 @@ func testEndToEndStatusHashing(t *testing.T, dc *DirectoryCache, tempDir string)
 
 	// Run Status command - this should detect the modification and use two-phase coordination
 	flags := make(map[string]string)
-	result, err := dc.Status(nil, flags)
+	result, err := dc.Status(context.Background(), flags)
 	if err != nil {
 		t.Fatalf("Status command failed: %v", err)
 	}

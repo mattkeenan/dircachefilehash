@@ -20,7 +20,7 @@ in the index. Shows files that have been modified, added, or deleted
 since the last update operation.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shutdownChan := shutdownFromContext(cmd.Context())
+		ctx := cmd.Context()
 
 		// Find the dcfh repository root
 		repoRoot, _, err := findDcfhRepo()
@@ -51,7 +51,7 @@ since the last update operation.`,
 			return fmt.Errorf("failed to apply configuration overrides: %w", err)
 		}
 
-		status, err := cache.Status(shutdownChan, flags)
+		status, err := cache.Status(ctx, flags)
 		if err != nil {
 			return err
 		}

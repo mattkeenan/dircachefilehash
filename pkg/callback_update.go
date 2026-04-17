@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -30,15 +31,15 @@ type UpdateCallback struct {
 	// No mutex needed - UpdateCallback runs single-threaded via hwangLinUnified
 
 	// Shutdown coordination and hash job synchronization
-	shutdownChan <-chan struct{} // Shutdown signal from main
-	hashJobWG    sync.WaitGroup  // Wait for all hash jobs to complete
+	ctx       context.Context
+	hashJobWG sync.WaitGroup
 
 	// Index writing - Iovec writer for temp index output
 	tempIndexWriter *TempIndexWriter // Iovec writer for temp index output
 }
 
 // NewUpdateCallback creates a new UpdateCallback for v0.7 direct temp index writing
-func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager *algorithmHashManager, shutdownChan <-chan struct{}) *UpdateCallback {
+func NewUpdateCallback(ctx context.Context, dc *DirectoryCache, tempIndexFileName string, hashManager *algorithmHashManager) *UpdateCallback {
 	return &UpdateCallback{
 		// v0.7 direct temp index writing
 		dc:                dc,
@@ -54,7 +55,7 @@ func NewUpdateCallback(dc *DirectoryCache, tempIndexFileName string, hashManager
 		pathOrderToEntry: make(map[uint64]BinaryEntryInterface),
 
 		// Shutdown coordination
-		shutdownChan: shutdownChan,
+		ctx: ctx,
 
 		// Index writing
 		tempIndexWriter: nil, // Will be initialized when first entry is written
@@ -232,7 +233,7 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		if IsDebugEnabled("hash") {
 			VerboseLog(3, "[UPDATE-COMPLETE] All hash jobs completed successfully")
 		}
-	case <-uc.shutdownChan:
+	case <-uc.ctx.Done():
 		// Interrupted - cleanup what we have
 		if IsDebugEnabled("hash") {
 			VerboseLog(3, "[UPDATE-COMPLETE] Shutdown signal received, proceeding with available entries")

@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,7 +145,7 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 // runStatusWorkflowUnified implements the Status command workflow using unified architecture
 // This follows the v0.7 pattern: write to cache-{timestamp}.idx, rename to cache.idx on success,
 // leave timestamped file on interruption for startup merge.
-func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{}) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) runStatusWorkflowUnified(ctx context.Context) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 
 	// Generate timestamped cache filename following v0.7 architecture
@@ -197,7 +198,7 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 
 	// v0.7 unified: Use performUnifiedStatusScan which handles iterative writing via StatusCallback
 	// This writes directly to temp cache index during Hwang-Lin iteration - no skiplist handling needed
-	resultSkiplist, scanErr := dc.performUnifiedStatusScan(shutdownChan, cacheTempFileName, workingSkiplist)
+	resultSkiplist, scanErr := dc.performUnifiedStatusScan(ctx, cacheTempFileName, workingSkiplist)
 	if scanErr != nil {
 		// v0.7: On interruption, StatusCallback handles cleanup and partial results preserved in timestamped file
 		// operationSuccessful remains false, so defer will leave timestamped file for startup merge
@@ -214,7 +215,7 @@ func (dc *DirectoryCache) runStatusWorkflowUnified(shutdownChan <-chan struct{})
 // performUnifiedStatusScan performs status scan using StatusCallback for v0.7 cache writing
 // This follows the same pattern as performUnifiedScanToSkiplist but uses StatusCallback
 // to filter and write only cache entries (not in main context) during iteration
-func (dc *DirectoryCache) performUnifiedStatusScan(shutdownChan <-chan struct{}, cacheFileName string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) performUnifiedStatusScan(ctx context.Context, cacheFileName string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
@@ -236,18 +237,18 @@ func (dc *DirectoryCache) performUnifiedStatusScan(shutdownChan <-chan struct{},
 	}()
 
 	// Create hash job manager for concurrent hashing
-	hashJobManager := dc.newAlgorithmHashManager(dc.hashWorkers, shutdownChan)
+	hashJobManager := dc.newAlgorithmHashManager(ctx, dc.hashWorkers)
 	defer hashJobManager.Shutdown()
 
 	// Create iterators for unified algorithm
-	existingIterator := NewBinaryEntrySkiplistIterator(compareSkiplist, "existing", shutdownChan)
-	scanIterator := NewUnifiedFilesystemScanIterator(dc, []string{}, "scan")
+	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "scan")
 
 	// Create status callback for v0.7 direct cache index writing
 	statusCallback := NewStatusCallback("status", dc, hashJobManager, cacheFileName)
 
 	// Run unified algorithm with StatusCallback
-	scanErr := hwangLinUnified(existingIterator, scanIterator, statusCallback, shutdownChan)
+	scanErr := hwangLinUnified(existingIterator, scanIterator, statusCallback, ctx)
 	if scanErr != nil {
 		dc.lastScanResult = compareSkiplist // Return original skiplist on error
 		dc.lastScanError = scanErr

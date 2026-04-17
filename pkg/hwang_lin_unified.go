@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -20,7 +21,7 @@ import (
 func hwangLinUnified(
 	leftIter, rightIter BinaryEntryIterator,
 	callback HwangLinCallback,
-	shutdownChan <-chan struct{},
+	ctx context.Context,
 ) error {
 	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
 		VerboseLog(3, "[HWANG-LIN] Starting hwangLinUnified: left=%s, right=%s", leftIter.Name(), rightIter.Name())
@@ -62,8 +63,8 @@ func hwangLinUnified(
 	for leftEntry != nil || rightEntry != nil {
 		// Check for shutdown signal at the beginning of each iteration
 		select {
-		case <-shutdownChan:
-			shutdownErr := fmt.Errorf("operation interrupted by shutdown signal")
+		case <-ctx.Done():
+			shutdownErr := fmt.Errorf("operation interrupted: %w", ctx.Err())
 			_ = callback.OnComplete(shutdownErr)
 			return shutdownErr
 		default:

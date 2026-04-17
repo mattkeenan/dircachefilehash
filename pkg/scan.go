@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,7 +65,7 @@ func (m *mockFileInfo) Sys() any           { return nil }
 // ============================================================================
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPath, shutdownChan <-chan struct{}) error {
+func (dc *DirectoryCache) scanPath(ctx context.Context, paths []string, resultChan chan<- *scannedPath) error {
 	defer VerboseEnter()()
 	defer close(resultChan)
 
@@ -116,7 +117,7 @@ func (dc *DirectoryCache) scanPath(paths []string, resultChan chan<- *scannedPat
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "scanPath: scanning deduplicated path: %s", absPath)
 		}
-		if err := dc.scanPathRecursive(absPath, resultChan, shutdownChan); err != nil {
+		if err := dc.scanPathRecursive(ctx, absPath, resultChan); err != nil {
 			return fmt.Errorf("failed to scan path %s: %w", absPath, err)
 		}
 	}
@@ -368,7 +369,7 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *scannedPath, shutdownChan <-chan struct{}) error {
+func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string, resultChan chan<- *scannedPath) error {
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
@@ -380,11 +381,11 @@ func (dc *DirectoryCache) scanPathRecursive(rootPath string, resultChan chan<- *
 	for len(pathQueue) > 0 {
 		// Check for shutdown
 		select {
-		case <-shutdownChan:
+		case <-ctx.Done():
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan interrupted by shutdown\n")
 			}
-			return fmt.Errorf("scan interrupted by shutdown")
+			return fmt.Errorf("scan interrupted: %w", ctx.Err())
 		default:
 		}
 
