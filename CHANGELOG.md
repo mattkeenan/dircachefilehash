@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Rejected
+
+### Double config parse for external repos
+
+Evaluated 2026-04-18: for external repos, `LoadConfig` is called in `ResolveExternalRoot` (discovery) and again in `configureDirectoryCache` (initialisation). Fixing would require changing 6 function signatures (including the public `OpenDirectoryCache` API) and adding global state to thread a `*Config` through the discovery layer. The config file is typically under 20 lines of INI — the extra parse takes microseconds and only affects external repos. The coupling cost exceeds the benefit.
+
+### SnapshotRepository field redundancy
+
+Evaluated 2026-04-18: `SnapshotsDir` is derivable from `MetaDir`. Dropping either field makes call sites less readable — `filepath.Dir(sr.SnapshotsDir)` obscures intent, `filepath.Join(sr.MetaDir, "snapshots")` repeated 8 times adds noise. The struct is created once per command. Both fields exist for readability, not due to a design flaw.
+
 ## [0.8.0] - 2026-04-15
 
 Migrate CLI from custom option parser to cobra/viper. GNU longopt support (`--option value`), built-in shell completion (`dcfh completion [bash|zsh]`), viper config binding, and `--version` flag.
