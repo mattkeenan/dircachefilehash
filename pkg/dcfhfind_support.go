@@ -89,37 +89,12 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 	return nil
 }
 
-// FindRepositoryRootFrom discovers the repository root starting from a specific directory
-// If startDir is empty, uses current working directory
+// FindRepositoryRootFrom discovers the repository root starting from a specific directory.
+// If startDir is empty, uses current working directory.
+// Handles both internal (.dcfh subdirectory) and external (*.dcfh) repos.
 func FindRepositoryRootFrom(startDir string) (string, error) {
-	if startDir == "" {
-		return repoDir()
-	}
-
-	// If startDir IS a .dcfh directory, return its parent as repo root
-	if filepath.Base(startDir) == ".dcfh" {
-		repoRoot := filepath.Dir(startDir)
-		realDir, err := filepath.EvalSymlinks(repoRoot)
-		if err != nil {
-			// If symlink resolution fails, fall back to original path
-			realDir = repoRoot
-		}
-		return realDir, nil
-	}
-
-	// Validate the specified directory has a .dcfh subdirectory
-	dcfhPath := filepath.Join(startDir, ".dcfh")
-	if info, err := os.Stat(dcfhPath); err != nil || !info.IsDir() {
-		return "", fmt.Errorf("no dcfh repository found at %s", startDir)
-	}
-
-	// Resolve symlinks to get the real path (like the core function does)
-	realDir, err := filepath.EvalSymlinks(startDir)
-	if err != nil {
-		// If symlink resolution fails, fall back to original path
-		realDir = startDir
-	}
-	return realDir, nil
+	rootDir, _, err := ResolveRepository(startDir)
+	return rootDir, err
 }
 
 // ResolveIndexFile resolves an index specifier to an actual file path
@@ -135,18 +110,16 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 	}
 
 	// Otherwise, discover repository and resolve index type
-	repoRoot, err := FindRepositoryRootFrom("")
+	_, metaDir, err := ResolveRepository("")
 	if err != nil {
 		return "", fmt.Errorf("not in a dcfh repository: %w", err)
 	}
 
-	dcfhDir := filepath.Join(repoRoot, ".dcfh")
-
 	switch indexSpec {
 	case "main":
-		return filepath.Join(dcfhDir, "main.idx"), nil
+		return filepath.Join(metaDir, "main.idx"), nil
 	case "cache":
-		return filepath.Join(dcfhDir, "cache.idx"), nil
+		return filepath.Join(metaDir, "cache.idx"), nil
 	case "scan":
 		// For scan, we'd need to handle multiple files - not supported yet
 		return "", fmt.Errorf("scan index type not yet supported (use scan-PID-TID instead)")
@@ -157,7 +130,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 			if !strings.HasSuffix(scanFile, ".idx") {
 				scanFile += ".idx"
 			}
-			scanPath := filepath.Join(dcfhDir, scanFile)
+			scanPath := filepath.Join(metaDir, scanFile)
 			if _, err := os.Stat(scanPath); err != nil {
 				return "", fmt.Errorf("scan index file not found: %s", scanPath)
 			}
@@ -167,7 +140,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 		// Try appending .idx if it doesn't have an extension
 		if !strings.Contains(indexSpec, ".") {
 			indexWithExt := indexSpec + ".idx"
-			indexPath := filepath.Join(dcfhDir, indexWithExt)
+			indexPath := filepath.Join(metaDir, indexWithExt)
 			if _, err := os.Stat(indexPath); err == nil {
 				return indexPath, nil
 			}

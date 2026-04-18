@@ -122,7 +122,7 @@ func TestRecoveryWorkflow(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 
 	t.Run("RecoverFromNonExistentFile", func(t *testing.T) {
-		dcfhDir := dc.DcfhDir
+		dcfhDir := dc.MetaDir
 		nonExistentPath := filepath.Join(dcfhDir, "nonexistent.idx")
 		err := dc.RecoverFromIndex(nonExistentPath, 1)
 		if err == nil {
@@ -153,7 +153,7 @@ func TestScanFileInfoSorting(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 
 	// Get the actual .dcfh directory path from the IndexFile
-	dcfhDir := dc.DcfhDir
+	dcfhDir := dc.MetaDir
 
 	// Ensure the .dcfh directory exists
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
@@ -217,7 +217,7 @@ func TestCreateEmptyMainIndex(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 
 	// Ensure the .dcfh directory exists
-	dcfhDir := dc.DcfhDir
+	dcfhDir := dc.MetaDir
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create dcfh directory: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestPreRecoverySnapshot(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 
 	// Ensure the .dcfh directory exists
-	dcfhDir := dc.DcfhDir
+	dcfhDir := dc.MetaDir
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create dcfh directory: %v", err)
 	}

@@ -316,8 +316,8 @@ func DiagnosticValidationProcessor(verbosity int) EntryProcessor {
 
 // createPreRecoverySnapshot creates a complete backup of all index files before recovery
 func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
-	dcfhDir := dc.DcfhDir
-	recoveryDir := filepath.Join(dcfhDir, "recovery")
+	metaDir := dc.MetaDir
+	recoveryDir := filepath.Join(metaDir, "recovery")
 
 	// Create recovery directory if it doesn't exist
 	if err := os.MkdirAll(recoveryDir, 0755); err != nil {
@@ -329,7 +329,7 @@ func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
 	}
 
 	// List all .idx files in the .dcfh directory
-	entries, err := os.ReadDir(dcfhDir)
+	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		return fmt.Errorf("failed to read .dcfh directory: %w", err)
 	}
@@ -340,7 +340,7 @@ func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
 			continue
 		}
 
-		sourcePath := filepath.Join(dcfhDir, entry.Name())
+		sourcePath := filepath.Join(metaDir, entry.Name())
 		destPath := filepath.Join(recoveryDir, entry.Name())
 
 		// Copy file preserving metadata
@@ -396,7 +396,7 @@ func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) e
 
 // generateRecoveryBackupName creates a backup filename for recovery operations
 func (dc *DirectoryCache) generateRecoveryBackupName(recoveryType string) string {
-	return filepath.Join(dc.DcfhDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
+	return filepath.Join(dc.MetaDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
 }
 
 // createRecoveryBackup creates a backup copy of a broken index file

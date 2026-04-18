@@ -38,7 +38,7 @@ func main() {
 	}
 
 	// Discover repository if needed
-	repo, err := discoverRepository(args.RepoPath)
+	repo, metaDir, err := discoverRepository(args.RepoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfind: %v\n", err)
 		os.Exit(1)
@@ -46,7 +46,7 @@ func main() {
 	args.RepoPath = repo
 
 	// Resolve starting points to actual index files
-	indexFiles, err := resolveStartingPoints(args.StartingPoints, args.RepoPath)
+	indexFiles, err := resolveStartingPoints(args.StartingPoints, metaDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfind: %v\n", err)
 		os.Exit(1)
@@ -740,32 +740,31 @@ func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
 	}
 }
 
-func discoverRepository(repoPath string) (string, error) {
+func discoverRepository(repoPath string) (string, string, error) {
 	if repoPath == "" {
 		repoPath = "."
 	}
-	return dircachefilehash.FindRepositoryRootFrom(repoPath)
+	return dircachefilehash.ResolveRepository(repoPath)
 }
 
-func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFile, error) {
+func resolveStartingPoints(startingPoints []string, metaDir string) ([]IndexFile, error) {
 	var indexFiles []IndexFile
-	dcfhDir := filepath.Join(repoPath, ".dcfh")
 
 	for _, point := range startingPoints {
 		switch point {
 		case "main":
 			indexFiles = append(indexFiles, IndexFile{
-				Path: filepath.Join(dcfhDir, "main.idx"),
+				Path: filepath.Join(metaDir, "main.idx"),
 				Type: "main",
 			})
 		case "cache":
 			indexFiles = append(indexFiles, IndexFile{
-				Path: filepath.Join(dcfhDir, "cache.idx"),
+				Path: filepath.Join(metaDir, "cache.idx"),
 				Type: "cache",
 			})
 		case "scan":
 			// Find all scan files
-			scanFiles, err := filepath.Glob(filepath.Join(dcfhDir, "scan-*.idx"))
+			scanFiles, err := filepath.Glob(filepath.Join(metaDir, "scan-*.idx"))
 			if err != nil {
 				return nil, fmt.Errorf("error finding scan files: %w", err)
 			}
@@ -785,7 +784,7 @@ func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFil
 			// Recursively resolve main, cache, and scan
 			allPoints := []string{"main", "cache", "scan"}
 			for _, subPoint := range allPoints {
-				subFiles, err := resolveStartingPoints([]string{subPoint}, repoPath)
+				subFiles, err := resolveStartingPoints([]string{subPoint}, metaDir)
 				if err != nil {
 					continue // Ignore missing indices
 				}
@@ -796,9 +795,9 @@ func resolveStartingPoints(startingPoints []string, repoPath string) ([]IndexFil
 			if strings.HasPrefix(point, "scan-") && (strings.Contains(point, "-") || strings.HasSuffix(point, ".idx")) {
 				var indexPath string
 				if strings.HasSuffix(point, ".idx") {
-					indexPath = filepath.Join(dcfhDir, point)
+					indexPath = filepath.Join(metaDir, point)
 				} else {
-					indexPath = filepath.Join(dcfhDir, point+".idx")
+					indexPath = filepath.Join(metaDir, point+".idx")
 				}
 
 				// Extract scan ID

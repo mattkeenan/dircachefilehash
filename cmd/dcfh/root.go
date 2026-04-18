@@ -25,10 +25,11 @@ var (
 	flagHashWorkers      int
 	flagIndexLockTimeout int
 	flagDryRun           bool
+	flagGlobalMetaDir    string
 
 	// Cached repo discovery — populated by PersistentPreRunE, reused by commands
 	cachedRepoRoot string
-	cachedDcfhDir  string
+	cachedMetaDir  string
 )
 
 var rootCmd = &cobra.Command{
@@ -75,6 +76,22 @@ var rootCmd = &cobra.Command{
 			dcfh.SetVerboseLevel(flagVerbose)
 		}
 
+		// If --dcfh-dir is set globally, resolve it and pre-populate cache.
+		// Skip for init — the directory doesn't exist yet.
+		if flagGlobalMetaDir != "" && cmd.Name() != "init" {
+			absMetaDir, err := filepath.Abs(flagGlobalMetaDir)
+			if err != nil {
+				return fmt.Errorf("failed to resolve --meta-dir path: %w", err)
+			}
+			cachedMetaDir = absMetaDir
+
+			if root, ok := dcfh.ResolveExternalRoot(absMetaDir); ok {
+				cachedRepoRoot = root
+			} else {
+				cachedRepoRoot = filepath.Dir(absMetaDir)
+			}
+		}
+
 		// Viper config binding: apply config defaults for flags not explicitly set
 		applyViperDefaults(cmd)
 
@@ -95,6 +112,7 @@ func init() {
 	pf.IntVarP(&flagHashWorkers, "hash-workers", "w", 0, "number of concurrent hash workers (0=use config default)")
 	pf.IntVar(&flagIndexLockTimeout, "index-lock-timeout", 0, "timeout in seconds for index memory locks (0=use config default)")
 	pf.BoolVar(&flagDryRun, "dry-run", false, "show what would be done without actually doing it")
+	pf.StringVar(&flagGlobalMetaDir, "meta-dir", "", "path to an external .dcfh directory (overrides auto-discovery)")
 
 	// Register completion functions for flag values
 	_ = rootCmd.RegisterFlagCompletionFunc("output", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -112,13 +130,13 @@ func init() {
 // for any flags that were not explicitly set on the command line.
 func applyViperDefaults(cmd *cobra.Command) {
 	// Find the .dcfh directory
-	_, dcfhDir, err := findDcfhRepo()
+	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		// No repo found — skip config loading (e.g. running init or completion)
 		return
 	}
 
-	configPath := filepath.Join(dcfhDir, "config")
+	configPath := filepath.Join(metaDir, "config")
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("ini")
 

@@ -1217,7 +1217,7 @@ func getSystemIOVMax() int {
 func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
 	var tempFiles []string
 
-	entries, err := os.ReadDir(dc.DcfhDir)
+	entries, err := os.ReadDir(dc.MetaDir)
 	if err != nil {
 		return nil, err
 	}

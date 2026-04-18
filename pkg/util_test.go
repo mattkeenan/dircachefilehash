@@ -244,9 +244,9 @@ func TestGetGoroutineID(t *testing.T) {
 
 func TestNewDirectoryCache(t *testing.T) {
 	rootDir := "/tmp/test/root" // Use /tmp to avoid permission issues
-	dcfhDir := "/tmp/test/dcfh"
+	metaDir := "/tmp/test/dcfh"
 
-	dc := NewDirectoryCache(rootDir, dcfhDir)
+	dc := NewDirectoryCache(rootDir, metaDir)
 
 	if dc == nil {
 		t.Fatal("NewDirectoryCache should not return nil")
@@ -256,8 +256,8 @@ func TestNewDirectoryCache(t *testing.T) {
 		t.Errorf("Expected RootDir %s, got %s", rootDir, dc.RootDir)
 	}
 
-	// CacheFile should be the cache.idx file in dcfhDir, not dcfhDir itself
-	expectedCacheFile := strings.TrimSuffix(dcfhDir, "/") + "/.dcfh/cache.idx"
+	// CacheFile should be the cache.idx file in metaDir, not metaDir itself
+	expectedCacheFile := strings.TrimSuffix(metaDir, "/") + "/.dcfh/cache.idx"
 	if dc.CacheFile != expectedCacheFile {
 		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
 	}

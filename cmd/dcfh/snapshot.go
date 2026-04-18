@@ -30,12 +30,12 @@ var snapshotCreateCmd = &cobra.Command{
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 
 		// Find dcfh repository
-		repoRoot, dcfhDir, err := findDcfhRepo()
+		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		sr := dcfh.NewSnapshotRepository(dcfhDir)
+		sr := dcfh.NewSnapshotRepository(metaDir)
 
 		if flagVerbose >= 1 {
 			fmt.Printf("Creating snapshot...\n")
@@ -71,12 +71,12 @@ var snapshotListCmd = &cobra.Command{
 	Short:   "List all available snapshots",
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, dcfhDir, err := findDcfhRepo()
+		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		sr := dcfh.NewSnapshotRepository(dcfhDir)
+		sr := dcfh.NewSnapshotRepository(metaDir)
 
 		snapshots, err := sr.ListSnapshots()
 		if err != nil {
@@ -151,13 +151,13 @@ var snapshotForgetCmd = &cobra.Command{
 	Short: "Remove snapshots based on retention policies",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, dcfhDir, err := findDcfhRepo()
+		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
 		// Load configuration to get default retention policy
-		config, err := dcfh.LoadConfig(dcfhDir)
+		config, err := dcfh.LoadConfig(metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
@@ -195,7 +195,7 @@ var snapshotForgetCmd = &cobra.Command{
 			dryRun = snapshotConfig.DryRun
 		}
 
-		sr := dcfh.NewSnapshotRepository(dcfhDir)
+		sr := dcfh.NewSnapshotRepository(metaDir)
 
 		// Show retention policy
 		if flagVerbose >= 1 || dryRun {
@@ -243,12 +243,12 @@ var snapshotRemoveCmd = &cobra.Command{
 	Short: "Remove specific snapshots by ID",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, dcfhDir, err := findDcfhRepo()
+		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		repo := dcfh.NewSnapshotRepository(dcfhDir)
+		repo := dcfh.NewSnapshotRepository(metaDir)
 		outputFormat := getOutputFormat()
 
 		var results []map[string]any

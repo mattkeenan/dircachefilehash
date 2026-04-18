@@ -376,7 +376,7 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 	// Use a priority queue (sorted slice) to ensure we process paths in alphabetical order
 	// This ensures the output is naturally sorted
 	pathQueue := []string{rootPath}
-	dcfhDir := dc.DcfhDir
+	metaDir := dc.MetaDir
 
 	for len(pathQueue) > 0 {
 		// Check for shutdown
@@ -504,7 +504,7 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 
 		if info.IsDir() {
 			// Skip the .dcfh directory
-			if currentPath == dcfhDir {
+			if currentPath == metaDir {
 				continue
 			}
 

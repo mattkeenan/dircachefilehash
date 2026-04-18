@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
@@ -160,36 +159,21 @@ func outputJSON(data any) {
 	}
 }
 
-// findDcfhRepo finds the .dcfh directory by walking up the directory tree.
-// Results are cached after the first successful call (populated by PersistentPreRunE).
+// findDcfhRepo returns the (rootDir, metaDir) for the current repository.
+// Results are cached after the first successful call.
 func findDcfhRepo() (string, string, error) {
 	if cachedRepoRoot != "" {
-		return cachedRepoRoot, cachedDcfhDir, nil
+		return cachedRepoRoot, cachedMetaDir, nil
 	}
 
-	currentDir, err := os.Getwd()
+	rootDir, metaDir, err := dcfh.ResolveRepository("")
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get current directory: %w", err)
+		return "", "", err
 	}
 
-	// Walk up the directory tree looking for .dcfh
-	for {
-		dcfhPath := filepath.Join(currentDir, ".dcfh")
-		if stat, err := os.Stat(dcfhPath); err == nil && stat.IsDir() {
-			cachedRepoRoot = currentDir
-			cachedDcfhDir = dcfhPath
-			return currentDir, dcfhPath, nil
-		}
-
-		parent := filepath.Dir(currentDir)
-
-		if parent == currentDir {
-			break
-		}
-		currentDir = parent
-	}
-
-	return "", "", fmt.Errorf("not in a dcfh repository (no .dcfh directory found)")
+	cachedRepoRoot = rootDir
+	cachedMetaDir = metaDir
+	return rootDir, metaDir, nil
 }
 
 // formatFileSize formats a file size in bytes to a human-readable string

@@ -11,6 +11,8 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+var flagInitExternal bool
+
 var initCmd = &cobra.Command{
 	Use:   "init <directory>",
 	Short: "Initialise a new dcfh repository",
@@ -18,7 +20,21 @@ var initCmd = &cobra.Command{
 
 Creates a new .dcfh directory structure with configuration files
 and an empty main index. The directory must exist and not already
-contain a .dcfh repository.`,
+contain a .dcfh repository.
+
+Use --external to create the .dcfh metadata directory outside the
+scanned directory (similar to a git bare repository). This is useful
+for indexing read-only directories or centralised index management.
+
+Examples:
+  dcfh init /home/matt/some/dir
+    Creates /home/matt/some/dir/.dcfh/
+
+  dcfh init --external /home/matt/some/dir
+    Creates ./home-matt-some-dir.dcfh/ in the current directory
+
+  dcfh init --external /home/matt/some/dir --meta-dir /storage/my-index.dcfh
+    Creates /storage/my-index.dcfh/`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		directory := args[0]
@@ -47,27 +63,68 @@ contain a .dcfh repository.`,
 			return fmt.Errorf("%s is not a directory", absDir)
 		}
 
-		// Check if .dcfh already exists
-		dcfhDir := filepath.Join(absDir, ".dcfh")
-		if _, err := os.Stat(dcfhDir); err == nil {
-			return fmt.Errorf(".dcfh directory already exists in %s", absDir)
+		var metaDir string
+		if flagInitExternal {
+			if flagGlobalMetaDir != "" {
+				metaDir, err = filepath.Abs(flagGlobalMetaDir)
+				if err != nil {
+					return fmt.Errorf("failed to get absolute path for %s: %w", flagGlobalMetaDir, err)
+				}
+				if filepath.Ext(metaDir) != ".dcfh" {
+					metaDir += ".dcfh"
+				}
+			} else {
+				slug := dcfh.PathToSlug(absDir)
+				metaDir, err = filepath.Abs(slug + ".dcfh")
+				if err != nil {
+					return fmt.Errorf("failed to get absolute path: %w", err)
+				}
+			}
+
+			if _, err := os.Stat(metaDir); err == nil {
+				return fmt.Errorf("external .dcfh directory already exists: %s", metaDir)
+			}
+		} else {
+			if flagGlobalMetaDir != "" {
+				return fmt.Errorf("--meta-dir can only be used with --external")
+			}
+
+			metaDir = filepath.Join(absDir, ".dcfh")
+			if _, err := os.Stat(metaDir); err == nil {
+				return fmt.Errorf(".dcfh directory already exists in %s", absDir)
+			}
 		}
 
-		// Create cache - this will automatically create .dcfh directory structure
-		cache := dcfh.CreateDirectoryCache(absDir, absDir)
+		var cache *dcfh.DirectoryCache
+		if flagInitExternal {
+			cache = dcfh.CreateDirectoryCache(absDir, metaDir)
+		} else {
+			cache = dcfh.CreateDirectoryCache(absDir, absDir)
+		}
 		defer func() { _ = cache.Close() }()
 
-		// Apply configuration overrides
 		flags := buildFlags()
 		if err := cache.ApplyConfigOverrides(flags); err != nil {
 			return fmt.Errorf("failed to apply configuration overrides: %w", err)
 		}
 
+		if flagInitExternal {
+			config := cache.GetConfig()
+			if config != nil {
+				if err := config.SetRepositoryRoot(absDir); err != nil {
+					return fmt.Errorf("failed to save repository root to config: %w", err)
+				}
+			}
+		}
+
 		format := getOutputFormat()
 		duration := time.Since(start)
 
-		// Always show the initialization message (git-style)
-		fmt.Printf("Initialised empty dcfh repository in %s\n", dcfhDir)
+		// Always show the initialisation message (git-style)
+		fmt.Printf("Initialised empty dcfh repository in %s\n", metaDir)
+		if flagInitExternal {
+			fmt.Printf("  scanning: %s\n", absDir)
+		}
 
 		if format == OutputJSON {
 			output := InitOutput{
@@ -91,5 +148,6 @@ contain a .dcfh repository.`,
 }
 
 func init() {
+	initCmd.Flags().BoolVar(&flagInitExternal, "external", false, "create .dcfh directory outside the scanned directory")
 	rootCmd.AddCommand(initCmd)
 }

@@ -58,12 +58,12 @@ func init() {
 
 // handleConfigList lists all configuration variables
 func handleConfigList() error {
-	_, dcfhDir, err := findDcfhRepo()
+	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
 
-	config, err := dcfh.LoadConfig(dcfhDir)
+	config, err := dcfh.LoadConfig(metaDir)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -81,12 +81,12 @@ func handleConfigList() error {
 
 // handleConfigGet retrieves a specific configuration value
 func handleConfigGet(key string) error {
-	_, dcfhDir, err := findDcfhRepo()
+	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
 
-	config, err := dcfh.LoadConfig(dcfhDir)
+	config, err := dcfh.LoadConfig(metaDir)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -113,12 +113,12 @@ func handleConfigGet(key string) error {
 
 // handleConfigSet sets a configuration value
 func handleConfigSet(key, value string) error {
-	_, dcfhDir, err := findDcfhRepo()
+	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
 
-	config, err := dcfh.LoadConfig(dcfhDir)
+	config, err := dcfh.LoadConfig(metaDir)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}

@@ -16,10 +16,11 @@ type IgnoreManager struct {
 	loaded     bool
 }
 
-// NewIgnoreManager creates a new ignore manager
-func NewIgnoreManager(dcfhDir string) *IgnoreManager {
+// NewIgnoreManager creates a new ignore manager.
+// metaDir is the .dcfh metadata directory path (e.g. /path/.dcfh or /path/foo.dcfh).
+func NewIgnoreManager(metaDir string) *IgnoreManager {
 	return &IgnoreManager{
-		ignorePath: filepath.Join(dcfhDir, ".dcfh", "ignore"),
+		ignorePath: filepath.Join(metaDir, "ignore"),
 		patterns:   make([]*regexp.Regexp, 0),
 		loaded:     false,
 	}

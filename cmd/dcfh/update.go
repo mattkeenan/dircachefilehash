@@ -22,7 +22,7 @@ This operation synchronises the index with the actual file system state.`,
 		ctx := cmd.Context()
 
 		// Find the dcfh repository root
-		repoRoot, _, err := findDcfhRepo()
+		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			if getOutputFormat() == OutputHuman {
 				fmt.Fprintf(os.Stderr, "Run 'dcfh init <dir>' to initialise a repository\n")
@@ -48,7 +48,7 @@ This operation synchronises the index with the actual file system state.`,
 		}
 
 		// Update the index
-		cache, err := dcfh.OpenDirectoryCache(repoRoot, repoRoot)
+		cache, err := dcfh.OpenDirectoryCache(repoRoot, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
 		}

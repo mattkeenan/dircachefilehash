@@ -48,6 +48,13 @@ type PerformanceConfig struct {
 	IndexLockTimeout int    // Timeout in seconds for index memory locks (default: 5)
 }
 
+// RepositoryConfig represents repository location configuration.
+// Only used for external repositories where the .dcfh directory is
+// separate from the scanned directory.
+type RepositoryConfig struct {
+	Root string // Absolute path to the directory being scanned
+}
+
 // SnapshotConfig represents snapshot retention policy configuration
 type SnapshotConfig struct {
 	KeepHourly  int  `ini:"keep_hourly"`  // Number of hourly snapshots to keep (default: 0)
@@ -69,8 +76,8 @@ type AllConfig struct {
 }
 
 // LoadConfig loads configuration from the .dcfh/config file
-func LoadConfig(dcfhDir string) (*Config, error) {
-	configPath := filepath.Join(dcfhDir, "config")
+func LoadConfig(metaDir string) (*Config, error) {
+	configPath := filepath.Join(metaDir, "config")
 
 	cfg := &Config{
 		configPath: configPath,
@@ -365,6 +372,53 @@ func (c *Config) GetSnapshotConfig() *SnapshotConfig {
 	}
 
 	return snapshotConfig
+}
+
+// GetRepositoryConfig returns the repository configuration.
+// Returns nil Root if this is a normal (non-external) repository.
+func (c *Config) GetRepositoryConfig() *RepositoryConfig {
+	repoConfig := &RepositoryConfig{}
+
+	if c.ini.HasSection("repository") {
+		section := c.ini.Section("repository")
+		if section.HasKey("root") {
+			repoConfig.Root = section.Key("root").String()
+		}
+	}
+
+	return repoConfig
+}
+
+// SetRepositoryRoot sets the root directory for an external repository.
+func (c *Config) SetRepositoryRoot(root string) error {
+	section, err := c.ini.NewSection("repository")
+	if err != nil {
+		return fmt.Errorf("failed to create repository section: %w", err)
+	}
+	if _, err := section.NewKey("root", root); err != nil {
+		return fmt.Errorf("failed to set repository root: %w", err)
+	}
+	return c.Save()
+}
+
+// ResolveExternalRoot reads the [repository] root from a .dcfh directory's
+// config file, returning the root path and true if found. Returns ("", false)
+// if the config doesn't exist or has no repository root.
+// This avoids duplicating the "load config, read root" pattern across callers.
+func ResolveExternalRoot(metaDir string) (string, bool) {
+	configPath := filepath.Join(metaDir, "config")
+	if _, err := os.Stat(configPath); err != nil {
+		return "", false
+	}
+	config, err := LoadConfig(metaDir)
+	if err != nil {
+		return "", false
+	}
+	repoConfig := config.GetRepositoryConfig()
+	if repoConfig.Root != "" {
+		return repoConfig.Root, true
+	}
+	return "", false
 }
 
 // GetAllConfig returns all configuration options

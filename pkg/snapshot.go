@@ -36,7 +36,7 @@ type SnapshotSummary struct {
 
 // SnapshotRepository manages snapshot storage and operations
 type SnapshotRepository struct {
-	BasePath     string // .dcfh directory path
+	MetaDir      string // .dcfh metadata directory path
 	SnapshotsDir string // .dcfh/snapshots directory (contains snapshot subdirectories directly)
 }
 
@@ -64,11 +64,11 @@ type SnapshotTarget struct {
 }
 
 // NewSnapshotRepository creates a new snapshot repository
-func NewSnapshotRepository(dcfhDir string) *SnapshotRepository {
-	snapshotsDir := filepath.Join(dcfhDir, "snapshots")
-	VerboseLog(3, "NewSnapshotRepository: dcfhDir=%s, basePath=%s", dcfhDir, dcfhDir)
+func NewSnapshotRepository(metaDir string) *SnapshotRepository {
+	snapshotsDir := filepath.Join(metaDir, "snapshots")
+	VerboseLog(3, "NewSnapshotRepository: metaDir=%s", metaDir)
 	return &SnapshotRepository{
-		BasePath:     dcfhDir,
+		MetaDir:      metaDir,
 		SnapshotsDir: snapshotsDir,
 	}
 }
@@ -129,7 +129,7 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 
 	for _, file := range filesToSnapshot {
 		// Copy file preserving metadata
-		srcPath := filepath.Join(sr.BasePath, file)
+		srcPath := filepath.Join(sr.MetaDir, file)
 		dstPath := filepath.Join(snapshotDir, file)
 
 		VerboseLog(2, "Copying %s (%s)", file, formatSize(getFileSize(srcPath)))
@@ -402,7 +402,7 @@ func (sr *SnapshotRepository) selectFromGroups(groups map[string][]*SnapshotMeta
 // Helper functions
 
 func (sr *SnapshotRepository) findFilesToSnapshot() ([]string, error) {
-	entries, err := os.ReadDir(sr.BasePath)
+	entries, err := os.ReadDir(sr.MetaDir)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,7 @@ func (sr *SnapshotRepository) findFilesToSnapshot() ([]string, error) {
 	}
 
 	// Debug output
-	VerboseLog(3, "Found %d files to snapshot in %s: %v", len(files), sr.BasePath, files)
+	VerboseLog(3, "Found %d files to snapshot in %s: %v", len(files), sr.MetaDir, files)
 
 	return files, nil
 }

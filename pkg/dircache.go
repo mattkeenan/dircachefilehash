@@ -14,9 +14,9 @@ import (
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
 func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {
-	dcfhDir := dc.DcfhDir
+	metaDir := dc.MetaDir
 
-	entries, err := os.ReadDir(dcfhDir)
+	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		return fmt.Errorf("failed to read .dcfh directory: %w", err)
 	}
@@ -134,33 +134,43 @@ func (dc *DirectoryCache) IndexTimestamp() (time.Time, bool) {
 	return time.Unix(int64(header.Timestamp), 0).UTC(), true
 }
 
+// ResolveMetaDir determines the metadata directory path.
+// If dir ends with ".dcfh", it IS the metadata directory (external repo).
+// Otherwise, ".dcfh" is appended (standard internal layout).
+// If dir is empty, defaults to rootDir.
+func ResolveMetaDir(dir, rootDir string) string {
+	if dir == "" {
+		dir = rootDir
+	}
+	if strings.HasSuffix(dir, ".dcfh") {
+		return dir
+	}
+	return filepath.Join(dir, ".dcfh")
+}
+
 // initDirectoryCacheBase creates a partially-initialised DirectoryCache with
 // struct fields set but no I/O performed (no directory creation, no config loading).
-// Returns the DirectoryCache and the resolved dcfhDir (defaulted to rootDir if empty).
-func initDirectoryCacheBase(rootDir, dcfhDir string) (*DirectoryCache, string) {
-	if dcfhDir == "" {
-		dcfhDir = rootDir
-	}
-
+// metaDir must be the fully resolved metadata directory path.
+func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
 	return &DirectoryCache{
 		RootDir:       rootDir,
-		DcfhDir:       filepath.Join(dcfhDir, ".dcfh"),
-		IndexFile:     filepath.Join(dcfhDir, ".dcfh", "main.idx"),
-		CacheFile:     filepath.Join(dcfhDir, ".dcfh", "cache.idx"),
+		MetaDir:       metaDir,
+		IndexFile:     filepath.Join(metaDir, "main.idx"),
+		CacheFile:     filepath.Join(metaDir, "cache.idx"),
 		signature:     [4]byte{'d', 'c', 'f', 'h'},
 		version:       CurrentIndexVersion,
 		hasher:        sha1.New(),
 		mmapIndex:     nil,
-		ignoreManager: NewIgnoreManager(dcfhDir),
-	}, dcfhDir
+		ignoreManager: NewIgnoreManager(metaDir),
+	}
 }
 
 // configureDirectoryCache loads config and ignore patterns from an existing .dcfh directory.
 // All errors are non-fatal (logged to stderr) to match existing behaviour.
-func configureDirectoryCache(dc *DirectoryCache, dcfhPath string) {
-	config, err := LoadConfig(dcfhPath)
+func configureDirectoryCache(dc *DirectoryCache, metaDir string) {
+	config, err := LoadConfig(metaDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", dcfhPath, err)
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", metaDir, err)
 	}
 	dc.config = config
 
@@ -181,37 +191,38 @@ func configureDirectoryCache(dc *DirectoryCache, dcfhPath string) {
 // CreateDirectoryCache creates a new dcfh repository on disk.
 // Creates the .dcfh directory and empty index file if they don't exist.
 // Use this for repository initialisation (dcfh init).
-func CreateDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
-	dc, dcfhDir := initDirectoryCacheBase(rootDir, dcfhDir)
+func CreateDirectoryCache(rootDir, metaDir string) *DirectoryCache {
+	metaDir = ResolveMetaDir(metaDir, rootDir)
+	dc := initDirectoryCacheBase(rootDir, metaDir)
 
-	// Prevent creating .dcfh inside .dcfh (nested repositories)
-	if filepath.Base(dcfhDir) == ".dcfh" {
-		fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside another .dcfh directory: %s\n", dcfhDir)
-		return dc
-	}
-
-	// Check if we're trying to create .dcfh inside any .dcfh subdirectory
-	dir := dcfhDir
-	for {
-		if filepath.Base(dir) == ".dcfh" {
-			fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside .dcfh directory tree: %s\n", dcfhDir)
+	// Prevent creating .dcfh inside .dcfh (nested repositories).
+	// External repos place metaDir elsewhere, so only check internal layout.
+	if metaDir == filepath.Join(rootDir, ".dcfh") {
+		if filepath.Base(rootDir) == ".dcfh" {
+			fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside another .dcfh directory: %s\n", rootDir)
 			return dc
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
+
+		dir := rootDir
+		for {
+			if filepath.Base(dir) == ".dcfh" {
+				fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside .dcfh directory tree: %s\n", rootDir)
+				return dc
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
 		}
-		dir = parent
 	}
 
-	// Create the .dcfh directory
-	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
-	if err := os.MkdirAll(dcfhPath, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dcfhPath, err)
+	if err := os.MkdirAll(dc.MetaDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dc.MetaDir, err)
 		return dc
 	}
 
-	configureDirectoryCache(dc, dcfhPath)
+	configureDirectoryCache(dc, dc.MetaDir)
 
 	// Create empty index if it doesn't exist
 	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
@@ -226,19 +237,27 @@ func CreateDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
 // OpenDirectoryCache opens an existing dcfh repository.
 // Returns an error if the .dcfh directory does not exist.
 // Use this for operations on existing repositories (status, update, dupes).
-func OpenDirectoryCache(rootDir, dcfhDir string) (*DirectoryCache, error) {
-	dc, dcfhDir := initDirectoryCacheBase(rootDir, dcfhDir)
+func OpenDirectoryCache(rootDir, metaDir string) (*DirectoryCache, error) {
+	metaDir = ResolveMetaDir(metaDir, rootDir)
+	dc := initDirectoryCacheBase(rootDir, metaDir)
 
-	dcfhPath := filepath.Join(dcfhDir, ".dcfh")
-	info, err := os.Stat(dcfhPath)
+	info, err := os.Stat(dc.MetaDir)
 	if err != nil {
-		return nil, fmt.Errorf("repository not found: %s does not exist", dcfhPath)
+		return nil, fmt.Errorf("repository not found: %s does not exist", dc.MetaDir)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("repository not found: %s is not a directory", dcfhPath)
+		return nil, fmt.Errorf("repository not found: %s is not a directory", dc.MetaDir)
 	}
 
-	configureDirectoryCache(dc, dcfhPath)
+	configureDirectoryCache(dc, dc.MetaDir)
+
+	// For external repos, resolve rootDir from the config we just loaded
+	if rootDir == "" && dc.config != nil {
+		repoConfig := dc.config.GetRepositoryConfig()
+		if repoConfig.Root != "" {
+			dc.RootDir = repoConfig.Root
+		}
+	}
 
 	return dc, nil
 }
@@ -246,8 +265,8 @@ func OpenDirectoryCache(rootDir, dcfhDir string) (*DirectoryCache, error) {
 // NewDirectoryCache creates a new directory cache instance.
 //
 // Deprecated: Use CreateDirectoryCache for new repositories or OpenDirectoryCache for existing ones.
-func NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache {
-	return CreateDirectoryCache(rootDir, dcfhDir)
+func NewDirectoryCache(rootDir, metaDir string) *DirectoryCache {
+	return CreateDirectoryCache(rootDir, metaDir)
 }
 
 // ApplyConfigOverrides applies configuration overrides from the flags map
@@ -369,47 +388,58 @@ func (dc *DirectoryCache) GetConfig() *Config {
 	return dc.config
 }
 
-// repoDir returns the repository root directory by searching upward for .dcfh
-func repoDir() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current directory: %w", err)
-	}
-
-	// First check if current directory IS a .dcfh directory
-	if filepath.Base(cwd) == ".dcfh" {
-		// We're inside a .dcfh directory, return its parent as repo root
-		repoRoot := filepath.Dir(cwd)
-		realDir, err := filepath.EvalSymlinks(repoRoot)
+// ResolveRepository finds the dcfh repository from startDir (or cwd if empty).
+// Returns (rootDir, metaDir, error).
+// Handles both internal (.dcfh subdirectory) and external (*.dcfh directory) repos.
+func ResolveRepository(startDir string) (string, string, error) {
+	if startDir == "" {
+		var err error
+		startDir, err = os.Getwd()
 		if err != nil {
-			// If symlink resolution fails, fall back to original path
-			realDir = repoRoot
+			return "", "", fmt.Errorf("failed to get current directory: %w", err)
 		}
-		return realDir, nil
 	}
 
-	dir := cwd
+	// Check if startDir itself IS a .dcfh directory (normal or external)
+	base := filepath.Base(startDir)
+	if strings.HasSuffix(base, ".dcfh") {
+		if base == ".dcfh" {
+			// Normal .dcfh directory — parent is repo root
+			repoRoot := filepath.Dir(startDir)
+			realDir, err := filepath.EvalSymlinks(repoRoot)
+			if err != nil {
+				realDir = repoRoot
+			}
+			return realDir, startDir, nil
+		}
+		// External .dcfh directory — read rootDir from config
+		if root, ok := ResolveExternalRoot(startDir); ok {
+			return root, startDir, nil
+		}
+		// Has no [repository] root — fall back to parent
+		return filepath.Dir(startDir), startDir, nil
+	}
+
+	// Walk up the directory tree looking for .dcfh subdirectory
+	dir := startDir
 	for {
-		dcfhPath := filepath.Join(dir, ".dcfh")
-		if info, err := os.Stat(dcfhPath); err == nil && info.IsDir() {
-			// Resolve symlinks to get the real path
+		metaDir := filepath.Join(dir, ".dcfh")
+		if info, err := os.Stat(metaDir); err == nil && info.IsDir() {
 			realDir, err := filepath.EvalSymlinks(dir)
 			if err != nil {
-				// If symlink resolution fails, fall back to original path
 				realDir = dir
 			}
-			return realDir, nil
+			return realDir, filepath.Join(realDir, ".dcfh"), nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached filesystem root
 			break
 		}
 		dir = parent
 	}
 
-	return "", fmt.Errorf("not a dcfh repository (or any of the parent directories): .dcfh directory not found")
+	return "", "", fmt.Errorf("not a dcfh repository (or any of the parent directories): .dcfh directory not found")
 }
 
 // registerIndex tracks an mmap'd index file for memory protection

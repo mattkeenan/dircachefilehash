@@ -5,7 +5,7 @@
 //
 // The main entry point is DirectoryCache, which manages file indexing for a directory:
 //
-//	dc := dircachefilehash.NewDirectoryCache("/path/to/dir", "/path/to/dir")
+//	dc := dircachefilehash.CreateDirectoryCache("/path/to/dir", "/path/to/dir")
 //	defer dc.Close()
 //
 // # Basic Operations

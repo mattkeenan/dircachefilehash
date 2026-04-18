@@ -223,8 +223,8 @@ type ScanFileInfo struct {
 
 // findScanIndexFiles finds all scan index files and returns them sorted by modification time (newest first)
 func (dc *DirectoryCache) findScanIndexFiles() ([]ScanFileInfo, error) {
-	dcfhDir := dc.DcfhDir
-	entries, err := os.ReadDir(dcfhDir)
+	metaDir := dc.MetaDir
+	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (dc *DirectoryCache) findScanIndexFiles() ([]ScanFileInfo, error) {
 		// Check if it's a scan index file (scan-<pid>-<tid>.idx pattern)
 		if filepath.Ext(name) == ".idx" &&
 			(len(name) > 9 && name[:5] == "scan-") {
-			filePath := filepath.Join(dcfhDir, name)
+			filePath := filepath.Join(metaDir, name)
 
 			// Get file info
 			info, err := entry.Info()

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unsafe"
 )
 
@@ -37,7 +38,7 @@ type ScanIndexInfo struct {
 // Note: skiplist management moved to higher-level files
 type DirectoryCache struct {
 	RootDir         string
-	DcfhDir         string // Path to .dcfh metadata directory
+	MetaDir         string // Path to .dcfh metadata directory
 	IndexFile       string
 	CacheFile       string         // Path to index.cache file
 	signature       [4]byte        // "dcfh" signature
@@ -405,7 +406,7 @@ func encodeWallTime(sec int64, nsec int64) uint64 {
 func (dc *DirectoryCache) generateTempFileName(prefix string) string {
 	pid := os.Getpid()
 	timestamp := time.Now().UnixNano()
-	return filepath.Join(dc.DcfhDir,
+	return filepath.Join(dc.MetaDir,
 		fmt.Sprintf("%s-%d-%d.tmp", prefix, pid, timestamp))
 }
 
@@ -422,21 +423,21 @@ func getGoroutineID() uint64 {
 func (dc *DirectoryCache) generateScanFileName() string {
 	pid := os.Getpid()
 	tid := getGoroutineID()
-	return filepath.Join(dc.DcfhDir,
+	return filepath.Join(dc.MetaDir,
 		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
 }
 
 // GenerateTimestampedFileName generates a timestamped filename using ISO 8601 format
 func (dc *DirectoryCache) GenerateTimestampedFileName(prefix string) string {
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	return filepath.Join(dc.DcfhDir,
+	return filepath.Join(dc.MetaDir,
 		fmt.Sprintf("%s-%s.idx", prefix, timestamp))
 }
 
 // ScanForTimestampedCacheFiles finds all cache-{timestamp}.idx files in chronological order
 func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
-	dcfhDir := dc.DcfhDir
-	entries, err := os.ReadDir(dcfhDir)
+	metaDir := dc.MetaDir
+	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .dcfh directory: %w", err)
 	}
@@ -452,7 +453,7 @@ func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
 
 		matches := cachePattern.FindStringSubmatch(entry.Name())
 		if matches != nil {
-			fullPath := filepath.Join(dcfhDir, entry.Name())
+			fullPath := filepath.Join(metaDir, entry.Name())
 			timestampedCaches = append(timestampedCaches, fullPath)
 		}
 	}
@@ -494,23 +495,23 @@ func ParseHumanSize(sizeStr string) (int, error) {
 	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
 
 	// Extract numeric part and suffix
-	var numPart string
+	var numPart strings.Builder
 	var suffix string
 	for i, char := range sizeStr {
 		if char >= '0' && char <= '9' || char == '.' {
-			numPart += string(char)
+			numPart.WriteString(string(char))
 		} else {
 			suffix = sizeStr[i:]
 			break
 		}
 	}
 
-	if numPart == "" {
+	if numPart.String() == "" {
 		return 0, fmt.Errorf("no numeric part in size string: %s", sizeStr)
 	}
 
 	// Parse the numeric part
-	num, err := strconv.ParseFloat(numPart, 64)
+	num, err := strconv.ParseFloat(numPart.String(), 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid numeric part in size string %s: %w", sizeStr, err)
 	}
@@ -577,4 +578,30 @@ func FormatHumanSize(bytes int64) string {
 // FormatHumanRate formats bytes per second into human-readable format
 func FormatHumanRate(bytesPerSec float64) string {
 	return FormatHumanSize(int64(bytesPerSec)) + "/s"
+}
+
+// PathToSlug converts an absolute path to a kebab-case slug suitable for
+// naming external .dcfh directories. Non-alphanumeric characters (including
+// path separators) are replaced with hyphens, consecutive hyphens are
+// collapsed, and leading/trailing hyphens are trimmed.
+// Unicode letters and digits are preserved.
+//
+// Example: "/home/matt/some/dir" → "home-matt-some-dir"
+func PathToSlug(path string) string {
+	path = strings.ToLower(path)
+
+	var b strings.Builder
+	b.Grow(len(path))
+	prevDash := false
+	for _, r := range path {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
 }

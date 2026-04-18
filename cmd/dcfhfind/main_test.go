@@ -510,7 +510,7 @@ func TestResolveStartingPoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveStartingPoints(tt.points, tempDir)
+			got, err := resolveStartingPoints(tt.points, dcfhDir)
 			if err != nil {
 				t.Errorf("resolveStartingPoints() error = %v", err)
 				return
