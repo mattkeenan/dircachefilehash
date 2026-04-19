@@ -96,23 +96,86 @@ func TestParseRepoURI(t *testing.T) {
 	}
 }
 
-func TestOpenRepoRejectsSSH(t *testing.T) {
+func TestOpenRepoRejectsSSHMetaDir(t *testing.T) {
+	// --meta-dir must be local; ssh:// there is a user error directing
+	// them to configure [repository] root instead.
 	_, err := OpenRepo(context.Background(), "ssh://host/path/foo.dcfh")
 	if err == nil {
-		t.Fatal("expected error for ssh:// URI")
+		t.Fatal("expected error for ssh:// meta-dir")
 	}
-	if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Fatalf("expected ErrRemoteNotImplemented, got: %v", err)
+	if !strings.Contains(err.Error(), "[repository] root") {
+		t.Fatalf("expected guidance about [repository] root, got: %v", err)
 	}
 }
 
-func TestCreateRepoRejectsSSH(t *testing.T) {
+func TestCreateRepoRejectsSSHMetaDir(t *testing.T) {
+	// metaDirSpec is the *local* .dcfh; ssh:// is only valid as rootDir.
 	_, err := CreateRepo(context.Background(), "/tmp", "ssh://host/path/foo.dcfh")
 	if err == nil {
 		t.Fatal("expected error for ssh:// metaDirSpec")
 	}
-	if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Fatalf("expected ErrRemoteNotImplemented, got: %v", err)
+	if !strings.Contains(err.Error(), "ssh://") {
+		t.Fatalf("expected ssh-related error, got: %v", err)
+	}
+}
+
+func TestCreateAndOpenAuditRepo(t *testing.T) {
+	tmp := t.TempDir()
+	ctx := context.Background()
+	metaDir := filepath.Join(tmp, "prod-host.dcfh")
+	rootURI := "ssh://admin@prod-host:2222/var/lib/app"
+
+	repo, err := CreateRepo(ctx, rootURI, metaDir)
+	if err != nil {
+		t.Fatalf("CreateRepo(audit): %v", err)
+	}
+
+	info, err := repo.Info(ctx)
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.RootDir != rootURI {
+		t.Errorf("RootDir: got %q, want %q", info.RootDir, rootURI)
+	}
+	if info.MetaDir != metaDir {
+		t.Errorf("MetaDir: got %q, want %q", info.MetaDir, metaDir)
+	}
+
+	// Survey/Apply stubs must report unimplemented in scaffold.
+	if _, err := repo.Survey(ctx, SurveyRequest{}); err == nil {
+		t.Fatal("expected Survey to return ErrRemoteNotImplemented")
+	} else if !errors.Is(err, ErrRemoteNotImplemented) {
+		t.Errorf("Survey: expected ErrRemoteNotImplemented, got: %v", err)
+	}
+	if _, err := repo.Apply(ctx, ApplyRequest{}); err == nil {
+		t.Fatal("expected Apply to return ErrRemoteNotImplemented")
+	} else if !errors.Is(err, ErrRemoteNotImplemented) {
+		t.Errorf("Apply: expected ErrRemoteNotImplemented, got: %v", err)
+	}
+
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Reopen via OpenRepo on the local metaDir — config root should route
+	// back to auditRepo automatically.
+	repo2, err := OpenRepo(ctx, metaDir)
+	if err != nil {
+		t.Fatalf("OpenRepo(audit): %v", err)
+	}
+	if _, ok := repo2.(*auditRepo); !ok {
+		t.Fatalf("expected *auditRepo, got %T", repo2)
+	}
+	_ = repo2.Close()
+}
+
+func TestCreateAuditRepoRequiresMetaDir(t *testing.T) {
+	_, err := CreateRepo(context.Background(), "ssh://host/path", "")
+	if err == nil {
+		t.Fatal("expected error when metaDirSpec is empty")
+	}
+	if !strings.Contains(err.Error(), "--meta-dir") {
+		t.Fatalf("expected guidance about --meta-dir, got: %v", err)
 	}
 }
 

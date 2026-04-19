@@ -14,19 +14,28 @@ type localRepo struct {
 	dc *DirectoryCache
 }
 
-// openLocalRepo opens an existing on-disk repository. metaDir may be any
-// of: a .dcfh subdirectory, an external *.dcfh directory, or a path under
-// a repository (handed to DiscoverRepository).
-func openLocalRepo(_ context.Context, metaDir string) (*localRepo, error) {
+// openRepoFromMetaDir opens a Repo for metaDir, dispatching to localRepo
+// or auditRepo based on the resolved repository root. A root containing
+// "://" is treated as a remote URI; anything else is a local path.
+func openRepoFromMetaDir(ctx context.Context, metaDir string) (Repo, error) {
 	rootDir, resolvedMeta, err := ResolveRepository(metaDir)
 	if err != nil {
-		// metaDir wasn't itself a *.dcfh directory — fall back to discovery
-		// from that starting point.
 		var derr error
 		rootDir, resolvedMeta, derr = DiscoverRepository(metaDir)
 		if derr != nil {
 			return nil, fmt.Errorf("failed to resolve repository at %s: %w", metaDir, err)
 		}
+	}
+
+	if IsRemote(rootDir) {
+		uri, perr := ParseRepoURI(rootDir)
+		if perr != nil {
+			return nil, fmt.Errorf("invalid remote root %q: %w", rootDir, perr)
+		}
+		if uri.Scheme != "ssh" {
+			return nil, fmt.Errorf("unsupported remote scheme %q in [repository] root", uri.Scheme)
+		}
+		return openAuditRepo(ctx, resolvedMeta, uri)
 	}
 
 	dc, err := OpenDirectoryCache(rootDir, resolvedMeta)

@@ -412,9 +412,9 @@ func ResolveRepository(metaDir string) (string, string, error) {
 	}
 	if strings.HasSuffix(base, ".dcfh") {
 		if root, ok := ResolveExternalRoot(metaDir); ok {
-			if strings.Contains(root, "://") {
-				return "", "", fmt.Errorf("%w: [repository] root=%s", ErrRemoteNotImplemented, root)
-			}
+			// Remote URIs are returned as-is; callers that only want a
+			// local rootDir must check for a scheme themselves (the
+			// Repo factory routes ssh:// to auditRepo).
 			return root, metaDir, nil
 		}
 		return filepath.Dir(metaDir), metaDir, nil

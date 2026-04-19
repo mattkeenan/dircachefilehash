@@ -136,6 +136,35 @@ type RepoURI struct {
 	Path   string // filesystem path (absolute for file, server path for ssh)
 }
 
+// String renders a RepoURI as its canonical string form — symmetric with
+// ParseRepoURI, so round-trips preserve all components.
+func (u RepoURI) String() string {
+	switch u.Scheme {
+	case "ssh":
+		s := "ssh://"
+		if u.User != "" {
+			s += u.User + "@"
+		}
+		s += u.Host
+		if u.Port != "" {
+			s += ":" + u.Port
+		}
+		s += u.Path
+		return s
+	case "file":
+		return "file://" + u.Path
+	default:
+		return u.Path
+	}
+}
+
+// IsRemote reports whether s references a remote repository (scheme
+// other than "file"). The check is cheap and avoids parsing for the
+// common dispatch decision.
+func IsRemote(s string) bool {
+	return strings.Contains(s, "://") && !strings.HasPrefix(s, "file://")
+}
+
 // ParseRepoURI parses a string into a RepoURI. Accepts:
 //   - bare absolute path (/abs/foo.dcfh) → file scheme
 //   - bare relative path (./rel) → file scheme, resolved to absolute
@@ -211,9 +240,9 @@ func OpenRepo(ctx context.Context, metaDirSpec string) (Repo, error) {
 	}
 	switch uri.Scheme {
 	case "file":
-		return openLocalRepo(ctx, uri.Path)
+		return openRepoFromMetaDir(ctx, uri.Path)
 	case "ssh":
-		return nil, fmt.Errorf("%w: ssh://%s%s", ErrRemoteNotImplemented, uri.Host, uri.Path)
+		return nil, fmt.Errorf("--meta-dir does not accept ssh:// (put the URI in [repository] root instead): %s", metaDirSpec)
 	default:
 		return nil, fmt.Errorf("unsupported scheme %q", uri.Scheme)
 	}
@@ -222,10 +251,37 @@ func OpenRepo(ctx context.Context, metaDirSpec string) (Repo, error) {
 // CreateRepo creates a new repository on disk and returns an open Repo
 // handle for it. Used by `dcfh init`. metaDirSpec may be empty (meaning
 // ".dcfh" under rootDir) or point to an external *.dcfh directory.
+//
+// rootDir may be an ssh:// URI to create an audit repository: the .dcfh
+// lives locally (metaDirSpec is required in this case) and the remote
+// URI is persisted in [repository] root. Subsequent Survey/Apply calls
+// drive the audit protocol against that host.
 func CreateRepo(ctx context.Context, rootDir, metaDirSpec string) (Repo, error) {
 	if rootDir == "" {
 		return nil, fmt.Errorf("CreateRepo requires a root directory")
 	}
+
+	if IsRemote(rootDir) {
+		rootURI, err := ParseRepoURI(rootDir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid remote root %q: %w", rootDir, err)
+		}
+		if rootURI.Scheme != "ssh" {
+			return nil, fmt.Errorf("unsupported remote scheme %q (only ssh is supported)", rootURI.Scheme)
+		}
+		if metaDirSpec == "" {
+			return nil, fmt.Errorf("audit repositories require --meta-dir (the local .dcfh directory)")
+		}
+		metaURI, err := ParseRepoURI(metaDirSpec)
+		if err != nil {
+			return nil, err
+		}
+		if metaURI.Scheme != "file" {
+			return nil, fmt.Errorf("--meta-dir must be a local path for audit repositories")
+		}
+		return createAuditRepo(ctx, metaURI.Path, rootURI)
+	}
+
 	if metaDirSpec == "" {
 		return createLocalRepo(ctx, rootDir, "")
 	}
@@ -238,7 +294,7 @@ func CreateRepo(ctx context.Context, rootDir, metaDirSpec string) (Repo, error) 
 	case "file":
 		return createLocalRepo(ctx, rootDir, uri.Path)
 	case "ssh":
-		return nil, fmt.Errorf("%w: ssh://%s%s", ErrRemoteNotImplemented, uri.Host, uri.Path)
+		return nil, fmt.Errorf("--meta-dir does not accept ssh:// (put the URI in rootDir instead): %s", metaDirSpec)
 	default:
 		return nil, fmt.Errorf("unsupported scheme %q", uri.Scheme)
 	}
