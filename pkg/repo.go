@@ -105,6 +105,7 @@ type Repo interface {
 	Survey(ctx context.Context, req SurveyRequest) (*StatusResult, error)
 	Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error)
 	Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error)
+	Filter(ctx context.Context, req FilterRequest) (*FilterResult, error)
 
 	Snapshots() SnapshotRepo
 	Config() ConfigRepo

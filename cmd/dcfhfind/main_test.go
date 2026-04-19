@@ -34,7 +34,6 @@ func createMockContext() *EvalContext {
 		IndexPath:    "/test/.dcfh/main.idx",
 		IndexType:    "main",
 		Repository:   "/test",
-		Options:      GlobalOptions{Warn: true},
 		EntryPath:    "test.go",
 		RelativePath: "test.go",
 	}
@@ -118,22 +117,22 @@ func TestParseTimeTest(t *testing.T) {
 		wantErr  bool
 	}{
 		// mtime tests
-		{"7", "mtime", 7, "=", "*main.MTimeTest", false},
-		{"+7", "mtime", 7, "+", "*main.MTimeTest", false},
-		{"-1", "mtime", 1, "-", "*main.MTimeTest", false},
+		{"7", "mtime", 7, "=", "*dircachefilehash.MTimeTest", false},
+		{"+7", "mtime", 7, "+", "*dircachefilehash.MTimeTest", false},
+		{"-1", "mtime", 1, "-", "*dircachefilehash.MTimeTest", false},
 
 		// mmin tests
-		{"30", "mmin", 30, "=", "*main.MMinTest", false},
-		{"+60", "mmin", 60, "+", "*main.MMinTest", false},
-		{"-5", "mmin", 5, "-", "*main.MMinTest", false},
+		{"30", "mmin", 30, "=", "*dircachefilehash.MMinTest", false},
+		{"+60", "mmin", 60, "+", "*dircachefilehash.MMinTest", false},
+		{"-5", "mmin", 5, "-", "*dircachefilehash.MMinTest", false},
 
 		// ctime tests
-		{"14", "ctime", 14, "=", "*main.CTimeTest", false},
-		{"+30", "ctime", 30, "+", "*main.CTimeTest", false},
+		{"14", "ctime", 14, "=", "*dircachefilehash.CTimeTest", false},
+		{"+30", "ctime", 30, "+", "*dircachefilehash.CTimeTest", false},
 
 		// cmin tests
-		{"120", "cmin", 120, "=", "*main.CMinTest", false},
-		{"-10", "cmin", 10, "-", "*main.CMinTest", false},
+		{"120", "cmin", 120, "=", "*dircachefilehash.CMinTest", false},
+		{"-10", "cmin", 10, "-", "*dircachefilehash.CMinTest", false},
 
 		// Error cases
 		{"", "mtime", 0, "", "", true},

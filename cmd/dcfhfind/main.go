@@ -3,9 +3,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,22 +38,18 @@ func main() {
 	}
 
 	// Discover repository if needed
-	repo, metaDir, err := discoverRepository(args.RepoPath)
+	repoRoot, metaDir, err := discoverRepository(args.RepoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfind: %v\n", err)
 		os.Exit(1)
 	}
-	args.RepoPath = repo
+	args.RepoPath = repoRoot
 
-	// Resolve starting points to actual index files
-	indexFiles, err := resolveStartingPoints(args.StartingPoints, metaDir)
-	if err != nil {
+	// Execute the find operation via the Repo abstraction
+	if err := executeFind(context.Background(), metaDir, args); err != nil {
 		fmt.Fprintf(os.Stderr, "dcfhfind: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Execute the find operation
-	executeFind(indexFiles, args)
 }
 
 func showUsage() {
@@ -159,34 +155,12 @@ type GlobalOptions struct {
 	RepoDir  string
 }
 
-// Expression represents a test or operator in the find expression
-type Expression interface {
-	Evaluate(entry *dircachefilehash.EntryInfo, context *EvalContext) (bool, error)
-	String() string
-}
+// Expression / Action / EvalContext / IndexFile are re-exported from pkg
+// via aliases.go; see pkg/filter.go and pkg/filter_run.go for the canonical
+// definitions.
 
-// Action represents an action to perform on matching entries
-type Action interface {
-	Execute(entry *dircachefilehash.EntryInfo, context *EvalContext) error
-	String() string
-}
-
-// EvalContext provides context for expression evaluation
-type EvalContext struct {
-	IndexPath    string
-	IndexType    string
-	Repository   string
-	Options      GlobalOptions
-	EntryPath    string
-	RelativePath string
-}
-
-// IndexFile represents a resolved index file to search
-type IndexFile struct {
-	Path   string
-	Type   string // "main", "cache", "scan", "file"
-	ScanID string // for scan files: "PID-TID"
-}
+// IndexFile mirrors pkg.IndexRef so existing tests keep working.
+type IndexFile = dircachefilehash.IndexRef
 
 func parseArguments(args []string) (*Arguments, error) {
 	result := &Arguments{
@@ -747,157 +721,44 @@ func discoverRepository(repoPath string) (string, string, error) {
 	return dircachefilehash.DiscoverRepository(repoPath)
 }
 
+// resolveStartingPoints is a thin wrapper over pkg.ResolveIndexSelectors
+// retained so existing tests and call sites keep working.
 func resolveStartingPoints(startingPoints []string, metaDir string) ([]IndexFile, error) {
-	var indexFiles []IndexFile
-
-	for _, point := range startingPoints {
-		switch point {
-		case "main":
-			indexFiles = append(indexFiles, IndexFile{
-				Path: filepath.Join(metaDir, "main.idx"),
-				Type: "main",
-			})
-		case "cache":
-			indexFiles = append(indexFiles, IndexFile{
-				Path: filepath.Join(metaDir, "cache.idx"),
-				Type: "cache",
-			})
-		case "scan":
-			// Find all scan files
-			scanFiles, err := filepath.Glob(filepath.Join(metaDir, "scan-*.idx"))
-			if err != nil {
-				return nil, fmt.Errorf("error finding scan files: %w", err)
-			}
-			for _, scanFile := range scanFiles {
-				basename := filepath.Base(scanFile)
-				// Extract scan ID from filename: scan-PID-TID.idx
-				if strings.HasPrefix(basename, "scan-") && strings.HasSuffix(basename, ".idx") {
-					scanID := basename[5 : len(basename)-4] // Remove "scan-" and ".idx"
-					indexFiles = append(indexFiles, IndexFile{
-						Path:   scanFile,
-						Type:   "scan",
-						ScanID: scanID,
-					})
-				}
-			}
-		case "all":
-			// Recursively resolve main, cache, and scan
-			allPoints := []string{"main", "cache", "scan"}
-			for _, subPoint := range allPoints {
-				subFiles, err := resolveStartingPoints([]string{subPoint}, metaDir)
-				if err != nil {
-					continue // Ignore missing indices
-				}
-				indexFiles = append(indexFiles, subFiles...)
-			}
-		default:
-			// Check if it's a specific scan file pattern
-			if strings.HasPrefix(point, "scan-") && (strings.Contains(point, "-") || strings.HasSuffix(point, ".idx")) {
-				var indexPath string
-				if strings.HasSuffix(point, ".idx") {
-					indexPath = filepath.Join(metaDir, point)
-				} else {
-					indexPath = filepath.Join(metaDir, point+".idx")
-				}
-
-				// Extract scan ID
-				basename := filepath.Base(indexPath)
-				if strings.HasPrefix(basename, "scan-") && strings.HasSuffix(basename, ".idx") {
-					scanID := basename[5 : len(basename)-4]
-					indexFiles = append(indexFiles, IndexFile{
-						Path:   indexPath,
-						Type:   "scan",
-						ScanID: scanID,
-					})
-				}
-			} else {
-				// Treat as direct file path
-				indexFiles = append(indexFiles, IndexFile{
-					Path: point,
-					Type: "file",
-				})
-			}
-		}
+	refs, err := dircachefilehash.ResolveIndexSelectors(metaDir, startingPoints)
+	if err != nil {
+		return nil, err
 	}
-
-	// Remove duplicates and check file existence
-	var result []IndexFile
-	seen := make(map[string]bool)
-
-	for _, indexFile := range indexFiles {
-		if seen[indexFile.Path] {
-			continue
-		}
-		seen[indexFile.Path] = true
-
-		if _, err := os.Stat(indexFile.Path); os.IsNotExist(err) {
-			// Silently skip missing files (like find does)
-			continue
-		}
-
-		result = append(result, indexFile)
-	}
-
-	if len(result) == 0 {
+	if len(refs) == 0 {
 		return nil, fmt.Errorf("no accessible index files found")
 	}
-
-	return result, nil
+	return refs, nil
 }
 
-func executeFind(indexFiles []IndexFile, args *Arguments) {
-	for _, indexFile := range indexFiles {
-		err := processIndexFile(indexFile, args)
-		if err != nil {
-			if args.GlobalOptions.Warn {
-				fmt.Fprintf(os.Stderr, "dcfhfind: warning: %s: %v\n", indexFile.Path, err)
-			}
+// executeFind delegates to repo.Filter, collapsing the implicit-AND list of
+// expressions into a single root predicate.
+func executeFind(ctx context.Context, metaDir string, args *Arguments) error {
+	repo, err := dircachefilehash.OpenRepo(ctx, metaDir)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	var root Expression
+	for _, e := range args.Expressions {
+		if root == nil {
+			root = e
 			continue
 		}
+		root = &AndExpression{Left: root, Right: e}
 	}
-}
 
-func processIndexFile(indexFile IndexFile, args *Arguments) error {
-	// Use the new IterateIndexFile function
-	return dircachefilehash.IterateIndexFile(indexFile.Path, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
-		context := &EvalContext{
-			IndexPath:    indexFile.Path,
-			IndexType:    indexType,
-			Repository:   args.RepoPath,
-			Options:      args.GlobalOptions,
-			EntryPath:    entry.Path,
-			RelativePath: entry.Path,
-		}
-
-		// Evaluate all expressions (implicit AND)
-		match := true
-		for _, expr := range args.Expressions {
-			result, err := expr.Evaluate(entry, context)
-			if err != nil {
-				if args.GlobalOptions.Warn {
-					fmt.Fprintf(os.Stderr, "dcfhfind: warning: %s: %v\n", entry.Path, err)
-				}
-				match = false
-				break
-			}
-			if !result {
-				match = false
-				break
-			}
-		}
-
-		// Execute actions on matching entries
-		if match {
-			for _, action := range args.Actions {
-				err := action.Execute(entry, context)
-				if err != nil {
-					if args.GlobalOptions.Warn {
-						fmt.Fprintf(os.Stderr, "dcfhfind: warning: action failed for %s: %v\n", entry.Path, err)
-					}
-				}
-			}
-		}
-
-		return true // Continue iteration
-	})
+	req := dircachefilehash.FilterRequest{
+		IndexSelectors: args.StartingPoints,
+		Repository:     args.RepoPath,
+		Expression:     root,
+		Actions:        args.Actions,
+		Warn:           args.GlobalOptions.Warn,
+	}
+	_, err = repo.Filter(ctx, req)
+	return err
 }

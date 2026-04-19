@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 )
 
@@ -120,6 +121,27 @@ func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult,
 func (l *localRepo) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error) {
 	flags := req.Options.toFlags()
 	return l.dc.FindDuplicatesUnified(ctx, flags)
+}
+
+func (l *localRepo) Filter(ctx context.Context, req FilterRequest) (*FilterResult, error) {
+	if len(req.Actions) == 0 {
+		return nil, fmt.Errorf("FilterRequest requires at least one action")
+	}
+	selectors := req.IndexSelectors
+	if len(selectors) == 0 {
+		selectors = []string{"all"}
+	}
+	refs, err := ResolveIndexSelectors(l.dc.MetaDir, selectors)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("no accessible index files found")
+	}
+	if req.Repository == "" {
+		req.Repository = l.dc.RootDir
+	}
+	return RunFilter(ctx, refs, req, os.Stderr)
 }
 
 func (l *localRepo) Snapshots() SnapshotRepo { return &localSnapshotRepo{dc: l.dc} }

@@ -91,8 +91,6 @@ func getOutputFormat() OutputFormat {
 }
 
 // buildOptions builds a typed Options struct for Repo calls from cobra flag values.
-// Preferred over buildFlags for new code; flags remains for ApplyConfigOverrides,
-// which still takes a stringly-typed map internally.
 func buildOptions() dcfh.Options {
 	return dcfh.Options{
 		Verbose:          flagVerbose,
@@ -101,31 +99,6 @@ func buildOptions() dcfh.Options {
 		HashWorkers:      flagHashWorkers,
 		IndexLockTimeout: flagIndexLockTimeout,
 	}
-}
-
-// buildFlags builds a flags map for package calls from cobra flag values.
-func buildFlags() map[string]string {
-	flags := make(map[string]string)
-
-	if flagVerbose > 0 {
-		flags["v"] = fmt.Sprintf("%d", flagVerbose)
-	}
-
-	if flagFilehash != "" {
-		flags["filehash"] = flagFilehash
-	}
-
-	flags["symlinks"] = flagSymlinks
-
-	if flagHashWorkers > 0 {
-		flags["hash_workers"] = fmt.Sprintf("%d", flagHashWorkers)
-	}
-
-	if flagIndexLockTimeout > 0 {
-		flags["index_lock_timeout"] = fmt.Sprintf("%d", flagIndexLockTimeout)
-	}
-
-	return flags
 }
 
 // outputError outputs an error message in the appropriate format
