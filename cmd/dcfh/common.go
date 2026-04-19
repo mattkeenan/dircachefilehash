@@ -90,6 +90,19 @@ func getOutputFormat() OutputFormat {
 	return OutputFormat(flagOutput)
 }
 
+// buildOptions builds a typed Options struct for Repo calls from cobra flag values.
+// Preferred over buildFlags for new code; flags remains for ApplyConfigOverrides,
+// which still takes a stringly-typed map internally.
+func buildOptions() dcfh.Options {
+	return dcfh.Options{
+		Verbose:          flagVerbose,
+		Filehash:         flagFilehash,
+		Symlinks:         flagSymlinks,
+		HashWorkers:      flagHashWorkers,
+		IndexLockTimeout: flagIndexLockTimeout,
+	}
+}
+
 // buildFlags builds a flags map for package calls from cobra flag values.
 func buildFlags() map[string]string {
 	flags := make(map[string]string)

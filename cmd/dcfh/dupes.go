@@ -31,25 +31,14 @@ total duplicate space that could be reclaimed.`,
 			return err
 		}
 
-		// Open existing repository
-		cache, err := dcfh.OpenDirectoryCache(repoRoot, metaDir)
+		// Open existing repository via the Repo abstraction
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
 		}
-		defer func() { _ = cache.Close() }()
+		defer func() { _ = repo.Close() }()
 
-		// Apply configuration overrides
-		flags := buildFlags()
-		if err := cache.ApplyConfigOverrides(flags); err != nil {
-			return fmt.Errorf("failed to apply configuration overrides: %w", err)
-		}
-
-		if _, err := cache.LoadMainIndex(); err != nil {
-			return fmt.Errorf("failed to load index: %w", err)
-		}
-
-		// Find duplicates using unified streaming architecture
-		duplicates, err := cache.FindDuplicatesUnified(ctx, flags)
+		duplicates, err := repo.Groups(ctx, dcfh.GroupsRequest{Options: buildOptions()})
 		if err != nil {
 			return fmt.Errorf("failed to find duplicates: %w", err)
 		}

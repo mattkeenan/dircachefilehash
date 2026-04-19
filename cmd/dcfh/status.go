@@ -39,35 +39,34 @@ since the last update operation.`,
 			relCwd = ""
 		}
 
-		// Open existing repository
-		cache, err := dcfh.OpenDirectoryCache(repoRoot, metaDir)
+		// Open existing repository via the Repo abstraction
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
 		}
-		defer func() { _ = cache.Close() }()
+		defer func() { _ = repo.Close() }()
 
-		// Apply configuration overrides
-		flags := buildFlags()
-		if err := cache.ApplyConfigOverrides(flags); err != nil {
-			return fmt.Errorf("failed to apply configuration overrides: %w", err)
-		}
-
-		status, err := cache.Status(ctx, flags)
+		status, err := repo.Survey(ctx, dcfh.SurveyRequest{Options: buildOptions()})
 		if err != nil {
 			return err
 		}
 
+		info, err := repo.Info(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read repository info: %w", err)
+		}
+
 		// Get "since" timestamp from index header (v3+) or file mtime (v2 fallback)
 		sinceStr := ""
-		if ts, ok := cache.IndexTimestamp(); ok {
-			sinceStr = ts.Format(time.RFC3339)
-		} else if info, err := os.Stat(cache.IndexFile); err == nil {
-			sinceStr = info.ModTime().UTC().Format(time.RFC3339)
+		if !info.IndexTimestamp.IsZero() {
+			sinceStr = info.IndexTimestamp.Format(time.RFC3339)
+		} else if fi, err := os.Stat(info.IndexFile); err == nil {
+			sinceStr = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 
 		format := getOutputFormat()
 		if format == OutputJSON {
-			fileCount := cache.Length()
+			fileCount := info.EntryCount
 			output := StatusOutput{
 				Repository: repoRoot,
 				WorkingDir: relCwd,
@@ -103,7 +102,7 @@ since the last update operation.`,
 		// Show status
 		if !status.HasChanges() {
 			fmt.Println("Nothing to commit, working tree clean")
-			fileCount := cache.Length()
+			fileCount := info.EntryCount
 			if sinceStr != "" {
 				fmt.Printf("Index contains %d files since %s\n", fileCount, sinceStr)
 			} else {

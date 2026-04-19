@@ -76,14 +76,17 @@ var rootCmd = &cobra.Command{
 			dcfh.SetVerboseLevel(flagVerbose)
 		}
 
-		// If --dcfh-dir is set globally, resolve it and pre-populate cache.
+		// If --meta-dir is set globally, resolve it and pre-populate cache.
 		// Skip for init — the directory doesn't exist yet.
 		if flagGlobalMetaDir != "" && cmd.Name() != "init" {
-			absMetaDir, err := filepath.Abs(flagGlobalMetaDir)
+			uri, err := dcfh.ParseRepoURI(flagGlobalMetaDir)
 			if err != nil {
-				return fmt.Errorf("failed to resolve --meta-dir path: %w", err)
+				return fmt.Errorf("failed to parse --meta-dir: %w", err)
 			}
-			rootDir, metaDir, err := dcfh.ResolveRepository(absMetaDir)
+			if uri.Scheme != "file" {
+				return fmt.Errorf("%w: --meta-dir=%s; put remote URIs in [repository] root instead", dcfh.ErrRemoteNotImplemented, flagGlobalMetaDir)
+			}
+			rootDir, metaDir, err := dcfh.ResolveRepository(uri.Path)
 			if err != nil {
 				return fmt.Errorf("failed to resolve --meta-dir: %w", err)
 			}

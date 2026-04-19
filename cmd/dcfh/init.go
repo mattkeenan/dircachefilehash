@@ -95,27 +95,19 @@ Examples:
 			}
 		}
 
-		var cache *dcfh.DirectoryCache
-		if flagInitExternal {
-			cache = dcfh.CreateDirectoryCache(absDir, metaDir)
-		} else {
-			cache = dcfh.CreateDirectoryCache(absDir, absDir)
-		}
-		defer func() { _ = cache.Close() }()
+		ctx := cmd.Context()
 
-		flags := buildFlags()
-		if err := cache.ApplyConfigOverrides(flags); err != nil {
-			return fmt.Errorf("failed to apply configuration overrides: %w", err)
-		}
-
+		// Internal layout passes empty metaDirSpec so CreateRepo uses the
+		// default ".dcfh" under absDir; external passes the resolved meta dir.
+		metaSpec := ""
 		if flagInitExternal {
-			config := cache.GetConfig()
-			if config != nil {
-				if err := config.SetRepositoryRoot(absDir); err != nil {
-					return fmt.Errorf("failed to save repository root to config: %w", err)
-				}
-			}
+			metaSpec = metaDir
 		}
+		repo, err := dcfh.CreateRepo(ctx, absDir, metaSpec)
+		if err != nil {
+			return fmt.Errorf("failed to create repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
 
 		format := getOutputFormat()
 		duration := time.Since(start)

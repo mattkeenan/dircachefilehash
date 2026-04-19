@@ -27,21 +27,26 @@ var snapshotCreateCmd = &cobra.Command{
 	Short: "Create a new snapshot",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 
 		// Find dcfh repository
-		repoRoot, metaDir, err := findDcfhRepo()
+		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		sr := dcfh.NewSnapshotRepository(metaDir)
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
 
 		if flagVerbose >= 1 {
 			fmt.Printf("Creating snapshot...\n")
 		}
 
-		metadata, err := sr.CreateSnapshot(repoRoot, tags)
+		metadata, err := repo.Snapshots().Create(ctx, tags)
 		if err != nil {
 			return fmt.Errorf("failed to create snapshot: %w", err)
 		}
@@ -71,14 +76,19 @@ var snapshotListCmd = &cobra.Command{
 	Short:   "List all available snapshots",
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		sr := dcfh.NewSnapshotRepository(metaDir)
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
 
-		snapshots, err := sr.ListSnapshots()
+		snapshots, err := repo.Snapshots().List(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to list snapshots: %w", err)
 		}
@@ -151,17 +161,24 @@ var snapshotForgetCmd = &cobra.Command{
 	Short: "Remove snapshots based on retention policies",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
+
 		// Load configuration to get default retention policy
-		config, err := dcfh.LoadConfig(metaDir)
+		allConfig, err := repo.Config().Get(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		snapshotConfig := config.GetSnapshotConfig()
+		snapshotConfig := allConfig.Snapshot
 
 		// Start with config defaults
 		policy := dcfh.RetentionPolicy{
@@ -195,8 +212,6 @@ var snapshotForgetCmd = &cobra.Command{
 			dryRun = snapshotConfig.DryRun
 		}
 
-		sr := dcfh.NewSnapshotRepository(metaDir)
-
 		// Show retention policy
 		if flagVerbose >= 1 || dryRun {
 			fmt.Printf("Retention policy: hourly=%d, daily=%d, weekly=%d, monthly=%d, yearly=%d\n",
@@ -206,7 +221,7 @@ var snapshotForgetCmd = &cobra.Command{
 			}
 		}
 
-		removed, err := sr.ForgetSnapshots(policy, dryRun)
+		removed, err := repo.Snapshots().Prune(ctx, policy, dryRun)
 		if err != nil {
 			return fmt.Errorf("failed to apply retention policy: %w", err)
 		}
@@ -243,12 +258,18 @@ var snapshotRemoveCmd = &cobra.Command{
 	Short: "Remove specific snapshots by ID",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		_, metaDir, err := findDcfhRepo()
 		if err != nil {
 			return fmt.Errorf("failed to find dcfh repository: %w", err)
 		}
 
-		repo := dcfh.NewSnapshotRepository(metaDir)
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
+		snapshots := repo.Snapshots()
 		outputFormat := getOutputFormat()
 
 		var results []map[string]any
@@ -272,7 +293,7 @@ var snapshotRemoveCmd = &cobra.Command{
 					outputMessage(fmt.Sprintf("Removing snapshot: %s", snapshotID))
 				}
 
-				err := repo.RemoveSnapshot(snapshotID)
+				err := snapshots.Delete(ctx, snapshotID)
 				if err != nil {
 					if outputFormat == OutputJSON {
 						results = append(results, map[string]any{

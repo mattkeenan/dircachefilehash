@@ -47,18 +47,12 @@ This operation synchronises the index with the actual file system state.`,
 			}
 		}
 
-		// Update the index
-		cache, err := dcfh.OpenDirectoryCache(repoRoot, metaDir)
+		// Open existing repository via the Repo abstraction
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
 		}
-		defer func() { _ = cache.Close() }()
-
-		// Apply configuration overrides
-		flags := buildFlags()
-		if err := cache.ApplyConfigOverrides(flags); err != nil {
-			return fmt.Errorf("failed to apply configuration overrides: %w", err)
-		}
+		defer func() { _ = repo.Close() }()
 
 		if format == OutputHuman && flagVerbose > 0 {
 			fmt.Println("Scanning directory...")
@@ -66,12 +60,13 @@ This operation synchronises the index with the actual file system state.`,
 
 		start := time.Now()
 
-		if err := cache.Update(ctx, flags, args...); err != nil {
+		result, err := repo.Apply(ctx, dcfh.ApplyRequest{Options: buildOptions(), Paths: args})
+		if err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
 		}
 
 		duration := time.Since(start)
-		fileCount, totalSize, _ := cache.Stats()
+		fileCount, totalSize := result.FileCount, result.TotalSize
 
 		if format == OutputJSON {
 			output := UpdateOutput{

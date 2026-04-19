@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -30,21 +30,23 @@ Examples:
   dcfh config output.format fdupes`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		// Handle --list flag
 		if configListFlag {
 			if len(args) > 0 {
 				return fmt.Errorf("cannot specify configuration keys with --list flag")
 			}
-			return handleConfigList()
+			return handleConfigList(ctx)
 		}
 
 		switch len(args) {
 		case 0:
 			return cmd.Help()
 		case 1:
-			return handleConfigGet(args[0])
+			return handleConfigGet(ctx, args[0])
 		case 2:
-			return handleConfigSet(args[0], args[1])
+			return handleConfigSet(ctx, args[0], args[1])
 		default:
 			return fmt.Errorf("too many arguments for config command")
 		}
@@ -57,18 +59,21 @@ func init() {
 }
 
 // handleConfigList lists all configuration variables
-func handleConfigList() error {
+func handleConfigList(ctx context.Context) error {
 	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
+	repo, err := dcfh.OpenRepo(ctx, metaDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = repo.Close() }()
 
-	config, err := dcfh.LoadConfig(metaDir)
+	allConfig, err := repo.Config().Get(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-
-	allConfig := config.GetAllConfig()
 
 	fmt.Printf("filehash.default=%s\n", allConfig.Hash.Default)
 	fmt.Printf("output.format=%s\n", allConfig.Output.Format)
@@ -80,18 +85,21 @@ func handleConfigList() error {
 }
 
 // handleConfigGet retrieves a specific configuration value
-func handleConfigGet(key string) error {
+func handleConfigGet(ctx context.Context, key string) error {
 	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
+	repo, err := dcfh.OpenRepo(ctx, metaDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = repo.Close() }()
 
-	config, err := dcfh.LoadConfig(metaDir)
+	allConfig, err := repo.Config().Get(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-
-	allConfig := config.GetAllConfig()
 
 	switch key {
 	case "filehash.default":
@@ -112,62 +120,21 @@ func handleConfigGet(key string) error {
 }
 
 // handleConfigSet sets a configuration value
-func handleConfigSet(key, value string) error {
+func handleConfigSet(ctx context.Context, key, value string) error {
 	_, metaDir, err := findDcfhRepo()
 	if err != nil {
 		return err
 	}
-
-	config, err := dcfh.LoadConfig(metaDir)
+	repo, err := dcfh.OpenRepo(ctx, metaDir)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return err
 	}
+	defer func() { _ = repo.Close() }()
 
-	switch key {
-	case "filehash.default":
-		if err := dcfh.ValidateHashAlgorithm(value); err != nil {
-			return fmt.Errorf("invalid hash algorithm: %w", err)
-		}
-		if err := config.SetHashDefault(value); err != nil {
-			return fmt.Errorf("failed to set filehash.default: %w", err)
-		}
-	case "output.format":
-		if err := dcfh.ValidateOutputFormat(value); err != nil {
-			return fmt.Errorf("invalid output format: %w", err)
-		}
-		if err := config.SetOutputFormat(value); err != nil {
-			return fmt.Errorf("failed to set output.format: %w", err)
-		}
-	case "verbose.level":
-		level, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid verbose level '%s': must be a number", value)
-		}
-		if err := dcfh.ValidateVerboseLevel(level); err != nil {
-			return fmt.Errorf("invalid verbose level: %w", err)
-		}
-		if err := config.SetVerboseLevel(level); err != nil {
-			return fmt.Errorf("failed to set verbose.level: %w", err)
-		}
-	case "verbose.debug":
-		if err := dcfh.ValidateDebugFlags(value); err != nil {
-			return fmt.Errorf("invalid debug flags: %w", err)
-		}
-		if err := config.SetDebugFlags(value); err != nil {
-			return fmt.Errorf("failed to set verbose.debug: %w", err)
-		}
-	case "symlink.mode":
-		if err := dcfh.ValidateSymlinkMode(value); err != nil {
-			return fmt.Errorf("invalid symlink mode: %w", err)
-		}
-		if err := config.SetSymlinkMode(value); err != nil {
-			return fmt.Errorf("failed to set symlink.mode: %w", err)
-		}
-	default:
-		return fmt.Errorf("unknown configuration key: %s", key)
+	if err := repo.Config().Set(ctx, key, value); err != nil {
+		return err
 	}
 
 	fmt.Printf("Configuration updated: %s = %s\n", key, value)
-
 	return nil
 }
