@@ -2,7 +2,6 @@ package dircachefilehash
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -75,31 +74,34 @@ type AllConfig struct {
 	Snapshot    *SnapshotConfig
 }
 
-// LoadConfig loads configuration from the .dcfh/config file
+// LoadConfig loads an existing configuration from the .dcfh/config file.
+// Returns an error if the config file does not exist.
 func LoadConfig(metaDir string) (*Config, error) {
+	configPath := filepath.Join(metaDir, "config")
+
+	iniFile, err := ini.Load(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config file: %w", err)
+	}
+
+	return &Config{configPath: configPath, ini: iniFile}, nil
+}
+
+// CreateDefaultConfig creates a new config file with defaults and saves it to disk.
+// Use this when initialising a new repository.
+func CreateDefaultConfig(metaDir string) (*Config, error) {
 	configPath := filepath.Join(metaDir, "config")
 
 	cfg := &Config{
 		configPath: configPath,
+		ini:        ini.Empty(),
 	}
 
-	// Load existing config or create default
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Create default config
-		cfg.ini = ini.Empty()
-		if err := cfg.setDefaults(); err != nil {
-			return nil, fmt.Errorf("failed to set default config: %w", err)
-		}
-		if err := cfg.Save(); err != nil {
-			return nil, fmt.Errorf("failed to save default config: %w", err)
-		}
-	} else {
-		// Load existing config
-		iniFile, err := ini.Load(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load config file: %w", err)
-		}
-		cfg.ini = iniFile
+	if err := cfg.setDefaults(); err != nil {
+		return nil, fmt.Errorf("failed to set default config: %w", err)
+	}
+	if err := cfg.Save(); err != nil {
+		return nil, fmt.Errorf("failed to save default config: %w", err)
 	}
 
 	return cfg, nil
@@ -406,10 +408,6 @@ func (c *Config) SetRepositoryRoot(root string) error {
 // if the config doesn't exist or has no repository root.
 // This avoids duplicating the "load config, read root" pattern across callers.
 func ResolveExternalRoot(metaDir string) (string, bool) {
-	configPath := filepath.Join(metaDir, "config")
-	if _, err := os.Stat(configPath); err != nil {
-		return "", false
-	}
 	config, err := LoadConfig(metaDir)
 	if err != nil {
 		return "", false

@@ -15,6 +15,10 @@ Evaluated 2026-04-18: for external repos, `LoadConfig` is called in `ResolveExte
 
 Evaluated 2026-04-18: `SnapshotsDir` is derivable from `MetaDir`. Dropping either field makes call sites less readable — `filepath.Dir(sr.SnapshotsDir)` obscures intent, `filepath.Join(sr.MetaDir, "snapshots")` repeated 8 times adds noise. The struct is created once per command. Both fields exist for readability, not due to a design flaw.
 
+### TOCTOU stat in ResolveExternalRoot
+
+Evaluated 2026-04-19: the original backlog item was incorrect — `LoadConfig` did not handle missing files gracefully, it created default config files on disk. Fixed by splitting `LoadConfig` into `LoadConfig` (load-only, errors on missing) and `CreateDefaultConfig` (creates defaults). The stat guard in `ResolveExternalRoot` is now unnecessary and was removed.
+
 ## [0.8.0] - 2026-04-15
 
 Migrate CLI from custom option parser to cobra/viper. GNU longopt support (`--option value`), built-in shell completion (`dcfh completion [bash|zsh]`), viper config binding, and `--version` flag.

@@ -222,6 +222,13 @@ func CreateDirectoryCache(rootDir, metaDir string) *DirectoryCache {
 		return dc
 	}
 
+	// Create default config if it doesn't exist
+	if _, err := LoadConfig(dc.MetaDir); err != nil {
+		if _, err := CreateDefaultConfig(dc.MetaDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create default config: %v\n", err)
+		}
+	}
+
 	configureDirectoryCache(dc, dc.MetaDir)
 
 	// Create empty index if it doesn't exist

@@ -10,10 +10,10 @@ func TestConfigDefaults(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Load config (should create default)
-	config, err := LoadConfig(tempDir)
+	// Create default config
+	config, err := CreateDefaultConfig(tempDir)
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to create default config: %v", err)
 	}
 
 	// Check default hash algorithm
@@ -33,10 +33,10 @@ func TestConfigOverrides(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Load config
-	config, err := LoadConfig(tempDir)
+	// Create default config
+	config, err := CreateDefaultConfig(tempDir)
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to create default config: %v", err)
 	}
 
 	// Apply multiple overrides
@@ -184,10 +184,10 @@ func TestSnapshotConfigDefaults(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Load config (should create default)
-	config, err := LoadConfig(tempDir)
+	// Create default config
+	config, err := CreateDefaultConfig(tempDir)
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to create default config: %v", err)
 	}
 
 	// Check snapshot configuration defaults
@@ -216,10 +216,10 @@ func TestSnapshotConfigModification(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Load config
-	config, err := LoadConfig(tempDir)
+	// Create default config
+	config, err := CreateDefaultConfig(tempDir)
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to create default config: %v", err)
 	}
 
 	// Modify snapshot configuration
@@ -263,10 +263,10 @@ func TestAllConfigIncludesSnapshot(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Load config
-	config, err := LoadConfig(tempDir)
+	// Create default config
+	config, err := CreateDefaultConfig(tempDir)
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to create default config: %v", err)
 	}
 
 	// Get all configuration

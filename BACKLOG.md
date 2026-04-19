@@ -1,9 +1,5 @@
 # Backlog
 
-## TOCTOU stat in ResolveExternalRoot
+## Separate discovery from explicit resolution in ResolveRepository
 
-`pkg/config.go` does `os.Stat(configPath)` before `LoadConfig`. The stat avoids parsing config for non-dcfh directories during the walk (the common case), but `LoadConfig` already handles missing files gracefully. Could remove the stat and let `LoadConfig` fail directly.
-
-## os.Getwd() in ResolveRepository
-
-Always called when `startDir` is empty. CLI callers like `findDcfhRepo` could pass the cwd they already know, but currently none of them have it. Low priority since it's one syscall per command invocation.
+`ResolveRepository` mixes two fundamentally different operations: discovery (walk up from cwd looking for `.dcfh`) and explicit resolution (metaDir is already known, resolve rootDir from config). These should be split into `DiscoverRepository` (local filesystem walk) and `ResolveRepository` (known metaDir → rootDir). This separation is needed for future remote repo support via `--meta-dir ssh://host/path/repo.dcfh` — discovery is always local, but explicit resolution could be remote. See assessment: `.claude/plans/transient-wondering-conway.md`.
