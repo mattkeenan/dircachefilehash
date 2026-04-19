@@ -744,7 +744,7 @@ func discoverRepository(repoPath string) (string, string, error) {
 	if repoPath == "" {
 		repoPath = "."
 	}
-	return dircachefilehash.ResolveRepository(repoPath)
+	return dircachefilehash.DiscoverRepository(repoPath)
 }
 
 func resolveStartingPoints(startingPoints []string, metaDir string) ([]IndexFile, error) {

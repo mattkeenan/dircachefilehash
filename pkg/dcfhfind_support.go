@@ -93,7 +93,7 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 // If startDir is empty, uses current working directory.
 // Handles both internal (.dcfh subdirectory) and external (*.dcfh) repos.
 func FindRepositoryRootFrom(startDir string) (string, error) {
-	rootDir, _, err := ResolveRepository(startDir)
+	rootDir, _, err := DiscoverRepository(startDir)
 	return rootDir, err
 }
 
@@ -110,7 +110,7 @@ func ResolveIndexFile(indexSpec string) (string, error) {
 	}
 
 	// Otherwise, discover repository and resolve index type
-	_, metaDir, err := ResolveRepository("")
+	_, metaDir, err := DiscoverRepository("")
 	if err != nil {
 		return "", fmt.Errorf("not in a dcfh repository: %w", err)
 	}

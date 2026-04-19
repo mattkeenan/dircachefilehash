@@ -395,10 +395,34 @@ func (dc *DirectoryCache) GetConfig() *Config {
 	return dc.config
 }
 
-// ResolveRepository finds the dcfh repository from startDir (or cwd if empty).
+// ResolveRepository resolves rootDir for a known metaDir (typically from
+// --meta-dir or because cwd is a *.dcfh directory). For internal .dcfh
+// directories, rootDir is the parent. For external *.dcfh directories, reads
+// [repository] root from the config, falling back to the parent directory.
 // Returns (rootDir, metaDir, error).
-// Handles both internal (.dcfh subdirectory) and external (*.dcfh directory) repos.
-func ResolveRepository(startDir string) (string, string, error) {
+func ResolveRepository(metaDir string) (string, string, error) {
+	base := filepath.Base(metaDir)
+	if base == ".dcfh" {
+		repoRoot := filepath.Dir(metaDir)
+		realDir, err := filepath.EvalSymlinks(repoRoot)
+		if err != nil {
+			realDir = repoRoot
+		}
+		return realDir, metaDir, nil
+	}
+	if strings.HasSuffix(base, ".dcfh") {
+		if root, ok := ResolveExternalRoot(metaDir); ok {
+			return root, metaDir, nil
+		}
+		return filepath.Dir(metaDir), metaDir, nil
+	}
+	return "", "", fmt.Errorf("not a .dcfh directory: %s", metaDir)
+}
+
+// DiscoverRepository walks up from startDir (or cwd if empty) looking for a
+// .dcfh subdirectory. Local filesystem only. If startDir itself IS a *.dcfh
+// directory, delegates to ResolveRepository. Returns (rootDir, metaDir, error).
+func DiscoverRepository(startDir string) (string, string, error) {
 	if startDir == "" {
 		var err error
 		startDir, err = os.Getwd()
@@ -407,27 +431,10 @@ func ResolveRepository(startDir string) (string, string, error) {
 		}
 	}
 
-	// Check if startDir itself IS a .dcfh directory (normal or external)
-	base := filepath.Base(startDir)
-	if strings.HasSuffix(base, ".dcfh") {
-		if base == ".dcfh" {
-			// Normal .dcfh directory — parent is repo root
-			repoRoot := filepath.Dir(startDir)
-			realDir, err := filepath.EvalSymlinks(repoRoot)
-			if err != nil {
-				realDir = repoRoot
-			}
-			return realDir, startDir, nil
-		}
-		// External .dcfh directory — read rootDir from config
-		if root, ok := ResolveExternalRoot(startDir); ok {
-			return root, startDir, nil
-		}
-		// Has no [repository] root — fall back to parent
-		return filepath.Dir(startDir), startDir, nil
+	if strings.HasSuffix(filepath.Base(startDir), ".dcfh") {
+		return ResolveRepository(startDir)
 	}
 
-	// Walk up the directory tree looking for .dcfh subdirectory
 	dir := startDir
 	for {
 		metaDir := filepath.Join(dir, ".dcfh")

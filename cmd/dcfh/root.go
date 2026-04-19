@@ -83,13 +83,12 @@ var rootCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to resolve --meta-dir path: %w", err)
 			}
-			cachedMetaDir = absMetaDir
-
-			if root, ok := dcfh.ResolveExternalRoot(absMetaDir); ok {
-				cachedRepoRoot = root
-			} else {
-				cachedRepoRoot = filepath.Dir(absMetaDir)
+			rootDir, metaDir, err := dcfh.ResolveRepository(absMetaDir)
+			if err != nil {
+				return fmt.Errorf("failed to resolve --meta-dir: %w", err)
 			}
+			cachedRepoRoot = rootDir
+			cachedMetaDir = metaDir
 		}
 
 		// Viper config binding: apply config defaults for flags not explicitly set

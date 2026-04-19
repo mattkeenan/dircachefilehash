@@ -166,7 +166,7 @@ func findDcfhRepo() (string, string, error) {
 		return cachedRepoRoot, cachedMetaDir, nil
 	}
 
-	rootDir, metaDir, err := dcfh.ResolveRepository("")
+	rootDir, metaDir, err := dcfh.DiscoverRepository("")
 	if err != nil {
 		return "", "", err
 	}
