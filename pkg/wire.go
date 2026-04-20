@@ -84,13 +84,30 @@ type FileMeta struct {
 	LinkTarget string   `json:"link_target,omitempty"`
 }
 
+// CacheMode controls whether the remote side keeps a persistent hash
+// cache across wire calls. The invoker picks per request: the remote
+// never caches unless explicitly told to. "" means no cache (default,
+// stateless remote); "local" opts into a disk-backed cache on the
+// remote's local disk, keyed by (path, size, mtime_ns, ctime_ns, algo).
+//
+// Cache-hit speedups only matter in edge cases (see plan Tradeoffs);
+// the field exists so security-aware invokers can keep the remote
+// stateless while trusted-workflow invokers can opt into speed.
+type CacheMode string
+
+const (
+	CacheModeNone  CacheMode = ""
+	CacheModeLocal CacheMode = "local"
+)
+
 // ScanRequest is the input to a ScanMetadata call. Empty Paths means
 // "scan the entire root". Symlinks and Ignores mirror the client-side
 // flags of the same name so the server reproduces client semantics.
 type ScanRequest struct {
-	Paths    []string `json:"paths,omitempty"`
-	Symlinks string   `json:"symlinks,omitempty"` // matches --symlinks modes
-	Ignores  []string `json:"ignores,omitempty"`  // .dcfhignore-style patterns
+	Paths    []string  `json:"paths,omitempty"`
+	Symlinks string    `json:"symlinks,omitempty"` // matches --symlinks modes
+	Ignores  []string  `json:"ignores,omitempty"`  // .dcfhignore-style patterns
+	Cache    CacheMode `json:"cache,omitempty"`
 }
 
 // ScanResponse carries the sorted FileMeta slice. Sort order is
@@ -108,8 +125,9 @@ type ScanResponse struct {
 // scan root) with the named algorithm. Algo is one of the dcfh hash names
 // ("sha1", "sha256", "sha512").
 type HashRequest struct {
-	Paths []string `json:"paths"`
-	Algo  string   `json:"algo"`
+	Paths []string  `json:"paths"`
+	Algo  string    `json:"algo"`
+	Cache CacheMode `json:"cache,omitempty"`
 }
 
 // PathDigest is one entry in a HashFiles response. If Err is non-empty
