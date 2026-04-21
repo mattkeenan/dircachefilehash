@@ -108,8 +108,6 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 		return fmt.Errorf("failed to get relative path: %w", err)
 	}
 
-	filePath := filepath.Join(hp.dc.RootDir, relPath)
-
 	// Check for symlink — hash target path, not target contents
 	mode, err := entry.Mode()
 	if err != nil {
@@ -120,9 +118,10 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 	var hashType uint16
 
 	if os.FileMode(mode)&os.ModeSymlink != 0 {
+		filePath := filepath.Join(hp.dc.RootDir, relPath)
 		hashBytes, hashType, err = hp.dc.hashSymlinkTargetToBytes(filePath)
 	} else {
-		hashBytes, hashType, err = hp.dc.HashFileInterruptibleToBytes(ctx, filePath, buffer)
+		hashBytes, hashType, err = hp.dc.fileHasher.HashOne(ctx, relPath, buffer)
 	}
 
 	if err != nil {

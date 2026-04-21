@@ -95,7 +95,7 @@ func (l *localRepo) Stats(_ context.Context) (*RepoStats, error) {
 	return &RepoStats{FileCount: count, TotalSize: size}, nil
 }
 
-func (l *localRepo) Survey(ctx context.Context, req SurveyRequest) (*StatusResult, error) {
+func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, error) {
 	flags := req.Options.toFlags()
 	if err := l.dc.ApplyConfigOverrides(flags); err != nil {
 		// Match existing behaviour in Status: fall back to applying
@@ -105,7 +105,7 @@ func (l *localRepo) Survey(ctx context.Context, req SurveyRequest) (*StatusResul
 		}
 	}
 	// Paths are intentionally unused in the current Status pipeline; it
-	// always surveys the whole tree. Keep the field on the request for
+	// always diffs the whole tree. Keep the field on the request for
 	// future use (Phase 1b+).
 	_ = req.Paths
 	return l.dc.Status(ctx, flags)

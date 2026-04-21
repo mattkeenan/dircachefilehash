@@ -9,7 +9,7 @@ import (
 // locally (main.idx, cache.idx, config, snapshots), while the root being
 // audited lives on a remote host addressed by an ssh:// URI. All index
 // decisions — Hwang–Lin, predicate evaluation, cache writes, snapshot
-// history — run on the invoker. Only Survey and Apply cross the wire;
+// history — run on the invoker. Only Diff and Apply cross the wire;
 // everything else operates on local state and delegates to localRepo.
 //
 // The wire surface itself (ScanMetadata, HashFiles, ServerInfo) lands in
@@ -22,7 +22,7 @@ type auditRepo struct {
 
 // openAuditRepo opens the invoker-side .dcfh at metaDir. The remote is
 // addressed by uri (ssh://[user@]host[:port]/path). Nothing crosses the
-// wire in this scaffold; Survey/Apply return ErrRemoteNotImplemented.
+// wire in this scaffold; Diff/Apply return ErrRemoteNotImplemented.
 func openAuditRepo(_ context.Context, metaDir string, uri RepoURI) (*auditRepo, error) {
 	if uri.Scheme != "ssh" {
 		return nil, fmt.Errorf("auditRepo requires ssh scheme, got %q", uri.Scheme)
@@ -74,8 +74,8 @@ func (a *auditRepo) Stats(ctx context.Context) (*RepoStats, error) {
 	return a.local.Stats(ctx)
 }
 
-func (a *auditRepo) Survey(_ context.Context, _ SurveyRequest) (*StatusResult, error) {
-	return nil, fmt.Errorf("%w: Survey against %s", ErrRemoteNotImplemented, a.remote)
+func (a *auditRepo) Diff(_ context.Context, _ DiffRequest) (*StatusResult, error) {
+	return nil, fmt.Errorf("%w: Diff against %s", ErrRemoteNotImplemented, a.remote)
 }
 
 func (a *auditRepo) Apply(_ context.Context, _ ApplyRequest) (*UpdateResult, error) {

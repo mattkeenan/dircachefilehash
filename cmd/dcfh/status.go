@@ -46,7 +46,7 @@ since the last update operation.`,
 		}
 		defer func() { _ = repo.Close() }()
 
-		status, err := repo.Survey(ctx, dcfh.SurveyRequest{Options: buildOptions()})
+		status, err := repo.Diff(ctx, dcfh.DiffRequest{Options: buildOptions()})
 		if err != nil {
 			return err
 		}

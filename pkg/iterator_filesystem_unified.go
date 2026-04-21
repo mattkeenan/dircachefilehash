@@ -171,7 +171,7 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 			// scanPath already closes the channel, so we don't need to close it
 		}()
 
-		if err := ufsi.dc.scanPath(ufsi.ctx, ufsi.paths, ufsi.scanChan); err != nil {
+		if err := ufsi.dc.walker.Walk(ufsi.ctx, ufsi.paths, ufsi.scanChan); err != nil {
 			ufsi.scanError = err
 		}
 	}()

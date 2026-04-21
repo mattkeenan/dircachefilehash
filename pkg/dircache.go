@@ -152,7 +152,7 @@ func ResolveMetaDir(dir, rootDir string) string {
 // struct fields set but no I/O performed (no directory creation, no config loading).
 // metaDir must be the fully resolved metadata directory path.
 func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
-	return &DirectoryCache{
+	dc := &DirectoryCache{
 		RootDir:       rootDir,
 		MetaDir:       metaDir,
 		IndexFile:     filepath.Join(metaDir, "main.idx"),
@@ -163,6 +163,9 @@ func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(metaDir),
 	}
+	dc.walker = &localWalker{dc: dc}
+	dc.fileHasher = &localHasher{dc: dc}
+	return dc
 }
 
 // configureDirectoryCache loads config and ignore patterns from an existing .dcfh directory.

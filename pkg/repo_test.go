@@ -141,11 +141,11 @@ func TestCreateAndOpenAuditRepo(t *testing.T) {
 		t.Errorf("MetaDir: got %q, want %q", info.MetaDir, metaDir)
 	}
 
-	// Survey/Apply stubs must report unimplemented in scaffold.
-	if _, err := repo.Survey(ctx, SurveyRequest{}); err == nil {
-		t.Fatal("expected Survey to return ErrRemoteNotImplemented")
+	// Diff/Apply stubs must report unimplemented in scaffold.
+	if _, err := repo.Diff(ctx, DiffRequest{}); err == nil {
+		t.Fatal("expected Diff to return ErrRemoteNotImplemented")
 	} else if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Errorf("Survey: expected ErrRemoteNotImplemented, got: %v", err)
+		t.Errorf("Diff: expected ErrRemoteNotImplemented, got: %v", err)
 	}
 	if _, err := repo.Apply(ctx, ApplyRequest{}); err == nil {
 		t.Fatal("expected Apply to return ErrRemoteNotImplemented")

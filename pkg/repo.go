@@ -64,14 +64,19 @@ type RepoStats struct {
 	TotalSize int64 `json:"total_size"`
 }
 
-// SurveyRequest selects what Survey should compare against the filesystem.
+// DiffRequest selects what Diff should compare against the filesystem.
 // Empty Paths means "entire repository".
-type SurveyRequest struct {
+//
+// Diff is a structured delta, not a listing — it reports which entries
+// were added, modified, or deleted relative to the baseline index. The
+// CLI surface is still `dcfh status`; only the internal primitive is
+// named Diff to reflect the return shape.
+type DiffRequest struct {
 	Options Options  `json:"options"`
 	Paths   []string `json:"paths,omitempty"`
 }
 
-// ApplyRequest is the analogue of SurveyRequest for Apply (dcfh update).
+// ApplyRequest is the analogue of DiffRequest for Apply (dcfh update).
 type ApplyRequest struct {
 	Options Options  `json:"options"`
 	Paths   []string `json:"paths,omitempty"`
@@ -102,7 +107,7 @@ type Repo interface {
 	Info(ctx context.Context) (*RepoInfo, error)
 	Stats(ctx context.Context) (*RepoStats, error)
 
-	Survey(ctx context.Context, req SurveyRequest) (*StatusResult, error)
+	Diff(ctx context.Context, req DiffRequest) (*StatusResult, error)
 	Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error)
 	Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error)
 	Filter(ctx context.Context, req FilterRequest) (*FilterResult, error)
@@ -254,7 +259,7 @@ func OpenRepo(ctx context.Context, metaDirSpec string) (Repo, error) {
 //
 // rootDir may be an ssh:// URI to create an audit repository: the .dcfh
 // lives locally (metaDirSpec is required in this case) and the remote
-// URI is persisted in [repository] root. Subsequent Survey/Apply calls
+// URI is persisted in [repository] root. Subsequent Diff/Apply calls
 // drive the audit protocol against that host.
 func CreateRepo(ctx context.Context, rootDir, metaDirSpec string) (Repo, error) {
 	if rootDir == "" {

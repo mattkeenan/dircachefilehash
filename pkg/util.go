@@ -44,6 +44,8 @@ type DirectoryCache struct {
 	signature       [4]byte        // "dcfh" signature
 	version         uint32         // Index version
 	hasher          hash.Hash      // SHA-1 hasher for checksums
+	walker          Walker         // Filesystem walker (local or wire-backed)
+	fileHasher      Hasher         // Content hasher (local or wire-backed)
 	mmapIndex       *mmapIndex     // Memory-mapped index file
 	ignoreManager   *IgnoreManager // Ignore pattern manager
 	config          *Config        // Configuration manager
