@@ -7,17 +7,20 @@ import (
 	"strconv"
 )
 
-// localRepo implements Repo by wrapping an open DirectoryCache. It is the
-// default Repo in Phase 1 and the "data side" Repo in Phase 3 (colocated
-// mode runs this same implementation inside the remote server process).
+// localRepo implements Repo by wrapping an open DirectoryCache. For ssh://
+// roots the DirectoryCache's walker/hasher pair is swapped to wire-backed
+// implementations sharing a single wireSession (held here so Close can
+// tear it down). The Repo surface is identical between local and wire
+// cases — only the filesystem side of the pipeline moves onto the wire.
 type localRepo struct {
-	dc *DirectoryCache
+	dc      *DirectoryCache
+	session *wireSession // non-nil for ssh:// repos
 }
 
-// openRepoFromMetaDir opens a Repo for metaDir, dispatching to localRepo
-// or auditRepo based on the resolved repository root. A root containing
-// "://" is treated as a remote URI; anything else is a local path.
-func openRepoFromMetaDir(ctx context.Context, metaDir string) (Repo, error) {
+// openRepoFromMetaDir opens a Repo for metaDir. A root URI with an ssh
+// scheme swaps in the wire-backed walker/hasher; anything else uses the
+// default local pair established by initDirectoryCacheBase.
+func openRepoFromMetaDir(_ context.Context, metaDir string) (Repo, error) {
 	rootDir, resolvedMeta, err := ResolveRepository(metaDir)
 	if err != nil {
 		var derr error
@@ -35,7 +38,11 @@ func openRepoFromMetaDir(ctx context.Context, metaDir string) (Repo, error) {
 		if uri.Scheme != "ssh" {
 			return nil, fmt.Errorf("unsupported remote scheme %q in [repository] root", uri.Scheme)
 		}
-		return openAuditRepo(ctx, resolvedMeta, uri)
+		dc, derr := OpenDirectoryCache("", resolvedMeta)
+		if derr != nil {
+			return nil, fmt.Errorf("failed to open invoker-side .dcfh at %s: %w", resolvedMeta, derr)
+		}
+		return newWireRepo(dc, uri), nil
 	}
 
 	dc, err := OpenDirectoryCache(rootDir, resolvedMeta)
@@ -65,13 +72,60 @@ func createLocalRepo(_ context.Context, rootDir, metaDir string) (*localRepo, er
 	return &localRepo{dc: dc}, nil
 }
 
-func (l *localRepo) Close() error {
-	if l.dc == nil {
-		return nil
+// createWireRepo creates a fresh invoker-side .dcfh at metaDir whose
+// [repository] root is persisted as the remote ssh URI. The ssh dial
+// itself is deferred until the first Diff/Apply.
+func createWireRepo(_ context.Context, metaDir string, uri RepoURI) (*localRepo, error) {
+	if uri.Scheme != "ssh" {
+		return nil, fmt.Errorf("wire repo requires ssh scheme, got %q", uri.Scheme)
 	}
-	err := l.dc.Close()
-	l.dc = nil
-	return err
+	remoteStr := uri.String()
+	dc := CreateDirectoryCache(remoteStr, metaDir)
+	if dc == nil || dc.MetaDir == "" {
+		return nil, fmt.Errorf("failed to create wire repository at %s", metaDir)
+	}
+	if dc.GetConfig() == nil {
+		_ = dc.Close()
+		return nil, fmt.Errorf("no configuration created for %s", metaDir)
+	}
+	if err := dc.GetConfig().SetRepositoryRoot(remoteStr); err != nil {
+		_ = dc.Close()
+		return nil, fmt.Errorf("failed to persist repository root: %w", err)
+	}
+	return newWireRepo(dc, uri), nil
+}
+
+// newWireRepo wires dc through a fresh wireSession so Diff/Apply route
+// their filesystem side over ssh. The session dials lazily on first use.
+func newWireRepo(dc *DirectoryCache, uri RepoURI) *localRepo {
+	return newWireRepoWithClient(dc, uri, nil)
+}
+
+// newWireRepoWithClient is the shared constructor underpinning newWireRepo
+// and in-process wire tests. When preBuilt is non-nil, it short-circuits
+// the first dial — used by tests that drive a RemoteHandler over io.Pipe.
+func newWireRepoWithClient(dc *DirectoryCache, uri RepoURI, preBuilt *WireClient) *localRepo {
+	sess := &wireSession{uri: uri, client: preBuilt}
+	dc.walker = &wireWalker{sess: sess, dc: dc}
+	dc.fileHasher = &wireHasher{sess: sess, dc: dc}
+	return &localRepo{dc: dc, session: sess}
+}
+
+func (l *localRepo) Close() error {
+	var firstErr error
+	if l.dc != nil {
+		if err := l.dc.Close(); err != nil {
+			firstErr = err
+		}
+		l.dc = nil
+	}
+	if l.session != nil {
+		if err := l.session.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		l.session = nil
+	}
+	return firstErr
 }
 
 func (l *localRepo) Info(_ context.Context) (*RepoInfo, error) {

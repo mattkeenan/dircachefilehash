@@ -417,7 +417,7 @@ func ResolveRepository(metaDir string) (string, string, error) {
 		if root, ok := ResolveExternalRoot(metaDir); ok {
 			// Remote URIs are returned as-is; callers that only want a
 			// local rootDir must check for a scheme themselves (the
-			// Repo factory routes ssh:// to auditRepo).
+			// Repo factory swaps the wire walker/hasher pair in).
 			return root, metaDir, nil
 		}
 		return filepath.Dir(metaDir), metaDir, nil

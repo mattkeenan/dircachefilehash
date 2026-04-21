@@ -39,8 +39,8 @@ var remoteCmd = &cobra.Command{
 
 const remoteLongHelp = `Run as the remote-side endpoint for audit-mode ssh sessions.
 
-The invoker's auditRepo spawns 'dcfh remote <root>' over ssh and speaks the
-wire protocol on stdin/stdout. The remote side holds no dcfh index state —
+The invoker's wire session spawns 'dcfh remote <root>' over ssh and speaks
+the wire protocol on stdin/stdout. The remote side holds no dcfh index state —
 only read-only filesystem scans (ScanMetadata) and content hashes
 (HashFiles), plus a capability query (ServerInfo).
 

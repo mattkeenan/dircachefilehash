@@ -2,7 +2,6 @@ package dircachefilehash
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,7 +118,7 @@ func TestCreateRepoRejectsSSHMetaDir(t *testing.T) {
 	}
 }
 
-func TestCreateAndOpenAuditRepo(t *testing.T) {
+func TestCreateAndOpenWireRepo(t *testing.T) {
 	tmp := t.TempDir()
 	ctx := context.Background()
 	metaDir := filepath.Join(tmp, "prod-host.dcfh")
@@ -127,7 +126,7 @@ func TestCreateAndOpenAuditRepo(t *testing.T) {
 
 	repo, err := CreateRepo(ctx, rootURI, metaDir)
 	if err != nil {
-		t.Fatalf("CreateRepo(audit): %v", err)
+		t.Fatalf("CreateRepo(wire): %v", err)
 	}
 
 	info, err := repo.Info(ctx)
@@ -141,35 +140,35 @@ func TestCreateAndOpenAuditRepo(t *testing.T) {
 		t.Errorf("MetaDir: got %q, want %q", info.MetaDir, metaDir)
 	}
 
-	// Diff/Apply stubs must report unimplemented in scaffold.
-	if _, err := repo.Diff(ctx, DiffRequest{}); err == nil {
-		t.Fatal("expected Diff to return ErrRemoteNotImplemented")
-	} else if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Errorf("Diff: expected ErrRemoteNotImplemented, got: %v", err)
-	}
-	if _, err := repo.Apply(ctx, ApplyRequest{}); err == nil {
-		t.Fatal("expected Apply to return ErrRemoteNotImplemented")
-	} else if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Errorf("Apply: expected ErrRemoteNotImplemented, got: %v", err)
+	// Local-only surface (Info, Snapshots, Config) must not dial ssh;
+	// nothing asserts that directly, but a dial against prod-host:2222
+	// from the test harness would hang, which is asserted by the test
+	// simply completing.
+	if _, err := repo.Snapshots().List(ctx); err != nil {
+		t.Errorf("Snapshots.List should succeed locally: %v", err)
 	}
 
 	if err := repo.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Reopen via OpenRepo on the local metaDir — config root should route
-	// back to auditRepo automatically.
+	// Reopen via OpenRepo on the local metaDir — config root routes the
+	// wire walker/hasher in on the reopened localRepo.
 	repo2, err := OpenRepo(ctx, metaDir)
 	if err != nil {
-		t.Fatalf("OpenRepo(audit): %v", err)
+		t.Fatalf("OpenRepo(wire): %v", err)
 	}
-	if _, ok := repo2.(*auditRepo); !ok {
-		t.Fatalf("expected *auditRepo, got %T", repo2)
+	lr, ok := repo2.(*localRepo)
+	if !ok {
+		t.Fatalf("expected *localRepo, got %T", repo2)
+	}
+	if lr.session == nil {
+		t.Errorf("expected wire session on reopened wire repo")
 	}
 	_ = repo2.Close()
 }
 
-func TestCreateAuditRepoRequiresMetaDir(t *testing.T) {
+func TestCreateWireRepoRequiresMetaDir(t *testing.T) {
 	_, err := CreateRepo(context.Background(), "ssh://host/path", "")
 	if err == nil {
 		t.Fatal("expected error when metaDirSpec is empty")

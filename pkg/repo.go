@@ -95,8 +95,10 @@ type UpdateResult struct {
 }
 
 // Repo is the transport-neutral surface that every CLI command uses.
-// Implementations: localRepo (Phase 1); auditRepo (Phase 2); colocatedRepo
-// (Phase 3). Filter and Fix are deferred to Phase 1b.
+// Implementations: localRepo wrapping a DirectoryCache; the DirectoryCache's
+// walker/hasher pair is swapped to the wire-backed pair for ssh:// roots.
+// colocatedRepo (Phase 3) will proxy the full interface. Fix is deferred
+// to Phase 1b.
 //
 // Session semantics: Repo owns index handles / RPC sessions. Close releases
 // them. Snapshots() and Config() return views into the same session —
@@ -284,7 +286,7 @@ func CreateRepo(ctx context.Context, rootDir, metaDirSpec string) (Repo, error) 
 		if metaURI.Scheme != "file" {
 			return nil, fmt.Errorf("--meta-dir must be a local path for audit repositories")
 		}
-		return createAuditRepo(ctx, metaURI.Path, rootURI)
+		return createWireRepo(ctx, metaURI.Path, rootURI)
 	}
 
 	if metaDirSpec == "" {
