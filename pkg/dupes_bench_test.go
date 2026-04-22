@@ -10,15 +10,13 @@ import (
 	"time"
 )
 
-// dupesBaselineBudget caps how long a single FindDuplicatesUnified call
-// is allowed to run before the benchmark skips the case with a clear
-// "baseline exceeded budget" message. Overridable via the
-// DCFH_DUPES_BENCH_BUDGET env var (duration string).
-//
-// This exists because the pre-fix impl is quadratic at the CLI layer
-// and super-linear at the pkg layer; running the large case against
-// the current code would consume hours per b.N iteration. A budget
-// that skips loudly is the right signal: the skip *is* the baseline.
+// dupesBaselineBudget caps how long a single FindDuplicates call is
+// allowed to run before the benchmark skips the case with a clear
+// "baseline exceeded budget" message. Overridable via
+// DCFH_DUPES_BENCH_BUDGET (duration string). Post-fix all three
+// shipped sizes sit well under the cap; the ceiling exists so a
+// future regression (or a re-run against the pre-commit-B impl) is
+// caught loudly instead of wedging CI.
 const dupesBaselineBudget = 60 * time.Second
 
 // dupesFixtureConfig parametrises the benchmark. The fixture produces
@@ -124,35 +122,6 @@ func budgetFromEnv() time.Duration {
 	return dupesBaselineBudget
 }
 
-// simulateDupesCLISort reproduces the quadratic sort pattern currently
-// in cmd/dcfh/dupes.go so the benchmark captures the full end-to-end
-// cost a user experiences from `dcfh dupes`, not just the pkg-layer
-// portion. Kept in lockstep with the CLI so baseline numbers reflect
-// reality. When Commit C deletes the CLI sorts, this helper will too.
-func simulateDupesCLISort(groups []DuplicateGroup) {
-	// Group-level bubble sort by hash — the quadratic one that
-	// dominates wall-clock on large duplicate-group counts.
-	for i := range groups {
-		for j := i + 1; j < len(groups); j++ {
-			if groups[i].Hash > groups[j].Hash {
-				groups[i], groups[j] = groups[j], groups[i]
-			}
-		}
-	}
-	// Per-group path bubble sort — the default-format branch runs
-	// this once per group.
-	for g := range groups {
-		files := groups[g].Files
-		for i := range files {
-			for j := i + 1; j < len(files); j++ {
-				if files[i] > files[j] {
-					files[i], files[j] = files[j], files[i]
-				}
-			}
-		}
-	}
-}
-
 // runDupesBench is the shared body of every BenchmarkFindDuplicates*
 // variant. The first iteration is wrapped in a wall-clock budget so we
 // skip early if the baseline would take longer than a user's patience
@@ -179,28 +148,25 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 	warmCache := openCache()
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	start := time.Now()
-	groups, err := warmCache.FindDuplicatesUnified(ctx, map[string]string{})
+	groups, err := warmCache.FindDuplicates(ctx, map[string]string{})
 	elapsed := time.Since(start)
 	cancel()
 	_ = warmCache.Close()
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-		b.Fatalf("warmup FindDuplicatesUnified: %v", err)
+		b.Fatalf("warmup FindDuplicates: %v", err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || elapsed >= budget {
 		b.Skipf("baseline exceeded %v at %d files, %d duplicate groups — this is the reason for the fix",
 			budget, cfg.total(), cfg.DupeGroupCount)
 	}
-	simulateDupesCLISort(groups)
 	b.Logf("warmup: %v, %d duplicate groups", elapsed, len(groups))
 	b.StartTimer()
 
 	for range b.N {
 		cache := openCache()
-		dupes, err := cache.FindDuplicatesUnified(context.Background(), map[string]string{})
-		if err != nil {
-			b.Fatalf("FindDuplicatesUnified: %v", err)
+		if _, err := cache.FindDuplicates(context.Background(), map[string]string{}); err != nil {
+			b.Fatalf("FindDuplicates: %v", err)
 		}
-		simulateDupesCLISort(dupes)
 		_ = cache.Close()
 	}
 }

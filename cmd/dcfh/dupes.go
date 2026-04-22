@@ -59,76 +59,33 @@ total duplicate space that could be reclaimed.`,
 			return nil // No output if no duplicates found (like fdupes in text mode)
 		}
 
-		// Bubble sort: data arrives mostly sorted from the skiplist/index,
-		// so this is effectively an O(n) verification pass. Don't replace
-		// with slices.Sort — pdqsort has higher constant overhead on
-		// already-sorted input.
-		for i := range duplicates {
-			for j := i + 1; j < len(duplicates); j++ {
-				if duplicates[i].Hash > duplicates[j].Hash {
-					duplicates[i], duplicates[j] = duplicates[j], duplicates[i]
-				}
-			}
-		}
+		// duplicates arrive sorted: groups by hash, Files within each group
+		// by path. pkg.FindDuplicates is authoritative for both orderings
+		// (see pkg/dupes.go). Nothing to sort here.
 
 		switch format {
 		case OutputJSON:
-			var groups []dcfh.DuplicateGroup
 			totalFiles := 0
-
 			for _, group := range duplicates {
-				filePaths := append([]string{}, group.Files...)
-
-				// Sort the file paths
-				for k := range filePaths {
-					for l := k + 1; l < len(filePaths); l++ {
-						if filePaths[k] > filePaths[l] {
-							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
-						}
-					}
-				}
-
-				groups = append(groups, dcfh.DuplicateGroup{
-					Hash:  group.Hash,
-					Files: filePaths,
-					Count: len(filePaths),
-				})
-
-				totalFiles += len(filePaths)
+				totalFiles += len(group.Files)
 			}
-
-			output := DupesOutput{
+			outputJSON(DupesOutput{
 				Repository:      repoRoot,
-				DuplicateGroups: groups,
+				DuplicateGroups: duplicates,
 				Summary: DuplicateSummary{
 					GroupCount: len(duplicates),
 					FileCount:  totalFiles,
 				},
-			}
-			outputJSON(output)
+			})
 
 		case OutputFdupes:
-			// fdupes format: absolute paths, one line per file, blank line between groups
+			// fdupes format: absolute paths, one line per file, blank
+			// line between groups. Joining a constant prefix preserves
+			// sort order, so paths stay ordered without resorting.
 			for i, group := range duplicates {
-				var filePaths []string
 				for _, relPath := range group.Files {
-					absPath := filepath.Join(repoRoot, relPath)
-					filePaths = append(filePaths, absPath)
+					fmt.Println(filepath.Join(repoRoot, relPath))
 				}
-
-				// Sort the file paths
-				for k := 0; k < len(filePaths); k++ {
-					for l := k + 1; l < len(filePaths); l++ {
-						if filePaths[k] > filePaths[l] {
-							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
-						}
-					}
-				}
-
-				for _, absPath := range filePaths {
-					fmt.Println(absPath)
-				}
-
 				if i < len(duplicates)-1 {
 					fmt.Println()
 				}
@@ -136,21 +93,9 @@ total duplicate space that could be reclaimed.`,
 
 		default: // OutputHuman
 			for i, group := range duplicates {
-				filePaths := append([]string{}, group.Files...)
-
-				// Sort the file paths
-				for k := range filePaths {
-					for l := k + 1; l < len(filePaths); l++ {
-						if filePaths[k] > filePaths[l] {
-							filePaths[k], filePaths[l] = filePaths[l], filePaths[k]
-						}
-					}
-				}
-
-				for _, relPath := range filePaths {
+				for _, relPath := range group.Files {
 					fmt.Println(relPath)
 				}
-
 				if i < len(duplicates)-1 {
 					fmt.Println()
 				}
