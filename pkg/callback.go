@@ -87,7 +87,6 @@ type HwangLinCallback interface {
 	// Implementation varies by callback:
 	// - StatusCallback: Full hash coordination + cache.idx writing
 	// - UpdateCallback: Full hash coordination + main.idx writing
-	// - DupesCallback: No-op (return nil) - no writing needed
 	//
 	// This method should be called by ALL On* methods before returning.
 	SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error

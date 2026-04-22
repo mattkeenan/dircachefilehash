@@ -2,8 +2,138 @@ package dircachefilehash
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 )
+
+// setupDupesRepo writes each (relpath → content) pair under a fresh
+// temp dir, runs Update to populate main.idx, and returns an open
+// DirectoryCache ready for FindDuplicates. Tests close it themselves.
+func setupDupesRepo(t *testing.T, files map[string]string) *DirectoryCache {
+	t.Helper()
+	root := t.TempDir()
+	for rel, content := range files {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", full, err)
+		}
+	}
+	dc := NewDirectoryCache(root, filepath.Join(root, ".dcfh"))
+	if err := dc.Update(context.Background(), map[string]string{}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	return dc
+}
+
+func TestFindDuplicates_RealDuplicates(t *testing.T) {
+	dc := setupDupesRepo(t, map[string]string{
+		"a.txt":     "shared A",
+		"b.txt":     "shared A",
+		"sub/c.txt": "shared A",
+		"d.txt":     "shared B",
+		"sub/e.txt": "shared B",
+		"f.txt":     "unique",
+		"sub/g.txt": "another unique",
+	})
+	defer func() { _ = dc.Close() }()
+
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{})
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("want 2 duplicate groups, got %d: %+v", len(groups), groups)
+	}
+	// Groups must be sorted by hash for determinism.
+	if groups[0].Hash > groups[1].Hash {
+		t.Errorf("groups not sorted by hash: %q then %q", groups[0].Hash, groups[1].Hash)
+	}
+	byContent := map[string][]string{
+		"shared A": {"a.txt", "b.txt", "sub/c.txt"},
+		"shared B": {"d.txt", "sub/e.txt"},
+	}
+	matched := 0
+	for _, g := range groups {
+		for _, want := range byContent {
+			if len(g.Files) == len(want) && slices.Equal(g.Files, want) {
+				matched++
+				break
+			}
+		}
+		// Files within a group must be in path-sorted order
+		// (skiplist iteration is path-sorted, so no per-group sort).
+		if !slices.IsSorted(g.Files) {
+			t.Errorf("group %q files not sorted: %v", g.Hash, g.Files)
+		}
+		if g.Count != len(g.Files) {
+			t.Errorf("Count %d != len(Files) %d", g.Count, len(g.Files))
+		}
+	}
+	if matched != 2 {
+		t.Errorf("group contents mismatch; groups=%+v", groups)
+	}
+}
+
+func TestFindDuplicates_NoDuplicates(t *testing.T) {
+	dc := setupDupesRepo(t, map[string]string{
+		"a": "one",
+		"b": "two",
+		"c": "three",
+	})
+	defer func() { _ = dc.Close() }()
+
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{})
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Errorf("want 0 groups, got %d: %+v", len(groups), groups)
+	}
+}
+
+func TestFindDuplicates_ContextCancellation(t *testing.T) {
+	dc := setupDupesRepo(t, map[string]string{
+		"a": "x", "b": "x", "c": "x",
+	})
+	defer func() { _ = dc.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the call
+	_, err := dc.FindDuplicates(ctx, map[string]string{})
+	if err == nil {
+		t.Fatal("expected error on cancelled context")
+	}
+}
+
+func TestFindDuplicatesUnified_AliasBehavesIdentically(t *testing.T) {
+	dc := setupDupesRepo(t, map[string]string{
+		"a": "dup", "b": "dup", "c": "uniq",
+	})
+	defer func() { _ = dc.Close() }()
+
+	ctx := context.Background()
+	a, err := dc.FindDuplicates(ctx, map[string]string{})
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	b, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
+	if err != nil {
+		t.Fatalf("FindDuplicatesUnified: %v", err)
+	}
+	if len(a) != len(b) {
+		t.Fatalf("group counts differ: %d vs %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i].Hash != b[i].Hash || !slices.Equal(a[i].Files, b[i].Files) {
+			t.Errorf("group %d differs: %+v vs %+v", i, a[i], b[i])
+		}
+	}
+}
 
 func TestDuplicateGroup_Fields(t *testing.T) {
 	group := DuplicateGroup{
