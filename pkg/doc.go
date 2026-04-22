@@ -23,7 +23,7 @@
 //
 // Find duplicate files:
 //
-//	groups, err := dc.FindDuplicates(map[string]string{})
+//	groups, err := dc.FindDuplicates(ctx, map[string]string{}, nil, true)
 //	for _, group := range groups {
 //		fmt.Printf("Hash %s: %v\n", group.Hash, group.Files)
 //	}

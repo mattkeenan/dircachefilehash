@@ -190,8 +190,7 @@ func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult,
 }
 
 func (l *localRepo) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error) {
-	flags := req.Options.toFlags()
-	return l.dc.FindDuplicatesUnified(ctx, flags)
+	return l.dc.FindDuplicates(ctx, req.Options.toFlags(), req.Paths, req.Exclusive)
 }
 
 func (l *localRepo) Filter(ctx context.Context, req FilterRequest) (*FilterResult, error) {

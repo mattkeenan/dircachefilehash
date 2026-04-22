@@ -148,7 +148,7 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 	warmCache := openCache()
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	start := time.Now()
-	groups, err := warmCache.FindDuplicates(ctx, map[string]string{})
+	groups, err := warmCache.FindDuplicates(ctx, map[string]string{}, nil, true)
 	elapsed := time.Since(start)
 	cancel()
 	_ = warmCache.Close()
@@ -164,7 +164,7 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 
 	for range b.N {
 		cache := openCache()
-		if _, err := cache.FindDuplicates(context.Background(), map[string]string{}); err != nil {
+		if _, err := cache.FindDuplicates(context.Background(), map[string]string{}, nil, true); err != nil {
 			b.Fatalf("FindDuplicates: %v", err)
 		}
 		_ = cache.Close()

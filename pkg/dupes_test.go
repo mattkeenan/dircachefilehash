@@ -42,7 +42,7 @@ func TestFindDuplicates_RealDuplicates(t *testing.T) {
 	})
 	defer func() { _ = dc.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), map[string]string{})
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, nil, true)
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestFindDuplicates_NoDuplicates(t *testing.T) {
 	})
 	defer func() { _ = dc.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), map[string]string{})
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, nil, true)
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -104,34 +104,115 @@ func TestFindDuplicates_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before the call
-	_, err := dc.FindDuplicates(ctx, map[string]string{})
+	_, err := dc.FindDuplicates(ctx, map[string]string{}, nil, true)
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
 }
 
-func TestFindDuplicatesUnified_AliasBehavesIdentically(t *testing.T) {
-	dc := setupDupesRepo(t, map[string]string{
-		"a": "dup", "b": "dup", "c": "uniq",
+// dupesPathFilterFixture seeds a repo with three dupe groups spread
+// across a/, b/, c/ so each test can pick which prefixes to pass.
+//
+//	group1: a/x, a/y, b/x    (cross-dir)
+//	group2: b/y, c/x         (cross-dir, no member in a/)
+//	group3: c/y, c/z         (entirely inside c/)
+func dupesPathFilterFixture(t *testing.T) *DirectoryCache {
+	t.Helper()
+	return setupDupesRepo(t, map[string]string{
+		"a/x": "g1", "a/y": "g1", "b/x": "g1",
+		"b/y": "g2", "c/x": "g2",
+		"c/y": "g3", "c/z": "g3",
+		"a/solo": "unique-a",
+		"b/solo": "unique-b",
 	})
+}
+
+func groupFiles(groups []DuplicateGroup) [][]string {
+	out := make([][]string, len(groups))
+	for i, g := range groups {
+		out[i] = g.Files
+	}
+	return out
+}
+
+func TestFindDuplicates_PathFilter_ZeroPaths(t *testing.T) {
+	dc := dupesPathFilterFixture(t)
 	defer func() { _ = dc.Close() }()
 
-	ctx := context.Background()
-	a, err := dc.FindDuplicates(ctx, map[string]string{})
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, nil, true)
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
-	b, err := dc.FindDuplicatesUnified(ctx, map[string]string{})
+	if len(groups) != 3 {
+		t.Fatalf("want 3 groups (whole repo), got %d: %+v", len(groups), groups)
+	}
+}
+
+func TestFindDuplicates_PathFilter_ExclusiveOneDir(t *testing.T) {
+	dc := dupesPathFilterFixture(t)
+	defer func() { _ = dc.Close() }()
+
+	// Only c/ — group3 is fully inside, group1 has members outside c/
+	// so its in-c/ count drops to 0, group2 drops to a singleton.
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, []string{"c/"}, true)
 	if err != nil {
-		t.Fatalf("FindDuplicatesUnified: %v", err)
+		t.Fatalf("FindDuplicates: %v", err)
 	}
-	if len(a) != len(b) {
-		t.Fatalf("group counts differ: %d vs %d", len(a), len(b))
+	if len(groups) != 1 {
+		t.Fatalf("want 1 group, got %d: %v", len(groups), groupFiles(groups))
 	}
-	for i := range a {
-		if a[i].Hash != b[i].Hash || !slices.Equal(a[i].Files, b[i].Files) {
-			t.Errorf("group %d differs: %+v vs %+v", i, a[i], b[i])
+	if !slices.Equal(groups[0].Files, []string{"c/y", "c/z"}) {
+		t.Errorf("want [c/y c/z], got %v", groups[0].Files)
+	}
+}
+
+func TestFindDuplicates_PathFilter_ExclusiveTwoDirs(t *testing.T) {
+	dc := dupesPathFilterFixture(t)
+	defer func() { _ = dc.Close() }()
+
+	// a/ ∪ c/. group1 loses its b/x member → still dup (a/x,a/y).
+	// group2 loses a/… (none), keeps c/x only → singleton, dropped.
+	// group3 stays.
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, []string{"a/", "c/"}, true)
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	got := groupFiles(groups)
+	want := [][]string{{"a/x", "a/y"}, {"c/y", "c/z"}}
+	// Order by Hash is stable but test-independent; match as set.
+	if len(got) != len(want) {
+		t.Fatalf("want %d groups, got %d: %v", len(want), len(got), got)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if slices.Equal(g, w) {
+				found = true
+				break
+			}
 		}
+		if !found {
+			t.Errorf("missing group %v in %v", w, got)
+		}
+	}
+}
+
+func TestFindDuplicates_PathFilter_NonExclusive(t *testing.T) {
+	dc := dupesPathFilterFixture(t)
+	defer func() { _ = dc.Close() }()
+
+	// --exclusive=no with a/: cross-dir group1 (has a/x,a/y,b/x) is
+	// reported in full; group2 has no member in a/ so it's dropped;
+	// group3 has no member in a/ so it's dropped.
+	groups, err := dc.FindDuplicates(context.Background(), map[string]string{}, []string{"a/"}, false)
+	if err != nil {
+		t.Fatalf("FindDuplicates: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("want 1 group, got %d: %v", len(groups), groupFiles(groups))
+	}
+	if !slices.Equal(groups[0].Files, []string{"a/x", "a/y", "b/x"}) {
+		t.Errorf("want [a/x a/y b/x], got %v", groups[0].Files)
 	}
 }
 
@@ -177,7 +258,7 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 
 	// Test FindDuplicates with empty flags
 	flags := map[string]string{}
-	duplicates, err := dc.FindDuplicates(context.Background(), flags)
+	duplicates, err := dc.FindDuplicates(context.Background(), flags, nil, true)
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -214,7 +295,7 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	for i, flags := range testFlags {
 		t.Run("flags_test_"+string(rune(i+'0')), func(t *testing.T) {
-			duplicates, err := dc.FindDuplicates(context.Background(), flags)
+			duplicates, err := dc.FindDuplicates(context.Background(), flags, nil, true)
 			if err != nil {
 				t.Fatalf("FindDuplicates failed with flags %v: %v", flags, err)
 			}

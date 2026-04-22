@@ -36,7 +36,16 @@ type DuplicateGroup struct {
 // that dcfh never mremap's, so `*binaryEntry` pointers obtained via
 // ForEach stay valid for the call's duration. Scan indices (which do
 // grow under mremap) are never in this skiplist.
-func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string) ([]DuplicateGroup, error) {
+//
+// paths optionally restricts results to entries under one of the given
+// repo-relative directory prefixes (each terminated with "/"). When
+// exclusive is true, entries outside the prefixes are dropped before
+// bucketing — the usual `fdupes -r sub/` shape. When exclusive is
+// false, bucketing spans the whole index and groups with no member in
+// the prefixes are discarded at the end. A nil/empty paths slice is
+// the zero-cost fast path: both checks are skipped, exclusive is
+// ignored, and behaviour matches the unfiltered whole-repo pass.
+func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string, paths []string, exclusive bool) ([]DuplicateGroup, error) {
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// No config loaded (fresh/partial repos): honour --symlinks
 		// directly so the call still succeeds.
@@ -51,6 +60,7 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	}
 
 	buckets := make(map[uint64][]*binaryEntry, max(skiplist.Length()/4, 16))
+	filterBefore := exclusive && len(paths) > 0
 
 	var iterErr error
 	skiplist.ForEach(func(entry *binaryEntry, _ string) bool {
@@ -59,6 +69,9 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 			return false
 		}
 		if entry.IsDeleted() {
+			return true
+		}
+		if filterBefore && !pathMatchesPrefix(entry.RelativePath(), paths) {
 			return true
 		}
 		key := *(*uint64)(unsafe.Pointer(&entry.Hash[0]))
@@ -70,11 +83,12 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	}
 
 	out := make([]DuplicateGroup, 0, len(buckets)/16+1)
+	filterAfter := !exclusive && len(paths) > 0
 	for _, entries := range buckets {
 		if len(entries) < 2 {
 			continue
 		}
-		appendBucketGroups(entries, &out)
+		appendBucketGroups(entries, &out, paths, filterAfter)
 	}
 	slices.SortFunc(out, func(a, b DuplicateGroup) int {
 		return strings.Compare(a.Hash, b.Hash)
@@ -82,25 +96,38 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	return out, nil
 }
 
-// FindDuplicatesUnified is the legacy name for FindDuplicates. It
-// remains callable so the Repo interface and existing benchmarks don't
-// need churn; new callers should use FindDuplicates directly.
-func (dc *DirectoryCache) FindDuplicatesUnified(ctx context.Context, flags map[string]string) ([]DuplicateGroup, error) {
-	return dc.FindDuplicates(ctx, flags)
+// pathMatchesPrefix reports whether rel falls under any of the given
+// directory prefixes. prefixes are forward-slash paths ending in "/",
+// so no trailing-slash edge cases arise.
+func pathMatchesPrefix(rel string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(rel, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // appendBucketGroups splits a prefix-collision bucket into per-full-hash
 // subgroups, dropping singletons, and appends any group of ≥2 files to
 // *out. Input is already in skiplist (path) order, so emitted groups
 // have path-sorted Files slices for free — no per-group sort.
-func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup) {
+//
+// When filterAfter is true, groups with no member matching any of the
+// prefixes are dropped (non-exclusive mode). When filterAfter is false
+// prefixes is unused.
+func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup, prefixes []string, filterAfter bool) {
 	// Pair-fast-path: two entries sharing a uint64 prefix are almost
 	// always a real duplicate. Compare full hashes to be sure.
 	if len(entries) == 2 {
 		if sameHash(entries[0], entries[1]) {
+			a, b := entries[0].RelativePath(), entries[1].RelativePath()
+			if filterAfter && !pathMatchesPrefix(a, prefixes) && !pathMatchesPrefix(b, prefixes) {
+				return
+			}
 			*out = append(*out, DuplicateGroup{
 				Hash:  entries[0].HashString(),
-				Files: []string{entries[0].RelativePath(), entries[1].RelativePath()},
+				Files: []string{a, b},
 				Count: 2,
 			})
 		}
@@ -120,6 +147,18 @@ func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup) {
 		files := make([]string, len(group))
 		for i, e := range group {
 			files[i] = e.RelativePath()
+		}
+		if filterAfter {
+			match := false
+			for _, f := range files {
+				if pathMatchesPrefix(f, prefixes) {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
 		}
 		*out = append(*out, DuplicateGroup{
 			Hash:  group[0].HashString(),

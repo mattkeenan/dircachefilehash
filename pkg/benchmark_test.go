@@ -319,7 +319,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 			if _, err := cache.LoadMainIndex(); err != nil {
 				b.Fatalf("LoadMainIndex failed: %v", err)
 			}
-			if _, err := cache.FindDuplicates(context.Background(), map[string]string{}); err != nil {
+			if _, err := cache.FindDuplicates(context.Background(), map[string]string{}, nil, true); err != nil {
 				b.Fatalf("FindDuplicates failed: %v", err)
 			}
 			_ = cache.Close()
