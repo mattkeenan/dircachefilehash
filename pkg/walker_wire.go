@@ -11,24 +11,27 @@ import (
 	"time"
 )
 
-// wireSession owns a lazily-dialled WireClient for audit-mode repos.
+// wireSession owns a lazily-dialled WireDriver for audit-mode repos.
 // Shared between wireWalker and wireHasher so a single ssh subprocess
 // serves both Diff's ScanMetadata and Apply's HashFiles traffic. Dial
 // happens on first Walk/HashOne; until then Info/Config/Snapshots touch
-// nothing off the invoker.
+// nothing off the invoker. Transport selection is owned by the factory:
+// the wire variant dials ssh lazily, the shell variant hands in a pre-
+// built shellClient so every Client() call returns immediately.
 type wireSession struct {
 	uri RepoURI
 
 	mu     sync.Mutex
-	client *WireClient
+	client WireDriver
 	closed bool
 }
 
-// Client returns the underlying WireClient, dialling on first use. The
-// mutex is released around the dial so a concurrent Close can tear the
-// session down without blocking on ssh startup latency; if two callers
-// race the first dial, the loser's client is discarded.
-func (s *wireSession) Client(ctx context.Context) (*WireClient, error) {
+// Client returns the underlying WireDriver, dialling on first use when
+// no pre-built client was supplied. The mutex is released around the
+// dial so a concurrent Close can tear the session down without blocking
+// on ssh startup latency; if two callers race the first dial, the
+// loser's client is discarded.
+func (s *wireSession) Client(ctx context.Context) (WireDriver, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()

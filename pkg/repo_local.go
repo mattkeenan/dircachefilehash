@@ -96,15 +96,23 @@ func createWireRepo(_ context.Context, metaDir string, uri RepoURI) (*localRepo,
 }
 
 // newWireRepo wires dc through a fresh wireSession so Diff/Apply route
-// their filesystem side over ssh. The session dials lazily on first use.
+// their filesystem side over ssh. For Transport=="wire" the session
+// dials lazily on first use; for Transport=="shell" a shellClient is
+// constructed eagerly (each call spawns its own ssh) and handed in
+// pre-built so Client() short-circuits the dial.
 func newWireRepo(dc *DirectoryCache, uri RepoURI) *localRepo {
+	if uri.Transport == TransportShell {
+		return newWireRepoWithClient(dc, uri, newShellClient(uri))
+	}
 	return newWireRepoWithClient(dc, uri, nil)
 }
 
-// newWireRepoWithClient is the shared constructor underpinning newWireRepo
-// and in-process wire tests. When preBuilt is non-nil, it short-circuits
-// the first dial — used by tests that drive a RemoteHandler over io.Pipe.
-func newWireRepoWithClient(dc *DirectoryCache, uri RepoURI, preBuilt *WireClient) *localRepo {
+// newWireRepoWithClient is the shared constructor underpinning newWireRepo,
+// ssh+shell factory wiring, and in-process wire tests. When preBuilt is
+// non-nil it short-circuits the first dial — the wire variant leaves it
+// nil (lazy ssh dial on first Walk/HashOne); the shell variant passes a
+// ready shellClient; tests pass a wire client wired to a pipe pair.
+func newWireRepoWithClient(dc *DirectoryCache, uri RepoURI, preBuilt WireDriver) *localRepo {
 	sess := &wireSession{uri: uri, client: preBuilt}
 	dc.walker = &wireWalker{sess: sess, dc: dc}
 	dc.fileHasher = &wireHasher{sess: sess, dc: dc}

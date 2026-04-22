@@ -10,6 +10,20 @@ import (
 	"sync/atomic"
 )
 
+// WireDriver is the invoker-side contract for issuing wire primitives.
+// The JSON-framed `*WireClient` and the shell-pipeline `*shellClient`
+// both satisfy it, so wireSession / wireWalker / wireHasher are agnostic
+// to which transport underlies a given ssh repo variant.
+type WireDriver interface {
+	ServerInfo(ctx context.Context) (*ServerCaps, error)
+	ScanMetadata(ctx context.Context, req ScanRequest) (*ScanResponse, error)
+	HashFiles(ctx context.Context, req HashRequest) (*HashResponse, error)
+	Close() error
+}
+
+// Compile-time assertion: *WireClient is the canonical WireDriver.
+var _ WireDriver = (*WireClient)(nil)
+
 // WireClient is the invoker-side driver for the audit wire protocol. It
 // owns a bidirectional transport (typically an ssh subprocess) and
 // serialises calls — Phase 2 issues one request at a time. The envelope

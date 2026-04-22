@@ -136,19 +136,31 @@ type ConfigRepo interface {
 // file:// (implicit or explicit) is supported; ssh:// parses but returns
 // ErrRemoteNotImplemented from the factories.
 type RepoURI struct {
-	Scheme string // "file" or "ssh"
-	User   string // ssh only
-	Host   string // ssh only
-	Port   string // ssh only
-	Path   string // filesystem path (absolute for file, server path for ssh)
+	Scheme    string // "file" or "ssh"
+	Transport string // ssh only: "wire" (default) or "shell"
+	User      string // ssh only
+	Host      string // ssh only
+	Port      string // ssh only
+	Path      string // filesystem path (absolute for file, server path for ssh)
 }
 
+// Transport constants for RepoURI.Transport (ssh scheme only).
+const (
+	TransportWire  = "wire"  // framed JSON-RPC to `dcfh remote` (default)
+	TransportShell = "shell" // shell pipeline (find -printf + sha256sum)
+)
+
 // String renders a RepoURI as its canonical string form — symmetric with
-// ParseRepoURI, so round-trips preserve all components.
+// ParseRepoURI, so round-trips preserve all components. Bare ssh:// is
+// emitted for Transport=="wire" (the default) and ssh+shell:// for shell.
 func (u RepoURI) String() string {
 	switch u.Scheme {
 	case "ssh":
-		s := "ssh://"
+		s := "ssh"
+		if u.Transport == TransportShell {
+			s += "+shell"
+		}
+		s += "://"
 		if u.User != "" {
 			s += u.User + "@"
 		}
@@ -176,7 +188,9 @@ func IsRemote(s string) bool {
 //   - bare absolute path (/abs/foo.dcfh) → file scheme
 //   - bare relative path (./rel) → file scheme, resolved to absolute
 //   - file:///abs/path → file scheme
-//   - ssh://[user@]host[:port]/path → ssh scheme (reserved for Phase 2)
+//   - ssh://[user@]host[:port]/path → ssh scheme, wire transport (default)
+//   - ssh+wire://[user@]host[:port]/path → ssh scheme, wire transport (explicit)
+//   - ssh+shell://[user@]host[:port]/path → ssh scheme, shell transport
 //
 // Phase 1 rejects ssh:// on --meta-dir via the factory, not here; parsing
 // succeeds so error messages can reference the parsed components.
@@ -185,8 +199,7 @@ func ParseRepoURI(s string) (RepoURI, error) {
 		return RepoURI{}, fmt.Errorf("empty repository URI")
 	}
 
-	if after, ok := strings.CutPrefix(s, "ssh://"); ok {
-		rest := after
+	if transport, rest, ok := cutSSHScheme(s); ok {
 		slash := strings.Index(rest, "/")
 		if slash < 0 {
 			return RepoURI{}, fmt.Errorf("ssh URI missing path: %s", s)
@@ -212,7 +225,7 @@ func ParseRepoURI(s string) (RepoURI, error) {
 		if host == "" {
 			return RepoURI{}, fmt.Errorf("ssh URI missing host: %s", s)
 		}
-		return RepoURI{Scheme: "ssh", User: user, Host: host, Port: port, Path: path}, nil
+		return RepoURI{Scheme: "ssh", Transport: transport, User: user, Host: host, Port: port, Path: path}, nil
 	}
 
 	if after, ok := strings.CutPrefix(s, "file://"); ok {
@@ -224,7 +237,7 @@ func ParseRepoURI(s string) (RepoURI, error) {
 	}
 
 	if scheme, _, ok := strings.Cut(s, "://"); ok {
-		return RepoURI{}, fmt.Errorf("unsupported URI scheme %q (supported: file, ssh)", scheme)
+		return RepoURI{}, fmt.Errorf("unsupported URI scheme %q (supported: file, ssh, ssh+wire, ssh+shell)", scheme)
 	}
 
 	abs, err := filepath.Abs(s)
@@ -232,6 +245,23 @@ func ParseRepoURI(s string) (RepoURI, error) {
 		return RepoURI{}, fmt.Errorf("failed to resolve path %q: %w", s, err)
 	}
 	return RepoURI{Scheme: "file", Path: abs}, nil
+}
+
+// cutSSHScheme strips a recognised ssh scheme prefix from s and returns
+// the resolved transport plus the remainder. Bare ssh:// is shorthand
+// for ssh+wire:// (the default). Unknown ssh+foo:// schemes return ok=false
+// so the caller can surface them via the unsupported-scheme error path.
+func cutSSHScheme(s string) (transport, rest string, ok bool) {
+	if after, hit := strings.CutPrefix(s, "ssh+wire://"); hit {
+		return TransportWire, after, true
+	}
+	if after, hit := strings.CutPrefix(s, "ssh+shell://"); hit {
+		return TransportShell, after, true
+	}
+	if after, hit := strings.CutPrefix(s, "ssh://"); hit {
+		return TransportWire, after, true
+	}
+	return "", "", false
 }
 
 // OpenRepo opens an existing repository. In Phase 1 only file:// is

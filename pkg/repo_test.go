@@ -41,14 +41,30 @@ func TestParseRepoURI(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:  "ssh basic",
+			name:  "ssh basic (shorthand for wire)",
 			input: "ssh://host/path/foo.dcfh",
-			want:  RepoURI{Scheme: "ssh", Host: "host", Path: "/path/foo.dcfh"},
+			want:  RepoURI{Scheme: "ssh", Transport: TransportWire, Host: "host", Path: "/path/foo.dcfh"},
+		},
+		{
+			name:  "ssh+wire explicit",
+			input: "ssh+wire://host/path/foo.dcfh",
+			want:  RepoURI{Scheme: "ssh", Transport: TransportWire, Host: "host", Path: "/path/foo.dcfh"},
+		},
+		{
+			name:  "ssh+shell variant",
+			input: "ssh+shell://user@host:2222/srv/app",
+			want:  RepoURI{Scheme: "ssh", Transport: TransportShell, User: "user", Host: "host", Port: "2222", Path: "/srv/app"},
+		},
+		{
+			name:      "ssh+unknown variant rejected",
+			input:     "ssh+bogus://host/p",
+			wantErr:   true,
+			errSubstr: "unsupported URI scheme",
 		},
 		{
 			name:  "ssh with user and port",
 			input: "ssh://user@host:2222/path/foo.dcfh",
-			want:  RepoURI{Scheme: "ssh", User: "user", Host: "host", Port: "2222", Path: "/path/foo.dcfh"},
+			want:  RepoURI{Scheme: "ssh", Transport: TransportWire, User: "user", Host: "host", Port: "2222", Path: "/path/foo.dcfh"},
 		},
 		{
 			name:    "ssh missing path",
@@ -92,6 +108,33 @@ func TestParseRepoURI(t *testing.T) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRepoURIStringRoundTrip(t *testing.T) {
+	cases := []string{
+		"file:///abs/path.dcfh",
+		"ssh://host/path",
+		"ssh://user@host:2222/srv/app",
+		"ssh+shell://host/path",
+		"ssh+shell://user@host:2222/srv/app",
+	}
+	for _, in := range cases {
+		u, err := ParseRepoURI(in)
+		if err != nil {
+			t.Fatalf("ParseRepoURI(%q): %v", in, err)
+		}
+		if got := u.String(); got != in {
+			t.Errorf("round-trip %q -> %q", in, got)
+		}
+	}
+	// ssh+wire:// canonicalises to bare ssh:// (wire is the default).
+	u, err := ParseRepoURI("ssh+wire://host/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.String(); got != "ssh://host/p" {
+		t.Errorf("ssh+wire canonical form: got %q, want ssh://host/p", got)
 	}
 }
 
