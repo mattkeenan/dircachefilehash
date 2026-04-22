@@ -45,7 +45,11 @@ func newShellClient(uri RepoURI) *shellClient {
 // stay visible; only stdout is returned for parsing.
 func sshShellRunner(uri RepoURI) shellRunner {
 	return func(ctx context.Context, pipeline string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, "ssh", sshArgs(uri, []string{pipeline})...)
+		argv, err := sshCommand(uri, []string{pipeline})
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, "ssh", argv...)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.Output()
 		if err != nil {

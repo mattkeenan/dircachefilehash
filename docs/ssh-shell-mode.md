@@ -49,6 +49,19 @@ nothing else is needed.
   after the remote returns its listing, costing bandwidth on very-wide
   repositories with many ignored entries.
 
+## Host-key TOFU
+
+dcfh keeps its ssh host fingerprints in `~/.config/dcfh/known_hosts`,
+separate from `~/.ssh/known_hosts`, so interactive ssh and automated
+audit runs cannot poison each other. First contact records the host's
+key; a later run against the same host whose key has changed fails
+loudly (ssh exits 255, dcfh surfaces the error). This applies to both
+`ssh://` and `ssh+shell://`.
+
+Authentication is delegated to `ssh` and `ssh-agent` — dcfh inherits
+`SSH_AUTH_SOCK` and never reads key material itself. Configure the
+remote's authorised keys via your normal ssh workflow.
+
 ## Verifying
 
 Check the remote meets the shell-mode requirements before your first audit:

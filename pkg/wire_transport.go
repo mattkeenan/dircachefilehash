@@ -42,7 +42,11 @@ func dialSSH(ctx context.Context, uri RepoURI, remoteCmd []string) (*sshTranspor
 		return nil, fmt.Errorf("dialSSH requires a remote command")
 	}
 
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs(uri, remoteCmd)...)
+	argv, err := sshCommand(uri, remoteCmd)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "ssh", argv...)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
