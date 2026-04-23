@@ -97,6 +97,39 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths 
 // updateSpecificPaths has been moved to v0.6/pkg/update.go as part of the v0.7 unified
 // architecture migration. Use updateSpecificPathsUnified() instead.
 
+// finaliseUpdateMainIndex mirrors finalisePipelineMainIndex for the
+// legacy update path. Kept separate because the stderr prefix is
+// "[UPDATE]" vs "[PIPELINE]" and these lines are grep'd in the wild.
+func finaliseUpdateMainIndex(dc *DirectoryCache, tempName string, ok bool) {
+	if !ok {
+		if _, err := os.Stat(tempName); err != nil {
+			return
+		}
+		if removeErr := os.Remove(tempName); removeErr != nil && IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to remove incomplete main index %s: %v\n", tempName, removeErr)
+		} else if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[UPDATE] Removed incomplete main index: %s\n", filepath.Base(tempName))
+		}
+		return
+	}
+	stat, err := os.Stat(tempName)
+	if err != nil {
+		return
+	}
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Second rename attempt: %s (%d bytes) -> %s", tempName, stat.Size(), dc.IndexFile)
+	}
+	if renameErr := os.Rename(tempName, dc.IndexFile); renameErr != nil {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to rename %s to main.idx: %v\n", tempName, renameErr)
+		}
+		return
+	}
+	if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
+	}
+}
+
 // performUnifiedScanToSkiplist performs scan using the old callback-driven architecture.
 // This function is retained only for recovery.go which still depends on it.
 //
@@ -125,37 +158,8 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(ctx context.Context, path
 	// v0.7: Generate timestamped main index filename for persistent strategy
 	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
 
-	// Track operation success for proper cleanup strategy
 	var operationSuccessful bool
-	defer func() {
-		if operationSuccessful {
-			// Success: atomic rename to main.idx and cleanup timestamped cache files
-			if stat, err := os.Stat(tempMainIndexFileName); err == nil {
-				if IsDebugEnabled("write") {
-					VerboseLog(3, "[UPDATE-WRITE] Second rename attempt: %s (%d bytes) -> %s", tempMainIndexFileName, stat.Size(), dc.IndexFile)
-				}
-				if renameErr := os.Rename(tempMainIndexFileName, dc.IndexFile); renameErr != nil {
-					if IsDebugEnabled("scan") {
-						fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to rename %s to main.idx: %v\n", tempMainIndexFileName, renameErr)
-					}
-				} else {
-					// Success - cleanup all timestamped cache files
-					if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
-						fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
-					}
-				}
-			}
-		} else {
-			// Interruption/Error: delete incomplete main index file
-			if _, err := os.Stat(tempMainIndexFileName); err == nil {
-				if removeErr := os.Remove(tempMainIndexFileName); removeErr != nil && IsDebugEnabled("scan") {
-					fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to remove incomplete main index %s: %v\n", tempMainIndexFileName, removeErr)
-				} else if IsDebugEnabled("scan") {
-					fmt.Fprintf(os.Stderr, "[UPDATE] Removed incomplete main index: %s\n", filepath.Base(tempMainIndexFileName))
-				}
-			}
-		}
-	}()
+	defer func() { finaliseUpdateMainIndex(dc, tempMainIndexFileName, operationSuccessful) }()
 
 	// v0.7: No scan index needed - UpdateCallback writes directly to temp main index
 

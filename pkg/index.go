@@ -395,135 +395,127 @@ func (dc *DirectoryCache) LoadIndexFromFileWithProcessor(filePath string, proces
 
 // loadIndexFromFileWithProcessor is the internal implementation with callback support
 func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	indexFile, header, err := dc.openAndValidateIndex(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return dc.collectEntryRefs(indexFile, header, filePath, processor)
+}
+
+// openAndValidateIndex opens the file, mmaps it, and runs the fixed
+// header checks (signature, byte order, version, clean-flag checksum).
+// On error it cleans up the fd/mmap; on success the caller owns the
+// returned indexFile and must close+munmap it when done.
+func (dc *DirectoryCache) openAndValidateIndex(filePath string) (*mmapIndexFile, *indexHeader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
+		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
 	}
-
-	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("failed to stat file: %w", err)
+		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
 	}
-
 	if stat.Size() < int64(V2HeaderSize) {
 		_ = file.Close()
-		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
-
-	// Memory map the file for reading
 	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("failed to mmap file: %w", err)
+		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
-	// Get direct pointer to header in mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-
-	// Verify header; on failure, clean up both mmap and file
-	if err := header.ValidateSignature(dc.signature); err != nil {
-		_ = unix.Munmap(data)
-		_ = file.Close()
-		return nil, err
-	}
-	if err := header.ValidateByteOrder(); err != nil {
-		_ = unix.Munmap(data)
-		_ = file.Close()
-		return nil, err
-	}
-	if err := header.ValidateVersion(dc.version); err != nil {
-		_ = unix.Munmap(data)
-		_ = file.Close()
-		return nil, err
+	cleanup := func() { _ = unix.Munmap(data); _ = file.Close() }
+	for _, check := range []func() error{
+		func() error { return header.ValidateSignature(dc.signature) },
+		func() error { return header.ValidateByteOrder() },
+		func() error { return header.ValidateVersion(dc.version) },
+	} {
+		if err := check(); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
 	}
 
-	hdrSize := headerSizeForVersion(header.Version)
 	indexFile := &mmapIndexFile{
 		File:       file,
 		Data:       data,
 		Size:       int(stat.Size()),
 		Type:       "loaded",
 		FilePath:   filePath,
-		headerSize: hdrSize,
+		headerSize: headerSizeForVersion(header.Version),
 	}
 
-	isClean := (header.Flags & IndexFlagClean) != 0
-
-	if !isClean {
+	if (header.Flags & IndexFlagClean) == 0 {
 		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
-	} else {
-		if err := dc.verifyHeaderChecksum(data, header); err != nil {
-			return nil, fmt.Errorf("checksum verification failed: %w", err)
-		}
+	} else if err := dc.verifyHeaderChecksum(data, header); err != nil {
+		return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
 	}
+	return indexFile, header, nil
+}
 
-	// Parse entries with callback processing
+// collectEntryRefs walks the entry region, validating each entry and
+// invoking the user's processor. Returns refs for entries the
+// processor accepted.
+func (dc *DirectoryCache) collectEntryRefs(indexFile *mmapIndexFile, header *indexHeader, filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	entryData := indexFile.Data[indexFile.headerSize:]
 	var refs []binaryEntryRef
 	offset := 0
-	entryData := data[hdrSize:]
-
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
 			return nil, fmt.Errorf("unexpected end of data at entry %d", i)
 		}
-
-		// Get direct pointer to binaryEntry in mmap'd memory
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-
-		// Validate binaryEntry chaining consistency
-		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
-			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
+		if err := dc.validateSingleEntry(entry, offset, entryData, int(i)); err != nil {
+			return nil, err
 		}
-
-		// Perform extra validation if debug flag is enabled
-		if IsDebugEnabled("extravalidation") {
-			if err := entry.ValidateEntry(); err != nil {
-				return nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
-			}
+		include, err := runEntryProcessor(processor, entry, i, filePath)
+		if err != nil {
+			return nil, err
 		}
-
-		// Call the processor callback
-		shouldInclude := true
-		if processor != nil {
-			include, err := processor(entry, i, filePath)
-			if err != nil {
-				return nil, fmt.Errorf("entry processor failed at entry %d: %w", i, err)
-			}
-			shouldInclude = include
+		if include {
+			refs = append(refs, binaryEntryRef{Offset: offset, IndexFile: indexFile})
 		}
-
-		// Only include entry if processor says so
-		if shouldInclude {
-			// Create binaryEntryRef instead of storing pointer
-			ref := binaryEntryRef{
-				Offset:    offset, // Offset from start of entry data
-				IndexFile: indexFile,
-			}
-			refs = append(refs, ref)
-		}
-
-		// Move to next entry using Size field
 		nextOffset := offset + int(entry.Size)
-
-		// Validate chaining consistency: current entry + Size = next entry
-		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
-			if nextOffset >= len(entryData) {
-				return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
-					i, entry.Size, offset, nextOffset, len(entryData))
-			}
+		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 && nextOffset >= len(entryData) {
+			return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
+				i, entry.Size, offset, nextOffset, len(entryData))
 		}
-
 		offset = nextOffset
 	}
-
-	// Final validation: ensure we consumed exactly the expected amount of data
 	if offset != len(entryData) {
 		return nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
 	}
-
 	return refs, nil
+}
+
+// validateSingleEntry wraps the chaining / extra-validation checks in
+// one place so collectEntryRefs stays straight-line.
+func (dc *DirectoryCache) validateSingleEntry(entry *binaryEntry, offset int, entryData []byte, index int) error {
+	if err := dc.validateEntryChaining(entry, offset, entryData, index); err != nil {
+		return fmt.Errorf("entry %d validation failed: %w", index, err)
+	}
+	if IsDebugEnabled("extravalidation") {
+		if err := entry.ValidateEntry(); err != nil {
+			return fmt.Errorf("entry %d extra validation failed: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// runEntryProcessor invokes the processor (if any). Nil processor
+// means "include everything".
+func runEntryProcessor(processor EntryProcessor, entry *binaryEntry, index uint32, filePath string) (bool, error) {
+	if processor == nil {
+		return true, nil
+	}
+	include, err := processor(entry, index, filePath)
+	if err != nil {
+		return false, fmt.Errorf("entry processor failed at entry %d: %w", index, err)
+	}
+	return include, nil
 }
 
 // Processor factory functions for different use cases
@@ -589,68 +581,68 @@ type SearchOptions struct {
 }
 
 func SearchEntryProcessor(opts SearchOptions) EntryProcessor {
-	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
-		// Skip deleted entries unless specifically requested
-		if entry.IsDeleted() && !opts.ShowDeleted {
-			return false, nil
+	return func(entry *binaryEntry, _ uint32, filePath string) (bool, error) {
+		matches, err := searchEntryMatches(opts, entry)
+		if err != nil || !matches {
+			return false, err
 		}
-
-		// Skip non-deleted entries if only deleted requested
-		if !entry.IsDeleted() && opts.ShowDeleted {
-			return false, nil
-		}
-
-		entryPath := entry.RelativePath()
-
-		// Apply filters
-		if opts.Pattern != "" {
-			matched, err := filepath.Match(opts.Pattern, filepath.Base(entryPath))
-			if err != nil {
-				return false, fmt.Errorf("invalid pattern %s: %w", opts.Pattern, err)
-			}
-			if !matched {
-				return false, nil
-			}
-		}
-
-		if opts.PathPrefix != "" && !strings.HasPrefix(entryPath, opts.PathPrefix) {
-			return false, nil
-		}
-
-		if opts.HashPrefix != "" {
-			hashStr := entry.HashString()
-			if !strings.HasPrefix(strings.ToLower(hashStr), strings.ToLower(opts.HashPrefix)) {
-				return false, nil
-			}
-		}
-
-		if opts.ExactSize != nil && entry.FileSize != *opts.ExactSize {
-			return false, nil
-		}
-
-		// Entry matches - output it
 		if opts.SearchCount != nil {
 			*opts.SearchCount++
 		}
-
-		// Output the match based on verbose level
-		VerboseLog(0, "%s", entryPath)
-		if GetVerboseLevel() >= 1 {
-			mtime := timeFromWall(entry.MTimeWall)
-			deletedFlag := ""
-			if entry.IsDeleted() {
-				deletedFlag = " (DELETED)"
-			}
-			VerboseLog(1, "  %04o %8d %s %s%s",
-				entry.Mode&0o7777, entry.FileSize,
-				mtime.Format("2006-01-02 15:04:05"),
-				filepath.Base(filePath), deletedFlag)
-		}
-		if GetVerboseLevel() >= 2 {
-			VerboseLog(2, "  Hash: %s (%s)", entry.HashString(), HashTypeName(entry.HashType))
-		}
-
+		emitSearchMatch(entry, filePath)
 		return false, nil // Don't include in skiplist, just process for output
+	}
+}
+
+// searchEntryMatches applies the SearchEntryProcessor filter set.
+// Returns (false, nil) for non-matches and (false, err) for a bad
+// glob pattern; (true, nil) means the caller should emit.
+func searchEntryMatches(opts SearchOptions, entry *binaryEntry) (bool, error) {
+	if entry.IsDeleted() != opts.ShowDeleted {
+		return false, nil
+	}
+	entryPath := entry.RelativePath()
+	if opts.Pattern != "" {
+		ok, err := filepath.Match(opts.Pattern, filepath.Base(entryPath))
+		if err != nil {
+			return false, fmt.Errorf("invalid pattern %s: %w", opts.Pattern, err)
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	if opts.PathPrefix != "" && !strings.HasPrefix(entryPath, opts.PathPrefix) {
+		return false, nil
+	}
+	if opts.HashPrefix != "" {
+		if !strings.HasPrefix(strings.ToLower(entry.HashString()), strings.ToLower(opts.HashPrefix)) {
+			return false, nil
+		}
+	}
+	if opts.ExactSize != nil && entry.FileSize != *opts.ExactSize {
+		return false, nil
+	}
+	return true, nil
+}
+
+// emitSearchMatch writes one matched entry's summary at the current
+// verbose level.
+func emitSearchMatch(entry *binaryEntry, filePath string) {
+	entryPath := entry.RelativePath()
+	VerboseLog(0, "%s", entryPath)
+	if GetVerboseLevel() >= 1 {
+		mtime := timeFromWall(entry.MTimeWall)
+		deletedFlag := ""
+		if entry.IsDeleted() {
+			deletedFlag = " (DELETED)"
+		}
+		VerboseLog(1, "  %04o %8d %s %s%s",
+			entry.Mode&0o7777, entry.FileSize,
+			mtime.Format("2006-01-02 15:04:05"),
+			filepath.Base(filePath), deletedFlag)
+	}
+	if GetVerboseLevel() >= 2 {
+		VerboseLog(2, "  Hash: %s (%s)", entry.HashString(), HashTypeName(entry.HashType))
 	}
 }
 

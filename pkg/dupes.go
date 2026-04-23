@@ -72,9 +72,7 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	}
 
 	pathExclusive := filter.Exclusive && len(filter.Paths) > 0
-	hasSize := filter.MinSize != nil || filter.MaxSize != nil
-	hasTime := !filter.StartTime.IsZero() || !filter.EndTime.IsZero()
-	filterBefore := pathExclusive || hasSize || hasTime
+	keep := entryKeeper(filter, pathExclusive)
 
 	buckets := make(map[uint64][]*binaryEntry, max(skiplist.Length()/4, 16))
 
@@ -84,30 +82,8 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 			iterErr = err
 			return false
 		}
-		if entry.IsDeleted() {
+		if entry.IsDeleted() || !keep(entry) {
 			return true
-		}
-		if filterBefore {
-			if hasSize {
-				if filter.MinSize != nil && entry.FileSize < *filter.MinSize {
-					return true
-				}
-				if filter.MaxSize != nil && entry.FileSize > *filter.MaxSize {
-					return true
-				}
-			}
-			if hasTime {
-				mtime := timeFromWall(entry.MTimeWall)
-				if !filter.StartTime.IsZero() && mtime.Before(filter.StartTime) {
-					return true
-				}
-				if !filter.EndTime.IsZero() && !mtime.Before(filter.EndTime) {
-					return true
-				}
-			}
-			if pathExclusive && !pathMatchesPrefix(entry.RelativePath(), filter.Paths) {
-				return true
-			}
 		}
 		key := *(*uint64)(unsafe.Pointer(&entry.Hash[0]))
 		buckets[key] = append(buckets[key], entry)
@@ -129,6 +105,41 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 		return strings.Compare(a.Hash, b.Hash)
 	})
 	return out, nil
+}
+
+// entryKeeper returns a predicate that applies the pre-bucket
+// filters (size / mtime / path-exclusive). The zero-filter fast path
+// returns a predicate that always keeps, letting the ForEach closure
+// stay branch-light.
+func entryKeeper(filter DupeFilter, pathExclusive bool) func(*binaryEntry) bool {
+	hasSize := filter.MinSize != nil || filter.MaxSize != nil
+	hasTime := !filter.StartTime.IsZero() || !filter.EndTime.IsZero()
+	if !pathExclusive && !hasSize && !hasTime {
+		return func(*binaryEntry) bool { return true }
+	}
+	return func(entry *binaryEntry) bool {
+		if hasSize {
+			if filter.MinSize != nil && entry.FileSize < *filter.MinSize {
+				return false
+			}
+			if filter.MaxSize != nil && entry.FileSize > *filter.MaxSize {
+				return false
+			}
+		}
+		if hasTime {
+			mtime := timeFromWall(entry.MTimeWall)
+			if !filter.StartTime.IsZero() && mtime.Before(filter.StartTime) {
+				return false
+			}
+			if !filter.EndTime.IsZero() && !mtime.Before(filter.EndTime) {
+				return false
+			}
+		}
+		if pathExclusive && !pathMatchesPrefix(entry.RelativePath(), filter.Paths) {
+			return false
+		}
+		return true
+	}
 }
 
 // pathMatchesPrefix reports whether rel falls under any of the given

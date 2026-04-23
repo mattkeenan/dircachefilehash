@@ -373,215 +373,186 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
-	// Use a priority queue (sorted slice) to ensure we process paths in alphabetical order
-	// This ensures the output is naturally sorted
 	pathQueue := []string{rootPath}
 	metaDir := dc.MetaDir
 
 	for len(pathQueue) > 0 {
-		// Check for shutdown
-		select {
-		case <-ctx.Done():
+		if err := ctx.Err(); err != nil {
 			if IsDebugEnabled("scanning") {
 				fmt.Fprintf(os.Stderr, "[SCAN] Filesystem scan interrupted by shutdown\n")
 			}
-			return fmt.Errorf("scan interrupted: %w", ctx.Err())
-		default:
+			return fmt.Errorf("scan interrupted: %w", err)
 		}
 
-		// Always process the first path (lexicographically smallest)
 		currentPath := pathQueue[0]
 		pathQueue = pathQueue[1:]
 
-		info, err := os.Lstat(currentPath)
-		if err != nil {
-			continue // Skip inaccessible paths
-		}
-
-		// Get relative path for ignore checking
-		relPath, err := filepath.Rel(dc.RootDir, currentPath)
-		if err != nil {
+		info, relPath, ok := dc.statAndFilter(currentPath)
+		if !ok {
 			continue
 		}
 
-		// Check if path should be ignored
-		if dc.ignoreManager.ShouldIgnore(relPath) {
-			continue
-		}
-
-		// Handle symlinks - determine if it's a file or directory symlink
 		if info.Mode()&os.ModeSymlink != 0 {
-			// Get info for the target to determine if it's a file or directory
-			targetInfo, err := os.Stat(currentPath)
-			if err != nil {
-				continue // Skip broken symlinks
+			resolved, skip := dc.resolveSymlinkForScan(currentPath, info)
+			if skip {
+				continue
 			}
-
-			if targetInfo.IsDir() {
-				// This is a directory symlink - apply symlink mode logic
-				baseMode, strict := parseSymlinkMode(dc.symlinkMode)
-
-				switch baseMode {
-				case "none":
-					// Don't follow directory symlinks - skip them
-					if IsDebugEnabled("symlinks") {
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (mode=none): %s\n", currentPath)
-					}
-					continue
-
-				case "internal":
-					// Only follow if symlink chain is internal to rootDir
-					allInternal, _, err := dc.checkSymlinkChain(currentPath, strict)
-					if err != nil {
-						if IsDebugEnabled("symlinks") {
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
-						}
-						continue // Skip problematic symlinks
-					}
-
-					if !allInternal {
-						if IsDebugEnabled("symlinks") {
-							finalTarget, _ := filepath.EvalSymlinks(currentPath)
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not internal): %s -> %s (root: %s, strict: %v)\n",
-								currentPath, finalTarget, dc.RootDir, strict)
-						}
-						continue
-					}
-
-					if IsDebugEnabled("symlinks") {
-						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following internal directory symlink: %s -> %s (root: %s, strict: %v)\n",
-							currentPath, finalTarget, dc.RootDir, strict)
-					}
-					info = targetInfo
-
-				case "external":
-					// Only follow if symlink chain is external to rootDir
-					_, allExternal, err := dc.checkSymlinkChain(currentPath, strict)
-					if err != nil {
-						if IsDebugEnabled("symlinks") {
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
-						}
-						continue // Skip problematic symlinks
-					}
-
-					if !allExternal {
-						if IsDebugEnabled("symlinks") {
-							finalTarget, _ := filepath.EvalSymlinks(currentPath)
-							fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not external): %s -> %s (root: %s, strict: %v)\n",
-								currentPath, finalTarget, dc.RootDir, strict)
-						}
-						continue
-					}
-
-					if IsDebugEnabled("symlinks") {
-						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following external directory symlink: %s -> %s (root: %s, strict: %v)\n",
-							currentPath, finalTarget, dc.RootDir, strict)
-					}
-					info = targetInfo
-
-				case "all":
-					// Follow all directory symlinks
-					if IsDebugEnabled("symlinks") {
-						finalTarget, _ := filepath.EvalSymlinks(currentPath)
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Following directory symlink (mode=all): %s -> %s\n",
-							currentPath, finalTarget)
-					}
-					info = targetInfo
-
-				default:
-					// Default to "all" for unknown modes
-					if IsDebugEnabled("symlinks") {
-						fmt.Fprintf(os.Stderr, "[SYMLINK] Unknown mode '%s', defaulting to 'all'\n", baseMode)
-					}
-					info = targetInfo
-				}
-			}
-			// For file symlinks, keep the original symlink info (don't replace with targetInfo)
-			// The symlink will be recorded as a symlink, but we'll hash the target content
+			info = resolved
 		}
 
-		if info.IsDir() {
-			// Skip the .dcfh directory
+		switch {
+		case info.IsDir():
 			if currentPath == metaDir {
 				continue
 			}
-
-			// Read directory entries and add to queue in sorted order
-			entries, err := os.ReadDir(currentPath)
-			if err != nil {
-				continue
-			}
-
-			// Sort entries for consistent ordering
-			sort.Slice(entries, func(i, j int) bool {
-				return entries[i].Name() < entries[j].Name()
-			})
-
-			// Add directory entries to queue, inserting in sorted position
-			var newPaths []string
-			for _, entry := range entries {
-				fullPath := filepath.Join(currentPath, entry.Name())
-				newPaths = append(newPaths, fullPath)
-			}
-
-			// Insert new paths into queue maintaining sorted order
-			pathQueue = dc.insertSorted(pathQueue, newPaths)
-
-		} else if info.Mode().IsRegular() {
-			// Skip index files
+			pathQueue = dc.enqueueDirChildren(pathQueue, currentPath)
+		case info.Mode().IsRegular(), info.Mode()&os.ModeSymlink != 0:
 			if currentPath == dc.IndexFile || currentPath == dc.CacheFile {
 				continue
 			}
-
-			// Get system-specific file information
-			stat := info.Sys().(*syscall.Stat_t)
-
-			scannedPath := &scannedPath{
-				AbsPath:  currentPath,
-				RelPath:  relPath,
-				Info:     info,
-				StatInfo: stat,
-			}
-
-			// Stream result immediately - this gives us better performance
-			if IsDebugEnabled("scanning") {
-				fmt.Fprintf(os.Stderr, "[SCAN] Scanned file: %s\n", relPath)
-			}
-			if IsDebugEnabled("scan") {
-				VerboseLog(3, "scanPathRecursive: found file %s", relPath)
-			}
-			resultChan <- scannedPath
-		} else if info.Mode()&os.ModeSymlink != 0 {
-			// Handle file symlinks (directory symlinks were already handled above)
-			// Skip index files
-			if currentPath == dc.IndexFile || currentPath == dc.CacheFile {
-				continue
-			}
-
-			// Get system-specific file information
-			stat := info.Sys().(*syscall.Stat_t)
-
-			scannedPath := &scannedPath{
-				AbsPath:  currentPath,
-				RelPath:  relPath,
-				Info:     info,
-				StatInfo: stat,
-			}
-
-			// Stream result immediately - this gives us better performance
-			if IsDebugEnabled("scanning") {
-				fmt.Fprintf(os.Stderr, "[SCAN] Scanned symlink: %s\n", relPath)
-			}
-			if IsDebugEnabled("scan") {
-				VerboseLog(3, "scanPathRecursive: found symlink %s", relPath)
-			}
-			resultChan <- scannedPath
+			resultChan <- makeScannedPath(currentPath, relPath, info)
 		}
 	}
 
 	return nil
+}
+
+// statAndFilter lstat's path, computes the relative path, and applies
+// the ignore-manager filter. Returns (info, relPath, true) to
+// process, or a zero (nil, "", false) to skip entirely.
+func (dc *DirectoryCache) statAndFilter(currentPath string) (os.FileInfo, string, bool) {
+	info, err := os.Lstat(currentPath)
+	if err != nil {
+		return nil, "", false
+	}
+	relPath, err := filepath.Rel(dc.RootDir, currentPath)
+	if err != nil {
+		return nil, "", false
+	}
+	if dc.ignoreManager.ShouldIgnore(relPath) {
+		return nil, "", false
+	}
+	return info, relPath, true
+}
+
+// resolveSymlinkForScan applies the symlink-mode policy to a symlink
+// entry. For directory symlinks it returns the target's FileInfo so
+// the scanner recurses in; for file symlinks it returns the original
+// lstat info unchanged. Returns skip=true for symlinks that should be
+// dropped (broken target, policy rejection, etc.).
+func (dc *DirectoryCache) resolveSymlinkForScan(currentPath string, info os.FileInfo) (os.FileInfo, bool) {
+	targetInfo, err := os.Stat(currentPath)
+	if err != nil {
+		return nil, true
+	}
+	if !targetInfo.IsDir() {
+		// File symlinks stay as lstat'd symlink info; target is hashed separately.
+		return info, false
+	}
+	if dc.shouldFollowDirSymlink(currentPath) {
+		return targetInfo, false
+	}
+	return nil, true
+}
+
+// shouldFollowDirSymlink applies the symlink-mode policy (none /
+// internal / external / all) to a directory symlink. Debug logs
+// describe every decision.
+func (dc *DirectoryCache) shouldFollowDirSymlink(currentPath string) bool {
+	baseMode, strict := parseSymlinkMode(dc.symlinkMode)
+	switch baseMode {
+	case "none":
+		if IsDebugEnabled("symlinks") {
+			fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (mode=none): %s\n", currentPath)
+		}
+		return false
+	case "internal":
+		return dc.checkDirSymlinkChain(currentPath, strict, true)
+	case "external":
+		return dc.checkDirSymlinkChain(currentPath, strict, false)
+	case "all":
+		if IsDebugEnabled("symlinks") {
+			finalTarget, _ := filepath.EvalSymlinks(currentPath)
+			fmt.Fprintf(os.Stderr, "[SYMLINK] Following directory symlink (mode=all): %s -> %s\n", currentPath, finalTarget)
+		}
+		return true
+	default:
+		if IsDebugEnabled("symlinks") {
+			fmt.Fprintf(os.Stderr, "[SYMLINK] Unknown mode '%s', defaulting to 'all'\n", baseMode)
+		}
+		return true
+	}
+}
+
+// checkDirSymlinkChain drives the internal/external symlink-chain
+// check. internal=true requires all links in the chain to point
+// inside dc.RootDir; internal=false requires all external.
+func (dc *DirectoryCache) checkDirSymlinkChain(currentPath string, strict, internal bool) bool {
+	allInternal, allExternal, err := dc.checkSymlinkChain(currentPath, strict)
+	if err != nil {
+		if IsDebugEnabled("symlinks") {
+			fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
+		}
+		return false
+	}
+	ok := allInternal
+	label := "internal"
+	if !internal {
+		ok = allExternal
+		label = "external"
+	}
+	if !ok {
+		if IsDebugEnabled("symlinks") {
+			finalTarget, _ := filepath.EvalSymlinks(currentPath)
+			fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not %s): %s -> %s (root: %s, strict: %v)\n",
+				label, currentPath, finalTarget, dc.RootDir, strict)
+		}
+		return false
+	}
+	if IsDebugEnabled("symlinks") {
+		finalTarget, _ := filepath.EvalSymlinks(currentPath)
+		fmt.Fprintf(os.Stderr, "[SYMLINK] Following %s directory symlink: %s -> %s (root: %s, strict: %v)\n",
+			label, currentPath, finalTarget, dc.RootDir, strict)
+	}
+	return true
+}
+
+// enqueueDirChildren reads the given directory's entries, sorts them,
+// and merges the new paths into the sorted pathQueue.
+func (dc *DirectoryCache) enqueueDirChildren(pathQueue []string, currentPath string) []string {
+	entries, err := os.ReadDir(currentPath)
+	if err != nil {
+		return pathQueue
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	newPaths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		newPaths = append(newPaths, filepath.Join(currentPath, entry.Name()))
+	}
+	return dc.insertSorted(pathQueue, newPaths)
+}
+
+// makeScannedPath builds the *scannedPath sent downstream. Debug
+// logging lives here so both the regular-file and file-symlink
+// branches emit consistent breadcrumbs.
+func makeScannedPath(currentPath, relPath string, info os.FileInfo) *scannedPath {
+	stat := info.Sys().(*syscall.Stat_t)
+	kind := "file"
+	if info.Mode()&os.ModeSymlink != 0 {
+		kind = "symlink"
+	}
+	if IsDebugEnabled("scanning") {
+		fmt.Fprintf(os.Stderr, "[SCAN] Scanned %s: %s\n", kind, relPath)
+	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "scanPathRecursive: found %s %s", kind, relPath)
+	}
+	return &scannedPath{
+		AbsPath:  currentPath,
+		RelPath:  relPath,
+		Info:     info,
+		StatInfo: stat,
+	}
 }
 
 // insertSorted inserts new paths into an existing sorted slice maintaining order

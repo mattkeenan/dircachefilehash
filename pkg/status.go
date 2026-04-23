@@ -72,30 +72,8 @@ func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (
 	// Generate timestamped cache index filename for pipeline output
 	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
 
-	// Track operation success for proper cleanup strategy
 	var operationSuccessful bool
-	defer func() {
-		if operationSuccessful {
-			// Success: atomic rename to cache.idx and cleanup timestamped files
-			if _, err := os.Stat(cacheTempFileName); err == nil {
-				if renameErr := os.Rename(cacheTempFileName, dc.CacheFile); renameErr != nil {
-					if IsDebugEnabled("scan") {
-						fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename %s to cache.idx: %v\n", cacheTempFileName, renameErr)
-					}
-				} else {
-					// Success - cleanup all timestamped cache files
-					if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
-						fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
-					}
-				}
-			}
-		} else {
-			// Interruption/Error: leave timestamped cache file for startup merge
-			if IsDebugEnabled("scan") {
-				fmt.Fprintf(os.Stderr, "[STATUS] Operation incomplete - leaving %s for startup merge\n", filepath.Base(cacheTempFileName))
-			}
-		}
-	}()
+	defer func() { finaliseStatusCache(dc, cacheTempFileName, operationSuccessful) }()
 
 	// Create iterators: main.idx (left) vs filesystem (right)
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
@@ -124,39 +102,55 @@ func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (
 	// Derive StatusResult from the cache file — its entries ARE the status
 	result := deriveStatusFromCache(dc, mainSkiplist, cacheTempFileName)
 
-	// Check for verbose flag and include clean status if requested
-	if verboseLevel, exists := flags["v"]; exists && verboseLevel != "" {
-		if level, err := strconv.Atoi(verboseLevel); err == nil && level > 0 {
-			result.CleanStatus = &CleanStatus{}
-
-			// Check main index clean status
-			if _, err := os.Stat(dc.IndexFile); err == nil {
-				// Main index exists - for now assume clean if it loads
-				result.CleanStatus.MainIndex = true
-			} else {
-				result.CleanStatus.MainIndex = false
-			}
-
-			// Check cache index clean status
-			if _, err := os.Stat(dc.CacheFile); err == nil {
-				// Cache index exists - for now assume clean if it exists
-				result.CleanStatus.CacheIndex = true
-			} else {
-				result.CleanStatus.CacheIndex = false
-			}
-
-			// Scan for temporary index files in the .dcfh directory
-			tempFiles, err := dc.scanForTempIndices()
-			if err == nil {
-				result.CleanStatus.TempIndices = tempFiles
-				result.CleanStatus.HasTempFiles = len(tempFiles) > 0
-			} else {
-				result.CleanStatus.HasTempFiles = false
-			}
+	if verbose, exists := flags["v"]; exists && verbose != "" {
+		if level, err := strconv.Atoi(verbose); err == nil && level > 0 {
+			result.CleanStatus = collectCleanStatus(dc)
 		}
 	}
 
 	return result, nil
+}
+
+// finaliseStatusCache handles the success/failure branches of the
+// Status cache lifecycle: rename to cache.idx and cleanup on success,
+// leave the timestamped file for startup merge on failure.
+func finaliseStatusCache(dc *DirectoryCache, cacheTempFileName string, ok bool) {
+	if !ok {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] Operation incomplete - leaving %s for startup merge\n", filepath.Base(cacheTempFileName))
+		}
+		return
+	}
+	if _, err := os.Stat(cacheTempFileName); err != nil {
+		return
+	}
+	if renameErr := os.Rename(cacheTempFileName, dc.CacheFile); renameErr != nil {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename %s to cache.idx: %v\n", cacheTempFileName, renameErr)
+		}
+		return
+	}
+	if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
+	}
+}
+
+// collectCleanStatus gathers the verbose --v clean-status snapshot:
+// whether main/cache indices load cleanly and which temp indices are
+// present. Stat failures collapse to "false" rather than propagating.
+func collectCleanStatus(dc *DirectoryCache) *CleanStatus {
+	cs := &CleanStatus{}
+	if _, err := os.Stat(dc.IndexFile); err == nil {
+		cs.MainIndex = true
+	}
+	if _, err := os.Stat(dc.CacheFile); err == nil {
+		cs.CacheIndex = true
+	}
+	if tempFiles, err := dc.scanForTempIndices(); err == nil {
+		cs.TempIndices = tempFiles
+		cs.HasTempFiles = len(tempFiles) > 0
+	}
+	return cs
 }
 
 // deriveStatusFromCache reads the cache file and categorises each entry
