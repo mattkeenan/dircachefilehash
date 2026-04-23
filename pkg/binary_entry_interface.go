@@ -265,91 +265,29 @@ var (
 // This mirrors the logic of isFileChangedFromScanned but uses safe interface methods.
 // Returns true if the file has changed and needs hashing.
 func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
-	// If no existing entry, file is new and needs hashing
-	if existingEntry == nil {
+	if existingEntry == nil || scannedEntry == nil {
 		return true
 	}
 
-	// If no scanned entry, assume needs hashing (shouldn't happen in normal flow)
-	if scannedEntry == nil {
-		return true
+	fields := []func(BinaryEntryInterface) (uint64, error){
+		func(e BinaryEntryInterface) (uint64, error) { return e.FileSize() },
+		func(e BinaryEntryInterface) (uint64, error) { v, err := e.UID(); return uint64(v), err },
+		func(e BinaryEntryInterface) (uint64, error) { v, err := e.GID(); return uint64(v), err },
+		func(e BinaryEntryInterface) (uint64, error) { v, err := e.Mode(); return uint64(v), err },
+		func(e BinaryEntryInterface) (uint64, error) { return e.CTimeWall() },
+		func(e BinaryEntryInterface) (uint64, error) { return e.MTimeWall() },
 	}
 
-	// Quick size check
-	existingSize, err := existingEntry.FileSize()
-	if err != nil {
-		return true // Assume needs hashing if we can't read existing size
-	}
-	scannedSize, err := scannedEntry.FileSize()
-	if err != nil {
-		return true // Assume needs hashing if we can't read scanned size
-	}
-	if existingSize != scannedSize {
-		return true
+	for _, f := range fields {
+		ev, err := f(existingEntry)
+		if err != nil {
+			return true
+		}
+		sv, err := f(scannedEntry)
+		if err != nil || ev != sv {
+			return true
+		}
 	}
 
-	// Check ownership
-	existingUID, err := existingEntry.UID()
-	if err != nil {
-		return true
-	}
-	scannedUID, err := scannedEntry.UID()
-	if err != nil {
-		return true
-	}
-	if existingUID != scannedUID {
-		return true
-	}
-
-	existingGID, err := existingEntry.GID()
-	if err != nil {
-		return true
-	}
-	scannedGID, err := scannedEntry.GID()
-	if err != nil {
-		return true
-	}
-	if existingGID != scannedGID {
-		return true
-	}
-
-	// Check mode
-	existingMode, err := existingEntry.Mode()
-	if err != nil {
-		return true
-	}
-	scannedMode, err := scannedEntry.Mode()
-	if err != nil {
-		return true
-	}
-	if existingMode != scannedMode {
-		return true
-	}
-
-	// Check timestamps using wall time
-	existingCTime, err := existingEntry.CTimeWall()
-	if err != nil {
-		return true
-	}
-	scannedCTime, err := scannedEntry.CTimeWall()
-	if err != nil {
-		return true
-	}
-	if existingCTime != scannedCTime {
-		return true
-	}
-
-	existingMTime, err := existingEntry.MTimeWall()
-	if err != nil {
-		return true
-	}
-	scannedMTime, err := scannedEntry.MTimeWall()
-	if err != nil {
-		return true
-	}
-	if existingMTime != scannedMTime {
-		return true
-	}
-
-	return false // No changes detected, no hashing needed
+	return false
 }

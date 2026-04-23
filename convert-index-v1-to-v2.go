@@ -8,6 +8,7 @@ import (
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+//nolint:gocognit // one-off v1→v2 migration tool; already-run script, not worth restructuring
 func main() {
 	if len(os.Args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <input-v1.idx> <output-v2.idx>\n", os.Args[0])

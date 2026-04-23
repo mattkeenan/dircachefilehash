@@ -67,41 +67,38 @@ func parsePartialDateTime(s string, zone *time.Location) (time.Time, error) {
 	if m == nil {
 		return time.Time{}, fmt.Errorf("invalid date %q; want YYYY[-MM[-DD[THH[:MM[:SS]]]]][Z|±hh[:mm]]", s)
 	}
+
+	field := func(idx, defaultVal, min, max int, name string) (int, error) {
+		if m[idx] == "" {
+			return defaultVal, nil
+		}
+		v, _ := strconv.Atoi(m[idx])
+		if v < min || v > max {
+			return 0, fmt.Errorf("invalid %s in %q", name, s)
+		}
+		return v, nil
+	}
+
 	year, _ := strconv.Atoi(m[1])
-	month := 1
-	if m[2] != "" {
-		month, _ = strconv.Atoi(m[2])
-		if month < 1 || month > 12 {
-			return time.Time{}, fmt.Errorf("invalid month in %q", s)
-		}
+	month, err := field(2, 1, 1, 12, "month")
+	if err != nil {
+		return time.Time{}, err
 	}
-	day := 1
-	if m[3] != "" {
-		day, _ = strconv.Atoi(m[3])
-		if day < 1 || day > 31 {
-			return time.Time{}, fmt.Errorf("invalid day in %q", s)
-		}
+	day, err := field(3, 1, 1, 31, "day")
+	if err != nil {
+		return time.Time{}, err
 	}
-	hour := 0
-	if m[4] != "" {
-		hour, _ = strconv.Atoi(m[4])
-		if hour > 23 {
-			return time.Time{}, fmt.Errorf("invalid hour in %q", s)
-		}
+	hour, err := field(4, 0, 0, 23, "hour")
+	if err != nil {
+		return time.Time{}, err
 	}
-	minute := 0
-	if m[5] != "" {
-		minute, _ = strconv.Atoi(m[5])
-		if minute > 59 {
-			return time.Time{}, fmt.Errorf("invalid minute in %q", s)
-		}
+	minute, err := field(5, 0, 0, 59, "minute")
+	if err != nil {
+		return time.Time{}, err
 	}
-	sec := 0
-	if m[6] != "" {
-		sec, _ = strconv.Atoi(m[6])
-		if sec > 59 {
-			return time.Time{}, fmt.Errorf("invalid second in %q", s)
-		}
+	sec, err := field(6, 0, 0, 59, "second")
+	if err != nil {
+		return time.Time{}, err
 	}
 
 	loc := zone

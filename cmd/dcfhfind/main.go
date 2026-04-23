@@ -420,154 +420,112 @@ func (p *ExpressionParser) parseBasicExpression() (Expression, error) {
 	if p.pos >= len(p.tokens) {
 		return nil, fmt.Errorf("unexpected end of expression")
 	}
-
 	token := p.next()
-
-	switch token {
-	case "--name":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--name requires a pattern")
-		}
-		pattern := p.next()
-		return &NameTest{Pattern: pattern, CaseSensitive: true}, nil
-
-	case "--iname":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--iname requires a pattern")
-		}
-		pattern := p.next()
-		return &NameTest{Pattern: pattern, CaseSensitive: false}, nil
-
-	case "--path":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--path requires a pattern")
-		}
-		pattern := p.next()
-		return &PathTest{Pattern: pattern, CaseSensitive: true}, nil
-
-	case "--ipath":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--ipath requires a pattern")
-		}
-		pattern := p.next()
-		return &PathTest{Pattern: pattern, CaseSensitive: false}, nil
-
-	case "--size":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--size requires a size specification")
-		}
-		sizeSpec := p.next()
-		expr, err := parseSizeTest(sizeSpec)
+	if expr, handled, err := p.parseTestToken(token); handled {
 		return expr, err
-
-	case "--empty":
-		return &EmptyTest{}, nil
-	case "--deleted":
-		return &DeletedTest{}, nil
-	case "--valid":
-		return &ValidTest{}, nil
-	case "--corrupt":
-		return &CorruptTest{}, nil
-
-	case "--hash":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--hash requires a hash value")
-		}
-		hash := p.next()
-		return &HashTest{Hash: hash}, nil
-
-	case "--mtime":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--mtime requires a time specification")
-		}
-		timeSpec := p.next()
-		return parseTimeTest(timeSpec, "mtime")
-
-	case "--mmin":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--mmin requires a time specification")
-		}
-		timeSpec := p.next()
-		return parseTimeTest(timeSpec, "mmin")
-
-	case "--ctime":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--ctime requires a time specification")
-		}
-		timeSpec := p.next()
-		return parseTimeTest(timeSpec, "ctime")
-
-	case "--cmin":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--cmin requires a time specification")
-		}
-		timeSpec := p.next()
-		return parseTimeTest(timeSpec, "cmin")
-
-	case "--hash-prefix":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--hash-prefix requires a prefix")
-		}
-		prefix := p.next()
-		return &HashPrefixTest{Prefix: prefix}, nil
-
-	case "--hash-type":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--hash-type requires a type")
-		}
-		hashType := p.next()
-		return &HashTypeTest{Type: hashType}, nil
-
-	// Actions
-	case "--print":
-		action := &PrintAction{}
-		p.actions = append(p.actions, action)
-		return nil, nil // Actions don't produce expressions
-
-	case "--print0":
-		action := &Print0Action{}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	case "--ls":
-		action := &LsAction{}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	case "--printf":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--printf requires a format string")
-		}
-		format := p.next()
-		action := &PrintfAction{Format: format}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	case "--validate":
-		action := &ValidateAction{}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	case "--checksum":
-		action := &ChecksumAction{}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	case "--fix":
-		if p.pos >= len(p.tokens) {
-			return nil, fmt.Errorf("--fix requires an argument (auto|manual|none)")
-		}
-		fixMode := p.next()
-		if fixMode != "auto" && fixMode != "manual" && fixMode != "none" {
-			return nil, fmt.Errorf("--fix argument must be auto, manual, or none")
-		}
-		action := &FixAction{Mode: fixMode}
-		p.actions = append(p.actions, action)
-		return nil, nil
-
-	default:
-		return nil, fmt.Errorf("unknown expression: %s", token)
 	}
+	if handled, err := p.parseActionToken(token); handled {
+		return nil, err
+	}
+	return nil, fmt.Errorf("unknown expression: %s", token)
+}
+
+// requireArg consumes the next token, returning it or a descriptive
+// error if the token stream is exhausted.
+func (p *ExpressionParser) requireArg(flag, what string) (string, error) {
+	if p.pos >= len(p.tokens) {
+		return "", fmt.Errorf("%s requires %s", flag, what)
+	}
+	return p.next(), nil
+}
+
+// parseTestToken handles the --name/--size/--hash/... family. The
+// bool return indicates "this token is a test"; caller falls through
+// to action parsing when false.
+func (p *ExpressionParser) parseTestToken(token string) (Expression, bool, error) {
+	// Tests taking no argument.
+	switch token {
+	case "--empty":
+		return &EmptyTest{}, true, nil
+	case "--deleted":
+		return &DeletedTest{}, true, nil
+	case "--valid":
+		return &ValidTest{}, true, nil
+	case "--corrupt":
+		return &CorruptTest{}, true, nil
+	}
+
+	// Tests taking one argument — build from (flag, what-the-arg-is, constructor).
+	argTests := []struct {
+		flag  string
+		what  string
+		build func(string) (Expression, error)
+	}{
+		{"--name", "a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: true}, nil }},
+		{"--iname", "a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: false}, nil }},
+		{"--path", "a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: true}, nil }},
+		{"--ipath", "a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: false}, nil }},
+		{"--size", "a size specification", parseSizeTest},
+		{"--hash", "a hash value", func(a string) (Expression, error) { return &HashTest{Hash: a}, nil }},
+		{"--mtime", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mtime") }},
+		{"--mmin", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mmin") }},
+		{"--ctime", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "ctime") }},
+		{"--cmin", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "cmin") }},
+		{"--hash-prefix", "a prefix", func(a string) (Expression, error) { return &HashPrefixTest{Prefix: a}, nil }},
+		{"--hash-type", "a type", func(a string) (Expression, error) { return &HashTypeTest{Type: a}, nil }},
+	}
+	for _, t := range argTests {
+		if t.flag != token {
+			continue
+		}
+		arg, err := p.requireArg(t.flag, t.what)
+		if err != nil {
+			return nil, true, err
+		}
+		expr, err := t.build(arg)
+		return expr, true, err
+	}
+	return nil, false, nil
+}
+
+// parseActionToken handles --print/--ls/--printf/etc. Actions don't
+// produce expressions; the bool indicates "this token was an action".
+func (p *ExpressionParser) parseActionToken(token string) (bool, error) {
+	switch token {
+	case "--print":
+		p.actions = append(p.actions, &PrintAction{})
+		return true, nil
+	case "--print0":
+		p.actions = append(p.actions, &Print0Action{})
+		return true, nil
+	case "--ls":
+		p.actions = append(p.actions, &LsAction{})
+		return true, nil
+	case "--validate":
+		p.actions = append(p.actions, &ValidateAction{})
+		return true, nil
+	case "--checksum":
+		p.actions = append(p.actions, &ChecksumAction{})
+		return true, nil
+	case "--printf":
+		format, err := p.requireArg("--printf", "a format string")
+		if err != nil {
+			return true, err
+		}
+		p.actions = append(p.actions, &PrintfAction{Format: format})
+		return true, nil
+	case "--fix":
+		mode, err := p.requireArg("--fix", "an argument (auto|manual|none)")
+		if err != nil {
+			return true, err
+		}
+		if mode != "auto" && mode != "manual" && mode != "none" {
+			return true, fmt.Errorf("--fix argument must be auto, manual, or none")
+		}
+		p.actions = append(p.actions, &FixAction{Mode: mode})
+		return true, nil
+	}
+	return false, nil
 }
 
 func parseSizeTest(sizeSpec string) (Expression, error) {

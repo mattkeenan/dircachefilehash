@@ -94,51 +94,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	command := args[1]
-
-	// Execute command
-	switch command {
-	case "header":
-		if len(args) < 3 {
-			fmt.Fprintf(os.Stderr, "dcfhfix: header command requires subcommand\n")
-			fmt.Fprintf(os.Stderr, "Usage: dcfhfix <index-file> header <show|edit> [args...]\n")
-			os.Exit(1)
-		}
-		err := handleHeaderCommand(indexFile, args[2:], options)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "entry":
-		if len(args) < 3 {
-			fmt.Fprintf(os.Stderr, "dcfhfix: entry command requires subcommand\n")
-			fmt.Fprintf(os.Stderr, "Usage: dcfhfix <index-file> entry <show|edit|append|remove|resort> [args...]\n")
-			os.Exit(1)
-		}
-		err := handleEntryCommand(indexFile, args[2:], options)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "fixes":
-		if len(args) < 3 {
-			fmt.Fprintf(os.Stderr, "dcfhfix: fixes command requires subcommand\n")
-			fmt.Fprintf(os.Stderr, "Usage: dcfhfix <index-file> fixes <list|pop|discard|clear> [args...]\n")
-			os.Exit(1)
-		}
-		err := handleFixesCommand(indexFile, args[2:], options)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
-			os.Exit(1)
-		}
-
-	default:
-		fmt.Fprintf(os.Stderr, "dcfhfix: unknown command '%s'\n", command)
-		fmt.Fprintf(os.Stderr, "Try 'dcfhfix --help' for more information.\n")
+	if err := dispatchCommand(args[1], indexFile, args[2:], options); err != nil {
+		fmt.Fprintf(os.Stderr, "dcfhfix: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// commandTable maps each top-level subcommand to its sub-argument
+// usage string and handler. Keeping them in one place means main()
+// is a straight-line dispatch.
+var commandTable = map[string]struct {
+	subUsage string
+	run      func(indexFile string, args []string, options *ParsedOptions) error
+}{
+	"header": {"dcfhfix <index-file> header <show|edit> [args...]", handleHeaderCommand},
+	"entry":  {"dcfhfix <index-file> entry <show|edit|append|remove|resort> [args...]", handleEntryCommand},
+	"fixes":  {"dcfhfix <index-file> fixes <list|pop|discard|clear> [args...]", handleFixesCommand},
+}
+
+func dispatchCommand(command, indexFile string, subArgs []string, options *ParsedOptions) error {
+	h, ok := commandTable[command]
+	if !ok {
+		return fmt.Errorf("unknown command %q; try 'dcfhfix --help'", command)
+	}
+	if len(subArgs) < 1 {
+		return fmt.Errorf("%s command requires subcommand\nUsage: %s", command, h.subUsage)
+	}
+	return h.run(indexFile, subArgs, options)
 }
 
 func showHelp() {
@@ -589,95 +571,109 @@ func headerShow(indexFile string, options *ParsedOptions) error {
 	return nil
 }
 
+// headerFieldEditor is the per-field implementation of header edit.
+// validate runs first (may reject with a formatted error); apply
+// mutates the copied header in place. A nil apply means the field is
+// validate-only (i.e., always rejected).
+type headerFieldEditor struct {
+	validate func(value string) error
+	apply    func(h *indexHeader, value string)
+}
+
+var headerFieldEditors = map[string]headerFieldEditor{
+	"signature": {
+		validate: func(v string) error {
+			if len(v) != 4 {
+				return fmt.Errorf("signature must be exactly 4 characters, got %d", len(v))
+			}
+			return nil
+		},
+		apply: func(h *indexHeader, v string) { copy(h.Signature[:], v) },
+	},
+	"version": {
+		validate: func(v string) error {
+			if _, err := parseUint32(v); err != nil {
+				return fmt.Errorf("invalid version value: %v", err)
+			}
+			return nil
+		},
+		apply: func(h *indexHeader, v string) { val, _ := parseUint32(v); h.Version = val },
+	},
+	"flags": {
+		validate: func(v string) error {
+			if _, err := parseUint16(v); err != nil {
+				return fmt.Errorf("invalid flags value: %v", err)
+			}
+			return nil
+		},
+		apply: func(h *indexHeader, v string) { val, _ := parseUint16(v); h.Flags = val },
+	},
+	"checksum_type": {
+		validate: func(v string) error {
+			if _, err := parseUint16(v); err != nil {
+				return fmt.Errorf("invalid checksum_type value: %v", err)
+			}
+			return nil
+		},
+		apply: func(h *indexHeader, v string) { val, _ := parseUint16(v); h.ChecksumType = val },
+	},
+	"entry_count": {validate: func(string) error {
+		return fmt.Errorf("entry_count is auto-calculated and cannot be manually edited")
+	}},
+	"checksum": {validate: func(string) error {
+		return fmt.Errorf("checksum is auto-calculated and cannot be manually edited")
+	}},
+	"byte_order": {validate: func(string) error {
+		return fmt.Errorf("byte_order is fixed and cannot be edited")
+	}},
+}
+
 func headerEdit(indexFile string, field string, value string, options *ParsedOptions) error {
 	if field == "json" {
 		return headerEditJSON(indexFile, value, options)
 	}
 
-	// Create backup before editing
-	description := fmt.Sprintf("Edit header.%s = %s", field, value)
+	editor, ok := headerFieldEditors[field]
+	if !ok {
+		return fmt.Errorf("unknown header field: %s", field)
+	}
+	if err := editor.validate(value); err != nil {
+		return err
+	}
+	if editor.apply == nil {
+		// Validate-only fields rejected above.
+		return fmt.Errorf("field %q is not editable", field)
+	}
+
 	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "header-edit", description, options)
-		if err != nil {
+		description := fmt.Sprintf("Edit header.%s = %s", field, value)
+		if err := createBackup(indexFile, "header-edit", description, options); err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit header field '%s' to value '%s'\n", field, value)
 		return nil
 	}
 
-	// Validate the field name and value first
-	var newHeaderData indexHeader
-	switch field {
-	case "signature":
-		if len(value) != 4 {
-			return fmt.Errorf("signature must be exactly 4 characters, got %d", len(value))
-		}
-	case "version":
-		_, err := parseUint32(value)
-		if err != nil {
-			return fmt.Errorf("invalid version value: %v", err)
-		}
-	case "entry_count":
-		return fmt.Errorf("entry_count is auto-calculated and cannot be manually edited")
-	case "flags":
-		_, err := parseUint16(value)
-		if err != nil {
-			return fmt.Errorf("invalid flags value: %v", err)
-		}
-	case "checksum_type":
-		_, err := parseUint16(value)
-		if err != nil {
-			return fmt.Errorf("invalid checksum_type value: %v", err)
-		}
-	case "checksum":
-		return fmt.Errorf("checksum is auto-calculated and cannot be manually edited")
-	case "byte_order":
-		return fmt.Errorf("byte_order is fixed and cannot be edited")
-	default:
-		return fmt.Errorf("unknown header field: %s", field)
-	}
-
-	// Load the index data
 	entryData, err := loadIndexIntoSkiplist(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to load index: %v", err)
 	}
-
-	// Get the current header so we can modify it
 	currentHeader, err := getIndexHeader(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to read current header: %v", err)
 	}
 
-	// Make a copy and modify the field
-	newHeaderData = *currentHeader
-	switch field {
-	case "signature":
-		copy(newHeaderData.Signature[:], []byte(value))
-	case "version":
-		val, _ := parseUint32(value) // already validated
-		newHeaderData.Version = val
-	case "flags":
-		val, _ := parseUint16(value) // already validated
-		newHeaderData.Flags = val
-	case "checksum_type":
-		val, _ := parseUint16(value) // already validated
-		newHeaderData.ChecksumType = val
-	}
+	newHeaderData := *currentHeader
+	editor.apply(&newHeaderData, value)
 
-	// Write the index with the modified header
-	err = writeIndexWithModifiedHeader(entryData, indexFile, &newHeaderData, options)
-	if err != nil {
+	if err := writeIndexWithModifiedHeader(entryData, indexFile, &newHeaderData, options); err != nil {
 		return fmt.Errorf("failed to write modified index: %v", err)
 	}
-
 	if !options.GetBool("quiet") {
 		fmt.Printf("Updated header field '%s' to '%s'\n", field, value)
 	}
-
 	return nil
 }
 
@@ -757,81 +753,66 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 	}
 }
 
+// entryFieldValidators covers the fields entryEdit may be asked to
+// write. Fields that are non-editable return an error from validate;
+// entryEdit never reaches the underlying store for them.
+var entryFieldValidators = map[string]func(value string) error{
+	"ctime":           func(v string) error { _, err := parseTimeValue(v); return errWrap("ctime", err) },
+	"mtime":           func(v string) error { _, err := parseTimeValue(v); return errWrap("mtime", err) },
+	"dev":             func(v string) error { _, err := parseUint32(v); return errWrap("dev", err) },
+	"ino":             func(v string) error { _, err := parseUint32(v); return errWrap("ino", err) },
+	"uid":             func(v string) error { _, err := parseUint32(v); return errWrap("uid", err) },
+	"gid":             func(v string) error { _, err := parseUint32(v); return errWrap("gid", err) },
+	"mode":            func(v string) error { _, err := parseUint32(v); return errWrap("mode", err) },
+	"file_size":       func(v string) error { _, err := parseUint64(v); return errWrap("file_size", err) },
+	"hash_type":       func(v string) error { _, err := parseUint16(v); return errWrap("hash_type", err) },
+	"hash":            func(v string) error { _, err := parseHashValue(v); return errWrap("hash", err) },
+	"flag_is_deleted": func(v string) error { _, err := parseBoolValue(v); return errWrap("flag_is_deleted", err) },
+	"path":            func(string) error { return fmt.Errorf("path cannot be edited (would change entry identity)") },
+	"size":            func(string) error { return fmt.Errorf("size is auto-calculated and cannot be manually edited") },
+}
+
+// errWrap annotates the common "invalid X value: ..." pattern with
+// the field name so per-field validators stay single-expression.
+func errWrap(field string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("invalid %s value: %v", field, err)
+}
+
 func entryEdit(indexFile string, field string, value string, paths []string, options *ParsedOptions) error {
 	if field == "json" {
 		return entryEditJSON(indexFile, value, paths, options)
 	}
-
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths specified")
 	}
 
-	// Create backup before editing
+	validate, ok := entryFieldValidators[field]
+	if !ok {
+		return fmt.Errorf("unknown entry field: %s", field)
+	}
+	if err := validate(value); err != nil {
+		return err
+	}
+
 	pathsDesc := fmt.Sprintf("%d paths", len(paths))
 	if len(paths) <= 3 {
 		pathsDesc = strings.Join(paths, ", ")
 	}
-	description := fmt.Sprintf("Edit entry.%s = %s for %s", field, value, pathsDesc)
-
 	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "entry-edit", description, options)
-		if err != nil {
+		description := fmt.Sprintf("Edit entry.%s = %s for %s", field, value, pathsDesc)
+		if err := createBackup(indexFile, "entry-edit", description, options); err != nil {
 			return fmt.Errorf("failed to create backup: %v", err)
 		}
 	}
-
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit entry field '%s' to value '%s' for paths: %s\n", field, value, pathsDesc)
 		return nil
 	}
 
-	// Validate the field name and value first
-	switch field {
-	case "ctime", "mtime":
-		_, err := parseTimeValue(value)
-		if err != nil {
-			return fmt.Errorf("invalid time value for %s: %v", field, err)
-		}
-	case "dev", "ino", "uid", "gid":
-		_, err := parseUint32(value)
-		if err != nil {
-			return fmt.Errorf("invalid %s value: %v", field, err)
-		}
-	case "mode":
-		_, err := parseUint32(value)
-		if err != nil {
-			return fmt.Errorf("invalid mode value: %v", err)
-		}
-	case "file_size":
-		_, err := parseUint64(value)
-		if err != nil {
-			return fmt.Errorf("invalid file_size value: %v", err)
-		}
-	case "hash_type":
-		_, err := parseUint16(value)
-		if err != nil {
-			return fmt.Errorf("invalid hash_type value: %v", err)
-		}
-	case "hash":
-		_, err := parseHashValue(value)
-		if err != nil {
-			return fmt.Errorf("invalid hash value: %v", err)
-		}
-	case "flag_is_deleted":
-		_, err := parseBoolValue(value)
-		if err != nil {
-			return fmt.Errorf("invalid flag_is_deleted value: %v", err)
-		}
-	case "path":
-		return fmt.Errorf("path cannot be edited (would change entry identity)")
-	case "size":
-		return fmt.Errorf("size is auto-calculated and cannot be manually edited")
-	default:
-		return fmt.Errorf("unknown entry field: %s", field)
-	}
-
-	// Create path set for matching
-	pathSet := make(map[string]bool)
+	pathSet := make(map[string]bool, len(paths))
 	for _, path := range paths {
 		normalizedPath := filepath.Clean(path)
 		if normalizedPath == "." {

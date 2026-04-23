@@ -8,89 +8,105 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// processAllEntriesWorkflow implements your pseudocode pattern
+// entryOutcome is the result the per-entry handler returns to the
+// top-level loop. Exactly one of validatedEntry / skip / stop / fatal
+// will be set.
+type entryOutcome struct {
+	validatedEntry *ValidatedEntry // success — caller advances offset by Entry.Size
+	skip           bool            // malformed but we could find the next entry; caller skipped offset
+	stop           bool            // malformed and we can't resync; caller breaks out
+	fatal          error           // abort the whole workflow
+}
+
+// processAllEntriesWorkflow walks every entry in data and either
+// applies the user's CLI field-edit (for paths in pathSet) or copies
+// the entry across unchanged. Corrupted entries are best-effort
+// skipped until an unfixable-cap is hit.
 func processAllEntriesWorkflow(data []byte, pathSet map[string]bool, field, value string, tmpIndexFile string, entriesFixed, entriesDiscarded *int, options *ParsedOptions) error {
-	// Extract header information
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
 	entryCount := header.EntryCount
 	entryData := data[hdrSize:]
 
 	offset := 0
-	unfixableEntryCount := 0
-	unfixableEntryMax := 100 // Maximum unfixable entries before we give up
+	unfixableCount := 0
+	const unfixableMax = 100
 
 	for i := uint32(0); i < entryCount && offset < len(entryData); i++ {
-		var validatedEntry *ValidatedEntry
-		var err error
-
-		// Try to get a validated entry from this offset
-		validatedEntry, err = NewValidatedEntry(entryData, int(i), offset)
-		if err != nil {
-			// Entry has structural corruption - try to fix it
-			fixedValidatedEntry, fixErr := attemptErrorFixAtOffsetValidated(entryData, int(i), offset, err)
-			if fixErr != nil {
-				// Entry is unfixable - discard it
-				if !options.GetBool("quiet") {
-					fmt.Fprintf(os.Stderr, "Warning: entry %d unfixable, discarding: %v\n", i, err)
-				}
-				*entriesDiscarded++
-				unfixableEntryCount++
-
-				if unfixableEntryCount > unfixableEntryMax {
-					return fmt.Errorf("too many unfixable entries (%d), aborting", unfixableEntryCount)
-				}
-
-				// Try to skip to next entry (best effort)
-				if !trySkipToNextEntry(entryData, &offset) {
-					break // Cannot continue if we can't find next entry
-				}
-				continue
-			}
-
-			// Structural fix succeeded - use the fixed entry
-			validatedEntry = fixedValidatedEntry
-			if !options.GetBool("quiet") {
-				fmt.Printf("Fixed corrupted entry %d\n", i)
-			}
+		outcome := processSingleEntry(entryData, &offset, int(i), pathSet, field, value, tmpIndexFile, entriesFixed, entriesDiscarded, options)
+		if outcome.fatal != nil {
+			return outcome.fatal
 		}
-
-		// At this point we have a structurally valid ValidatedEntry
-		// Check if this entry's path matches the CLI target paths
-		if pathSet[validatedEntry.Path] {
-			// Apply the user's CLI command to this matching entry
-			commandFixedEntry, cmdErr := validatedEntry.ApplyFieldFix(field, value)
-			if cmdErr != nil {
-				if !options.GetBool("quiet") {
-					fmt.Fprintf(os.Stderr, "Warning: entry %d still broken after CLI command, discarding: %v\n", i, cmdErr)
-				}
-				*entriesDiscarded++
-				// Try to skip to next entry
-				if !trySkipToNextEntry(entryData, &offset) {
-					break
-				}
-				continue
-			}
-
-			// CLI command succeeded - use the command-fixed entry
-			err = appendValidatedEntryToTmpIndex(tmpIndexFile, commandFixedEntry)
-			if err != nil {
-				return fmt.Errorf("failed to append command-fixed entry %d: %v", i, err)
-			}
-			*entriesFixed++
-		} else {
-			// Path doesn't match CLI targets - use the original (structurally valid) entry
-			err = appendValidatedEntryToTmpIndex(tmpIndexFile, validatedEntry)
-			if err != nil {
-				return fmt.Errorf("failed to append valid entry %d: %v", i, err)
-			}
+		if outcome.stop {
+			break
 		}
-
-		// Move to next entry using the valid entry's size
-		offset += int(validatedEntry.Entry.Size)
+		if outcome.skip {
+			unfixableCount++
+			if unfixableCount > unfixableMax {
+				return fmt.Errorf("too many unfixable entries (%d), aborting", unfixableCount)
+			}
+			continue
+		}
+		offset += int(outcome.validatedEntry.Entry.Size)
 	}
 
 	return nil
+}
+
+// processSingleEntry handles one entry. On structural corruption it
+// advances *offset itself (via trySkipToNextEntry) and returns
+// skip/stop; on success the caller is responsible for advancing by
+// Entry.Size.
+func processSingleEntry(entryData []byte, offset *int, i int, pathSet map[string]bool, field, value, tmpIndexFile string, entriesFixed, entriesDiscarded *int, options *ParsedOptions) entryOutcome {
+	ve, err := NewValidatedEntry(entryData, i, *offset)
+	if err != nil {
+		return handleCorruptedEntry(entryData, offset, i, err, entriesDiscarded, options)
+	}
+
+	if !pathSet[ve.Path] {
+		if writeErr := appendValidatedEntryToTmpIndex(tmpIndexFile, ve); writeErr != nil {
+			return entryOutcome{fatal: fmt.Errorf("failed to append valid entry %d: %v", i, writeErr)}
+		}
+		return entryOutcome{validatedEntry: ve}
+	}
+
+	fixed, cmdErr := ve.ApplyFieldFix(field, value)
+	if cmdErr != nil {
+		if !options.GetBool("quiet") {
+			fmt.Fprintf(os.Stderr, "Warning: entry %d still broken after CLI command, discarding: %v\n", i, cmdErr)
+		}
+		*entriesDiscarded++
+		if !trySkipToNextEntry(entryData, offset) {
+			return entryOutcome{stop: true}
+		}
+		return entryOutcome{skip: true}
+	}
+
+	if writeErr := appendValidatedEntryToTmpIndex(tmpIndexFile, fixed); writeErr != nil {
+		return entryOutcome{fatal: fmt.Errorf("failed to append command-fixed entry %d: %v", i, writeErr)}
+	}
+	*entriesFixed++
+	return entryOutcome{validatedEntry: ve}
+}
+
+// handleCorruptedEntry wraps the attempt-to-repair / skip-or-stop
+// path for entries that failed structural validation.
+func handleCorruptedEntry(entryData []byte, offset *int, i int, origErr error, entriesDiscarded *int, options *ParsedOptions) entryOutcome {
+	fixed, fixErr := attemptErrorFixAtOffsetValidated(entryData, i, *offset, origErr)
+	if fixErr == nil {
+		if !options.GetBool("quiet") {
+			fmt.Printf("Fixed corrupted entry %d\n", i)
+		}
+		return entryOutcome{validatedEntry: fixed}
+	}
+	if !options.GetBool("quiet") {
+		fmt.Fprintf(os.Stderr, "Warning: entry %d unfixable, discarding: %v\n", i, origErr)
+	}
+	*entriesDiscarded++
+	if !trySkipToNextEntry(entryData, offset) {
+		return entryOutcome{stop: true}
+	}
+	return entryOutcome{skip: true}
 }
 
 // trySkipToNextEntry attempts to find the next entry when current one is corrupted

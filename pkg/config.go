@@ -107,106 +107,43 @@ func CreateDefaultConfig(metaDir string) (*Config, error) {
 	return cfg, nil
 }
 
+// defaultKeys lists every (section, key, value) seeded into a fresh
+// config. Order is preserved so the on-disk layout matches what the
+// old per-section code produced.
+var defaultKeys = []struct{ section, key, value string }{
+	{"filehash", "default", "sha256"},
+	{"output", "format", "human"},
+	{"verbose", "level", "0"},
+	{"verbose", "debug", ""},
+	{"symlink", "mode", "none"},
+	{"ignore", "ignore_is_deindex", "true"},
+	{"performance", "hash_workers", "2"},
+	{"performance", "index_lock_timeout", "5"},
+	{"snapshot", "keep_hourly", "0"},
+	{"snapshot", "keep_daily", "7"},
+	{"snapshot", "keep_weekly", "4"},
+	{"snapshot", "keep_monthly", "12"},
+	{"snapshot", "keep_yearly", "3"},
+	{"snapshot", "dry_run", "false"},
+}
+
 // setDefaults sets default configuration values
 func (c *Config) setDefaults() error {
-	// Set default hash algorithm
-	fileHashSection, err := c.ini.NewSection("filehash")
-	if err != nil {
-		return fmt.Errorf("failed to create filehash section: %w", err)
+	sections := map[string]*ini.Section{}
+	for _, d := range defaultKeys {
+		sec, ok := sections[d.section]
+		if !ok {
+			s, err := c.ini.NewSection(d.section)
+			if err != nil {
+				return fmt.Errorf("failed to create %s section: %w", d.section, err)
+			}
+			sections[d.section] = s
+			sec = s
+		}
+		if _, err := sec.NewKey(d.key, d.value); err != nil {
+			return fmt.Errorf("failed to set default %s.%s: %w", d.section, d.key, err)
+		}
 	}
-	_, err = fileHashSection.NewKey("default", "sha256")
-	if err != nil {
-		return fmt.Errorf("failed to set default hash algorithm: %w", err)
-	}
-
-	// Set default output format
-	outputSection, err := c.ini.NewSection("output")
-	if err != nil {
-		return fmt.Errorf("failed to create output section: %w", err)
-	}
-	_, err = outputSection.NewKey("format", "human")
-	if err != nil {
-		return fmt.Errorf("failed to set default output format: %w", err)
-	}
-
-	// Set default verbose settings
-	verboseSection, err := c.ini.NewSection("verbose")
-	if err != nil {
-		return fmt.Errorf("failed to create verbose section: %w", err)
-	}
-	_, err = verboseSection.NewKey("level", "0")
-	if err != nil {
-		return fmt.Errorf("failed to set default verbose level: %w", err)
-	}
-	_, err = verboseSection.NewKey("debug", "")
-	if err != nil {
-		return fmt.Errorf("failed to set default debug flags: %w", err)
-	}
-
-	// Set default symlink settings
-	symlinkSection, err := c.ini.NewSection("symlink")
-	if err != nil {
-		return fmt.Errorf("failed to create symlink section: %w", err)
-	}
-	_, err = symlinkSection.NewKey("mode", "none")
-	if err != nil {
-		return fmt.Errorf("failed to set default symlink mode: %w", err)
-	}
-
-	// Set default ignore settings
-	ignoreSection, err := c.ini.NewSection("ignore")
-	if err != nil {
-		return fmt.Errorf("failed to create ignore section: %w", err)
-	}
-	_, err = ignoreSection.NewKey("ignore_is_deindex", "true")
-	if err != nil {
-		return fmt.Errorf("failed to set default ignore_is_deindex: %w", err)
-	}
-
-	// Set default performance settings
-	performanceSection, err := c.ini.NewSection("performance")
-	if err != nil {
-		return fmt.Errorf("failed to create performance section: %w", err)
-	}
-	_, err = performanceSection.NewKey("hash_workers", "2")
-	if err != nil {
-		return fmt.Errorf("failed to set default hash workers: %w", err)
-	}
-	_, err = performanceSection.NewKey("index_lock_timeout", "5")
-	if err != nil {
-		return fmt.Errorf("failed to set default index lock timeout: %w", err)
-	}
-
-	// Set default snapshot retention policy settings
-	snapshotSection, err := c.ini.NewSection("snapshot")
-	if err != nil {
-		return fmt.Errorf("failed to create snapshot section: %w", err)
-	}
-	_, err = snapshotSection.NewKey("keep_hourly", "0")
-	if err != nil {
-		return fmt.Errorf("failed to set default keep_hourly: %w", err)
-	}
-	_, err = snapshotSection.NewKey("keep_daily", "7")
-	if err != nil {
-		return fmt.Errorf("failed to set default keep_daily: %w", err)
-	}
-	_, err = snapshotSection.NewKey("keep_weekly", "4")
-	if err != nil {
-		return fmt.Errorf("failed to set default keep_weekly: %w", err)
-	}
-	_, err = snapshotSection.NewKey("keep_monthly", "12")
-	if err != nil {
-		return fmt.Errorf("failed to set default keep_monthly: %w", err)
-	}
-	_, err = snapshotSection.NewKey("keep_yearly", "3")
-	if err != nil {
-		return fmt.Errorf("failed to set default keep_yearly: %w", err)
-	}
-	_, err = snapshotSection.NewKey("dry_run", "false")
-	if err != nil {
-		return fmt.Errorf("failed to set default dry_run: %w", err)
-	}
-
 	return nil
 }
 
@@ -330,50 +267,45 @@ func (c *Config) GetPerformanceConfig() *PerformanceConfig {
 
 // GetSnapshotConfig returns snapshot retention policy configuration
 func (c *Config) GetSnapshotConfig() *SnapshotConfig {
-	snapshotConfig := &SnapshotConfig{
-		KeepHourly:  0,     // fallback default
-		KeepDaily:   7,     // fallback default
-		KeepWeekly:  4,     // fallback default
-		KeepMonthly: 12,    // fallback default
-		KeepYearly:  3,     // fallback default
-		DryRun:      false, // fallback default
+	cfg := &SnapshotConfig{
+		KeepHourly:  0,
+		KeepDaily:   7,
+		KeepWeekly:  4,
+		KeepMonthly: 12,
+		KeepYearly:  3,
+		DryRun:      false,
 	}
 
-	if c.ini.HasSection("snapshot") {
-		section := c.ini.Section("snapshot")
-		if section.HasKey("keep_hourly") {
-			if hourly, err := section.Key("keep_hourly").Int(); err == nil {
-				snapshotConfig.KeepHourly = hourly
-			}
-		}
-		if section.HasKey("keep_daily") {
-			if daily, err := section.Key("keep_daily").Int(); err == nil {
-				snapshotConfig.KeepDaily = daily
-			}
-		}
-		if section.HasKey("keep_weekly") {
-			if weekly, err := section.Key("keep_weekly").Int(); err == nil {
-				snapshotConfig.KeepWeekly = weekly
-			}
-		}
-		if section.HasKey("keep_monthly") {
-			if monthly, err := section.Key("keep_monthly").Int(); err == nil {
-				snapshotConfig.KeepMonthly = monthly
-			}
-		}
-		if section.HasKey("keep_yearly") {
-			if yearly, err := section.Key("keep_yearly").Int(); err == nil {
-				snapshotConfig.KeepYearly = yearly
-			}
-		}
-		if section.HasKey("dry_run") {
-			if dryRun, err := section.Key("dry_run").Bool(); err == nil {
-				snapshotConfig.DryRun = dryRun
+	if !c.ini.HasSection("snapshot") {
+		return cfg
+	}
+	section := c.ini.Section("snapshot")
+
+	intFields := []struct {
+		key string
+		dst *int
+	}{
+		{"keep_hourly", &cfg.KeepHourly},
+		{"keep_daily", &cfg.KeepDaily},
+		{"keep_weekly", &cfg.KeepWeekly},
+		{"keep_monthly", &cfg.KeepMonthly},
+		{"keep_yearly", &cfg.KeepYearly},
+	}
+	for _, f := range intFields {
+		if section.HasKey(f.key) {
+			if v, err := section.Key(f.key).Int(); err == nil {
+				*f.dst = v
 			}
 		}
 	}
 
-	return snapshotConfig
+	if section.HasKey("dry_run") {
+		if v, err := section.Key("dry_run").Bool(); err == nil {
+			cfg.DryRun = v
+		}
+	}
+
+	return cfg
 }
 
 // GetRepositoryConfig returns the repository configuration.
