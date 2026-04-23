@@ -83,104 +83,103 @@ func ValidationConfigWithFixes(mode ValidationMode, fixMode FixMode, verbosity i
 
 // UnifiedValidationProcessor creates a configurable validation processor
 func UnifiedValidationProcessor(config ValidationConfig) EntryProcessor {
-	return func(entry *binaryEntry, entryIndex uint32, filePath string) (bool, error) {
-		var validationErrors []string
-
-		// Structural validation
-		if config.StructuralChecks {
-			if err := validateEntryStructure(entry, entryIndex); err != nil {
-				validationErrors = append(validationErrors, fmt.Sprintf("structural: %v", err))
-				if config.Mode == ValidationStrict {
-					return false, err
-				}
-			}
+	return func(entry *binaryEntry, entryIndex uint32, _ string) (bool, error) {
+		errs, strictErr := collectValidationErrors(entry, entryIndex, config)
+		if strictErr != nil {
+			return false, strictErr
 		}
+		return decideInclusion(config, entry, entryIndex, errs)
+	}
+}
 
-		// Logical validation
-		if config.LogicalChecks {
-			if err := validateEntryLogical(entry, config); err != nil {
-				validationErrors = append(validationErrors, fmt.Sprintf("logical: %v", err))
-				if config.Mode == ValidationStrict {
-					return false, err
-				}
+// collectValidationErrors runs the structural and logical checks
+// enabled in config and returns the aggregated error messages. If
+// the mode is strict and any check fails, the original error is
+// returned via strictErr so the caller can bail immediately.
+func collectValidationErrors(entry *binaryEntry, entryIndex uint32, config ValidationConfig) (errs []string, strictErr error) {
+	if config.StructuralChecks {
+		if err := validateEntryStructure(entry, entryIndex); err != nil {
+			errs = append(errs, fmt.Sprintf("structural: %v", err))
+			if config.Mode == ValidationStrict {
+				return errs, err
 			}
-		}
-
-		// Handle validation results based on mode
-		hasErrors := len(validationErrors) > 0
-
-		switch config.Mode {
-		case ValidationStrict:
-			// Already handled above - any error causes immediate failure
-			return !hasErrors, nil
-
-		case ValidationLenient:
-			// Skip entries with errors, log if verbose
-			if hasErrors && config.Verbosity >= 2 {
-				var path string
-				if entry != nil {
-					path = entry.RelativePath()
-				}
-				if path == "" {
-					path = fmt.Sprintf("<entry-%d>", entryIndex)
-				}
-				for _, errMsg := range validationErrors {
-					VerboseLog(2, "Validation: skipping entry %d (%s): %s", entryIndex, path, errMsg)
-				}
-			}
-			return !hasErrors, nil
-
-		case ValidationDiagnostic:
-			// Include all entries but report issues
-			if hasErrors && config.Verbosity >= 1 {
-				var path string
-				if entry != nil {
-					path = entry.RelativePath()
-				}
-				if path == "" {
-					path = fmt.Sprintf("<entry-%d>", entryIndex)
-				}
-				for _, errMsg := range validationErrors {
-					VerboseLog(1, "Diagnostic: entry %d (%s): %s", entryIndex, path, errMsg)
-				}
-			}
-			return true, nil // Include entry regardless of validation results
-
-		case ValidationRecovery:
-			// Include entries for recovery, but in auto mode skip entries with unfixable time issues
-			if hasErrors {
-				var path string
-				if entry != nil {
-					path = entry.RelativePath()
-				}
-				if path == "" {
-					path = fmt.Sprintf("<entry-%d>", entryIndex)
-				}
-
-				// In auto mode, skip entries with time validation errors (unfixable)
-				if config.FixMode == FixModeAuto {
-					for _, errMsg := range validationErrors {
-						if strings.Contains(errMsg, "invalid ctime") || strings.Contains(errMsg, "invalid mtime") {
-							if config.Verbosity >= 2 {
-								VerboseLog(2, "Auto mode: skipping entry %d (%s) with unfixable time issue: %s", entryIndex, path, errMsg)
-							}
-							return false, nil // Skip entry with unfixable time issues
-						}
-					}
-				}
-
-				if config.Verbosity >= 2 {
-					for _, errMsg := range validationErrors {
-						VerboseLog(2, "Recovery: including entry %d (%s) despite issues: %s", entryIndex, path, errMsg)
-					}
-				}
-			}
-			return true, nil // Include entry for potential fixing
-
-		default:
-			return !hasErrors, nil
 		}
 	}
+	if config.LogicalChecks {
+		if err := validateEntryLogical(entry, config); err != nil {
+			errs = append(errs, fmt.Sprintf("logical: %v", err))
+			if config.Mode == ValidationStrict {
+				return errs, err
+			}
+		}
+	}
+	return errs, nil
+}
+
+// decideInclusion applies the mode-specific policy: strict/lenient
+// drop on error, diagnostic always includes, recovery includes but
+// drops auto-fix candidates with unfixable time issues.
+func decideInclusion(config ValidationConfig, entry *binaryEntry, entryIndex uint32, errs []string) (bool, error) {
+	hasErrors := len(errs) > 0
+	switch config.Mode {
+	case ValidationStrict, ValidationLenient:
+		if hasErrors && config.Mode == ValidationLenient && config.Verbosity >= 2 {
+			logValidationErrors(entry, entryIndex, errs, 2, "Validation: skipping entry %d (%s): %s")
+		}
+		return !hasErrors, nil
+	case ValidationDiagnostic:
+		if hasErrors && config.Verbosity >= 1 {
+			logValidationErrors(entry, entryIndex, errs, 1, "Diagnostic: entry %d (%s): %s")
+		}
+		return true, nil
+	case ValidationRecovery:
+		if hasErrors {
+			if config.FixMode == FixModeAuto && hasUnfixableTimeError(errs) {
+				if config.Verbosity >= 2 {
+					logValidationErrors(entry, entryIndex, errs, 2, "Auto mode: skipping entry %d (%s) with unfixable time issue: %s")
+				}
+				return false, nil
+			}
+			if config.Verbosity >= 2 {
+				logValidationErrors(entry, entryIndex, errs, 2, "Recovery: including entry %d (%s) despite issues: %s")
+			}
+		}
+		return true, nil
+	default:
+		return !hasErrors, nil
+	}
+}
+
+// resolveValidationPath produces a stable identifier for logging when
+// an entry may be nil or have an empty path (corrupt/indexOnly).
+func resolveValidationPath(entry *binaryEntry, entryIndex uint32) string {
+	if entry != nil {
+		if p := entry.RelativePath(); p != "" {
+			return p
+		}
+	}
+	return fmt.Sprintf("<entry-%d>", entryIndex)
+}
+
+// logValidationErrors emits one VerboseLog line per error message
+// at the given level using a printf-style format expecting
+// (index, path, errMsg) placeholders.
+func logValidationErrors(entry *binaryEntry, entryIndex uint32, errs []string, level int, format string) {
+	path := resolveValidationPath(entry, entryIndex)
+	for _, errMsg := range errs {
+		VerboseLog(level, format, entryIndex, path, errMsg)
+	}
+}
+
+// hasUnfixableTimeError reports whether any error in errs describes
+// an invalid ctime/mtime — these are unfixable in auto mode.
+func hasUnfixableTimeError(errs []string) bool {
+	for _, errMsg := range errs {
+		if strings.Contains(errMsg, "invalid ctime") || strings.Contains(errMsg, "invalid mtime") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateEntryStructure performs binary format validation (idxck-style)
@@ -632,11 +631,12 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 	// Create skiplist for recovery
 	skiplist := NewSkiplistWrapper(int(header.EntryCount), CacheContext)
 
-	// Parse entries and apply fixes
 	offset := 0
 	entryData := data[headerSizeForVersion(header.Version):]
+	hdrSize := headerSizeForVersion(header.Version)
 	validEntryCount := 0
 	fixesApplied := 0
+	processor := UnifiedValidationProcessor(config)
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
@@ -645,89 +645,14 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 			}
 			break
 		}
-
-		// Get direct pointer to binaryEntry in mmap'd memory
-		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-
-		// Create a copy of the entry for potential fixing
-		entrySize := int(entry.Size)
-		if entrySize <= 0 || entrySize > 4096 {
-			if config.Verbosity >= 2 {
-				VerboseLog(2, "Invalid entry size %d at entry %d, skipping", entrySize, i)
-			}
-			offset += 256 // Conservative skip
-			continue
-		}
-
-		entryCopy := make([]byte, entrySize)
-		sourceBytes := (*[4096]byte)(unsafe.Pointer(entry))[:entrySize:entrySize]
-		copy(entryCopy, sourceBytes)
-
-		// Get pointer to our copy for fixing
-		workingEntry := (*binaryEntry)(unsafe.Pointer(&entryCopy[0]))
-
-		// Apply fixes to the working copy
-		hadFixes, err := dc.applyFixesToEntry(workingEntry, i, config)
-		if err != nil {
-			if config.Verbosity >= 2 {
-				VerboseLog(2, "Failed to apply fixes to entry %d: %v", i, err)
-			}
-			offset += int(entry.Size)
-			continue
-		}
-
-		if hadFixes {
+		advance, fixed, inserted := dc.processRecoveryEntry(entryData, offset, i, config, processor, recoveryIndexPath, indexPath, hdrSize, skiplist)
+		if fixed {
 			fixesApplied++
 		}
-
-		// Validate the (potentially fixed) entry
-		processor := UnifiedValidationProcessor(config)
-		shouldInclude, err := processor(workingEntry, i, indexPath)
-		if err != nil {
-			if config.Verbosity >= 2 {
-				VerboseLog(2, "Entry %d validation failed even after fixes: %v", i, err)
-			}
-			offset += int(entry.Size)
-			continue
-		}
-
-		if shouldInclude {
-			// Create clean copy in recovery index
-			_, cleanOffset, err := dc.appendRawEntryToScanIndex(recoveryIndexPath, entryCopy)
-			if err != nil {
-				if config.Verbosity >= 2 {
-					VerboseLog(2, "Failed to create clean copy of entry %d: %v", i, err)
-				}
-				offset += int(entry.Size)
-				continue
-			}
-
-			// Create skiplist reference to the clean copy
-			recoveryIndexFile := &mmapIndexFile{
-				File:       nil,
-				Data:       nil,
-				Size:       0,
-				Offset:     int(cleanOffset),
-				Type:       "recovery",
-				FilePath:   recoveryIndexPath,
-				headerSize: headerSizeForVersion(header.Version),
-			}
-
-			cleanEntryRef := binaryEntryRef{
-				Offset:    int(cleanOffset),
-				IndexFile: recoveryIndexFile,
-			}
-
-			skiplist.Insert(cleanEntryRef, CacheContext)
+		if inserted {
 			validEntryCount++
-
-			if config.Verbosity >= 3 {
-				VerboseLog(3, "Successfully processed entry %d: %s", i, workingEntry.RelativePath())
-			}
 		}
-
-		// Move to next entry
-		offset += int(entry.Size)
+		offset += advance
 	}
 
 	if config.Verbosity >= 1 {
@@ -736,6 +661,68 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 	}
 
 	return skiplist, nil
+}
+
+// processRecoveryEntry evaluates one entry during enhanced recovery.
+// It returns how far to advance the offset in entryData, whether a
+// fix was applied, and whether the (possibly-fixed) entry was
+// inserted into the recovery skiplist.
+func (dc *DirectoryCache) processRecoveryEntry(entryData []byte, offset int, i uint32, config ValidationConfig, processor EntryProcessor, recoveryIndexPath, indexPath string, hdrSize int, skiplist *skiplistWrapper) (advance int, fixed, inserted bool) {
+	entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
+	entrySize := int(entry.Size)
+	if entrySize <= 0 || entrySize > 4096 {
+		if config.Verbosity >= 2 {
+			VerboseLog(2, "Invalid entry size %d at entry %d, skipping", entrySize, i)
+		}
+		return 256, false, false // Conservative skip
+	}
+
+	entryCopy := make([]byte, entrySize)
+	sourceBytes := (*[4096]byte)(unsafe.Pointer(entry))[:entrySize:entrySize]
+	copy(entryCopy, sourceBytes)
+	workingEntry := (*binaryEntry)(unsafe.Pointer(&entryCopy[0]))
+
+	hadFixes, err := dc.applyFixesToEntry(workingEntry, i, config)
+	if err != nil {
+		if config.Verbosity >= 2 {
+			VerboseLog(2, "Failed to apply fixes to entry %d: %v", i, err)
+		}
+		return entrySize, false, false
+	}
+
+	shouldInclude, err := processor(workingEntry, i, indexPath)
+	if err != nil {
+		if config.Verbosity >= 2 {
+			VerboseLog(2, "Entry %d validation failed even after fixes: %v", i, err)
+		}
+		return entrySize, hadFixes, false
+	}
+	if !shouldInclude {
+		return entrySize, hadFixes, false
+	}
+
+	_, cleanOffset, err := dc.appendRawEntryToScanIndex(recoveryIndexPath, entryCopy)
+	if err != nil {
+		if config.Verbosity >= 2 {
+			VerboseLog(2, "Failed to create clean copy of entry %d: %v", i, err)
+		}
+		return entrySize, hadFixes, false
+	}
+
+	skiplist.Insert(binaryEntryRef{
+		Offset: int(cleanOffset),
+		IndexFile: &mmapIndexFile{
+			Offset:     int(cleanOffset),
+			Type:       "recovery",
+			FilePath:   recoveryIndexPath,
+			headerSize: hdrSize,
+		},
+	}, CacheContext)
+
+	if config.Verbosity >= 3 {
+		VerboseLog(3, "Successfully processed entry %d: %s", i, workingEntry.RelativePath())
+	}
+	return entrySize, hadFixes, true
 }
 
 // isValidHashType checks if a hash type is valid
@@ -1021,85 +1008,92 @@ func (dc *DirectoryCache) AutoRecover(verbosity int) error {
 	if verbosity >= 1 {
 		VerboseLog(1, "Starting automatic index recovery")
 	}
-
-	// CRITICAL: Create pre-recovery snapshot before any recovery operations
 	if err := dc.createPreRecoverySnapshot(verbosity); err != nil {
 		return fmt.Errorf("failed to create pre-recovery snapshot: %w", err)
 	}
 
-	// First, try comprehensive state preservation recovery if any index files exist
-	hasAnyIndex := false
-	if _, err := os.Stat(dc.IndexFile); err == nil {
-		hasAnyIndex = true
-	}
-	if _, err := os.Stat(dc.CacheFile); err == nil {
-		hasAnyIndex = true
-	}
-	if scanFiles, err := dc.findScanIndexFiles(); err == nil && len(scanFiles) > 0 {
-		hasAnyIndex = true
-	}
-
-	if hasAnyIndex {
-		if verbosity >= 1 {
-			VerboseLog(1, "Attempting comprehensive recovery with state preservation")
-		}
-		if err := dc.RecoverWithStatePreservation(verbosity); err == nil {
-			if verbosity >= 1 {
-				VerboseLog(1, "Successfully recovered with state preservation")
-			}
-			return nil
-		} else if verbosity >= 2 {
-			VerboseLog(2, "Comprehensive recovery failed: %v", err)
-		}
-	}
-
-	// Fallback strategies for partial recovery
-
-	// Strategy 1: Try to recover from existing cache index (if it exists and partially readable)
-	if _, err := os.Stat(dc.CacheFile); err == nil {
-		if verbosity >= 1 {
-			VerboseLog(1, "Attempting recovery from cache index only")
-		}
-		if err := dc.RecoverFromIndex(dc.CacheFile, verbosity); err == nil {
-			if verbosity >= 1 {
-				VerboseLog(1, "Successfully recovered from cache index")
-			}
+	if dc.anyIndexExists() {
+		if dc.tryRecoveryStrategy(verbosity, "comprehensive recovery with state preservation",
+			func() error { return dc.RecoverWithStatePreservation(verbosity) }) {
 			return nil
 		}
-		if verbosity >= 2 {
-			VerboseLog(2, "Cache index recovery failed: %v", err)
-		}
 	}
 
-	// Strategy 2: Try to recover from scan files
-	if verbosity >= 1 {
-		VerboseLog(1, "Attempting recovery from scan files")
-	}
-	if err := dc.RecoverFromScanFiles(verbosity); err == nil {
-		if verbosity >= 1 {
-			VerboseLog(1, "Successfully recovered from scan files")
-		}
+	cacheExists := fileExists(dc.CacheFile)
+	mainExists := fileExists(dc.IndexFile)
+
+	if cacheExists && dc.tryRecoveryStrategy(verbosity, "recovery from cache index only",
+		func() error { return dc.RecoverFromIndex(dc.CacheFile, verbosity) }) {
 		return nil
-	} else if verbosity >= 2 {
-		VerboseLog(2, "Scan file recovery failed: %v", err)
 	}
-
-	// Strategy 3: Try to recover from main index (if it exists)
-	if _, err := os.Stat(dc.IndexFile); err == nil {
-		if verbosity >= 1 {
-			VerboseLog(1, "Attempting recovery from main index")
-		}
-		if err := dc.RecoverFromIndex(dc.IndexFile, verbosity); err == nil {
-			if verbosity >= 1 {
-				VerboseLog(1, "Successfully recovered from main index")
-			}
-			return nil
-		} else if verbosity >= 2 {
-			VerboseLog(2, "Main index recovery failed: %v", err)
-		}
+	if dc.tryRecoveryStrategy(verbosity, "recovery from scan files",
+		func() error { return dc.RecoverFromScanFiles(verbosity) }) {
+		return nil
 	}
-
+	if mainExists && dc.tryRecoveryStrategy(verbosity, "recovery from main index",
+		func() error { return dc.RecoverFromIndex(dc.IndexFile, verbosity) }) {
+		return nil
+	}
 	return fmt.Errorf("all recovery strategies failed")
+}
+
+// anyIndexExists reports whether at least one of the main/cache/scan
+// index files is present on disk — the precondition for trying
+// comprehensive state-preserving recovery.
+func (dc *DirectoryCache) anyIndexExists() bool {
+	if fileExists(dc.IndexFile) || fileExists(dc.CacheFile) {
+		return true
+	}
+	scanFiles, err := dc.findScanIndexFiles()
+	return err == nil && len(scanFiles) > 0
+}
+
+// tryRecoveryStrategy runs attempt, logging success or failure at the
+// configured verbosity. Returns true iff attempt returned nil, so the
+// caller can short-circuit the strategy chain.
+func (dc *DirectoryCache) tryRecoveryStrategy(verbosity int, label string, attempt func() error) bool {
+	if verbosity >= 1 {
+		VerboseLog(1, "Attempting %s", label)
+	}
+	err := attempt()
+	if err == nil {
+		if verbosity >= 1 {
+			VerboseLog(1, "Successfully completed %s", label)
+		}
+		return true
+	}
+	if verbosity >= 2 {
+		VerboseLog(2, "%s failed: %v", label, err)
+	}
+	return false
+}
+
+// fileExists is a zero-fuss os.Stat wrapper for strategy gating.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// tryRecoverSource backs up a single source (main / cache / one scan
+// file) and, if the load produces any entries, appends its skiplist
+// to recovered. Returns the updated recovered/backups slices.
+// backupKind drives the backup filename template; label is the
+// human-readable source name used in verbose log output.
+func (dc *DirectoryCache) tryRecoverSource(path, backupKind, label string, verbosity int, recovered []*skiplistWrapper, backups []string) ([]*skiplistWrapper, []string) {
+	backupPath := dc.generateRecoveryBackupName(backupKind)
+	if err := dc.createRecoveryBackup(path, backupPath, verbosity); err != nil {
+		return recovered, backups
+	}
+	backups = append(backups, backupPath)
+
+	skiplist, err := dc.loadIndexWithProcessor(path, RecoveryValidationProcessor(verbosity))
+	if err != nil || skiplist.Length() == 0 {
+		return recovered, backups
+	}
+	if verbosity >= 1 {
+		VerboseLog(1, "Recovered %d entries from %s", skiplist.Length(), label)
+	}
+	return append(recovered, skiplist), backups
 }
 
 // RecoverWithStatePreservation performs comprehensive recovery while preserving as much state as possible
@@ -1118,64 +1112,28 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	var recoveredSkiplists []*skiplistWrapper
 	var backupPaths []string
 
-	// Step 1: Try to recover from main index
-	if _, err := os.Stat(dc.IndexFile); err == nil {
-		mainBackup := dc.generateRecoveryBackupName("main")
-		if err := dc.createRecoveryBackup(dc.IndexFile, mainBackup, verbosity); err == nil {
-			backupPaths = append(backupPaths, mainBackup)
-
-			if mainSkiplist, err := dc.loadIndexWithProcessor(dc.IndexFile, RecoveryValidationProcessor(verbosity)); err == nil && mainSkiplist.Length() > 0 {
-				recoveredSkiplists = append(recoveredSkiplists, mainSkiplist)
-				if verbosity >= 1 {
-					VerboseLog(1, "Recovered %d entries from main index", mainSkiplist.Length())
-				}
-			}
-		}
+	if fileExists(dc.IndexFile) {
+		recoveredSkiplists, backupPaths = dc.tryRecoverSource(dc.IndexFile, "main", "main index", verbosity, recoveredSkiplists, backupPaths)
 	}
-
-	// Step 2: Try to recover from cache index
-	if _, err := os.Stat(dc.CacheFile); err == nil {
-		cacheBackup := dc.generateRecoveryBackupName("cache")
-		if err := dc.createRecoveryBackup(dc.CacheFile, cacheBackup, verbosity); err == nil {
-			backupPaths = append(backupPaths, cacheBackup)
-
-			if cacheSkiplist, err := dc.loadIndexWithProcessor(dc.CacheFile, RecoveryValidationProcessor(verbosity)); err == nil && cacheSkiplist.Length() > 0 {
-				recoveredSkiplists = append(recoveredSkiplists, cacheSkiplist)
-				if verbosity >= 1 {
-					VerboseLog(1, "Recovered %d entries from cache index", cacheSkiplist.Length())
-				}
-			}
-		}
+	if fileExists(dc.CacheFile) {
+		recoveredSkiplists, backupPaths = dc.tryRecoverSource(dc.CacheFile, "cache", "cache index", verbosity, recoveredSkiplists, backupPaths)
 	}
-
-	// Step 3: Try to recover from scan files
-	if scanFiles, err := dc.findScanIndexFiles(); err == nil && len(scanFiles) > 0 {
+	if scanFiles, err := dc.findScanIndexFiles(); err == nil {
 		for _, scanFile := range scanFiles {
-			scanBackup := dc.generateRecoveryBackupName("scan")
-			if err := dc.createRecoveryBackup(scanFile.Path, scanBackup, verbosity); err == nil {
-				backupPaths = append(backupPaths, scanBackup) //nolint:staticcheck // SA4010: backupPaths accumulated for future recovery reporting
-
-				if scanSkiplist, err := dc.loadIndexWithProcessor(scanFile.Path, RecoveryValidationProcessor(verbosity)); err == nil && scanSkiplist.Length() > 0 {
-					recoveredSkiplists = append(recoveredSkiplists, scanSkiplist)
-					if verbosity >= 1 {
-						VerboseLog(1, "Recovered %d entries from scan file %s", scanSkiplist.Length(), filepath.Base(scanFile.Path))
-					}
-				}
-			}
+			label := fmt.Sprintf("scan file %s", filepath.Base(scanFile.Path))
+			recoveredSkiplists, backupPaths = dc.tryRecoverSource(scanFile.Path, "scan", label, verbosity, recoveredSkiplists, backupPaths)
 		}
 	}
+	_ = backupPaths //nolint:staticcheck // SA4010: backupPaths accumulated for future recovery reporting
 
 	if len(recoveredSkiplists) == 0 {
 		return fmt.Errorf("no valid data could be recovered from any index files")
 	}
 
-	// Step 4: Merge all recovered data
 	mergedSkiplist := recoveredSkiplists[0].Copy()
 	for i := 1; i < len(recoveredSkiplists); i++ {
-		if err := mergedSkiplist.Merge(recoveredSkiplists[i], MergeTheirs); err != nil {
-			if verbosity >= 2 {
-				VerboseLog(2, "Warning: failed to merge skiplist %d: %v", i, err)
-			}
+		if err := mergedSkiplist.Merge(recoveredSkiplists[i], MergeTheirs); err != nil && verbosity >= 2 {
+			VerboseLog(2, "Warning: failed to merge skiplist %d: %v", i, err)
 		}
 	}
 
