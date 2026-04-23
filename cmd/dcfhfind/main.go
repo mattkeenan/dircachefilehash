@@ -455,37 +455,42 @@ func (p *ExpressionParser) parseTestToken(token string) (Expression, bool, error
 		return &CorruptTest{}, true, nil
 	}
 
-	// Tests taking one argument — build from (flag, what-the-arg-is, constructor).
-	argTests := []struct {
-		flag  string
-		what  string
-		build func(string) (Expression, error)
-	}{
-		{"--name", "a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: true}, nil }},
-		{"--iname", "a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: false}, nil }},
-		{"--path", "a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: true}, nil }},
-		{"--ipath", "a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: false}, nil }},
-		{"--size", "a size specification", parseSizeTest},
-		{"--hash", "a hash value", func(a string) (Expression, error) { return &HashTest{Hash: a}, nil }},
-		{"--mtime", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mtime") }},
-		{"--mmin", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mmin") }},
-		{"--ctime", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "ctime") }},
-		{"--cmin", "a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "cmin") }},
-		{"--hash-prefix", "a prefix", func(a string) (Expression, error) { return &HashPrefixTest{Prefix: a}, nil }},
-		{"--hash-type", "a type", func(a string) (Expression, error) { return &HashTypeTest{Type: a}, nil }},
+	spec, ok := argTestTable[token]
+	if !ok {
+		return nil, false, nil
 	}
-	for _, t := range argTests {
-		if t.flag != token {
-			continue
-		}
-		arg, err := p.requireArg(t.flag, t.what)
-		if err != nil {
-			return nil, true, err
-		}
-		expr, err := t.build(arg)
-		return expr, true, err
+	arg, err := p.requireArg(token, spec.what)
+	if err != nil {
+		return nil, true, err
 	}
-	return nil, false, nil
+	expr, err := spec.build(arg)
+	return expr, true, err
+}
+
+// argTestSpec is the per-flag data for a test that takes one
+// argument: the human description of what the arg should be, and a
+// constructor that turns the arg into an Expression.
+type argTestSpec struct {
+	what  string
+	build func(string) (Expression, error)
+}
+
+// argTestTable dispatches each --flag to its argument description
+// and Expression constructor. Package-level so the map and its
+// closures are allocated exactly once, not per parse call.
+var argTestTable = map[string]argTestSpec{
+	"--name":        {"a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: true}, nil }},
+	"--iname":       {"a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: false}, nil }},
+	"--path":        {"a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: true}, nil }},
+	"--ipath":       {"a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: false}, nil }},
+	"--size":        {"a size specification", parseSizeTest},
+	"--hash":        {"a hash value", func(a string) (Expression, error) { return &HashTest{Hash: a}, nil }},
+	"--mtime":       {"a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mtime") }},
+	"--mmin":        {"a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mmin") }},
+	"--ctime":       {"a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "ctime") }},
+	"--cmin":        {"a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "cmin") }},
+	"--hash-prefix": {"a prefix", func(a string) (Expression, error) { return &HashPrefixTest{Prefix: a}, nil }},
+	"--hash-type":   {"a type", func(a string) (Expression, error) { return &HashTypeTest{Type: a}, nil }},
 }
 
 // parseActionToken handles --print/--ls/--printf/etc. Actions don't

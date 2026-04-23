@@ -165,19 +165,21 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 	}
 }
 
-// finalisePipelineMainIndex handles the success/failure branches of
-// the main-index cache lifecycle: rename the timestamped temp file
-// into place and cleanup on success, remove the incomplete file
-// on failure.
-func finalisePipelineMainIndex(dc *DirectoryCache, tempName string, ok bool) {
+// finaliseMainIndex handles the success/failure branches of the
+// main-index cache lifecycle: on success, atomically rename the
+// timestamped temp file into place and clean up related temp files;
+// on failure, remove the incomplete temp file. logPrefix tags stderr
+// diagnostics so pipeline vs legacy-update call sites stay
+// distinguishable in captured logs.
+func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) {
 	if !ok {
 		if _, err := os.Stat(tempName); err != nil {
 			return
 		}
 		if removeErr := os.Remove(tempName); removeErr != nil && IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[PIPELINE] Warning: failed to remove incomplete main index %s: %v\n", tempName, removeErr)
+			fmt.Fprintf(os.Stderr, "%s Warning: failed to remove incomplete main index %s: %v\n", logPrefix, tempName, removeErr)
 		} else if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[PIPELINE] Removed incomplete main index: %s\n", filepath.Base(tempName))
+			fmt.Fprintf(os.Stderr, "%s Removed incomplete main index: %s\n", logPrefix, filepath.Base(tempName))
 		}
 		return
 	}
@@ -186,16 +188,16 @@ func finalisePipelineMainIndex(dc *DirectoryCache, tempName string, ok bool) {
 		return
 	}
 	if IsDebugEnabled("write") {
-		VerboseLog(3, "[PIPELINE] Renaming %s (%d bytes) -> %s", tempName, stat.Size(), dc.IndexFile)
+		VerboseLog(3, "%s Renaming %s (%d bytes) -> %s", logPrefix, tempName, stat.Size(), dc.IndexFile)
 	}
 	if renameErr := os.Rename(tempName, dc.IndexFile); renameErr != nil {
 		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[PIPELINE] Warning: failed to rename to main.idx: %v\n", renameErr)
+			fmt.Fprintf(os.Stderr, "%s Warning: failed to rename %s to main.idx: %v\n", logPrefix, tempName, renameErr)
 		}
 		return
 	}
 	if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
-		fmt.Fprintf(os.Stderr, "[PIPELINE] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
+		fmt.Fprintf(os.Stderr, "%s Warning: failed to cleanup timestamped cache files: %v\n", logPrefix, cleanupErr)
 	}
 }
 
@@ -221,7 +223,7 @@ func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []strin
 	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
 
 	var operationSuccessful bool
-	defer func() { finalisePipelineMainIndex(dc, tempMainIndexFileName, operationSuccessful) }()
+	defer func() { finaliseMainIndex(dc, tempMainIndexFileName, "[PIPELINE]", operationSuccessful) }()
 
 	// Create iterators
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
