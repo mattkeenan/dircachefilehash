@@ -8,9 +8,11 @@ linters:
   enable:
     - bidichk        # dangerous unicode sequences
     - copyloopvar    # loop variable capture bugs
+    - cyclop         # cyclomatic complexity per function
     - durationcheck  # duration multiplication mistakes
     - errname        # sentinel error naming conventions
     - errorlint      # error wrapping best practices
+    - gocognit       # cognitive complexity per function
     - gocritic       # broad set of style and correctness checks
     - misspell       # spelling mistakes in comments/strings
     - nilerr         # returning nil when err is not nil
@@ -29,6 +31,12 @@ linters:
       disabled-checks:
         - ifElseChain  # too opinionated for algorithmic code with clear branch logic
 
+    cyclop:
+      max-complexity: 20
+
+    gocognit:
+      min-complexity: 30
+
   exclusions:
     presets:
       - std-error-handling
@@ -40,6 +48,11 @@ linters:
       # Test code: direct error comparison and type assertions are fine for sentinel errors.
       - linters: [errorlint]
         path: _test\.go
+      # Complexity linters don't apply to test code or shared test framework files.
+      - linters: [cyclop, gocognit]
+        path: _test\.go
+      - linters: [cyclop, gocognit]
+        path: _test_framework\.go
 
 formatters:
   enable:
