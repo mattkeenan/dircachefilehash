@@ -18,6 +18,8 @@ import (
 //
 // The algorithm maintains the same O(n+m) efficiency as the original
 // Hwang-Lin algorithm while providing composable, testable components.
+//
+//nolint:gocognit,cyclop // core merge-sort comparison with three-way iterator state; helpers would obscure the ordering invariants
 func hwangLinUnified(
 	leftIter, rightIter BinaryEntryIterator,
 	callback HwangLinCallback,

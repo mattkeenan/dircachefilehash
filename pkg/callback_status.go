@@ -66,104 +66,89 @@ func (sc *StatusCallback) OnComparison(
 	leftPath, rightPath string,
 ) (bool, error) {
 	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
 
 	switch result {
 	case ComparisonMatch:
-		// Both entries exist - check if file was modified or deleted
-		if leftEntry != nil && rightEntry != nil {
-			// Check if the right entry (current filesystem state) is marked as deleted
-			if isDeleted, err := rightEntry.IsDeleted(); err == nil && isDeleted {
-				sc.result.Deleted = append(sc.result.Deleted, rightPath)
-			} else {
-				// CRITICAL: Status command MUST hash files that need hashing
-				if needsHash(leftEntry, rightEntry) {
-					// File changed - categorize as modified and coordinate hashing
-					sc.result.Modified = append(sc.result.Modified, rightPath)
-
-					// Release mutex before hash coordination to avoid deadlocks
-					sc.mutex.Unlock()
-
-					// Use unified hash coordination for modified file
-					if err := sc.SubmitAndOrWriteHash(rightEntry, "modified"); err != nil {
-						return false, err
-					}
-
-					// Re-acquire mutex for rest of method
-					sc.mutex.Lock()
-				} else {
-					// File unchanged - use unified coordination for unchanged file
-					sc.mutex.Unlock()
-
-					// Use unified hash coordination for unchanged file (will add to backlog)
-					if err := sc.SubmitAndOrWriteHash(leftEntry, "unchanged"); err != nil {
-						return false, err
-					}
-
-					// Re-acquire mutex for rest of method
-					sc.mutex.Lock()
-				}
-			}
-		}
-
-	case ComparisonLeftFirst:
-		// Left entry exists but not on right - this is a deleted file
-		if leftEntry != nil {
-			// Only count as deleted if the left entry is not already marked as deleted
-			if isDeleted, err := leftEntry.IsDeleted(); err == nil && !isDeleted {
-				sc.result.Deleted = append(sc.result.Deleted, leftPath)
-			}
-		}
-
-	case ComparisonRightFirst:
-		// Right entry exists but not on left - this is a new/added file
-		if rightEntry != nil {
-			// Only count as added if the right entry is not marked as deleted
-			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
-				// CRITICAL: Status command MUST hash new files (always needs hashing)
-				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[STATUS-HASH] Requesting hash for new file: %s", rightPath)
-				}
-				if err := rightEntry.RequestHash(); err != nil {
-					return false, err
-				}
-				sc.result.Added = append(sc.result.Added, rightPath)
-				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[STATUS-HASH] Successfully requested hash for new file: %s", rightPath)
-				}
-			}
-		}
-
-	case ComparisonLeftExhausted:
-		// Only right entries remain - these are all new/added files
-		if rightEntry != nil {
-			if isDeleted, err := rightEntry.IsDeleted(); err == nil && !isDeleted {
-				// CRITICAL: Status command MUST hash new files (always needs hashing)
-				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[STATUS-HASH] Requesting hash for new file (left exhausted): %s", rightPath)
-				}
-				if err := rightEntry.RequestHash(); err != nil {
-					return false, err
-				}
-				sc.result.Added = append(sc.result.Added, rightPath)
-				if IsDebugEnabled("hash") {
-					VerboseLog(3, "[STATUS-HASH] Successfully requested hash for new file (left exhausted): %s", rightPath)
-				}
-			}
-		}
-
-	case ComparisonRightExhausted:
-		// Only left entries remain - these are all deleted files
-		if leftEntry != nil {
-			if isDeleted, err := leftEntry.IsDeleted(); err == nil && !isDeleted {
-				sc.result.Deleted = append(sc.result.Deleted, leftPath)
-			}
+		return sc.onMatch(leftEntry, rightEntry, rightPath)
+	case ComparisonLeftFirst, ComparisonRightExhausted:
+		sc.recordDeletion(leftEntry, leftPath)
+	case ComparisonRightFirst, ComparisonLeftExhausted:
+		if err := sc.recordAddition(rightEntry, rightPath, result == ComparisonLeftExhausted); err != nil {
+			return false, err
 		}
 	}
+	return true, nil
+}
 
-	// Release mutex at end (it was already handled in SubmitAndOrWriteHash calls above)
+// onMatch handles ComparisonMatch: the file is in both the index and
+// the filesystem. Classify as deleted (right-side tombstone),
+// modified (metadata changed), or unchanged (write through to
+// backlog). Expects sc.mutex to be held on entry; unlocks/re-locks
+// around SubmitAndOrWriteHash to avoid deadlocks, matching the
+// original contract.
+func (sc *StatusCallback) onMatch(leftEntry, rightEntry BinaryEntryInterface, rightPath string) (bool, error) {
+	if leftEntry == nil || rightEntry == nil {
+		return true, nil
+	}
+	if isDeleted, err := rightEntry.IsDeleted(); err == nil && isDeleted {
+		sc.result.Deleted = append(sc.result.Deleted, rightPath)
+		return true, nil
+	}
+	reason := "unchanged"
+	submitEntry := leftEntry
+	if needsHash(leftEntry, rightEntry) {
+		sc.result.Modified = append(sc.result.Modified, rightPath)
+		reason = "modified"
+		submitEntry = rightEntry
+	}
 	sc.mutex.Unlock()
+	err := sc.SubmitAndOrWriteHash(submitEntry, reason)
+	sc.mutex.Lock()
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
-	return true, nil // Continue processing
+// recordDeletion appends path to result.Deleted if entry is non-nil
+// and not already marked deleted.
+func (sc *StatusCallback) recordDeletion(entry BinaryEntryInterface, path string) {
+	if entry == nil {
+		return
+	}
+	if isDeleted, err := entry.IsDeleted(); err == nil && !isDeleted {
+		sc.result.Deleted = append(sc.result.Deleted, path)
+	}
+}
+
+// recordAddition queues a hash request for a new file and appends
+// it to result.Added. leftExhausted tags the verbose log line so
+// debug output distinguishes the two call sites.
+func (sc *StatusCallback) recordAddition(entry BinaryEntryInterface, path string, leftExhausted bool) error {
+	if entry == nil {
+		return nil
+	}
+	// Errors reading IsDeleted are treated as "skip", matching the
+	// original inline logic (`err == nil && !isDeleted`).
+	if isDeleted, _ := entry.IsDeleted(); isDeleted {
+		return nil
+	}
+	logTag := ""
+	if leftExhausted {
+		logTag = " (left exhausted)"
+	}
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[STATUS-HASH] Requesting hash for new file%s: %s", logTag, path)
+	}
+	if err := entry.RequestHash(); err != nil {
+		return err
+	}
+	sc.result.Added = append(sc.result.Added, path)
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[STATUS-HASH] Successfully requested hash for new file%s: %s", logTag, path)
+	}
+	return nil
 }
 
 // OnLeftOnly handles remaining entries from the left iterator (deleted files)

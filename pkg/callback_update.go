@@ -73,76 +73,8 @@ func (uc *UpdateCallback) OnComparison(
 			result, leftPath, rightPath, leftEntry != nil, rightEntry != nil)
 	}
 
-	switch result {
-	case ComparisonMatch:
-		// Files exist in both - check if they differ (matches hwangLinCompareToSkiplist cmp == 0 case)
-		if leftEntry != nil && rightEntry != nil {
-			// Skip deleted entries in the index (left side)
-			if isDeleted, err := leftEntry.IsDeleted(); err == nil && isDeleted {
-				return true, nil // Continue processing, skip this entry
-			}
-
-			// Check if this file should still be indexed
-			if !uc.dc.shouldIndex(rightPath) {
-				// File exists but should no longer be indexed - skip (main.idx excludes deleted entries)
-				return true, nil
-			}
-
-			// Check if the file needs hashing (has changed)
-			if needsHash(leftEntry, rightEntry) {
-				// File changed - use unified hash coordination
-				if err := uc.SubmitAndOrWriteHash(rightEntry, "modified"); err != nil {
-					return false, err
-				}
-			} else {
-				// File unchanged - use unified hash coordination
-				if err := uc.SubmitAndOrWriteHash(leftEntry, "unchanged"); err != nil {
-					return false, err
-				}
-			}
-		}
-
-	case ComparisonRightFirst:
-		// File only in scan (right side) - new file (matches hwangLinCompareToSkiplist cmp < 0 case)
-		if rightEntry != nil {
-			if IsDebugEnabled("verbose-3") {
-				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: ComparisonRightFirst for %s - processing new file\n", rightPath)
-			}
-			// Check if this file should be indexed
-			if !uc.dc.shouldIndex(rightPath) {
-				if IsDebugEnabled("verbose-3") {
-					fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Skipping %s - shouldIndex returned false\n", rightPath)
-				}
-				// File should not be indexed - skip without creating entry
-				return true, nil
-			}
-
-			if IsDebugEnabled("verbose-3") {
-				fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Creating scan entry for new file %s\n", rightPath)
-			}
-			// Use unified hash coordination for new file
-			if err := uc.SubmitAndOrWriteHash(rightEntry, "new_file"); err != nil {
-				return false, err
-			}
-		}
-
-	case ComparisonLeftFirst:
-		// File only in index (left side) - deleted file (matches hwangLinCompareToSkiplist cmp > 0 case)
-		if leftEntry != nil {
-			// Check if this file should still be indexed based on symlink and ignore rules
-			if !uc.dc.shouldIndex(leftPath) {
-				// File should not be indexed - skip without creating deleted entry
-				return true, nil
-			}
-
-			// Skip already deleted entries
-			if isDeleted, err := leftEntry.IsDeleted(); err == nil && isDeleted {
-				return true, nil // Continue processing
-			}
-
-			// Skip deleted entries (main.idx excludes deleted entries per v0.7 architecture)
-			return true, nil
-		}
+	if err := uc.dispatchComparison(result, leftEntry, rightEntry, leftPath, rightPath); err != nil {
+		return false, err
 	}
 
 	// Check completion queue from hashJobManager and merge completed entries to backlog
@@ -153,7 +85,67 @@ func (uc *UpdateCallback) OnComparison(
 		return false, err
 	}
 
-	return true, nil // Continue processing
+	return true, nil
+}
+
+// dispatchComparison routes the ComparisonResult to the appropriate
+// per-case handler. The outer caller still does post-processing
+// (hash job draining + retirement) regardless of which case ran,
+// so handlers only concern themselves with their own logic.
+func (uc *UpdateCallback) dispatchComparison(result ComparisonResult, leftEntry, rightEntry BinaryEntryInterface, leftPath, rightPath string) error {
+	switch result {
+	case ComparisonMatch:
+		return uc.handleMatch(leftEntry, rightEntry, rightPath)
+	case ComparisonRightFirst:
+		return uc.handleNewFile(rightEntry, rightPath)
+	case ComparisonLeftFirst:
+		// main.idx excludes deleted entries in v0.7; all LeftFirst cases
+		// are no-ops regardless of the index's deleted flag.
+		_ = leftEntry
+		_ = leftPath
+		return nil
+	}
+	return nil
+}
+
+// handleMatch is the ComparisonMatch branch: either-side nil, one-side
+// deleted, filtered out by shouldIndex, or needs-hash/unchanged
+// accounting via SubmitAndOrWriteHash.
+func (uc *UpdateCallback) handleMatch(leftEntry, rightEntry BinaryEntryInterface, rightPath string) error {
+	if leftEntry == nil || rightEntry == nil {
+		return nil
+	}
+	if isDeleted, err := leftEntry.IsDeleted(); err == nil && isDeleted {
+		return nil
+	}
+	if !uc.dc.shouldIndex(rightPath) {
+		return nil
+	}
+	if needsHash(leftEntry, rightEntry) {
+		return uc.SubmitAndOrWriteHash(rightEntry, "modified")
+	}
+	return uc.SubmitAndOrWriteHash(leftEntry, "unchanged")
+}
+
+// handleNewFile is the ComparisonRightFirst branch: log verbosely,
+// respect shouldIndex, then submit a new-file hash job.
+func (uc *UpdateCallback) handleNewFile(rightEntry BinaryEntryInterface, rightPath string) error {
+	if rightEntry == nil {
+		return nil
+	}
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: ComparisonRightFirst for %s - processing new file\n", rightPath)
+	}
+	if !uc.dc.shouldIndex(rightPath) {
+		if IsDebugEnabled("verbose-3") {
+			fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Skipping %s - shouldIndex returned false\n", rightPath)
+		}
+		return nil
+	}
+	if IsDebugEnabled("verbose-3") {
+		fmt.Fprintf(os.Stderr, "[VERBOSE-3] UpdateCallback: Creating scan entry for new file %s\n", rightPath)
+	}
+	return uc.SubmitAndOrWriteHash(rightEntry, "new_file")
 }
 
 // OnLeftOnly handles remaining entries from left iterator (when right is exhausted)
@@ -202,53 +194,15 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		}
 	}
 
-	// Wait for all hash jobs to complete with graceful shutdown handling
-	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] OnComplete() state analysis:\n")
+	uc.logOnCompleteState()
+	uc.waitForHashJobs()
 
-	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Getting jobs in flight...\n")
-	remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
-	fmt.Fprintf(os.Stderr, "  - Jobs in flight: %d\n", remainingJobs)
-
-	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Skipping pathOrderToEntry map size (avoiding potential deadlock)...\n")
-
-	fmt.Fprintf(os.Stderr, "  - Next retire index: %d\n", uc.nextRetireIndex)
-	fmt.Fprintf(os.Stderr, "  - Entry counter (total submitted): %d\n", uc.entryCounter)
-
-	if remainingJobs > 0 {
-		fmt.Fprintf(os.Stderr, "  - About to wait for WaitGroup with %d outstanding jobs\n", remainingJobs)
-	} else {
-		fmt.Fprintf(os.Stderr, "  - No jobs in flight, WaitGroup should complete immediately\n")
-	}
-
-	// Wait for hash jobs with cancellation support
-	done := make(chan struct{})
-	go func() {
-		uc.hashJobWG.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// All jobs completed normally
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-COMPLETE] All hash jobs completed successfully")
-		}
-	case <-uc.ctx.Done():
-		// Interrupted - cleanup what we have
-		if IsDebugEnabled("hash") {
-			VerboseLog(3, "[UPDATE-COMPLETE] Shutdown signal received, proceeding with available entries")
-		}
-	}
-
-	// Final cleanup regardless of completion vs interruption
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Processing final completions and retiring remaining entries\n")
 
-	// Drain any remaining completions (non-blocking)
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 1: Calling processCompletedHashJobs...\n")
 	uc.processCompletedHashJobs()
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 1: processCompletedHashJobs completed\n")
 
-	// Write any remaining entries from retireSkiplist
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 2: Calling retireContiguousEntries...\n")
 	if retireErr := uc.retireContiguousEntries(); retireErr != nil {
 		fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 2: retireContiguousEntries returned error: %v\n", retireErr)
@@ -261,56 +215,93 @@ func (uc *UpdateCallback) OnComplete(err error) error {
 		fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 2: retireContiguousEntries completed successfully\n")
 	}
 
-	// v0.7: Close temp index writer to finalize the temp index file
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Step 3: Closing temp index writer...\n")
-	if uc.tempIndexWriter != nil {
-		tempPath := uc.tempIndexWriter.GetTempPath() // Hoist - call once
+	return uc.finaliseTempIndexWriter(err)
+}
 
-		if closeErr := uc.tempIndexWriter.Close(); closeErr != nil {
-			if err == nil {
-				// No previous error, return the close error
-				return fmt.Errorf("failed to close temp index writer: %w", closeErr)
-			} else {
-				// Previous error exists, log close error but return original error
-				fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to close temp index writer: %v\n", closeErr)
-			}
+// logOnCompleteState prints the OnComplete pre-wait breadcrumbs to
+// stderr. Intentionally unconditional — these traces are load-bearing
+// for incident triage.
+func (uc *UpdateCallback) logOnCompleteState() {
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] OnComplete() state analysis:\n")
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Getting jobs in flight...\n")
+	remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
+	fmt.Fprintf(os.Stderr, "  - Jobs in flight: %d\n", remainingJobs)
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] Skipping pathOrderToEntry map size (avoiding potential deadlock)...\n")
+	fmt.Fprintf(os.Stderr, "  - Next retire index: %d\n", uc.nextRetireIndex)
+	fmt.Fprintf(os.Stderr, "  - Entry counter (total submitted): %d\n", uc.entryCounter)
+	if remainingJobs > 0 {
+		fmt.Fprintf(os.Stderr, "  - About to wait for WaitGroup with %d outstanding jobs\n", remainingJobs)
+	} else {
+		fmt.Fprintf(os.Stderr, "  - No jobs in flight, WaitGroup should complete immediately\n")
+	}
+}
+
+// waitForHashJobs blocks until either all outstanding hash jobs
+// complete or the update context is cancelled. Either way we
+// proceed to the retirement/cleanup phase in OnComplete.
+func (uc *UpdateCallback) waitForHashJobs() {
+	done := make(chan struct{})
+	go func() {
+		uc.hashJobWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-COMPLETE] All hash jobs completed successfully")
 		}
-
-		if IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-WRITE] Temp index writer closed: %s (%d entries)",
-				tempPath, uc.tempIndexWriter.GetEntryCount())
-		}
-
-		// v0.7: Atomic rename temp index to main.idx after successful completion
-		if err == nil {
-			mainIndexPath := uc.dc.IndexFile
-
-			// Check the size of the temp file before rename
-			var tempFileSize int64 = -1
-			if stat, statErr := os.Stat(tempPath); statErr == nil {
-				tempFileSize = stat.Size()
-			}
-
-			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-WRITE] Atomically renaming temp index: %s (%d bytes) -> %s", tempPath, tempFileSize, mainIndexPath)
-			}
-
-			if renameErr := os.Rename(tempPath, mainIndexPath); renameErr != nil {
-				return fmt.Errorf("failed to atomically rename temp index to main index: %w", renameErr)
-			}
-
-			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-WRITE] Successfully updated main index: %s", mainIndexPath)
-			}
-		} else {
-			// Error occurred - clean up temp file
-			if cleanupErr := os.Remove(tempPath); cleanupErr != nil {
-				fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup temp index file %s: %v\n", tempPath, cleanupErr)
-			}
+	case <-uc.ctx.Done():
+		if IsDebugEnabled("hash") {
+			VerboseLog(3, "[UPDATE-COMPLETE] Shutdown signal received, proceeding with available entries")
 		}
 	}
+}
 
-	return err // Return original error if any
+// finaliseTempIndexWriter closes the temp index writer and either
+// atomically renames the temp file into place (on success) or
+// removes it (on failure). prevErr is the error accumulated so far;
+// the returned error preserves it unless the close itself failed
+// with prevErr==nil.
+func (uc *UpdateCallback) finaliseTempIndexWriter(prevErr error) error {
+	if uc.tempIndexWriter == nil {
+		return prevErr
+	}
+	tempPath := uc.tempIndexWriter.GetTempPath()
+
+	if closeErr := uc.tempIndexWriter.Close(); closeErr != nil {
+		if prevErr == nil {
+			return fmt.Errorf("failed to close temp index writer: %w", closeErr)
+		}
+		fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to close temp index writer: %v\n", closeErr)
+	}
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Temp index writer closed: %s (%d entries)",
+			tempPath, uc.tempIndexWriter.GetEntryCount())
+	}
+
+	if prevErr != nil {
+		if cleanupErr := os.Remove(tempPath); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "[UPDATE] Warning: failed to cleanup temp index file %s: %v\n", tempPath, cleanupErr)
+		}
+		return prevErr
+	}
+
+	mainIndexPath := uc.dc.IndexFile
+	var tempFileSize int64 = -1
+	if stat, statErr := os.Stat(tempPath); statErr == nil {
+		tempFileSize = stat.Size()
+	}
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Atomically renaming temp index: %s (%d bytes) -> %s", tempPath, tempFileSize, mainIndexPath)
+	}
+	if renameErr := os.Rename(tempPath, mainIndexPath); renameErr != nil {
+		return fmt.Errorf("failed to atomically rename temp index to main index: %w", renameErr)
+	}
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-WRITE] Successfully updated main index: %s", mainIndexPath)
+	}
+	return nil
 }
 
 // Name returns the name of this callback for debugging
@@ -456,69 +447,70 @@ func (uc *UpdateCallback) processCompletedHashJobs() {
 
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Entering completion loop...\n")
 	completionCount := 0
-	// Non-blocking read of completion channel (entries arrive in JobID order)
 	for {
 		select {
 		case completion := <-uc.hashJobManager.CompletionChannel():
 			completionCount++
-			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Processing completion %d, JobID=%d, Cookie=%d\n", completionCount, completion.JobID, completion.Cookie)
-
-			// Handle termination/sentinel completion (JobID=0, Cookie=0)
-			if completion.JobID == 0 && completion.Cookie == 0 {
-				fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Received termination signal, ignoring\n")
-				continue
-			}
-
-			// Completions arrive in JobID order thanks to algorithmHashManager
-			// Add completed entry to retireSkiplist with path order ID as context for ordering
-			pathOrderID := completion.Cookie
-
-			if IsDebugEnabled("hash") {
-				VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, pathOrderID)
-			}
-
-			// Signal wait group that this job is done (ALWAYS - even if entry lookup fails)
-			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: About to call hashJobWG.Done()\n")
-			uc.hashJobWG.Done()
-			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: hashJobWG.Done() completed\n")
-
-			// Decrement atomic counter when job completes (guard against underflow)
-			if atomic.LoadUint64(&uc.jobsInFlight) > 0 {
-				atomic.AddUint64(&uc.jobsInFlight, ^uint64(0)) // Atomic decrement
-			}
-
-			// Find the entry that this completion belongs to
-			entry := uc.findEntryByPathOrderID(pathOrderID)
-			if entry != nil {
-				if path, err := entry.RelativePath(); err == nil {
-					if IsDebugEnabled("hash") {
-						VerboseLog(3, "[HASH-COMPLETE] Adding completed entry to retireSkiplist: %s (pathOrderID=%d)", path, pathOrderID)
-					}
-				}
-
-				// Add to retire skiplist with path order ID as context
-				pathOrderStr := fmt.Sprintf("%d", pathOrderID)
-				if entryRef, ok := entry.GetBinaryEntryRef(); ok {
-					uc.retireSkiplist.Insert(entryRef, pathOrderStr)
-				}
-
-				// NOTE: Do NOT delete from pathOrderToEntry here!
-				// The entry must remain until retireContiguousEntries() processes it
-
-				if IsDebugEnabled("hash") {
-					remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
-					VerboseLog(3, "[HASH-COMPLETE] Entry added to retireSkiplist, remaining jobs: %d", remainingJobs)
-				}
-			} else if IsDebugEnabled("hash") {
-				VerboseLog(1, "[HASH-COMPLETE] WARNING: Received completion for unknown pathOrderID: %d (job counted as complete)", pathOrderID)
-			}
-			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Completed processing completion %d, looping back...\n", completionCount)
+			uc.handleHashCompletion(completion, completionCount)
 		default:
-			// No more completions available (non-blocking)
 			fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: No more completions, processed %d total, returning\n", completionCount)
 			return
 		}
 	}
+}
+
+// handleHashCompletion processes a single hashJobManager completion:
+// ignore termination sentinels, signal the WaitGroup, decrement the
+// in-flight counter, and file the completed entry in retireSkiplist
+// keyed by its path-order cookie.
+func (uc *UpdateCallback) handleHashCompletion(completion hashJobCompletion, completionCount int) {
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Processing completion %d, JobID=%d, Cookie=%d\n", completionCount, completion.JobID, completion.Cookie)
+
+	if completion.JobID == 0 && completion.Cookie == 0 {
+		fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Received termination signal, ignoring\n")
+		return
+	}
+
+	pathOrderID := completion.Cookie
+	if IsDebugEnabled("hash") {
+		VerboseLog(3, "[HASH-COMPLETE] Received completion message: JobID=%d, Cookie=%d", completion.JobID, pathOrderID)
+	}
+
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: About to call hashJobWG.Done()\n")
+	uc.hashJobWG.Done()
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: hashJobWG.Done() completed\n")
+
+	if atomic.LoadUint64(&uc.jobsInFlight) > 0 {
+		atomic.AddUint64(&uc.jobsInFlight, ^uint64(0))
+	}
+
+	entry := uc.findEntryByPathOrderID(pathOrderID)
+	if entry == nil {
+		if IsDebugEnabled("hash") {
+			VerboseLog(1, "[HASH-COMPLETE] WARNING: Received completion for unknown pathOrderID: %d (job counted as complete)", pathOrderID)
+		}
+		fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Completed processing completion %d, looping back...\n", completionCount)
+		return
+	}
+
+	if IsDebugEnabled("hash") {
+		if path, err := entry.RelativePath(); err == nil {
+			VerboseLog(3, "[HASH-COMPLETE] Adding completed entry to retireSkiplist: %s (pathOrderID=%d)", path, pathOrderID)
+		}
+	}
+
+	// NOTE: Do NOT delete from pathOrderToEntry here — the entry must
+	// remain until retireContiguousEntries() processes it.
+	pathOrderStr := fmt.Sprintf("%d", pathOrderID)
+	if entryRef, ok := entry.GetBinaryEntryRef(); ok {
+		uc.retireSkiplist.Insert(entryRef, pathOrderStr)
+	}
+
+	if IsDebugEnabled("hash") {
+		remainingJobs := atomic.LoadUint64(&uc.jobsInFlight)
+		VerboseLog(3, "[HASH-COMPLETE] Entry added to retireSkiplist, remaining jobs: %d", remainingJobs)
+	}
+	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] processCompletedHashJobs: Completed processing completion %d, looping back...\n", completionCount)
 }
 
 // createEntryIovec creates an Iovec for zero-copy writing when possible
@@ -667,86 +659,88 @@ func (uc *UpdateCallback) findEntryByPathOrderID(pathOrderID uint64) BinaryEntry
 
 // retireContiguousEntries processes retire entries in path order ID sequence for writing
 func (uc *UpdateCallback) retireContiguousEntries() error {
-	var readyIoVecs []syscall.Iovec
-	// Keep entry references alive until after WriteIoVecBatch completes.
-	// Iovec.Base points into memory owned by these entries (BEScanEntry.binaryData
-	// or mmap'd binaryEntry). Deleting from pathOrderToEntry before the write
-	// would allow GC to collect BEScanEntry backing memory, causing dangling pointers.
-	var retiredEntries []BinaryEntryInterface
+	readyIoVecs, retiredEntries, err := uc.collectContiguousRetirees()
+	if err != nil {
+		return err
+	}
+	if len(readyIoVecs) == 0 {
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")
+		}
+		return nil
+	}
+	return uc.flushRetireBatch(readyIoVecs, retiredEntries)
+}
 
-	// Retire entries in strict path order ID sequence (no gaps allowed)
+// collectContiguousRetirees walks pathOrderToEntry from nextRetireIndex
+// forward, stopping at the first gap. For each contiguous entry it
+// builds an Iovec and advances nextRetireIndex. Keeps retiredEntries
+// alive so their backing memory (Iovec.Base) outlives the subsequent
+// write.
+func (uc *UpdateCallback) collectContiguousRetirees() ([]syscall.Iovec, []BinaryEntryInterface, error) {
+	var readyIoVecs []syscall.Iovec
+	var retiredEntries []BinaryEntryInterface
 	for {
-		// O(1) lookup by path order ID (no locking - single-threaded)
 		entry := uc.pathOrderToEntry[uc.nextRetireIndex]
 		if entry == nil {
-			break // Gap found - cannot retire until this path order ID arrives
+			return readyIoVecs, retiredEntries, nil
 		}
-
-		// Found next contiguous entry - create Iovec for writing
 		ioVec, err := uc.createEntryIovec(entry)
 		if err != nil {
-			return fmt.Errorf("failed to create Iovec for path order ID %d: %w", uc.nextRetireIndex, err)
+			return nil, nil, fmt.Errorf("failed to create Iovec for path order ID %d: %w", uc.nextRetireIndex, err)
 		}
-
 		if IsDebugEnabled("write") {
 			if path, err := entry.RelativePath(); err == nil {
 				VerboseLog(3, "[UPDATE-RETIRE] Retiring entry %s (pathOrderID=%d)", path, uc.nextRetireIndex)
-				// Remove from skiplist by path (not context)
 				uc.retireSkiplist.Delete(path)
 			}
 		}
-
 		readyIoVecs = append(readyIoVecs, ioVec)
 		retiredEntries = append(retiredEntries, entry)
 		uc.nextRetireIndex++
 	}
+}
 
-	// Write contiguous batch to temp index via single Iovec operation
-	if len(readyIoVecs) > 0 {
-		// Initialize temp index writer if needed
-		if uc.tempIndexWriter == nil {
-			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-RETIRE] Creating new TempIndexWriter for: %s", uc.tempIndexFileName)
-			}
-			writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
-			if err != nil {
-				return fmt.Errorf("failed to create temp index writer: %w", err)
-			}
-			uc.tempIndexWriter = writer
-			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-RETIRE] TempIndexWriter created successfully")
-			}
-		}
-
+// flushRetireBatch lazy-initialises the temp index writer, writes the
+// batch of Iovecs, and then (and only then) frees the retired entries
+// from pathOrderToEntry so GC can reclaim their backing memory.
+func (uc *UpdateCallback) flushRetireBatch(readyIoVecs []syscall.Iovec, retiredEntries []BinaryEntryInterface) error {
+	if uc.tempIndexWriter == nil {
 		if IsDebugEnabled("write") {
-			totalBytes := uint64(0)
-			for _, iovec := range readyIoVecs {
-				totalBytes += iovec.Len
-			}
-			VerboseLog(3, "[UPDATE-RETIRE] Writing batch of %d Iovecs, total %d bytes to temp index", len(readyIoVecs), totalBytes)
+			VerboseLog(3, "[UPDATE-RETIRE] Creating new TempIndexWriter for: %s", uc.tempIndexFileName)
 		}
-
-		if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
-			if IsDebugEnabled("write") {
-				VerboseLog(3, "[UPDATE-RETIRE] Failed to write Iovec batch: %v", err)
-			}
-			return fmt.Errorf("failed to write Iovec batch: %w", err)
+		writer, err := NewTempIndexWriter(uc.dc, uc.tempIndexFileName)
+		if err != nil {
+			return fmt.Errorf("failed to create temp index writer: %w", err)
 		}
-
+		uc.tempIndexWriter = writer
 		if IsDebugEnabled("write") {
-			VerboseLog(3, "[UPDATE-RETIRE] Successfully wrote batch of %d entries to temp index", len(readyIoVecs))
+			VerboseLog(3, "[UPDATE-RETIRE] TempIndexWriter created successfully")
 		}
-
-		// Now safe to release entry references — writev() has completed.
-		// Clean up path order mapping for all retired entries.
-		startIndex := uc.nextRetireIndex - uint64(len(retiredEntries))
-		for i := range retiredEntries {
-			delete(uc.pathOrderToEntry, startIndex+uint64(i))
-		}
-		// retiredEntries goes out of scope here, allowing GC
-	} else if IsDebugEnabled("write") {
-		VerboseLog(3, "[UPDATE-RETIRE] No entries ready for writing this cycle")
 	}
 
+	if IsDebugEnabled("write") {
+		totalBytes := uint64(0)
+		for _, iovec := range readyIoVecs {
+			totalBytes += iovec.Len
+		}
+		VerboseLog(3, "[UPDATE-RETIRE] Writing batch of %d Iovecs, total %d bytes to temp index", len(readyIoVecs), totalBytes)
+	}
+
+	if err := uc.tempIndexWriter.WriteIoVecBatch(readyIoVecs); err != nil {
+		if IsDebugEnabled("write") {
+			VerboseLog(3, "[UPDATE-RETIRE] Failed to write Iovec batch: %v", err)
+		}
+		return fmt.Errorf("failed to write Iovec batch: %w", err)
+	}
+
+	if IsDebugEnabled("write") {
+		VerboseLog(3, "[UPDATE-RETIRE] Successfully wrote batch of %d entries to temp index", len(readyIoVecs))
+	}
+
+	startIndex := uc.nextRetireIndex - uint64(len(retiredEntries))
+	for i := range retiredEntries {
+		delete(uc.pathOrderToEntry, startIndex+uint64(i))
+	}
 	return nil
 }

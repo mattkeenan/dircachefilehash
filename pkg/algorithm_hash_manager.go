@@ -291,7 +291,11 @@ func (ahm *algorithmHashManager) FinishSubmitting() {
 	}
 }
 
-// hashWorker processes hash jobs (same as simpleHashManager)
+// hashWorker processes hash jobs (same as simpleHashManager).
+// See CLAUDE.md "Hash Worker Synchronization" for the shutdown and
+// interruption invariants the body encodes.
+//
+//nolint:gocognit // worker loop with interleaved job consumption, interruption signalling, and shutdown coordination
 func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 	defer ahm.wg.Done()
 
