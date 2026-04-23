@@ -84,17 +84,12 @@ type ApplyRequest struct {
 
 // GroupsRequest selects duplicate-detection options.
 //
-// Paths restricts the result to entries whose repo-relative path falls
-// under one of the given directory prefixes. Each entry must be a
-// forward-slash path terminated with "/"; an empty slice means "whole
-// repo" and is the zero-cost fast path. Exclusive (default true) keeps
-// only groups whose members are all inside the prefixes — i.e. the
-// classic `fdupes -r sub/` shape. Exclusive=false buckets across the
-// whole index and emits any group with ≥1 member under a prefix.
+// Filter narrows which index entries participate — paths, size bounds,
+// mtime bounds. The zero DupeFilter is the whole-repo fast path. See
+// DupeFilter for the precise semantics of each field.
 type GroupsRequest struct {
-	Options   Options  `json:"options"`
-	Paths     []string `json:"paths,omitempty"`
-	Exclusive bool     `json:"exclusive,omitempty"`
+	Options Options    `json:"options"`
+	Filter  DupeFilter `json:"filter,omitzero"`
 }
 
 // UpdateResult summarises what Apply did.

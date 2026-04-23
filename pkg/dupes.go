@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -14,6 +15,20 @@ type DuplicateGroup struct {
 	Hash  string   `json:"hash"`
 	Files []string `json:"files"`
 	Count int      `json:"count"`
+}
+
+// DupeFilter narrows which index entries participate. Zero value is
+// the whole-repo fast path. Paths are forward-slash, trailing "/";
+// Exclusive is ignored when Paths is empty. StartTime is inclusive,
+// EndTime is exclusive. Size bounds use *uint64 so MinSize=0 means
+// "no lower bound" while MaxSize=&0 means "only empty files".
+type DupeFilter struct {
+	Paths     []string  `json:"paths,omitempty"`
+	Exclusive bool      `json:"exclusive,omitempty"`
+	MinSize   *uint64   `json:"min_size,omitempty"`
+	MaxSize   *uint64   `json:"max_size,omitempty"`
+	StartTime time.Time `json:"start_time,omitzero"`
+	EndTime   time.Time `json:"end_time,omitzero"`
 }
 
 // FindDuplicates returns groups of files with identical content hashes
@@ -37,15 +52,12 @@ type DuplicateGroup struct {
 // ForEach stay valid for the call's duration. Scan indices (which do
 // grow under mremap) are never in this skiplist.
 //
-// paths optionally restricts results to entries under one of the given
-// repo-relative directory prefixes (each terminated with "/"). When
-// exclusive is true, entries outside the prefixes are dropped before
-// bucketing — the usual `fdupes -r sub/` shape. When exclusive is
-// false, bucketing spans the whole index and groups with no member in
-// the prefixes are discarded at the end. A nil/empty paths slice is
-// the zero-cost fast path: both checks are skipped, exclusive is
-// ignored, and behaviour matches the unfiltered whole-repo pass.
-func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string, paths []string, exclusive bool) ([]DuplicateGroup, error) {
+// Size and date filters are applied before bucketing so a group that
+// loses members below the ≥2 threshold is never emitted. Path
+// filtering uses the same pre-bucket path only when Exclusive is true;
+// Exclusive=false buckets the whole index and drops whole groups in
+// appendBucketGroups so cross-prefix groups are preserved intact.
+func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// No config loaded (fresh/partial repos): honour --symlinks
 		// directly so the call still succeeds.
@@ -59,8 +71,12 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 		return nil, fmt.Errorf("failed to load merged index: %w", err)
 	}
 
+	pathExclusive := filter.Exclusive && len(filter.Paths) > 0
+	hasSize := filter.MinSize != nil || filter.MaxSize != nil
+	hasTime := !filter.StartTime.IsZero() || !filter.EndTime.IsZero()
+	filterBefore := pathExclusive || hasSize || hasTime
+
 	buckets := make(map[uint64][]*binaryEntry, max(skiplist.Length()/4, 16))
-	filterBefore := exclusive && len(paths) > 0
 
 	var iterErr error
 	skiplist.ForEach(func(entry *binaryEntry, _ string) bool {
@@ -71,8 +87,27 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 		if entry.IsDeleted() {
 			return true
 		}
-		if filterBefore && !pathMatchesPrefix(entry.RelativePath(), paths) {
-			return true
+		if filterBefore {
+			if hasSize {
+				if filter.MinSize != nil && entry.FileSize < *filter.MinSize {
+					return true
+				}
+				if filter.MaxSize != nil && entry.FileSize > *filter.MaxSize {
+					return true
+				}
+			}
+			if hasTime {
+				mtime := timeFromWall(entry.MTimeWall)
+				if !filter.StartTime.IsZero() && mtime.Before(filter.StartTime) {
+					return true
+				}
+				if !filter.EndTime.IsZero() && !mtime.Before(filter.EndTime) {
+					return true
+				}
+			}
+			if pathExclusive && !pathMatchesPrefix(entry.RelativePath(), filter.Paths) {
+				return true
+			}
 		}
 		key := *(*uint64)(unsafe.Pointer(&entry.Hash[0]))
 		buckets[key] = append(buckets[key], entry)
@@ -83,12 +118,12 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	}
 
 	out := make([]DuplicateGroup, 0, len(buckets)/16+1)
-	filterAfter := !exclusive && len(paths) > 0
+	filterAfter := !filter.Exclusive && len(filter.Paths) > 0
 	for _, entries := range buckets {
 		if len(entries) < 2 {
 			continue
 		}
-		appendBucketGroups(entries, &out, paths, filterAfter)
+		appendBucketGroups(entries, &out, filter.Paths, filterAfter)
 	}
 	slices.SortFunc(out, func(a, b DuplicateGroup) int {
 		return strings.Compare(a.Hash, b.Hash)

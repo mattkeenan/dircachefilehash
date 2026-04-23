@@ -5,17 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// dupesExclusive is the --exclusive flag value. Default yes matches
-// `fdupes -r sub/` — only groups fully inside the given paths. Set to
-// no to bucket across the whole index and emit groups with ≥1 member
-// inside the paths.
-var dupesExclusive = yesNoFlag(true)
+const (
+	flagExclusive = "exclusive"
+	flagMinSize   = "min-size"
+	flagMaxSize   = "max-size"
+	flagStartDate = "start-date"
+	flagEndDate   = "end-date"
+	flagTZ        = "tz"
+)
+
+var (
+	dupesExclusive    = yesNoFlag(true)
+	dupesMinSizeStr   string
+	dupesMaxSizeStr   string
+	dupesStartDateStr string
+	dupesEndDateStr   string
+	dupesTZ           string
+)
 
 var dupesCmd = &cobra.Command{
 	Use:   "dupes [paths...]",
@@ -31,7 +44,17 @@ subdirectories. With --exclusive=yes (the default) only groups whose
 members are all inside the given paths are reported, matching the
 behaviour of ` + "`fdupes -r sub/`" + `. With --exclusive=no, bucketing
 spans the whole index and any group with at least one member inside
-the given paths is reported.`,
+the given paths is reported.
+
+File-level filters (--min-size, --max-size, --start-date, --end-date)
+are applied before bucketing, so a group that loses members below the
+≥2 threshold is never emitted. Sizes take binary suffixes (1K=1024,
+1M=1024K, 1G, 1T). Dates accept partial ISO-8601 (YYYY, YYYY-MM,
+YYYY-MM-DD, YYYY-MM-DDTHH[:MM[:SS]]) optionally suffixed with Z or
+±hh[:mm]. --start-date is inclusive, --end-date is exclusive, so
+--end-date 2027 includes all of 2026. Bare date-times are anchored in
+--tz (an IANA zone) if set, otherwise the local zone (which honours
+the TZ environment variable).`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -50,6 +73,11 @@ the given paths is reported.`,
 			return err
 		}
 
+		filter, err := buildDupeFilter(cmd, paths)
+		if err != nil {
+			return err
+		}
+
 		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
@@ -58,9 +86,8 @@ the given paths is reported.`,
 		defer func() { _ = repo.Close() }()
 
 		duplicates, err := repo.Groups(ctx, dcfh.GroupsRequest{
-			Options:   buildOptions(),
-			Paths:     paths,
-			Exclusive: bool(dupesExclusive),
+			Options: buildOptions(),
+			Filter:  filter,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to find duplicates: %w", err)
@@ -130,9 +157,73 @@ the given paths is reported.`,
 }
 
 func init() {
-	dupesCmd.Flags().Var(&dupesExclusive, "exclusive",
+	dupesCmd.Flags().Var(&dupesExclusive, flagExclusive,
 		"restrict results to groups fully inside the given paths (yes|no, default yes)")
+	dupesCmd.Flags().StringVar(&dupesMinSizeStr, flagMinSize, "",
+		"minimum file size (inclusive); binary suffixes K/M/G/T (e.g. 1K=1024)")
+	dupesCmd.Flags().StringVar(&dupesMaxSizeStr, flagMaxSize, "",
+		"maximum file size (inclusive); binary suffixes K/M/G/T")
+	dupesCmd.Flags().StringVar(&dupesStartDateStr, flagStartDate, "",
+		"minimum mtime (inclusive); partial ISO-8601, e.g. 2026 or 2026-01-01T00")
+	dupesCmd.Flags().StringVar(&dupesEndDateStr, flagEndDate, "",
+		"maximum mtime (exclusive); partial ISO-8601")
+	dupesCmd.Flags().StringVar(&dupesTZ, flagTZ, "",
+		"IANA timezone for bare date-times (default: $TZ or system local)")
 	rootCmd.AddCommand(dupesCmd)
+}
+
+func buildDupeFilter(cmd *cobra.Command, paths []string) (dcfh.DupeFilter, error) {
+	f := dcfh.DupeFilter{
+		Paths:     paths,
+		Exclusive: bool(dupesExclusive),
+	}
+
+	if cmd.Flags().Changed(flagMinSize) {
+		n, err := parseSizeBound(dupesMinSizeStr)
+		if err != nil {
+			return f, fmt.Errorf("--%s: %w", flagMinSize, err)
+		}
+		f.MinSize = &n
+	}
+	if cmd.Flags().Changed(flagMaxSize) {
+		n, err := parseSizeBound(dupesMaxSizeStr)
+		if err != nil {
+			return f, fmt.Errorf("--%s: %w", flagMaxSize, err)
+		}
+		f.MaxSize = &n
+	}
+
+	var zone *time.Location
+	if cmd.Flags().Changed(flagStartDate) || cmd.Flags().Changed(flagEndDate) {
+		z, err := resolveZone(dupesTZ)
+		if err != nil {
+			return f, err
+		}
+		zone = z
+	}
+	if cmd.Flags().Changed(flagStartDate) {
+		t, err := parsePartialDateTime(dupesStartDateStr, zone)
+		if err != nil {
+			return f, fmt.Errorf("--%s: %w", flagStartDate, err)
+		}
+		f.StartTime = t
+	}
+	if cmd.Flags().Changed(flagEndDate) {
+		t, err := parsePartialDateTime(dupesEndDateStr, zone)
+		if err != nil {
+			return f, fmt.Errorf("--%s: %w", flagEndDate, err)
+		}
+		f.EndTime = t
+	}
+
+	if f.MinSize != nil && f.MaxSize != nil && *f.MinSize > *f.MaxSize {
+		return f, fmt.Errorf("--min-size (%d) exceeds --max-size (%d)", *f.MinSize, *f.MaxSize)
+	}
+	if !f.StartTime.IsZero() && !f.EndTime.IsZero() && !f.StartTime.Before(f.EndTime) {
+		return f, fmt.Errorf("--start-date (%s) is not before --end-date (%s)",
+			f.StartTime.Format(time.RFC3339), f.EndTime.Format(time.RFC3339))
+	}
+	return f, nil
 }
 
 // yesNoFlag is a cobra/pflag bool-shaped flag that accepts only "yes"
