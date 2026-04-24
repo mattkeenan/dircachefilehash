@@ -13,21 +13,23 @@ import (
 )
 
 const (
-	flagExclusive = "exclusive"
-	flagMinSize   = "min-size"
-	flagMaxSize   = "max-size"
-	flagStartDate = "start-date"
-	flagEndDate   = "end-date"
-	flagTZ        = "tz"
+	flagExclusive       = "exclusive"
+	flagMinSize         = "min-size"
+	flagMaxSize         = "max-size"
+	flagStartDate       = "start-date"
+	flagEndDate         = "end-date"
+	flagTZ              = "tz"
+	flagIgnoreHardlinks = "ignore-hardlinks"
 )
 
 var (
-	dupesExclusive    = yesNoFlag(true)
-	dupesMinSizeStr   string
-	dupesMaxSizeStr   string
-	dupesStartDateStr string
-	dupesEndDateStr   string
-	dupesTZ           string
+	dupesExclusive       = yesNoFlag(true)
+	dupesMinSizeStr      string
+	dupesMaxSizeStr      string
+	dupesStartDateStr    string
+	dupesEndDateStr      string
+	dupesTZ              string
+	dupesIgnoreHardlinks bool
 )
 
 var dupesCmd = &cobra.Command{
@@ -54,7 +56,13 @@ YYYY-MM-DD, YYYY-MM-DDTHH[:MM[:SS]]) optionally suffixed with Z or
 ±hh[:mm]. --start-date is inclusive, --end-date is exclusive, so
 --end-date 2027 includes all of 2026. Bare date-times are anchored in
 --tz (an IANA zone) if set, otherwise the local zone (which honours
-the TZ environment variable).`,
+the TZ environment variable).
+
+With -H / --ignore-hardlinks, entries that refer to the same underlying
+inode (hardlinks to one on-disk file) collapse to a single representative
+path inside each group. A group whose members are all hardlinks to one
+inode therefore disappears — handy when you only care about content
+duplicates that actually occupy extra storage.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -169,13 +177,16 @@ func init() {
 		"maximum mtime (exclusive); partial ISO-8601")
 	dupesCmd.Flags().StringVar(&dupesTZ, flagTZ, "",
 		"IANA timezone for bare date-times (default: $TZ or system local)")
+	dupesCmd.Flags().BoolVarP(&dupesIgnoreHardlinks, flagIgnoreHardlinks, "H", false,
+		"collapse hardlinks to the same inode to one entry per group")
 	rootCmd.AddCommand(dupesCmd)
 }
 
 func buildDupeFilter(cmd *cobra.Command, paths []string) (dcfh.DupeFilter, error) {
 	f := dcfh.DupeFilter{
-		Paths:     paths,
-		Exclusive: bool(dupesExclusive),
+		Paths:           paths,
+		Exclusive:       bool(dupesExclusive),
+		IgnoreHardlinks: dupesIgnoreHardlinks,
 	}
 
 	if cmd.Flags().Changed(flagMinSize) {

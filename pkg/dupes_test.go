@@ -214,7 +214,11 @@ type sizedFile struct {
 	mtime   time.Time
 }
 
-func setupDupesRepoSized(t *testing.T, files map[string]sizedFile) *DirectoryCache {
+// setupDupesRepoSized seeds a repo with the given fixture files, plus
+// optional extraLinks maps: each linkPath → targetPath triggers an
+// os.Link after files are written, before the initial Update, so the
+// scanner walks both names. targetPath must be in files.
+func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ...map[string]string) *DirectoryCache {
 	t.Helper()
 	root := t.TempDir()
 	for rel, spec := range files {
@@ -233,6 +237,18 @@ func setupDupesRepoSized(t *testing.T, files map[string]sizedFile) *DirectoryCac
 		if !spec.mtime.IsZero() {
 			if err := os.Chtimes(full, spec.mtime, spec.mtime); err != nil {
 				t.Fatalf("chtimes %s: %v", full, err)
+			}
+		}
+	}
+	for _, linkMap := range extraLinks {
+		for linkRel, targetRel := range linkMap {
+			linkFull := filepath.Join(root, linkRel)
+			targetFull := filepath.Join(root, targetRel)
+			if err := os.MkdirAll(filepath.Dir(linkFull), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", filepath.Dir(linkFull), err)
+			}
+			if err := os.Link(targetFull, linkFull); err != nil {
+				t.Fatalf("link %s -> %s: %v", linkRel, targetRel, err)
 			}
 		}
 	}
@@ -457,6 +473,105 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Errorf("want 2 files, got %v", got)
+	}
+}
+
+// setupDupesRepoWithLinks seeds a repo like setupDupesRepo but also
+// hardlinks each linkPath → targetPath (targetPath must be in files),
+// so both land in the index sharing (Dev, Ino).
+func setupDupesRepoWithLinks(t *testing.T, files map[string]string, links map[string]string) *DirectoryCache {
+	t.Helper()
+	sized := make(map[string]sizedFile, len(files))
+	for rel, content := range files {
+		sized[rel] = sizedFile{content: content}
+	}
+	return setupDupesRepoSized(t, sized, links)
+}
+
+func TestFindDuplicates_IgnoreHardlinks_PureHardlinkGroup(t *testing.T) {
+	// Two entries, same content, same inode (hard linked).
+	// Without the flag: one group of 2. With the flag: no group.
+	dc := setupDupesRepoWithLinks(t,
+		map[string]string{"a.txt": "shared"},
+		map[string]string{"b.txt": "a.txt"},
+	)
+	defer func() { _ = dc.Close() }()
+
+	off, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (off): %v", err)
+	}
+	if len(off) != 1 || !slices.Equal(off[0].Files, []string{"a.txt", "b.txt"}) {
+		t.Fatalf("flag off: want [a.txt b.txt], got %v", groupFiles(off))
+	}
+
+	on, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (on): %v", err)
+	}
+	if len(on) != 0 {
+		t.Errorf("flag on: want no groups, got %v", groupFiles(on))
+	}
+}
+
+func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
+	// Three entries, same content: a.txt and b.txt hard linked;
+	// c.txt is an independent copy. Flag off: group of 3.
+	// Flag on: group of 2 (representative hardlink + c.txt).
+	dc := setupDupesRepoWithLinks(t,
+		map[string]string{
+			"a.txt": "shared",
+			"c.txt": "shared",
+		},
+		map[string]string{"b.txt": "a.txt"},
+	)
+	defer func() { _ = dc.Close() }()
+
+	off, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (off): %v", err)
+	}
+	if len(off) != 1 || !slices.Equal(off[0].Files, []string{"a.txt", "b.txt", "c.txt"}) {
+		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
+	}
+
+	on, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (on): %v", err)
+	}
+	// The hardlink pair collapses to its first path-sorted member (a.txt),
+	// so the surviving group is [a.txt, c.txt].
+	if len(on) != 1 || !slices.Equal(on[0].Files, []string{"a.txt", "c.txt"}) {
+		t.Fatalf("flag on: want [a.txt c.txt], got %v", groupFiles(on))
+	}
+}
+
+func TestFindDuplicates_IgnoreHardlinks_AllHardlinked(t *testing.T) {
+	// Three paths, all hard linked to the same inode.
+	// Flag on: group disappears entirely.
+	dc := setupDupesRepoWithLinks(t,
+		map[string]string{"a.txt": "shared"},
+		map[string]string{
+			"b.txt": "a.txt",
+			"c.txt": "a.txt",
+		},
+	)
+	defer func() { _ = dc.Close() }()
+
+	off, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (off): %v", err)
+	}
+	if len(off) != 1 || !slices.Equal(off[0].Files, []string{"a.txt", "b.txt", "c.txt"}) {
+		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
+	}
+
+	on, err := dc.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	if err != nil {
+		t.Fatalf("FindDuplicates (on): %v", err)
+	}
+	if len(on) != 0 {
+		t.Errorf("flag on: want no groups, got %v", groupFiles(on))
 	}
 }
 

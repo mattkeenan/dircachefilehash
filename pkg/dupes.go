@@ -22,13 +22,17 @@ type DuplicateGroup struct {
 // Exclusive is ignored when Paths is empty. StartTime is inclusive,
 // EndTime is exclusive. Size bounds use *uint64 so MinSize=0 means
 // "no lower bound" while MaxSize=&0 means "only empty files".
+// IgnoreHardlinks, when true, collapses entries sharing the same
+// (Dev, Ino) pair inside a hash-group to a single representative path,
+// so hardlinks to one inode are not reported as duplicates.
 type DupeFilter struct {
-	Paths     []string  `json:"paths,omitempty"`
-	Exclusive bool      `json:"exclusive,omitempty"`
-	MinSize   *uint64   `json:"min_size,omitempty"`
-	MaxSize   *uint64   `json:"max_size,omitempty"`
-	StartTime time.Time `json:"start_time,omitzero"`
-	EndTime   time.Time `json:"end_time,omitzero"`
+	Paths           []string  `json:"paths,omitempty"`
+	Exclusive       bool      `json:"exclusive,omitempty"`
+	MinSize         *uint64   `json:"min_size,omitempty"`
+	MaxSize         *uint64   `json:"max_size,omitempty"`
+	StartTime       time.Time `json:"start_time,omitzero"`
+	EndTime         time.Time `json:"end_time,omitzero"`
+	IgnoreHardlinks bool      `json:"ignore_hardlinks,omitempty"`
 }
 
 // FindDuplicates returns groups of files with identical content hashes
@@ -57,6 +61,11 @@ type DupeFilter struct {
 // filtering uses the same pre-bucket path only when Exclusive is true;
 // Exclusive=false buckets the whole index and drops whole groups in
 // appendBucketGroups so cross-prefix groups are preserved intact.
+//
+// IgnoreHardlinks is applied after hash-bucketing in appendBucketGroups:
+// entries sharing (Dev, Ino) within a full-hash subgroup collapse to
+// the first (path-sorted) occurrence, and the ≥2 threshold is re-checked
+// so a group of pure hardlink siblings disappears.
 func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
 		// No config loaded (fresh/partial repos): honour --symlinks
@@ -94,12 +103,15 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	}
 
 	out := make([]DuplicateGroup, 0, len(buckets)/16+1)
-	filterAfter := !filter.Exclusive && len(filter.Paths) > 0
+	post := postBucketCtx{
+		filter:      &filter,
+		filterAfter: !filter.Exclusive && len(filter.Paths) > 0,
+	}
 	for _, entries := range buckets {
 		if len(entries) < 2 {
 			continue
 		}
-		appendBucketGroups(entries, &out, filter.Paths, filterAfter)
+		appendBucketGroups(entries, &out, post)
 	}
 	slices.SortFunc(out, func(a, b DuplicateGroup) int {
 		return strings.Compare(a.Hash, b.Hash)
@@ -154,28 +166,35 @@ func pathMatchesPrefix(rel string, prefixes []string) bool {
 	return false
 }
 
+// postBucketCtx carries the inputs appendBucketGroups needs to decide
+// whether (and in what shape) to emit a hash-matched group. New
+// post-bucket filters should add a field here rather than grow the
+// appendBucketGroups signature; precomputed derivations (like
+// filterAfter) live alongside the filter pointer.
+type postBucketCtx struct {
+	filter      *DupeFilter
+	filterAfter bool // !filter.Exclusive && len(filter.Paths) > 0
+}
+
 // appendBucketGroups splits a prefix-collision bucket into per-full-hash
 // subgroups, dropping singletons, and appends any group of ≥2 files to
 // *out. Input is already in skiplist (path) order, so emitted groups
 // have path-sorted Files slices for free — no per-group sort.
 //
-// When filterAfter is true, groups with no member matching any of the
-// prefixes are dropped (non-exclusive mode). When filterAfter is false
-// prefixes is unused.
-func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup, prefixes []string, filterAfter bool) {
+// Post-bucket filters live in emitHashGroup, in two flavours:
+//   - group transformers (may shrink a group): e.g. IgnoreHardlinks via
+//     dedupByInode. Applied before the ≥2 threshold check.
+//   - group predicates (keep-or-drop): e.g. the ctx.filterAfter path
+//     check for non-exclusive mode. Applied after the threshold check.
+func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup, ctx postBucketCtx) {
 	// Pair-fast-path: two entries sharing a uint64 prefix are almost
 	// always a real duplicate. Compare full hashes to be sure.
 	if len(entries) == 2 {
-		if sameHash(entries[0], entries[1]) {
-			a, b := entries[0].RelativePath(), entries[1].RelativePath()
-			if filterAfter && !pathMatchesPrefix(a, prefixes) && !pathMatchesPrefix(b, prefixes) {
-				return
-			}
-			*out = append(*out, DuplicateGroup{
-				Hash:  entries[0].HashString(),
-				Files: []string{a, b},
-				Count: 2,
-			})
+		if !sameHash(entries[0], entries[1]) {
+			return
+		}
+		if g, ok := emitHashGroup(entries, ctx); ok {
+			*out = append(*out, g)
 		}
 		return
 	}
@@ -187,31 +206,67 @@ func appendBucketGroups(entries []*binaryEntry, out *[]DuplicateGroup, prefixes 
 		sub[e.Hash] = append(sub[e.Hash], e)
 	}
 	for _, group := range sub {
-		if len(group) < 2 {
+		if g, ok := emitHashGroup(group, ctx); ok {
+			*out = append(*out, g)
+		}
+	}
+}
+
+// emitHashGroup applies post-bucket filters to a same-hash group and
+// returns the DuplicateGroup to emit, or ok=false to skip. Callers
+// must guarantee every entry in group shares the same full hash.
+func emitHashGroup(group []*binaryEntry, ctx postBucketCtx) (DuplicateGroup, bool) {
+	if ctx.filter.IgnoreHardlinks {
+		group = dedupByInode(group)
+	}
+	if len(group) < 2 {
+		return DuplicateGroup{}, false
+	}
+	files := make([]string, len(group))
+	for i, e := range group {
+		files[i] = e.RelativePath()
+	}
+	if ctx.filterAfter && !anyPathMatchesPrefix(files, ctx.filter.Paths) {
+		return DuplicateGroup{}, false
+	}
+	return DuplicateGroup{
+		Hash:  group[0].HashString(),
+		Files: files,
+		Count: len(files),
+	}, true
+}
+
+// anyPathMatchesPrefix reports whether any file falls under one of the
+// given directory prefixes.
+func anyPathMatchesPrefix(files []string, prefixes []string) bool {
+	for _, f := range files {
+		if pathMatchesPrefix(f, prefixes) {
+			return true
+		}
+	}
+	return false
+}
+
+// dedupByInode collapses entries sharing (Dev, Ino) to the first
+// occurrence in the input slice. Input is already path-sorted (skiplist
+// iteration order) so the kept representative is the lowest path per
+// inode. Returns the input slice compacted in place when safe, else a
+// fresh slice — either way the caller must use the returned slice.
+func dedupByInode(entries []*binaryEntry) []*binaryEntry {
+	if len(entries) < 2 {
+		return entries
+	}
+	seen := make(map[[2]uint32]struct{}, len(entries))
+	out := entries[:0]
+	for _, e := range entries {
+		key := [2]uint32{e.Dev, e.Ino}
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		files := make([]string, len(group))
-		for i, e := range group {
-			files[i] = e.RelativePath()
-		}
-		if filterAfter {
-			match := false
-			for _, f := range files {
-				if pathMatchesPrefix(f, prefixes) {
-					match = true
-					break
-				}
-			}
-			if !match {
-				continue
-			}
-		}
-		*out = append(*out, DuplicateGroup{
-			Hash:  group[0].HashString(),
-			Files: files,
-			Count: len(files),
-		})
+		seen[key] = struct{}{}
+		out = append(out, e)
 	}
+	return out
 }
 
 // sameHash reports whether two entries carry identical content hashes.
