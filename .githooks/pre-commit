@@ -1,25 +1,47 @@
 #!/bin/bash
-# Pre-commit hook: format, fix, lint, and test Go code
+# Pre-commit hook: format, fix, lint, and test Go code.
+#
+# Default: checks only staged Go files (fast commit-time gate).
+# Pass --all or set DCFH_HOOK_ALL=1 to check every tracked Go file —
+# drops the golangci-lint --new filter, walks the whole repo for
+# gofmt/gopls, and leaves formatting fixes as unstaged working-tree
+# changes rather than re-staging them.
 
 set -e
 
-echo "Running pre-commit checks..."
+MODE_ALL="${DCFH_HOOK_ALL:-0}"
+for arg in "$@"; do
+    if [ "$arg" = "--all" ]; then
+        MODE_ALL=1
+    fi
+done
 
-# Get list of staged Go files (only additions, copies, modifications)
-STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
-if [ -z "$STAGED_GO_FILES" ]; then
-    echo "No staged Go files, skipping checks."
-    exit 0
+if [ "$MODE_ALL" = "1" ]; then
+    echo "Running pre-commit checks (--all: every tracked Go file)..."
+    STAGED_GO_FILES=$(git ls-files '*.go')
+    if [ -z "$STAGED_GO_FILES" ]; then
+        echo "No tracked Go files, nothing to check."
+        exit 0
+    fi
+else
+    echo "Running pre-commit checks..."
+    STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+    if [ -z "$STAGED_GO_FILES" ]; then
+        echo "No staged Go files, skipping checks."
+        exit 0
+    fi
 fi
 
-# Run go fmt on staged files (auto-fix and re-stage)
+# Run go fmt on the selected files (auto-fix; re-stage only in staged mode)
 echo "Running go fmt..."
 UNFORMATTED=$(echo "$STAGED_GO_FILES" | xargs gofmt -l 2>/dev/null)
 if [ -n "$UNFORMATTED" ]; then
     echo "Formatting:"
     echo "$UNFORMATTED"
     echo "$UNFORMATTED" | xargs gofmt -w
-    echo "$UNFORMATTED" | while read -r f; do git add "$f" 2>/dev/null; done
+    if [ "$MODE_ALL" != "1" ]; then
+        echo "$UNFORMATTED" | while read -r f; do git add "$f" 2>/dev/null; done
+    fi
 fi
 
 # Run go fix
@@ -28,12 +50,15 @@ if ! go fix ./... 2>&1; then
     echo "ERROR: go fix failed"
     exit 1
 fi
-# Re-stage any staged files that were modified by go fix
-for f in $STAGED_GO_FILES; do
-    if ! git diff --quiet -- "$f" 2>/dev/null; then
-        git add "$f"
-    fi
-done
+# Re-stage any staged files that go fix modified (staged mode only —
+# in --all mode, the loop iterates the whole tree and would be noisy).
+if [ "$MODE_ALL" != "1" ]; then
+    for f in $STAGED_GO_FILES; do
+        if ! git diff --quiet -- "$f" 2>/dev/null; then
+            git add "$f"
+        fi
+    done
+fi
 
 # Run gopls diagnostics on staged files (error severity only).
 # gopls check is invoked once with all files to avoid spawning per-file processes.
@@ -55,10 +80,15 @@ if ! go vet -unsafeptr=false ./...; then
     exit 1
 fi
 
-# Run golangci-lint (--new: only flag issues in changed code, not legacy).
+# Run golangci-lint. In staged mode, --new only flags issues in changed
+# code (legacy stays silent). In --all mode, audit the whole codebase.
 if command -v golangci-lint &>/dev/null; then
     echo "Running golangci-lint..."
-    if ! golangci-lint run --new ./...; then
+    LINT_ARGS=(run ./...)
+    if [ "$MODE_ALL" != "1" ]; then
+        LINT_ARGS=(run --new ./...)
+    fi
+    if ! golangci-lint "${LINT_ARGS[@]}"; then
         echo "ERROR: golangci-lint found issues"
         exit 1
     fi
