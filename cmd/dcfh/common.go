@@ -6,6 +6,7 @@ import (
 	"os"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
+	"github.com/mattkeenan/dircachefilehash/pkg/fsdedupe"
 )
 
 // Output structures for JSON
@@ -62,6 +63,7 @@ type DupesOutput struct {
 	Repository      string                `json:"repository"`
 	DuplicateGroups []dcfh.DuplicateGroup `json:"duplicate_groups"`
 	Summary         DuplicateSummary      `json:"summary"`
+	DedupeResult    *fsdedupe.Result      `json:"dedupe_result,omitempty"`
 }
 
 type DuplicateSummary struct {

@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
+	"github.com/mattkeenan/dircachefilehash/pkg/fsdedupe"
 )
 
 func TestNormaliseDupePaths(t *testing.T) {
@@ -67,6 +72,141 @@ func TestNormaliseDupePaths(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// resetDupesFlags resets the dupes-scoped globals the tests touch.
+// Keeps the resetFlags() helper in dcfh_test.go focused on the
+// root-level flags.
+func resetDupesFlags() {
+	dupesExclusive = yesNoFlag(true)
+	dupesMinSizeStr = ""
+	dupesMaxSizeStr = ""
+	dupesStartDateStr = ""
+	dupesEndDateStr = ""
+	dupesTZ = ""
+	dupesIgnoreHardlinks = false
+	dupesFSDedupe = false
+}
+
+func TestBuildDupeFilter_FSDedupeForcesIgnoreHardlinks(t *testing.T) {
+	resetDupesFlags()
+	dupesFSDedupe = true
+	// IgnoreHardlinks is left false; the --fs-dedupe branch must
+	// force it on regardless of how -H was set on the command line.
+	f, err := buildDupeFilter(dupesCmd, nil)
+	if err != nil {
+		t.Fatalf("buildDupeFilter: %v", err)
+	}
+	if !f.IgnoreHardlinks {
+		t.Error("--fs-dedupe did not force IgnoreHardlinks=true")
+	}
+	if f.MinSize == nil || *f.MinSize != dedupeDefaultMinSize {
+		t.Errorf("MinSize=%v; want default %d when --fs-dedupe and --min-size not set",
+			f.MinSize, dedupeDefaultMinSize)
+	}
+}
+
+func TestBuildDupeFilter_FSDedupeRespectsUserMinSize(t *testing.T) {
+	// Reset, then simulate `--fs-dedupe --min-size 8K`. A user who
+	// explicitly sets --min-size wins over the dedupe default.
+	resetDupesFlags()
+	dupesFSDedupe = true
+	dupesMinSizeStr = "8K"
+	// Register the transient flag value as "Changed" by parsing via
+	// the same cobra flagset a real invocation would use.
+	cmd := dupesCmd
+	if err := cmd.Flags().Set(flagMinSize, "8K"); err != nil {
+		t.Fatalf("Flags.Set: %v", err)
+	}
+	defer func() {
+		// Clean up the Changed flag state so later tests aren't polluted.
+		_ = cmd.Flags().Set(flagMinSize, "")
+		cmd.Flags().Lookup(flagMinSize).Changed = false
+	}()
+
+	f, err := buildDupeFilter(cmd, nil)
+	if err != nil {
+		t.Fatalf("buildDupeFilter: %v", err)
+	}
+	if f.MinSize == nil || *f.MinSize != 8192 {
+		t.Errorf("MinSize=%v; want 8192 (user-provided)", f.MinSize)
+	}
+}
+
+func TestBuildDupeFilter_NoFSDedupe_NoImplicitMinSize(t *testing.T) {
+	// Regression gate: without --fs-dedupe, MinSize must remain nil
+	// when --min-size is absent, so non-dedupe users keep today's
+	// behaviour (dupes reports every group regardless of size).
+	resetDupesFlags()
+	f, err := buildDupeFilter(dupesCmd, nil)
+	if err != nil {
+		t.Fatalf("buildDupeFilter: %v", err)
+	}
+	if f.MinSize != nil {
+		t.Errorf("MinSize=%v; want nil when --fs-dedupe is off", f.MinSize)
+	}
+	if f.IgnoreHardlinks {
+		t.Error("IgnoreHardlinks=true; want false when -H and --fs-dedupe are both off")
+	}
+}
+
+func TestRunDedupe_StubReceivesGroups(t *testing.T) {
+	// Verifies the cmd-layer dispatch: the dupes groups reach
+	// runFSDedupe with correct shape, and its Result flows back
+	// without alteration.
+	orig := runFSDedupe
+	defer func() { runFSDedupe = orig }()
+
+	var captured []fsdedupe.Group
+	var capturedOpts fsdedupe.Options
+	runFSDedupe = func(_ context.Context, groups []fsdedupe.Group, opts fsdedupe.Options) (*fsdedupe.Result, error) {
+		captured = groups
+		capturedOpts = opts
+		return &fsdedupe.Result{
+			Groups: []fsdedupe.GroupResult{{
+				Hash:    "h1",
+				Outcome: fsdedupe.OutcomeOK,
+			}},
+			TotalReclaimed: 1024,
+		}, nil
+	}
+
+	res, err := runDedupe(context.Background(), "/repo",
+		[]dcfh.DuplicateGroup{{Hash: "h1", Files: []string{"a", "b"}, Count: 2}},
+	)
+	if err != nil {
+		t.Fatalf("runDedupe: %v", err)
+	}
+	if res == nil || res.TotalReclaimed != 1024 {
+		t.Errorf("stub Result not returned: %+v", res)
+	}
+	if len(captured) != 1 || captured[0].Hash != "h1" || len(captured[0].Files) != 2 {
+		t.Errorf("captured groups wrong shape: %+v", captured)
+	}
+	if capturedOpts.RepoRoot != "/repo" {
+		t.Errorf("captured opts.RepoRoot=%q; want /repo", capturedOpts.RepoRoot)
+	}
+	if capturedOpts.Logf == nil {
+		t.Error("captured opts.Logf was nil; want stderr logger")
+	}
+}
+
+func TestRunDedupe_UnsupportedPlatformErrorSurfaces(t *testing.T) {
+	// Simulates the non-Linux / disabled-build path: stub returns
+	// ErrUnsupported and runDedupe must pass it back unchanged so
+	// the caller can exit non-zero.
+	orig := runFSDedupe
+	defer func() { runFSDedupe = orig }()
+	runFSDedupe = func(context.Context, []fsdedupe.Group, fsdedupe.Options) (*fsdedupe.Result, error) {
+		return nil, fsdedupe.ErrUnsupported
+	}
+	res, err := runDedupe(context.Background(), "/repo", nil)
+	if !errors.Is(err, fsdedupe.ErrUnsupported) {
+		t.Errorf("err=%v; want ErrUnsupported", err)
+	}
+	if res != nil {
+		t.Errorf("res=%+v; want nil on unsupported", res)
 	}
 }
 
