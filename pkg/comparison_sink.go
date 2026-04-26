@@ -2,190 +2,118 @@ package dircachefilehash
 
 import "fmt"
 
-// updateComparisonSink implements ComparisonSink for the update pipeline.
-// It classifies comparison results, determines which entries need hashing,
-// and routes PipelineEntry values to either the hash channel (needs hash)
-// or the bypass channel (no hash needed).
+// scanWritePolicy selects the inclusion rules for scanWriteSink. The two
+// callers — `dcfh update` (main.idx) and the cache-refresh half of
+// `dcfh status` / fs-scan (cache.idx) — share most pipeline plumbing and
+// differ only in what to write per case:
 //
-// This replaces the monolithic UpdateCallback.OnComparison method,
-// separating classification from hash coordination and I/O.
-type updateComparisonSink struct {
-	dc       *DirectoryCache
-	hashCh   chan<- *PipelineEntry
-	bypassCh chan<- *PipelineEntry
-	seqNum   uint64
+//	scanWriteCanonical → write every on-disk entry, no deletions.
+//	                     Used for main.idx; the file IS the canonical
+//	                     view of all known files with their hashes.
+//
+//	scanWriteDelta     → write only changes, keep deletions.
+//	                     Used for cache.idx; the file IS the diff vs main.
+type scanWritePolicy int
+
+const (
+	scanWriteCanonical scanWritePolicy = iota
+	scanWriteDelta
+)
+
+// scanWriteSink is the unified pipeline-internal ComparisonSink. It
+// classifies comparison results, decides hash-vs-bypass routing, and
+// emits PipelineEntry values; the writer stage downstream decides which
+// file to flush them to.
+//
+// hashLookup is an optional pre-loaded skiplist consulted to skip
+// re-hashing when metadata indicates a change but a previous run already
+// hashed the new bytes (cache.idx serves as that lookup for the Delta
+// caller). Pass nil for the Canonical case.
+type scanWriteSink struct {
+	hashLookup *skiplistWrapper
+	policy     scanWritePolicy
+	hashCh     chan<- *PipelineEntry
+	bypassCh   chan<- *PipelineEntry
+	seqNum     uint64
 }
 
-// newUpdateComparisonSink creates a sink that routes entries into the update pipeline.
-// The caller must close hashCh and bypassCh only after Close() returns.
-func newUpdateComparisonSink(dc *DirectoryCache, hashCh, bypassCh chan<- *PipelineEntry) *updateComparisonSink {
-	return &updateComparisonSink{
-		dc:       dc,
-		hashCh:   hashCh,
-		bypassCh: bypassCh,
-		seqNum:   0,
+// newScanWriteSink creates the unified update/cache-refresh sink. The
+// caller must close hashCh and bypassCh only after Close() returns.
+func newScanWriteSink(hashLookup *skiplistWrapper, policy scanWritePolicy, hashCh, bypassCh chan<- *PipelineEntry) *scanWriteSink {
+	return &scanWriteSink{
+		hashLookup: hashLookup,
+		policy:     policy,
+		hashCh:     hashCh,
+		bypassCh:   bypassCh,
 	}
 }
 
 // OnMatch handles entries present in both the existing index and the scan.
 // No shouldIndex check needed — the scanner already filters by symlink mode
 // and ignore patterns before entries reach this sink.
-func (s *updateComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
-	// Skip already-deleted entries
+func (s *scanWriteSink) OnMatch(left, right BinaryEntryInterface) error {
 	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
 		return nil
 	}
 
-	if needsHash(left, right) {
-		// File changed — hash the scan entry, then write it
-		s.emit(right, OpModified, true)
-	} else {
-		// File unchanged — use existing entry (already has hash)
-		s.emit(left, OpUnchanged, false)
+	if !needsHash(left, right) {
+		if s.policy == scanWriteCanonical {
+			s.emit(left, OpUnchanged, false)
+		}
+		return nil
 	}
-	return nil
+	return s.emitHashed(right, OpModified)
 }
 
 // OnLeftOnly handles entries only in the existing index (deleted from disk).
-// For main.idx updates, deleted files are simply omitted (not written).
-func (s *updateComparisonSink) OnLeftOnly(_ BinaryEntryInterface) error {
-	// Deleted files are excluded from main.idx — do not emit
-	return nil
-}
-
-// OnRightOnly handles entries only in the scan (new files).
-// No shouldIndex check needed — the scanner already filters by symlink mode
-// and ignore patterns before entries reach this sink.
-func (s *updateComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
-	// New file — needs hashing
-	s.emit(entry, OpNewFile, true)
-	return nil
-}
-
-// Close signals that no more entries will arrive. Closes both output channels.
-func (s *updateComparisonSink) Close() error {
-	close(s.hashCh)
-	close(s.bypassCh)
-	return nil
-}
-
-// emit creates a PipelineEntry and sends it to the appropriate channel.
-func (s *updateComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
-	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
-}
-
-// cacheRefreshSink is a pipeline-internal ComparisonSink whose role is to
-// populate cache.idx as a side-effect of an fs-scan. It compares main.idx
-// (left) vs filesystem (right), using a pre-loaded merged cache as a hash
-// lookup to avoid redundant hashing.
-//
-// Check order for each file on disk:
-//  1. Check main — if metadata matches, file unchanged, skip entirely
-//  2. Check merged cache — if metadata matches, use cached hash (no re-hash)
-//  3. Neither matches — submit for hashing
-//
-// Only entries that differ from main are written to the new cache (sparse
-// delta). Diff classification lives in diffComparisonSink; this sink
-// exists purely so that fs-scan banks its hashing work for future runs.
-type cacheRefreshSink struct {
-	dc            *DirectoryCache
-	cacheSkiplist *skiplistWrapper // pre-loaded merged cache for hash lookups
-	hashCh        chan<- *PipelineEntry
-	bypassCh      chan<- *PipelineEntry
-	seqNum        uint64
-}
-
-// newCacheRefreshSink creates a sink that routes entries into the status pipeline.
-// cacheSkiplist is the pre-loaded merge of all existing cache files, used to avoid
-// re-hashing files whose metadata hasn't changed since the last status run.
-func newCacheRefreshSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper, hashCh, bypassCh chan<- *PipelineEntry) *cacheRefreshSink {
-	return &cacheRefreshSink{
-		dc:            dc,
-		cacheSkiplist: cacheSkiplist,
-		hashCh:        hashCh,
-		bypassCh:      bypassCh,
-		seqNum:        0,
-	}
-}
-
-// OnMatch handles entries present in both main.idx and the filesystem scan.
-// No shouldIndex check needed — the scanner already filters by symlink mode
-// and ignore patterns before entries reach this sink.
-func (s *cacheRefreshSink) OnMatch(left, right BinaryEntryInterface) error {
-	// Skip already-deleted entries
-	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
+// Canonical drops them (main.idx omits deletions); Delta keeps them so the
+// cache reflects what was removed.
+func (s *scanWriteSink) OnLeftOnly(entry BinaryEntryInterface) error {
+	if s.policy == scanWriteCanonical {
 		return nil
 	}
-
-	rightPath, err := right.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get right path: %w", err)
-	}
-
-	// Step 1: check main — if metadata matches, file unchanged, skip
-	if !needsHash(left, right) {
-		return nil
-	}
-
-	// File differs from main — check cache for a fresh entry
-	if cached := s.cacheSkiplist.FindAsInterface(rightPath); cached != nil {
-		if !needsHash(cached, right) {
-			// Cache has a fresh entry — use it, no re-hash needed
-			s.emit(cached, OpModified, false)
-			return nil
-		}
-	}
-
-	// Neither main nor cache is fresh — submit for hashing
-	s.emit(right, OpModified, true)
-	return nil
-}
-
-// OnLeftOnly handles entries only in main.idx (deleted from disk).
-// Deleted entries are written to cache so the cache reflects the deletion.
-func (s *cacheRefreshSink) OnLeftOnly(entry BinaryEntryInterface) error {
-	// Skip already-deleted entries
 	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
 		return nil
 	}
-
-	// Emit to bypass — cache retains deleted entries
 	s.emit(entry, OpDeleted, false)
 	return nil
 }
 
-// OnRightOnly handles entries only in the filesystem scan (new files, not in main).
-// No shouldIndex check needed — the scanner already filters by symlink mode
-// and ignore patterns before entries reach this sink.
-func (s *cacheRefreshSink) OnRightOnly(entry BinaryEntryInterface) error {
-	rightPath, err := entry.RelativePath()
-	if err != nil {
-		return fmt.Errorf("failed to get right path: %w", err)
-	}
+// OnRightOnly handles entries only in the scan (new files). Both policies
+// write them; Delta consults the hash lookup first to skip re-hashing.
+func (s *scanWriteSink) OnRightOnly(entry BinaryEntryInterface) error {
+	return s.emitHashed(entry, OpNewFile)
+}
 
-	// Check cache for a fresh entry
-	if cached := s.cacheSkiplist.FindAsInterface(rightPath); cached != nil {
-		if !needsHash(cached, entry) {
-			// Cache has a fresh entry — use it, no re-hash needed
-			s.emit(cached, OpNewFile, false)
-			return nil
+// emitHashed routes a known-changed scan entry: try the optional hash
+// lookup first (cache hit → bypass the hash workers), otherwise submit
+// for hashing. Shared by OnMatch's modified branch and OnRightOnly.
+func (s *scanWriteSink) emitHashed(scanned BinaryEntryInterface, op PipelineOp) error {
+	if s.hashLookup != nil {
+		path, err := scanned.RelativePath()
+		if err != nil {
+			return fmt.Errorf("failed to get scanned path: %w", err)
+		}
+		if cached := s.hashLookup.FindAsInterface(path); cached != nil {
+			if !needsHash(cached, scanned) {
+				s.emit(cached, op, false)
+				return nil
+			}
 		}
 	}
-
-	// No fresh cache entry — submit for hashing
-	s.emit(entry, OpNewFile, true)
+	s.emit(scanned, op, true)
 	return nil
 }
 
 // Close signals that no more entries will arrive. Closes both output channels.
-func (s *cacheRefreshSink) Close() error {
+func (s *scanWriteSink) Close() error {
 	close(s.hashCh)
 	close(s.bypassCh)
 	return nil
 }
 
 // emit creates a PipelineEntry and sends it to the appropriate channel.
-func (s *cacheRefreshSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
+func (s *scanWriteSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
 	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
 }
 

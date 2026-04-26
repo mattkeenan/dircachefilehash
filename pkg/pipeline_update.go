@@ -48,7 +48,7 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, leftIter, rightI
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		sink := newUpdateComparisonSink(dc, hashCh, bypassCh)
+		sink := newScanWriteSink(nil, scanWriteCanonical, hashCh, bypassCh)
 		adapter := newSinkCallbackAdapter(sink)
 		err := hwangLinUnified(leftIter, rightIter, adapter, ctx)
 		if err != nil {
