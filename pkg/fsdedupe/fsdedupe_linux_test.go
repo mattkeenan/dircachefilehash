@@ -65,8 +65,8 @@ func TestRun_ReadOnlyTarget(t *testing.T) {
 	if roFR.Outcome != OutcomeSkipped {
 		t.Errorf("ro.bin outcome=%s; want skipped", roFR.Outcome)
 	}
-	if !strings.Contains(roFR.Reason, "permission") && !strings.Contains(roFR.Reason, "read-only") {
-		t.Errorf("ro.bin reason=%q; want permission- or read-only-flavoured", roFR.Reason)
+	if roFR.Reason != ReasonReadOnlyFile {
+		t.Errorf("ro.bin reason=%q; want %q", roFR.Reason, ReasonReadOnlyFile)
 	}
 }
 

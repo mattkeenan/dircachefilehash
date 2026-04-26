@@ -34,6 +34,7 @@ const (
 	ReasonSameInode        = "same inode"
 	ReasonNoProgress       = "kernel reported zero progress"
 	ReasonPermissionDenied = "permission denied"
+	ReasonReadOnlyFile     = "read-only file"
 	ReasonReadOnlyFS       = "read-only filesystem"
 	ReasonTextFileBusy     = "text file busy"
 )

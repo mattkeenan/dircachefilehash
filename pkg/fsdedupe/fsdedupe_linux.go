@@ -32,6 +32,7 @@ type fileInfo struct {
 	abs  string
 	dev  uint64
 	size uint64
+	mode os.FileMode
 }
 
 // activeTarget is a per-target bookkeeping slot used during the
@@ -285,6 +286,7 @@ func statAndFilter(files []string, repoRoot string) ([]fileInfo, []FileResult) {
 			abs:  abs,
 			dev:  sys.Dev,
 			size: uint64(st.Size()),
+			mode: st.Mode(),
 		})
 	}
 	return infos, skipped
@@ -368,6 +370,13 @@ func dedupeWave(ctx context.Context, srcFile *os.File, srcSize uint64, wave []fi
 	}()
 
 	for _, t := range wave {
+		if t.mode.Perm()&0o222 == 0 {
+			results = append(results, FileResult{
+				Path: t.rel, Outcome: OutcomeSkipped,
+				Reason: ReasonReadOnlyFile,
+			})
+			continue
+		}
 		f, err := os.OpenFile(t.abs, os.O_RDWR|syscall.O_NOFOLLOW, 0)
 		if err != nil {
 			results = append(results, FileResult{
