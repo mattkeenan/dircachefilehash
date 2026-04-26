@@ -8,16 +8,16 @@ import (
 
 // IndexRef.Type vocabulary recognised by OpenRef.
 //
-// Existing types (set by ResolveIndexSelectors):
+// File-backed (set by ResolveIndexSelectors from on-disk paths):
 //   - "main"       — the canonical main.idx
 //   - "cache"      — the cache.idx (sparse delta over main)
 //   - "scan"       — a scan-<id>.idx file (transient)
 //   - "file"       — an arbitrary .idx path
 //
-// New types added in Phase 1:
+// Virtual (no Path; materialised on Open):
 //   - "cache+main" — cache deltas applied over main; cache wins
-//   - "fs-scan"    — live filesystem state (materialised by refreshing cache,
-//     then exposed as cache+main)
+//   - "fs-scan"    — live filesystem state (refreshing cache.idx as a
+//     side-effect; the result is exposed as cache+main)
 //   - "snapshot"   — a snapshot's main.idx, identified by SnapshotID
 const (
 	RefTypeMain      = "main"
@@ -128,19 +128,16 @@ func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (Bin
 	return NewBinaryEntrySkiplistIterator(ctx, sl, "snapshot-"+id), closer, nil
 }
 
-// openFsScanRef materialises the live filesystem as a cache+main iterator
-// by first running the Status pipeline to refresh cache.idx, then opening
-// the resulting cache+main view. This guarantees that any work done to
-// hash files during the scan is banked into cache.idx for future runs.
+// openFsScanRef materialises the live filesystem as a cache+main iterator.
+// The cache write is a structural property of opening fs-scan — every
+// scan banks its hashing work into cache.idx — so callers driving Diff
+// over fs-scan never have to think about cache lifecycle.
 func openFsScanRef(ctx context.Context, dc *DirectoryCache) (BinaryEntryIterator, func() error, error) {
-	if _, err := dc.Status(ctx, nil); err != nil {
-		return nil, nil, fmt.Errorf("OpenRef fs-scan: cache refresh: %w", err)
-	}
-	sl, err := dc.LoadMergedMainCacheIndex()
+	merged, err := dc.refreshFsScanCache(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("OpenRef fs-scan: load cache+main: %w", err)
+		return nil, nil, fmt.Errorf("OpenRef fs-scan: %w", err)
 	}
-	return NewBinaryEntrySkiplistIterator(ctx, sl, "fs-scan"), noopCloser, nil
+	return NewBinaryEntrySkiplistIterator(ctx, merged, "fs-scan"), noopCloser, nil
 }
 
 func buildSkiplistFromRefs(refs []binaryEntryRef, ctx string) *skiplistWrapper {

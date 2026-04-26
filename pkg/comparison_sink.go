@@ -74,18 +74,20 @@ func (s *updateComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, h
 	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
 }
 
-// statusComparisonSink implements ComparisonSink for the status pipeline.
-// It compares main.idx (left) vs filesystem (right), using a pre-loaded
-// merged cache as a hash lookup to avoid redundant hashing.
+// cacheRefreshSink is a pipeline-internal ComparisonSink whose role is to
+// populate cache.idx as a side-effect of an fs-scan. It compares main.idx
+// (left) vs filesystem (right), using a pre-loaded merged cache as a hash
+// lookup to avoid redundant hashing.
 //
 // Check order for each file on disk:
 //  1. Check main — if metadata matches, file unchanged, skip entirely
 //  2. Check merged cache — if metadata matches, use cached hash (no re-hash)
 //  3. Neither matches — submit for hashing
 //
-// Only entries that differ from main are written to the new cache (sparse delta).
-// The resulting cache file IS the status: its entries are the changes.
-type statusComparisonSink struct {
+// Only entries that differ from main are written to the new cache (sparse
+// delta). Diff classification lives in diffComparisonSink; this sink
+// exists purely so that fs-scan banks its hashing work for future runs.
+type cacheRefreshSink struct {
 	dc            *DirectoryCache
 	cacheSkiplist *skiplistWrapper // pre-loaded merged cache for hash lookups
 	hashCh        chan<- *PipelineEntry
@@ -93,11 +95,11 @@ type statusComparisonSink struct {
 	seqNum        uint64
 }
 
-// newStatusComparisonSink creates a sink that routes entries into the status pipeline.
+// newCacheRefreshSink creates a sink that routes entries into the status pipeline.
 // cacheSkiplist is the pre-loaded merge of all existing cache files, used to avoid
 // re-hashing files whose metadata hasn't changed since the last status run.
-func newStatusComparisonSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper, hashCh, bypassCh chan<- *PipelineEntry) *statusComparisonSink {
-	return &statusComparisonSink{
+func newCacheRefreshSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper, hashCh, bypassCh chan<- *PipelineEntry) *cacheRefreshSink {
+	return &cacheRefreshSink{
 		dc:            dc,
 		cacheSkiplist: cacheSkiplist,
 		hashCh:        hashCh,
@@ -109,7 +111,7 @@ func newStatusComparisonSink(dc *DirectoryCache, cacheSkiplist *skiplistWrapper,
 // OnMatch handles entries present in both main.idx and the filesystem scan.
 // No shouldIndex check needed — the scanner already filters by symlink mode
 // and ignore patterns before entries reach this sink.
-func (s *statusComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
+func (s *cacheRefreshSink) OnMatch(left, right BinaryEntryInterface) error {
 	// Skip already-deleted entries
 	if isDeleted, err := left.IsDeleted(); err == nil && isDeleted {
 		return nil
@@ -141,7 +143,7 @@ func (s *statusComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 
 // OnLeftOnly handles entries only in main.idx (deleted from disk).
 // Deleted entries are written to cache so the cache reflects the deletion.
-func (s *statusComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
+func (s *cacheRefreshSink) OnLeftOnly(entry BinaryEntryInterface) error {
 	// Skip already-deleted entries
 	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
 		return nil
@@ -155,7 +157,7 @@ func (s *statusComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
 // OnRightOnly handles entries only in the filesystem scan (new files, not in main).
 // No shouldIndex check needed — the scanner already filters by symlink mode
 // and ignore patterns before entries reach this sink.
-func (s *statusComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
+func (s *cacheRefreshSink) OnRightOnly(entry BinaryEntryInterface) error {
 	rightPath, err := entry.RelativePath()
 	if err != nil {
 		return fmt.Errorf("failed to get right path: %w", err)
@@ -176,14 +178,14 @@ func (s *statusComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
 }
 
 // Close signals that no more entries will arrive. Closes both output channels.
-func (s *statusComparisonSink) Close() error {
+func (s *cacheRefreshSink) Close() error {
 	close(s.hashCh)
 	close(s.bypassCh)
 	return nil
 }
 
 // emit creates a PipelineEntry and sends it to the appropriate channel.
-func (s *statusComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
+func (s *cacheRefreshSink) emit(entry BinaryEntryInterface, op PipelineOp, hash bool) {
 	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
 }
 
@@ -264,10 +266,9 @@ func (s *diffComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
 	return s.recordAdded(entry)
 }
 
-// recordAdded / recordDeleted are the lock-free hot-path appenders, called
-// from OnMatch (after the deletion bits have already been read) and from
-// OnLeftOnly/OnRightOnly (after a fresh IsDeleted check). They never
-// re-take a lock to ask "is this deleted?" — the caller has settled it.
+// recordAdded / recordDeleted append to the result without re-checking
+// the deletion bit — callers (OnMatch, OnLeftOnly, OnRightOnly) have
+// already settled it.
 func (s *diffComparisonSink) recordAdded(entry BinaryEntryInterface) error {
 	path, err := entry.RelativePath()
 	if err != nil {

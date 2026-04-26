@@ -37,78 +37,91 @@ type StatusResult struct {
 	CleanStatus   *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
 }
 
-// Status compares main.idx against the current filesystem, writing changes to cache.idx.
-// The cache is a sparse delta — its entries ARE the status (modified, added, deleted).
+// Status compares main.idx against the current filesystem, writing changes
+// to cache.idx, and returns a structured StatusResult describing the diff.
+// It is a thin wrapper over Diff(main, fs-scan); the cache write is the
+// side-effect of opening fs-scan. The --v clean-status snapshot remains
+// a Status-only feature, attached to the result here.
 func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (*StatusResult, error) {
 	defer VerboseEnter()()
 
-	// Apply flags before scanning
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
-		// If no config loaded, apply symlink mode directly if provided
+		// Fall back to applying symlink mode directly when no config is loaded.
 		if symlinkMode, exists := flags["symlinks"]; exists {
 			dc.symlinkMode = symlinkMode
 		}
 	}
 
-	// Load main index as base for comparison
-	mainSkiplist, err := dc.LoadMainIndex()
+	result, err := Diff(ctx, dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan})
 	if err != nil {
-		return nil, fmt.Errorf("failed to load main index: %w", err)
+		return result, err
 	}
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "Status: mainSkiplist length = %d", mainSkiplist.Length())
-	}
-
-	// Load and merge all cache indices (cache.idx + timestamped cache files)
-	// Used as a hash lookup to avoid re-hashing files already cached
-	cacheSkiplist, err := dc.loadCacheIndex()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load cache index: %w", err)
-	}
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "Status: cacheSkiplist length = %d", cacheSkiplist.Length())
-	}
-
-	// Generate timestamped cache index filename for pipeline output
-	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
-
-	var operationSuccessful bool
-	defer func() { finaliseStatusCache(dc, cacheTempFileName, operationSuccessful) }()
-
-	// Create iterators: main.idx (left) vs filesystem (right)
-	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "scan")
-
-	// Run the 4-stage pipeline: Compare → Hash → Reorder → Write
-	// The pipeline writes only changes (vs main) to the cache file.
-	scanErr := RunStatusPipeline(ctx, dc, cacheSkiplist, existingIterator, scanIterator, cacheTempFileName)
-	if scanErr != nil {
-		if IsDebugEnabled("scan") {
-			fmt.Fprintf(os.Stderr, "[STATUS] Pipeline error: %v\n", scanErr)
-		}
-	}
-
-	// CRITICAL: Status command MUST write hashed results to cache for performance optimisation
-	operationSuccessful = (scanErr == nil)
-
-	if IsDebugEnabled("scan") {
-		if operationSuccessful {
-			fmt.Fprintf(os.Stderr, "[STATUS] Operation completed successfully - will rename to cache.idx and cleanup\n")
-		} else {
-			fmt.Fprintf(os.Stderr, "[STATUS] Operation interrupted - will preserve timestamped cache file\n")
-		}
-	}
-
-	// Derive StatusResult from the cache file — its entries ARE the status
-	result := deriveStatusFromCache(dc, mainSkiplist, cacheTempFileName)
 
 	if verbose, exists := flags["v"]; exists && verbose != "" {
-		if level, err := strconv.Atoi(verbose); err == nil && level > 0 {
+		if level, atoiErr := strconv.Atoi(verbose); atoiErr == nil && level > 0 {
 			result.CleanStatus = collectCleanStatus(dc)
 		}
 	}
 
 	return result, nil
+}
+
+// refreshFsScanCache runs the cache-refreshing scan pipeline that used to
+// live inline inside dc.Status. It loads main + cache, runs the 4-stage
+// pipeline (writing changes to a fresh cache-{ts}.idx, renamed to cache.idx
+// on success), then re-loads the post-rename cache and merges it over the
+// in-memory main. The returned skiplist IS the cache+main view callers
+// need next — no Copy and no second cache load required at the call site.
+//
+// On error the skiplist is nil; the cache may still have been partially
+// written (the timestamped file is left in place for startup merge).
+func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context) (*skiplistWrapper, error) {
+	mainSkiplist, err := dc.LoadMainIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load main index: %w", err)
+	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "refreshFsScanCache: mainSkiplist length = %d", mainSkiplist.Length())
+	}
+
+	cacheSkiplistPre, err := dc.loadCacheIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load cache index: %w", err)
+	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "refreshFsScanCache: cacheSkiplist length = %d", cacheSkiplistPre.Length())
+	}
+
+	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
+
+	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
+	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "scan")
+
+	scanErr := RunStatusPipeline(ctx, dc, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
+	finaliseStatusCache(dc, cacheTempFileName, scanErr == nil)
+
+	if scanErr != nil {
+		if IsDebugEnabled("scan") {
+			fmt.Fprintf(os.Stderr, "[STATUS] Pipeline error: %v\n", scanErr)
+		}
+		return nil, scanErr
+	}
+	if IsDebugEnabled("scan") {
+		fmt.Fprintf(os.Stderr, "[STATUS] Pipeline completed; cache.idx refreshed\n")
+	}
+
+	// The pipeline renamed cache-{ts}.idx → cache.idx, so cacheSkiplistPre is
+	// stale. Load the post-rename cache and overlay it on mainSkiplist.
+	// mainSkiplist has no other consumers at this point — mutate in place,
+	// no Copy needed.
+	cacheSkiplistPost, err := dc.loadCacheIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload cache index: %w", err)
+	}
+	if err := mainSkiplist.Merge(cacheSkiplistPost, MergeTheirs); err != nil {
+		return nil, fmt.Errorf("failed to merge cache over main: %w", err)
+	}
+	return mainSkiplist, nil
 }
 
 // finaliseStatusCache handles the success/failure branches of the
@@ -151,50 +164,6 @@ func collectCleanStatus(dc *DirectoryCache) *CleanStatus {
 		cs.HasTempFiles = len(tempFiles) > 0
 	}
 	return cs
-}
-
-// deriveStatusFromCache reads the cache file and categorises each entry
-// by comparing against main.idx. The cache is a sparse delta — every entry
-// in it represents a change from main.
-func deriveStatusFromCache(dc *DirectoryCache, mainSkiplist *skiplistWrapper, cachePath string) *StatusResult {
-	result := &StatusResult{
-		Modified: make([]string, 0),
-		Added:    make([]string, 0),
-		Deleted:  make([]string, 0),
-	}
-
-	refs, _, err := dc.loadIndexFromFileWithTracking(cachePath)
-	if err != nil {
-		// No cache file (pipeline failed or empty) — return empty result
-		return result
-	}
-
-	// Iterate refs directly — they're already path-sorted from the pipeline's
-	// reorder stage, so no skiplist needed.
-	for _, ref := range refs {
-		entry := ref.GetBinaryEntry()
-		if entry == nil {
-			continue
-		}
-		path := entry.RelativePath()
-		size := int64(entry.FileSize)
-
-		if entry.IsDeleted() {
-			result.Deleted = append(result.Deleted, path)
-			result.DeletedBytes += size
-			continue
-		}
-
-		if mainEntry, _ := mainSkiplist.Find(path); mainEntry != nil {
-			result.Modified = append(result.Modified, path)
-			result.ModifiedBytes += size
-		} else {
-			result.Added = append(result.Added, path)
-			result.AddedBytes += size
-		}
-	}
-
-	return result
 }
 
 // HasChanges returns true if there are any changes

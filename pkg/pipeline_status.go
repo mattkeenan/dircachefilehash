@@ -40,7 +40,7 @@ func RunStatusPipeline(ctx context.Context, dc *DirectoryCache, cacheSkiplist *s
 		}
 	}
 
-	sink := newStatusComparisonSink(dc, cacheSkiplist, hashCh, bypassCh)
+	sink := newCacheRefreshSink(dc, cacheSkiplist, hashCh, bypassCh)
 
 	// --- Stage 1: Compare (main.idx vs filesystem) ---
 	wg.Add(1)
