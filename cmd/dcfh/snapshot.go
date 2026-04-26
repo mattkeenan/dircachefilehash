@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -346,12 +347,74 @@ var snapshotRemoveCmd = &cobra.Command{
 	},
 }
 
+var snapshotStatusVs string
+
 var snapshotStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Compare current state with snapshots",
-	Args:  cobra.NoArgs,
+	Use:   "status [<id-or-tag>]",
+	Short: "Compare a snapshot with the current state",
+	Long: `Compare a snapshot with main.idx (default) or a fresh filesystem scan.
+
+The id-or-tag argument selects the snapshot. An exact snapshot id wins; a
+tag falls back to the most recent snapshot carrying that tag. Omit the
+argument to compare the most recent snapshot of any tag.
+
+Examples:
+  dcfh snapshot status                       # latest snapshot vs main.idx
+  dcfh snapshot status monthly               # latest "monthly" snapshot vs main.idx
+  dcfh snapshot status monthly --vs fs-scan  # latest "monthly" snapshot vs filesystem`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("snapshot status not yet implemented")
+		ctx := cmd.Context()
+		_, metaDir, err := findDcfhRepo()
+		if err != nil {
+			return err
+		}
+
+		repo, err := dcfh.OpenRepo(ctx, metaDir)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		defer func() { _ = repo.Close() }()
+
+		idOrTag := ""
+		if len(args) == 1 {
+			idOrTag = args[0]
+		} else {
+			snapshots, err := repo.Snapshots().List(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to list snapshots: %w", err)
+			}
+			if len(snapshots) == 0 {
+				return fmt.Errorf("no snapshots found in %s", metaDir)
+			}
+			idOrTag = snapshots[0].ID
+		}
+
+		right := snapshotStatusVs
+		if right == "" {
+			right = "main"
+		}
+		if right != "main" && right != "fs-scan" {
+			return fmt.Errorf("--vs must be 'main' or 'fs-scan', got %q", right)
+		}
+
+		left := "snapshot:" + idOrTag
+		result, err := repo.DiffRefs(ctx, dcfh.DiffRefsRequest{
+			Options: buildOptions(),
+			Left:    left,
+			Right:   right,
+		})
+		if err != nil {
+			return err
+		}
+
+		if getOutputFormat() == OutputJSON {
+			outputDiffJSON(left, right, result)
+			return nil
+		}
+
+		renderDiffHuman(os.Stdout, left, right, result)
+		return nil
 	},
 }
 
@@ -374,4 +437,6 @@ func init() {
 	snapshotForgetCmd.Flags().IntVar(&forgetKeepWeekly, "keep-weekly", 0, "number of weekly snapshots to keep")
 	snapshotForgetCmd.Flags().IntVarP(&forgetKeepMonthly, "keep-monthly", "m", 0, "number of monthly snapshots to keep")
 	snapshotForgetCmd.Flags().IntVarP(&forgetKeepYearly, "keep-yearly", "y", 0, "number of yearly snapshots to keep")
+
+	snapshotStatusCmd.Flags().StringVar(&snapshotStatusVs, "vs", "main", "compare against: main | fs-scan")
 }

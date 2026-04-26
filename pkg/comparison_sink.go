@@ -187,6 +187,111 @@ func (s *statusComparisonSink) emit(entry BinaryEntryInterface, op PipelineOp, h
 	emitPipelineEntry(entry, op, hash, &s.seqNum, s.hashCh, s.bypassCh)
 }
 
+// diffComparisonSink implements ComparisonSink for the generic Diff engine.
+// It accumulates a *StatusResult directly during the Hwang-Lin walk by
+// classifying every comparison purely on hash equality — no metadata
+// fast-path, no cache lookup, no hashing.
+//
+// Pre-condition: both iterators must already carry hashes for every live
+// entry. The Diff engine guarantees this by routing fs-scan refs through
+// a cache-refreshing materialiser before opening them.
+//
+// Deleted entries are treated as "not present on that side": a deleted left
+// + live right collapses to OnRightOnly (added); the symmetric case
+// collapses to OnLeftOnly (deleted); both-deleted is silently dropped.
+type diffComparisonSink struct {
+	result *StatusResult
+}
+
+func newDiffComparisonSink() *diffComparisonSink {
+	return &diffComparisonSink{
+		result: &StatusResult{
+			Modified: make([]string, 0),
+			Added:    make([]string, 0),
+			Deleted:  make([]string, 0),
+		},
+	}
+}
+
+func (s *diffComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
+	leftDel, _ := left.IsDeleted()
+	rightDel, _ := right.IsDeleted()
+
+	if leftDel && rightDel {
+		return nil
+	}
+	if leftDel {
+		// Already know rightDel==false; avoid re-checking inside the helper.
+		return s.recordAdded(right)
+	}
+	if rightDel {
+		return s.recordDeleted(left)
+	}
+
+	leftHash, err := left.Hash()
+	if err != nil {
+		return fmt.Errorf("diff: left hash: %w", err)
+	}
+	rightHash, err := right.Hash()
+	if err != nil {
+		return fmt.Errorf("diff: right hash: %w", err)
+	}
+	if leftHash == rightHash {
+		return nil
+	}
+
+	path, err := right.RelativePath()
+	if err != nil {
+		return fmt.Errorf("diff: right path: %w", err)
+	}
+	size, _ := right.FileSize()
+	s.result.Modified = append(s.result.Modified, path)
+	s.result.ModifiedBytes += int64(size)
+	return nil
+}
+
+func (s *diffComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
+	if d, _ := entry.IsDeleted(); d {
+		return nil
+	}
+	return s.recordDeleted(entry)
+}
+
+func (s *diffComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
+	if d, _ := entry.IsDeleted(); d {
+		return nil
+	}
+	return s.recordAdded(entry)
+}
+
+// recordAdded / recordDeleted are the lock-free hot-path appenders, called
+// from OnMatch (after the deletion bits have already been read) and from
+// OnLeftOnly/OnRightOnly (after a fresh IsDeleted check). They never
+// re-take a lock to ask "is this deleted?" — the caller has settled it.
+func (s *diffComparisonSink) recordAdded(entry BinaryEntryInterface) error {
+	path, err := entry.RelativePath()
+	if err != nil {
+		return fmt.Errorf("diff: right path: %w", err)
+	}
+	size, _ := entry.FileSize()
+	s.result.Added = append(s.result.Added, path)
+	s.result.AddedBytes += int64(size)
+	return nil
+}
+
+func (s *diffComparisonSink) recordDeleted(entry BinaryEntryInterface) error {
+	path, err := entry.RelativePath()
+	if err != nil {
+		return fmt.Errorf("diff: left path: %w", err)
+	}
+	size, _ := entry.FileSize()
+	s.result.Deleted = append(s.result.Deleted, path)
+	s.result.DeletedBytes += int64(size)
+	return nil
+}
+
+func (s *diffComparisonSink) Close() error { return nil }
+
 // emitPipelineEntry is the shared implementation used by both comparison sinks.
 func emitPipelineEntry(entry BinaryEntryInterface, op PipelineOp, hash bool, seqNum *uint64, hashCh, bypassCh chan<- *PipelineEntry) {
 	pe := &PipelineEntry{

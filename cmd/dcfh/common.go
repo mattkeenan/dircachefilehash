@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"time"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 	"github.com/mattkeenan/dircachefilehash/pkg/fsdedupe"
@@ -162,6 +166,154 @@ func findDcfhRepo() (string, string, error) {
 	cachedRepoRoot = rootDir
 	cachedMetaDir = metaDir
 	return rootDir, metaDir, nil
+}
+
+// renderStatusHuman renders a StatusResult in the long-standing dcfh-status
+// format. Shared between `dcfh status` and `dcfh diff main fs-scan` so the
+// two paths are byte-identical on the canonical case.
+//
+// repoRoot/relCwd/sinceStr/fileCount are status-specific framing values;
+// callers driving non-status diffs should use renderDiffHuman instead.
+func renderStatusHuman(w io.Writer, repoRoot, relCwd, sinceStr string, sr *dcfh.StatusResult, fileCount int) {
+	fmt.Fprintf(w, "On branch main\n")
+	if relCwd != "" {
+		fmt.Fprintf(w, "Working directory: %s\n", relCwd)
+	}
+	fmt.Fprintf(w, "Repository root: %s\n", repoRoot)
+	fmt.Fprintln(w)
+
+	if !sr.HasChanges() {
+		fmt.Fprintln(w, "Nothing to commit, working tree clean")
+		if sinceStr != "" {
+			fmt.Fprintf(w, "Index contains %d files since %s\n", fileCount, sinceStr)
+		} else {
+			fmt.Fprintf(w, "Index contains %d files\n", fileCount)
+		}
+		return
+	}
+
+	if len(sr.Modified) > 0 {
+		fmt.Fprintln(w, "Changes not staged for commit:")
+		fmt.Fprintln(w, "  (use \"dcfh update\" to update the index)")
+		fmt.Fprintln(w)
+		for _, path := range sr.Modified {
+			fmt.Fprintf(w, "\tmodified:   %s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(sr.Added) > 0 {
+		fmt.Fprintln(w, "Untracked files:")
+		fmt.Fprintln(w, "  (use \"dcfh update\" to include in what will be committed)")
+		fmt.Fprintln(w)
+		for _, path := range sr.Added {
+			fmt.Fprintf(w, "\t%s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(sr.Deleted) > 0 {
+		fmt.Fprintln(w, "Changes not staged for commit:")
+		fmt.Fprintln(w, "  (use \"dcfh update\" to update the index)")
+		fmt.Fprintln(w)
+		for _, path := range sr.Deleted {
+			fmt.Fprintf(w, "\tdeleted:    %s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+
+	sinceSuffix := ""
+	if sinceStr != "" {
+		sinceSuffix = " since " + sinceStr
+	}
+	fmt.Fprintf(w, "Summary: %d modified (%s), %d added (%s), %d deleted (%s)%s\n",
+		len(sr.Modified), formatFileSize(sr.ModifiedBytes),
+		len(sr.Added), formatFileSize(sr.AddedBytes),
+		len(sr.Deleted), formatFileSize(sr.DeletedBytes),
+		sinceSuffix)
+}
+
+// renderDiffHuman renders a StatusResult as a generic two-sided diff.
+// Used by `dcfh diff` for any combination other than (main, fs-scan), which
+// routes through renderStatusHuman to preserve dcfh-status output.
+func renderDiffHuman(w io.Writer, leftLabel, rightLabel string, sr *dcfh.StatusResult) {
+	fmt.Fprintf(w, "Diff: %s -> %s\n", leftLabel, rightLabel)
+	fmt.Fprintln(w)
+
+	if !sr.HasChanges() {
+		fmt.Fprintln(w, "No differences.")
+		return
+	}
+
+	if len(sr.Modified) > 0 {
+		fmt.Fprintf(w, "Modified (%d, %s):\n", len(sr.Modified), formatFileSize(sr.ModifiedBytes))
+		for _, path := range sr.Modified {
+			fmt.Fprintf(w, "\tmodified:   %s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+	if len(sr.Added) > 0 {
+		fmt.Fprintf(w, "Added on %s (%d, %s):\n", rightLabel, len(sr.Added), formatFileSize(sr.AddedBytes))
+		for _, path := range sr.Added {
+			fmt.Fprintf(w, "\tadded:      %s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+	if len(sr.Deleted) > 0 {
+		fmt.Fprintf(w, "Missing on %s (%d, %s):\n", rightLabel, len(sr.Deleted), formatFileSize(sr.DeletedBytes))
+		for _, path := range sr.Deleted {
+			fmt.Fprintf(w, "\tdeleted:    %s\n", path)
+		}
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintf(w, "Summary: %d modified (%s), %d added (%s), %d deleted (%s)\n",
+		len(sr.Modified), formatFileSize(sr.ModifiedBytes),
+		len(sr.Added), formatFileSize(sr.AddedBytes),
+		len(sr.Deleted), formatFileSize(sr.DeletedBytes))
+}
+
+// outputDiffJSON emits the standard diff JSON envelope used by `dcfh diff`
+// and `dcfh snapshot status`. Keeps the two paths from drifting on field
+// names, ordering, or summary shape.
+func outputDiffJSON(left, right string, sr *dcfh.StatusResult) {
+	outputJSON(map[string]any{
+		"left":     left,
+		"right":    right,
+		"modified": sr.Modified,
+		"added":    sr.Added,
+		"deleted":  sr.Deleted,
+		"summary": StatusSummary{
+			ModifiedCount: len(sr.Modified),
+			AddedCount:    len(sr.Added),
+			DeletedCount:  len(sr.Deleted),
+			ModifiedBytes: sr.ModifiedBytes,
+			AddedBytes:    sr.AddedBytes,
+			DeletedBytes:  sr.DeletedBytes,
+			HasChanges:    sr.HasChanges(),
+		},
+	})
+}
+
+// statusFraming derives the status-style framing values (working-dir relative
+// to repo root, "since" timestamp from main.idx). Used by `dcfh status` and
+// by the byte-equivalent (main, fs-scan) branch of `dcfh diff`.
+func statusFraming(ctx context.Context, repo dcfh.Repo, repoRoot string) (relCwd, sinceStr string, info *dcfh.RepoInfo, err error) {
+	cwd, _ := os.Getwd()
+	relCwd, _ = filepath.Rel(repoRoot, cwd)
+	if relCwd == "." {
+		relCwd = ""
+	}
+	info, err = repo.Info(ctx)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if !info.IndexTimestamp.IsZero() {
+		sinceStr = info.IndexTimestamp.Format(time.RFC3339)
+	} else if fi, statErr := os.Stat(info.IndexFile); statErr == nil {
+		sinceStr = fi.ModTime().UTC().Format(time.RFC3339)
+	}
+	return relCwd, sinceStr, info, nil
 }
 
 // formatFileSize formats a file size in bytes to a human-readable string

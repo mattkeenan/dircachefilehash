@@ -9,12 +9,14 @@ import (
 	"strings"
 )
 
-// IndexRef identifies a resolved index file together with the selector
-// that produced it ("main", "cache", "scan", or "file" for direct paths).
+// IndexRef identifies a resolved index file or virtual data source together
+// with the selector that produced it. See pkg/openref.go for the full Type
+// vocabulary recognised by OpenRef.
 type IndexRef struct {
-	Path   string
-	Type   string
-	ScanID string // for scan files: "PID-TID"
+	Path       string
+	Type       string
+	ScanID     string // Type=="scan": "PID-TID"
+	SnapshotID string // Type=="snapshot": exact ID or tag
 }
 
 // ResolveIndexSelectors turns a list of dcfhfind-style selectors (main, cache,
@@ -34,24 +36,48 @@ func ResolveIndexSelectors(metaDir string, selectors []string) ([]IndexRef, erro
 	seen := make(map[string]bool, len(out))
 	filtered := out[:0]
 	for _, r := range out {
-		if seen[r.Path] {
+		key := r.Path
+		if key == "" {
+			// Virtual refs (cache+main, fs-scan, snapshot) carry no path —
+			// dedupe on (Type, SnapshotID) instead.
+			key = r.Type + ":" + r.SnapshotID
+		}
+		if seen[key] {
 			continue
 		}
-		seen[r.Path] = true
-		if _, err := os.Stat(r.Path); os.IsNotExist(err) {
-			continue
+		seen[key] = true
+		if r.Path != "" {
+			if _, err := os.Stat(r.Path); os.IsNotExist(err) {
+				continue
+			}
 		}
 		filtered = append(filtered, r)
 	}
 	return filtered, nil
 }
 
+// ParseIndexRef parses a single selector string (the same vocabulary as
+// ResolveIndexSelectors) into an IndexRef without performing any
+// existence checks. Errors when the selector resolves to multiple refs
+// (e.g. bare "scan" when several scan files exist) — diff and snapshot
+// status need exactly one ref per side.
+func ParseIndexRef(metaDir, sel string) (IndexRef, error) {
+	refs, err := resolveOneSelector(metaDir, sel)
+	if err != nil {
+		return IndexRef{}, err
+	}
+	if len(refs) != 1 {
+		return IndexRef{}, fmt.Errorf("selector %q resolved to %d refs (expected exactly 1)", sel, len(refs))
+	}
+	return refs[0], nil
+}
+
 func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 	switch sel {
 	case "main":
-		return []IndexRef{{Path: filepath.Join(metaDir, MainIndex), Type: "main"}}, nil
+		return []IndexRef{{Path: filepath.Join(metaDir, MainIndex), Type: RefTypeMain}}, nil
 	case "cache":
-		return []IndexRef{{Path: filepath.Join(metaDir, CacheIndex), Type: "cache"}}, nil
+		return []IndexRef{{Path: filepath.Join(metaDir, CacheIndex), Type: RefTypeCache}}, nil
 	case "scan":
 		matches, err := filepath.Glob(filepath.Join(metaDir, "scan-*.idx"))
 		if err != nil {
@@ -63,7 +89,7 @@ func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 			if strings.HasPrefix(base, "scan-") && strings.HasSuffix(base, ".idx") {
 				refs = append(refs, IndexRef{
 					Path:   m,
-					Type:   "scan",
+					Type:   RefTypeScan,
 					ScanID: base[5 : len(base)-4],
 				})
 			}
@@ -79,6 +105,17 @@ func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 			refs = append(refs, sub...)
 		}
 		return refs, nil
+	case "cache+main":
+		return []IndexRef{{Type: RefTypeCacheMain}}, nil
+	case "fs-scan":
+		return []IndexRef{{Type: RefTypeFsScan}}, nil
+	}
+
+	if id, ok := strings.CutPrefix(sel, "snapshot:"); ok {
+		if id == "" {
+			return nil, fmt.Errorf("snapshot: requires an id or tag (e.g. snapshot:monthly)")
+		}
+		return []IndexRef{{Type: RefTypeSnapshot, SnapshotID: id}}, nil
 	}
 
 	if strings.HasPrefix(sel, "scan-") && (strings.Contains(sel, "-") || strings.HasSuffix(sel, ".idx")) {
@@ -91,12 +128,12 @@ func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 		if strings.HasPrefix(base, "scan-") && strings.HasSuffix(base, ".idx") {
 			return []IndexRef{{
 				Path:   path,
-				Type:   "scan",
+				Type:   RefTypeScan,
 				ScanID: base[5 : len(base)-4],
 			}}, nil
 		}
 	}
-	return []IndexRef{{Path: sel, Type: "file"}}, nil
+	return []IndexRef{{Path: sel, Type: RefTypeFile}}, nil
 }
 
 // FilterRequest selects which indices to scan and supplies the predicate tree

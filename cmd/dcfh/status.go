@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -32,13 +30,6 @@ since the last update operation.`,
 			return err
 		}
 
-		// Get current working directory relative to repo root
-		cwd, _ := os.Getwd()
-		relCwd, _ := filepath.Rel(repoRoot, cwd)
-		if relCwd == "." {
-			relCwd = ""
-		}
-
 		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
@@ -51,17 +42,9 @@ since the last update operation.`,
 			return err
 		}
 
-		info, err := repo.Info(ctx)
+		relCwd, sinceStr, info, err := statusFraming(ctx, repo, repoRoot)
 		if err != nil {
 			return fmt.Errorf("failed to read repository info: %w", err)
-		}
-
-		// Get "since" timestamp from index header (v3+) or file mtime (v2 fallback)
-		sinceStr := ""
-		if !info.IndexTimestamp.IsZero() {
-			sinceStr = info.IndexTimestamp.Format(time.RFC3339)
-		} else if fi, err := os.Stat(info.IndexFile); err == nil {
-			sinceStr = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 
 		format := getOutputFormat()
@@ -91,66 +74,7 @@ since the last update operation.`,
 			return nil
 		}
 
-		// Text output
-		fmt.Printf("On branch main\n")
-		if relCwd != "" {
-			fmt.Printf("Working directory: %s\n", relCwd)
-		}
-		fmt.Printf("Repository root: %s\n", repoRoot)
-		fmt.Println()
-
-		// Show status
-		if !status.HasChanges() {
-			fmt.Println("Nothing to commit, working tree clean")
-			fileCount := info.EntryCount
-			if sinceStr != "" {
-				fmt.Printf("Index contains %d files since %s\n", fileCount, sinceStr)
-			} else {
-				fmt.Printf("Index contains %d files\n", fileCount)
-			}
-			return nil
-		}
-
-		if len(status.Modified) > 0 {
-			fmt.Println("Changes not staged for commit:")
-			fmt.Println("  (use \"dcfh update\" to update the index)")
-			fmt.Println()
-			for _, path := range status.Modified {
-				fmt.Printf("\tmodified:   %s\n", path)
-			}
-			fmt.Println()
-		}
-
-		if len(status.Added) > 0 {
-			fmt.Println("Untracked files:")
-			fmt.Println("  (use \"dcfh update\" to include in what will be committed)")
-			fmt.Println()
-			for _, path := range status.Added {
-				fmt.Printf("\t%s\n", path)
-			}
-			fmt.Println()
-		}
-
-		if len(status.Deleted) > 0 {
-			fmt.Println("Changes not staged for commit:")
-			fmt.Println("  (use \"dcfh update\" to update the index)")
-			fmt.Println()
-			for _, path := range status.Deleted {
-				fmt.Printf("\tdeleted:    %s\n", path)
-			}
-			fmt.Println()
-		}
-
-		sinceSuffix := ""
-		if sinceStr != "" {
-			sinceSuffix = " since " + sinceStr
-		}
-		fmt.Printf("Summary: %d modified (%s), %d added (%s), %d deleted (%s)%s\n",
-			len(status.Modified), formatFileSize(status.ModifiedBytes),
-			len(status.Added), formatFileSize(status.AddedBytes),
-			len(status.Deleted), formatFileSize(status.DeletedBytes),
-			sinceSuffix)
-
+		renderStatusHuman(os.Stdout, repoRoot, relCwd, sinceStr, status, info.EntryCount)
 		return nil
 	},
 }

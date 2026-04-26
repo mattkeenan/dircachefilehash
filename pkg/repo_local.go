@@ -173,6 +173,32 @@ func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, e
 	return l.dc.Status(ctx, flags)
 }
 
+func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusResult, error) {
+	flags := req.Options.toFlags()
+	if err := l.dc.ApplyConfigOverrides(flags); err != nil {
+		if symlinkMode, ok := flags["symlinks"]; ok {
+			l.dc.symlinkMode = symlinkMode
+		}
+	}
+	left := req.Left
+	if left == "" {
+		left = "main"
+	}
+	right := req.Right
+	if right == "" {
+		right = "fs-scan"
+	}
+	leftRef, err := ParseIndexRef(l.dc.MetaDir, left)
+	if err != nil {
+		return nil, fmt.Errorf("parse left ref %q: %w", left, err)
+	}
+	rightRef, err := ParseIndexRef(l.dc.MetaDir, right)
+	if err != nil {
+		return nil, fmt.Errorf("parse right ref %q: %w", right, err)
+	}
+	return Diff(ctx, l.dc, leftRef, rightRef)
+}
+
 func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error) {
 	flags := req.Options.toFlags()
 	if err := l.dc.Update(ctx, flags, req.Paths...); err != nil {

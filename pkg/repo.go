@@ -76,6 +76,16 @@ type DiffRequest struct {
 	Paths   []string `json:"paths,omitempty"`
 }
 
+// DiffRefsRequest drives the generalised Diff engine, comparing two index
+// references identified by selector strings (see ResolveIndexSelectors for
+// the vocabulary). Empty Left defaults to "main"; empty Right defaults to
+// "fs-scan", giving the historical dcfh-status semantics by default.
+type DiffRefsRequest struct {
+	Options Options `json:"options"`
+	Left    string  `json:"left,omitempty"`
+	Right   string  `json:"right,omitempty"`
+}
+
 // ApplyRequest is the analogue of DiffRequest for Apply (dcfh update).
 type ApplyRequest struct {
 	Options Options  `json:"options"`
@@ -115,6 +125,7 @@ type Repo interface {
 	Stats(ctx context.Context) (*RepoStats, error)
 
 	Diff(ctx context.Context, req DiffRequest) (*StatusResult, error)
+	DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusResult, error)
 	Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error)
 	Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error)
 	Filter(ctx context.Context, req FilterRequest) (*FilterResult, error)

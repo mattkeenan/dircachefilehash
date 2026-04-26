@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -538,6 +539,41 @@ func (sr *SnapshotRepository) loadSnapshotMetadata(metadataPath string) (*Snapsh
 	}
 
 	return &metadata, nil
+}
+
+// ResolveSnapshotID resolves a user-supplied snapshot identifier to an exact
+// snapshot ID. The identifier may be:
+//   - an exact ID (timestamp form, e.g. "20260101T120000.000000000Z")
+//   - a tag (e.g. "monthly") — the most recent snapshot carrying that tag
+//
+// Latest-wins on tag collision (matches restic semantics). Returns an error
+// when no snapshot matches.
+func ResolveSnapshotID(metaDir, idOrTag string) (string, error) {
+	sr := NewSnapshotRepository(metaDir)
+
+	// Fast path: directory name == snapshot ID, so an exact-ID lookup is a
+	// single stat — no need to load every snapshot's metadata.json.
+	if _, err := os.Stat(filepath.Join(sr.SnapshotsDir, idOrTag, "metadata.json")); err == nil {
+		return idOrTag, nil
+	}
+
+	// Slow path: tag lookup — load all metadata, return the newest match.
+	snapshots, err := sr.ListSnapshots()
+	if err != nil {
+		return "", fmt.Errorf("list snapshots: %w", err)
+	}
+	if len(snapshots) == 0 {
+		return "", fmt.Errorf("no snapshots found in %s", metaDir)
+	}
+
+	// ListSnapshots is sorted newest-first, so the first tag hit wins.
+	for _, snap := range snapshots {
+		if slices.Contains(snap.Tags, idOrTag) {
+			return snap.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("no snapshot matches %q (neither ID nor tag)", idOrTag)
 }
 
 func generateSnapshotID(t time.Time) string {
