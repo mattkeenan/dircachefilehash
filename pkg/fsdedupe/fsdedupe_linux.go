@@ -154,6 +154,9 @@ func run(ctx context.Context, groups []Group, opts Options) (*Result, error) {
 		} else {
 			result.TotalReclaimed += gr.BytesReclaimed
 		}
+		if opts.OnGroup != nil {
+			opts.OnGroup(gr)
+		}
 	}
 
 	// Flatten unsupported-device set for reporting.

@@ -148,8 +148,12 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
+	var streamed []fsdedupe.GroupResult
 	res, err := fsdedupe.Run(ctx, toFSDedupeGroups(groups), fsdedupe.Options{
 		RepoRoot: dc.RootDir,
+		OnGroup: func(gr fsdedupe.GroupResult) {
+			streamed = append(streamed, gr)
+		},
 	})
 	if err != nil {
 		t.Fatalf("fsdedupe.Run (apply): %v", err)
@@ -162,6 +166,17 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 	for _, g := range res.Groups {
 		if g.Outcome != fsdedupe.OutcomeOK {
 			t.Errorf("group %s outcome=%s; want ok (files=%+v)", g.Hash, g.Outcome, g.Files)
+		}
+	}
+
+	// Streamed view must match the batch view 1:1 — the cmd-layer's
+	// fused print/dedupe loop relies on this equivalence.
+	if len(streamed) != len(res.Groups) {
+		t.Fatalf("streamed=%d, batch=%d; want equal", len(streamed), len(res.Groups))
+	}
+	for i, gr := range res.Groups {
+		if streamed[i].Hash != gr.Hash {
+			t.Errorf("group[%d]: streamed=%q, batch=%q", i, streamed[i].Hash, gr.Hash)
 		}
 	}
 

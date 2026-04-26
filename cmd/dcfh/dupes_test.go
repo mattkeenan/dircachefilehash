@@ -172,8 +172,14 @@ func TestRunDedupe_StubReceivesGroups(t *testing.T) {
 		}, nil
 	}
 
+	var streamed []string
+	onGroup := func(gr fsdedupe.GroupResult) {
+		streamed = append(streamed, gr.Hash)
+	}
+
 	res, err := runDedupe(context.Background(), "/repo",
 		[]dcfh.DuplicateGroup{{Hash: "h1", Files: []string{"a", "b"}, Count: 2}},
+		onGroup,
 	)
 	if err != nil {
 		t.Fatalf("runDedupe: %v", err)
@@ -190,6 +196,18 @@ func TestRunDedupe_StubReceivesGroups(t *testing.T) {
 	if capturedOpts.Logf == nil {
 		t.Error("captured opts.Logf was nil; want stderr logger")
 	}
+	if capturedOpts.OnGroup == nil {
+		t.Error("captured opts.OnGroup was nil; want propagated callback")
+	}
+	// The stub returned a Result with one group; in real fsdedupe.Run
+	// the callback fires for each group as it completes. Simulate that
+	// here so the wiring assertion is end-to-end.
+	if capturedOpts.OnGroup != nil {
+		capturedOpts.OnGroup(res.Groups[0])
+	}
+	if len(streamed) != 1 || streamed[0] != "h1" {
+		t.Errorf("OnGroup did not surface stub group: %v", streamed)
+	}
 }
 
 func TestRunDedupe_UnsupportedPlatformErrorSurfaces(t *testing.T) {
@@ -201,7 +219,7 @@ func TestRunDedupe_UnsupportedPlatformErrorSurfaces(t *testing.T) {
 	runFSDedupe = func(context.Context, []fsdedupe.Group, fsdedupe.Options) (*fsdedupe.Result, error) {
 		return nil, fsdedupe.ErrUnsupported
 	}
-	res, err := runDedupe(context.Background(), "/repo", nil)
+	res, err := runDedupe(context.Background(), "/repo", nil, nil)
 	if !errors.Is(err, fsdedupe.ErrUnsupported) {
 		t.Errorf("err=%v; want ErrUnsupported", err)
 	}

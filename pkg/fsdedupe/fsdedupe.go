@@ -55,6 +55,13 @@ type Options struct {
 	DryRun   bool
 	RepoRoot string
 	Logf     func(format string, args ...any)
+
+	// OnGroup, if non-nil, is invoked after each group's dedupe work
+	// completes — before the next group begins. The same GroupResult
+	// is also appended to Result.Groups, so callers that only want
+	// the batch view can ignore this hook. Run holds no state across
+	// the callback; panics propagate.
+	OnGroup func(GroupResult)
 }
 
 // Outcome is the summary state for a file or group.

@@ -143,16 +143,17 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 		// by path. pkg.FindDuplicates is authoritative for both orderings
 		// (see pkg/dupes.go). Nothing to sort here.
 
-		var dedupeResult *fsdedupe.Result
-		if dupesFSDedupe {
-			dedupeResult, err = runDedupe(ctx, repoRoot, duplicates)
-			if err != nil {
-				return err
+		// JSON mode is batch: dedupe (if requested) then emit one
+		// structured object. Non-JSON modes stream per-group output via
+		// the OnGroup callback below.
+		if format == OutputJSON {
+			var dedupeResult *fsdedupe.Result
+			if dupesFSDedupe {
+				dedupeResult, err = runDedupe(ctx, repoRoot, duplicates, nil)
+				if err != nil {
+					return err
+				}
 			}
-		}
-
-		switch format {
-		case OutputJSON:
 			totalFiles := 0
 			for _, group := range duplicates {
 				totalFiles += len(group.Files)
@@ -166,32 +167,54 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 				},
 				DedupeResult: dedupeResult,
 			})
+			return nil
+		}
 
-		case OutputFdupes:
-			// fdupes format: absolute paths, one line per file, blank
-			// line between groups. Joining a constant prefix preserves
-			// sort order, so paths stay ordered without resorting.
-			for i, group := range duplicates {
-				for _, relPath := range group.Files {
-					fmt.Println(filepath.Join(repoRoot, relPath))
-				}
-				if i < len(duplicates)-1 {
-					fmt.Println()
-				}
+		// Per-group printer shared between the streaming dedupe path
+		// and the plain listing path. Format choice is decided once
+		// here, not per file.
+		isFdupes := format == OutputFdupes
+		printedGroups := 0
+		printGroupListing := func(g dcfh.DuplicateGroup) {
+			if printedGroups > 0 {
+				fmt.Println()
 			}
-		default: // OutputHuman
-			for i, group := range duplicates {
-				for _, relPath := range group.Files {
+			printedGroups++
+			for _, relPath := range g.Files {
+				if isFdupes {
+					fmt.Println(filepath.Join(repoRoot, relPath))
+				} else {
 					fmt.Println(relPath)
-				}
-				if i < len(duplicates)-1 {
-					fmt.Println()
 				}
 			}
 		}
 
-		if dedupeResult != nil && format != OutputJSON {
-			printDedupeSummary(dedupeResult)
+		var dedupeResult *fsdedupe.Result
+		if dupesFSDedupe {
+			// Recover the index-side group ordering inside the
+			// callback: fsdedupe.GroupResult carries only the hash and
+			// per-file outcomes, not the original sorted file list.
+			groupsByHash := make(map[string]dcfh.DuplicateGroup, len(duplicates))
+			for _, g := range duplicates {
+				groupsByHash[g.Hash] = g
+			}
+			onGroup := func(gr fsdedupe.GroupResult) {
+				printGroupListing(groupsByHash[gr.Hash])
+				printGroupOutcome(gr)
+			}
+			dedupeResult, err = runDedupe(ctx, repoRoot, duplicates, onGroup)
+			if err != nil {
+				return err
+			}
+		} else {
+			for _, g := range duplicates {
+				printGroupListing(g)
+			}
+		}
+
+		if dedupeResult != nil {
+			fmt.Println()
+			printDedupeFooter(dedupeResult)
 		}
 
 		return nil
@@ -202,7 +225,9 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 // and dispatches to the platform-specific backend. Non-Linux builds
 // surface as fsdedupe.ErrUnsupported with a platform tag; translate
 // that into a clear stderr message before returning a non-zero exit.
-func runDedupe(ctx context.Context, repoRoot string, duplicates []dcfh.DuplicateGroup) (*fsdedupe.Result, error) {
+// onGroup, if non-nil, fires once per group as soon as fsdedupe
+// finishes that group — used by the streaming output path.
+func runDedupe(ctx context.Context, repoRoot string, duplicates []dcfh.DuplicateGroup, onGroup func(fsdedupe.GroupResult)) (*fsdedupe.Result, error) {
 	groups := make([]fsdedupe.Group, len(duplicates))
 	for i, g := range duplicates {
 		groups[i] = fsdedupe.Group{Hash: g.Hash, Files: g.Files}
@@ -213,6 +238,7 @@ func runDedupe(ctx context.Context, repoRoot string, duplicates []dcfh.Duplicate
 		Logf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		},
+		OnGroup: onGroup,
 	}
 	res, err := runFSDedupe(ctx, groups, opts)
 	if errors.Is(err, fsdedupe.ErrUnsupported) {
@@ -222,40 +248,47 @@ func runDedupe(ctx context.Context, repoRoot string, duplicates []dcfh.Duplicate
 	return res, err
 }
 
-// printDedupeSummary writes human-readable per-group outcomes and a
-// totals line for human/fdupes output modes. JSON mode carries the
-// full structure inside DupesOutput.DedupeResult so it's skipped here.
-func printDedupeSummary(r *fsdedupe.Result) {
-	fmt.Println()
-	fmt.Println("fs-dedupe:")
-	for _, g := range r.Groups {
-		line := fmt.Sprintf("  %s  %s", g.Hash, g.Outcome)
-		if g.BytesReclaimed > 0 {
-			line += fmt.Sprintf("  %s", formatFileSize(int64(g.BytesReclaimed)))
+// printGroupOutcome renders a single GroupResult inline, immediately
+// under its file listing. It writes one summary line per group plus
+// one indented line per non-OK / non-Planned file.
+func printGroupOutcome(g fsdedupe.GroupResult) {
+	line := fmt.Sprintf("  → fs-dedupe: %s", g.Outcome)
+	if g.BytesReclaimed > 0 {
+		verb := "reclaimed"
+		if flagDryRun {
+			verb = "planned"
 		}
-		if g.Reason != "" {
-			line += fmt.Sprintf("  (%s)", g.Reason)
-		}
-		fmt.Println(line)
-		for _, f := range g.Files {
-			if f.Outcome == fsdedupe.OutcomeOK || f.Outcome == fsdedupe.OutcomePlanned {
-				continue
-			}
-			fmt.Printf("    %s  %s", f.Path, f.Outcome)
-			if f.Reason != "" {
-				fmt.Printf("  (%s)", f.Reason)
-			}
-			fmt.Println()
-		}
+		line += fmt.Sprintf(", %s %s", formatFileSize(int64(g.BytesReclaimed)), verb)
 	}
+	if g.Reason != "" {
+		line += fmt.Sprintf(" (%s)", g.Reason)
+	}
+	fmt.Println(line)
+	for _, f := range g.Files {
+		if f.Outcome == fsdedupe.OutcomeOK || f.Outcome == fsdedupe.OutcomePlanned {
+			continue
+		}
+		detail := fmt.Sprintf("      %s: %s", f.Path, f.Outcome)
+		if f.Reason != "" {
+			detail += fmt.Sprintf(" — %s", f.Reason)
+		}
+		fmt.Println(detail)
+	}
+}
+
+// printDedupeFooter writes the once-per-run trailing totals line and
+// any UnsupportedDevs entries. Per-group output happens inline via
+// printGroupOutcome from the OnGroup callback; this helper covers the
+// strictly run-global view.
+func printDedupeFooter(r *fsdedupe.Result) {
 	for _, dev := range r.UnsupportedDevs {
-		fmt.Printf("  skipped device %s: filesystem does not support FIDEDUPERANGE\n", dev)
+		fmt.Printf("skipped device %s: filesystem does not support FIDEDUPERANGE\n", dev)
 	}
 	if flagDryRun {
-		fmt.Printf("  total planned: %s across %d groups\n",
+		fmt.Printf("total planned: %s across %d groups\n",
 			formatFileSize(int64(r.TotalPlanned)), len(r.Groups))
 	} else {
-		fmt.Printf("  total reclaimed: %s across %d groups\n",
+		fmt.Printf("total reclaimed: %s across %d groups\n",
 			formatFileSize(int64(r.TotalReclaimed)), len(r.Groups))
 	}
 }

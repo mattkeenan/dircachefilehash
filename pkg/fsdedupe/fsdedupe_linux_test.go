@@ -123,6 +123,61 @@ func TestSummariseOutcome(t *testing.T) {
 	}
 }
 
+// TestRun_OnGroupCallback pins the streaming hook: Options.OnGroup
+// must fire once per input group, in input order, with each call's
+// GroupResult matching the corresponding entry in Result.Groups.
+func TestRun_OnGroupCallback(t *testing.T) {
+	dir := t.TempDir()
+	if !ProbeReflinkFS(dir) {
+		t.Skipf("no reflink-capable filesystem under %q; skipping", dir)
+	}
+
+	// Two distinct content pools so we get two groups in the input.
+	a := make([]byte, 8192)
+	for i := range a {
+		a[i] = byte(i % 251)
+	}
+	b := make([]byte, 8192)
+	for i := range b {
+		b[i] = byte((i*7 + 3) % 241)
+	}
+	for name, data := range map[string][]byte{
+		"a1.bin": a, "a2.bin": a,
+		"b1.bin": b, "b2.bin": b,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	groups := []Group{
+		{Hash: "ga", Files: []string{"a1.bin", "a2.bin"}},
+		{Hash: "gb", Files: []string{"b1.bin", "b2.bin"}},
+	}
+	var streamed []GroupResult
+	res, err := Run(context.Background(), groups, Options{
+		RepoRoot: dir,
+		OnGroup: func(gr GroupResult) {
+			streamed = append(streamed, gr)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(streamed) != len(res.Groups) {
+		t.Fatalf("streamed=%d, batch=%d; want equal", len(streamed), len(res.Groups))
+	}
+	for i, gr := range res.Groups {
+		if streamed[i].Hash != gr.Hash {
+			t.Errorf("group[%d]: streamed hash=%q, batch hash=%q",
+				i, streamed[i].Hash, gr.Hash)
+		}
+	}
+	if streamed[0].Hash != "ga" || streamed[1].Hash != "gb" {
+		t.Errorf("streaming order wrong: %v", []string{streamed[0].Hash, streamed[1].Hash})
+	}
+}
+
 // TestPartitionByDev_MultipleDevs is a narrow unit check on the
 // device-partitioning helper — the real multi-device behaviour is
 // hard to exercise in tests (needs two mounted filesystems) but
