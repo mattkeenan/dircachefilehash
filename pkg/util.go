@@ -65,6 +65,42 @@ type DirectoryCache struct {
 	cacheIndex       *mmapIndexFile   // Cache index file (if loaded)
 	scanIndices      []*mmapIndexFile // Scan index files (may be multiple)
 	indexLockTimeout int              // Timeout in seconds for index memory locks
+
+	// Read-only mmap memo: dedups loadIndexFromFileWithTracking calls for
+	// canonical paths (main.idx, cache.idx, timestamped cache files,
+	// snapshot main.idx). Keyed by absolute path. Stat-checked on every
+	// lookup so atomic-rename writes invalidate naturally.
+	//
+	// Lifetime: the memo owns the mappings. Each entry is constructed with
+	// refCount=1; eviction or Close DecRefs to 0 → cleanup. Stat-mismatch
+	// evictions move the old entry into orphanIndices instead of unmapping
+	// immediately — skiplists handed out earlier may still hold refs into
+	// that mapping. orphanIndices is drained in Close.
+	loadedIndices map[string]*loadedIndex
+	orphanIndices []*loadedIndex
+	loadedMu      sync.Mutex
+}
+
+// loadedIndex is one entry in the read-only mmap memo. The mmap is owned
+// by the memo: holding a *loadedIndex implies a live mapping. Eviction
+// (stale stat or Close) DecRefs file. The refs slice is the parsed entry
+// list — sharing it across consumers is safe because main/cache/snapshot
+// indices are PROT_READ and never mutated in memory.
+type loadedIndex struct {
+	file *mmapIndexFile
+	refs []binaryEntryRef
+	stat cachedStat
+}
+
+// cachedStat captures the identity of an on-disk index file for the memo's
+// invalidation check. Comparing dev+inode+size+mtime catches atomic
+// renames (inode changes), in-place truncation (size changes), and any
+// other rewrite (mtime changes).
+type cachedStat struct {
+	dev   uint64
+	ino   uint64
+	size  int64
+	mtime int64 // unix nanoseconds
 }
 
 // binaryEntry represents a file entry in mmap'd memory (zero-copy)

@@ -37,34 +37,6 @@ Scope when picked up:
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
 the remote host holds no dcfh state to repair.
 
-## Bug: `dcfh dupes` reports all-zero SHA1 hash
-
-`dcfh dupes --json` groups files under `"hash": "0000000000000000000000000000000000000000"`
-(40 hex zeros, i.e. a zero SHA1) even when the index stores correct SHA256 hashes.
-
-Reproduction:
-```sh
-mkdir /tmp/smoke && cd /tmp/smoke
-echo hello > a.txt && echo world > b.txt && echo hello > c.txt
-dcfh init . && dcfh update
-dcfh dupes --json
-# → one group with all 3 files under hash=000…000
-dcfhfind main --printf '%H  %p\n'
-# → correct SHA256 hashes (a.txt and c.txt match, b.txt differs)
-```
-
-The main index is fine (`dcfhfind` reads correct hashes). The bug is in
-`FindDuplicatesUnified` / the dupes grouping path: it emits a zero-length
-SHA1 placeholder instead of reading the stored hash.
-
-Effects:
-- All non-identical files are reported as duplicates of each other.
-- `dupes` output (human, JSON, fdupes) is unusable when the repo uses
-  anything other than SHA1.
-
-Pre-existing — confirmed on unmodified `main` via `git stash` during the
-Phase 1 Repo-abstraction refactor (which did not touch `FindDuplicatesUnified`).
-
 ## Pipeline refactor: share main.idx load across Diff(main, fs-scan) (medium priority)
 
 `Diff(main, fs-scan)` opens main twice: once via `OpenRef(RefTypeMain)` for
@@ -83,6 +55,34 @@ Scope: have `Diff()` detect the `(main, fs-scan)` pair, load main once,
 pass it into a `refreshFsScanCacheWithMain(ctx, mainSkiplist)` helper,
 and skip the second build. Iterators on both sides share the same
 underlying ref slice via separate skiplist views.
+
+## dcfhfix: default to non-destructive fix-to-new-file (medium priority)
+
+`dcfhfix` should default to writing repairs to a *new* index file (e.g.
+`<name>.fixed.idx` or similar), moving the original out of the way
+rather than mutating it in place. In-place editing should require an
+explicit `--force --edit-in-place` (or equivalent) — a "break glass in
+case of nuclear war" flag, not the default.
+
+Why: dcfhfix operates on potentially-corrupted state where the only
+remaining evidence is the index itself. The current in-place default
+makes destructive edits the path of least resistance; a fix-to-new-file
+default preserves the original automatically and matches the safety
+posture of comparable tools (`fsck -n`, `git fsck` write nothing).
+
+Scope when picked up:
+- Make non-destructive output the default for `dcfhfix scan`, `entry`,
+  `header` write paths.
+- Original index moved aside (`<name>.idx.pre-fix` or timestamped) so a
+  user can compare/roll back without thinking about it.
+- `--edit-in-place` (gated by `--force` or its own clear flag) for the
+  rare case where users explicitly want the old behaviour.
+- Big warnings on the in-place path; clean-flag header check still
+  applies as the in-use lockout (separate concern).
+- Update help text and DESIGN docs to reflect the new default.
+
+Dependency: aligns naturally with the Fix-primitive restructure above
+(non-destructive output is a property of `FixRequest` semantics).
 
 ## Pipeline refactor: retire `runStatusWorkflowUnified` / `StatusCallback` (low-medium priority)
 

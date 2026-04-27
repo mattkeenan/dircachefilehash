@@ -5,36 +5,87 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
+
+// statForMemo extracts identity for the read-only mmap memo from an
+// os.FileInfo. Returns false if the underlying syscall.Stat_t is
+// unavailable (non-Unix platforms — dcfh is Unix-only by design, so
+// this should never trigger; defensive).
+func statForMemo(info os.FileInfo) (cachedStat, bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return cachedStat{}, false
+	}
+	return cachedStat{
+		dev:   st.Dev,
+		ino:   st.Ino,
+		size:  info.Size(),
+		mtime: info.ModTime().UnixNano(),
+	}, true
+}
+
+// loadIndexShared returns the cached *mmapIndexFile + refs slice for path,
+// loading and memoising on first call or stat mismatch. The memo owns the
+// mapping; callers must NOT DecRef the returned file. Skiplist entries
+// built from refs remain valid as long as the DirectoryCache is open:
+// stat-mismatch evictions move the old entry to orphanIndices rather than
+// unmapping immediately, and Close drains both maps.
+func (dc *DirectoryCache) loadIndexShared(path string) (*mmapIndexFile, []binaryEntryRef, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	stat, _ := statForMemo(info)
+
+	dc.loadedMu.Lock()
+	defer dc.loadedMu.Unlock()
+
+	if dc.loadedIndices == nil {
+		dc.loadedIndices = make(map[string]*loadedIndex)
+	}
+
+	if cached, ok := dc.loadedIndices[path]; ok {
+		if cached.stat == stat {
+			return cached.file, cached.refs, nil
+		}
+		dc.orphanIndices = append(dc.orphanIndices, cached)
+		delete(dc.loadedIndices, path)
+	}
+
+	refs, indexFile, err := dc.loadIndexFromFileWithTracking(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	dc.loadedIndices[path] = &loadedIndex{
+		file: indexFile,
+		refs: refs,
+		stat: stat,
+	}
+	return indexFile, refs, nil
+}
 
 // LoadMainIndex loads the main index file into a skiplist with "main" context
 func (dc *DirectoryCache) LoadMainIndex() (*skiplistWrapper, error) {
-	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
-		// Create empty main index if it doesn't exist
+	indexFile, refs, err := dc.loadIndexShared(dc.IndexFile)
+	if os.IsNotExist(err) {
 		if err := dc.createEmptyIndex(); err != nil {
 			return nil, fmt.Errorf("failed to create empty main index: %w", err)
 		}
+		indexFile, refs, err = dc.loadIndexShared(dc.IndexFile)
 	}
-
-	// Load entries from file as binaryEntryRef instances
-	refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.IndexFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
 
-	// Register the main index file for tracking
+	// dc.mainIndex is a non-owning per-type pointer used by IndexTimestamp
+	// (pkg/dircache.go) for the mmap RWMutex. The memo owns lifetime.
 	if indexFile != nil {
 		indexFile.Type = "main"
 		dc.registerIndex("main", indexFile)
 	}
 
-	// Create skiplist and insert all entries with main context
-	skiplist := NewSkiplistWrapper(16, MainContext)
-	for _, ref := range refs {
-		skiplist.Insert(ref, MainContext)
-	}
-
-	return skiplist, nil
+	return buildSkiplistFromRefs(refs, MainContext), nil
 }
 
 // LoadMergedMainCacheIndex loads main index and merges cache index for unified architecture operations
@@ -65,31 +116,23 @@ func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 
 // LoadCacheIndex loads the cache index file and merges timestamped cache files
 func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
-	// Create base skiplist for cache context
 	skiplist := NewSkiplistWrapper(16, CacheContext)
 
-	// Load main cache.idx if it exists
-	if _, err := os.Stat(dc.CacheFile); err == nil {
-		// Load entries from file as binaryEntryRef instances
-		refs, indexFile, err := dc.loadIndexFromFileWithTracking(dc.CacheFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load cache index: %w", err)
-		}
-
-		// Register the cache index file for tracking
+	indexFile, refs, err := dc.loadIndexShared(dc.CacheFile)
+	switch {
+	case err == nil:
 		if indexFile != nil {
 			indexFile.Type = "cache"
 			dc.registerIndex("cache", indexFile)
 		}
-
-		// Insert all entries with cache context
 		for _, ref := range refs {
 			skiplist.Insert(ref, CacheContext)
 		}
-
 		if IsDebugEnabled("load") {
 			VerboseLog(3, "loadCacheIndex: loaded %d entries from cache.idx", len(refs))
 		}
+	case !os.IsNotExist(err):
+		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
 
 	// Load and merge timestamped cache files in chronological order
@@ -103,29 +146,21 @@ func (dc *DirectoryCache) loadCacheIndex() (*skiplistWrapper, error) {
 			VerboseLog(3, "loadCacheIndex: merging timestamped cache file: %s", filepath.Base(cacheFile))
 		}
 
-		// Load timestamped cache file
-		refs, indexFile, err := dc.loadIndexFromFileWithTracking(cacheFile)
+		indexFile, refs, err := dc.loadIndexShared(cacheFile)
 		if err != nil {
-			// Log warning and skip corrupted cache files
 			if IsDebugEnabled("scan") {
 				fmt.Fprintf(os.Stderr, "[CACHE] Warning: skipping corrupted cache file %s: %v\n", cacheFile, err)
 			}
 			continue
 		}
 
-		// Register the timestamped cache index file for tracking
 		if indexFile != nil {
 			indexFile.Type = "timestamped-cache"
 			dc.registerIndex(fmt.Sprintf("timestamped-cache-%s", filepath.Base(cacheFile)), indexFile)
 		}
 
-		// Create temporary skiplist for this cache file
-		timestampedSkiplist := NewSkiplistWrapper(16, CacheContext)
-		for _, ref := range refs {
-			timestampedSkiplist.Insert(ref, CacheContext)
-		}
+		timestampedSkiplist := buildSkiplistFromRefs(refs, CacheContext)
 
-		// Merge into main cache skiplist (later timestamps take precedence)
 		if err := skiplist.Merge(timestampedSkiplist, MergeTheirs); err != nil {
 			return nil, fmt.Errorf("failed to merge timestamped cache file %s: %w", cacheFile, err)
 		}

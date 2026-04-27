@@ -105,6 +105,10 @@ func openFileRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryE
 // openSnapshotRef resolves a snapshot's main.idx file and opens it as an
 // iterator. SnapshotID may be either an exact ID (timestamp form) or a tag;
 // tag lookups return the most recent matching snapshot.
+//
+// Goes through the read-only mmap memo, so repeated `dcfh snapshot status`
+// calls against the same snapshot in one process share a single mapping.
+// The memo owns lifetime; the returned closer is a no-op.
 func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryEntryIterator, func() error, error) {
 	if ref.SnapshotID == "" {
 		return nil, nil, fmt.Errorf("OpenRef snapshot: SnapshotID is required")
@@ -114,18 +118,12 @@ func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (Bin
 		return nil, nil, fmt.Errorf("OpenRef snapshot %q: %w", ref.SnapshotID, err)
 	}
 	path := filepath.Join(dc.MetaDir, "snapshots", id, "main.idx")
-	refs, indexFile, err := dc.loadIndexFromFileWithTracking(path)
+	_, refs, err := dc.loadIndexShared(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef snapshot %s: %w", id, err)
 	}
 	sl := buildSkiplistFromRefs(refs, MainContext)
-	closer := func() error {
-		if indexFile != nil {
-			indexFile.DecRef()
-		}
-		return nil
-	}
-	return NewBinaryEntrySkiplistIterator(ctx, sl, "snapshot-"+id), closer, nil
+	return NewBinaryEntrySkiplistIterator(ctx, sl, "snapshot-"+id), noopCloser, nil
 }
 
 // openFsScanRef materialises the live filesystem as a cache+main iterator.

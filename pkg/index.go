@@ -717,6 +717,12 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		Type:       "loaded",
 		FilePath:   filePath,
 		headerSize: hdrSize,
+		// Start with refCount=1 so existing error-cleanup DecRef paths
+		// (and the read-only mmap memo's drain in Close) reach 0 and
+		// trigger Cleanup. The construction ref is owned by whoever
+		// receives indexFile — for memo'd loads, the DirectoryCache; for
+		// direct callers like openFileRef, the returned closer.
+		refCount: 1,
 	}
 
 	isClean := (header.Flags & IndexFlagClean) != 0
@@ -855,23 +861,35 @@ func (dc *DirectoryCache) Close() error {
 		dc.mmapIndex = nil
 	}
 
-	// Clean up tracked index files using DecRef() for proper reference counting
-	if dc.mainIndex != nil {
-		dc.mainIndex.DecRef()
-		dc.mainIndex = nil
+	// Drain the read-only mmap memo (owns lifetime of main/cache/snapshot
+	// mappings loaded via loadIndexShared). dc.mainIndex/dc.cacheIndex are
+	// non-owning per-type pointers maintained by registerIndex for the
+	// memory-protection RWMutex machinery; the memo drain releases the
+	// actual mappings, so we just nil out those pointers here.
+	dc.loadedMu.Lock()
+	for _, li := range dc.loadedIndices {
+		if li != nil && li.file != nil {
+			li.file.DecRef()
+		}
 	}
-
-	if dc.cacheIndex != nil {
-		dc.cacheIndex.DecRef()
-		dc.cacheIndex = nil
+	dc.loadedIndices = nil
+	for _, li := range dc.orphanIndices {
+		if li != nil && li.file != nil {
+			li.file.DecRef()
+		}
 	}
+	dc.orphanIndices = nil
+	dc.loadedMu.Unlock()
 
+	dc.mainIndex = nil
+	dc.cacheIndex = nil
+
+	// Scan indices have their own ownership (created with refCount=1
+	// outside the memo by appendEntryToNamedIndex and friends).
 	if dc.currentScan != nil {
 		dc.currentScan.DecRef()
 		dc.currentScan = nil
 	}
-
-	// Clean up all scan indices
 	for _, scanIndex := range dc.scanIndices {
 		if scanIndex != nil {
 			scanIndex.DecRef()
