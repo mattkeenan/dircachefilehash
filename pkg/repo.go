@@ -65,38 +65,48 @@ type RepoStats struct {
 }
 
 // DiffRequest selects what Diff should compare against the filesystem.
-// Empty Paths means "entire repository".
+// Empty Paths means "entire repository". Filter narrows the *reported*
+// result without affecting cache writes — see FilterOptions for the
+// shared flag dialect.
 //
 // Diff is a structured delta, not a listing — it reports which entries
 // were added, modified, or deleted relative to the baseline index. The
 // CLI surface is still `dcfh status`; only the internal primitive is
 // named Diff to reflect the return shape.
 type DiffRequest struct {
-	Options Options  `json:"options"`
-	Paths   []string `json:"paths,omitempty"`
+	Options Options       `json:"options"`
+	Paths   []string      `json:"paths,omitempty"`
+	Filter  FilterOptions `json:"filter,omitzero"`
 }
 
 // DiffRefsRequest drives the generalised Diff engine, comparing two index
 // references identified by selector strings (see ResolveIndexSelectors for
 // the vocabulary). Empty Left defaults to "main"; empty Right defaults to
 // "fs-scan", giving the historical dcfh-status semantics by default.
+// Filter narrows the reported result.
 type DiffRefsRequest struct {
-	Options Options `json:"options"`
-	Left    string  `json:"left,omitempty"`
-	Right   string  `json:"right,omitempty"`
+	Options Options       `json:"options"`
+	Left    string        `json:"left,omitempty"`
+	Right   string        `json:"right,omitempty"`
+	Filter  FilterOptions `json:"filter,omitzero"`
 }
 
 // ApplyRequest is the analogue of DiffRequest for Apply (dcfh update).
+//
+// Filter is reserved for v2: useful filtering on update means push-down
+// (skip rescan/rehash for non-matching files), which v1 does not yet
+// implement. Setting Filter today is silently ignored.
 type ApplyRequest struct {
-	Options Options  `json:"options"`
-	Paths   []string `json:"paths,omitempty"`
+	Options Options       `json:"options"`
+	Paths   []string      `json:"paths,omitempty"`
+	Filter  FilterOptions `json:"filter,omitzero"`
 }
 
-// GroupsRequest selects duplicate-detection options.
-//
-// Filter narrows which index entries participate — paths, size bounds,
-// mtime bounds. The zero DupeFilter is the whole-repo fast path. See
-// DupeFilter for the precise semantics of each field.
+// GroupsRequest selects duplicate-detection options. Filter holds the
+// dupes-specific bits (Paths, Exclusive, IgnoreHardlinks) plus a
+// pre-built Predicate FilterExpr. When a remote transport lands it
+// will need to ship the predicate inputs separately (FilterExpr is
+// json:"-" on DupeFilter); add a wire shape then.
 type GroupsRequest struct {
 	Options Options    `json:"options"`
 	Filter  DupeFilter `json:"filter,omitzero"`

@@ -129,18 +129,38 @@ func (s *scanWriteSink) emit(entry BinaryEntryInterface, op PipelineOp, hash boo
 // Deleted entries are treated as "not present on that side": a deleted left
 // + live right collapses to OnRightOnly (added); the symmetric case
 // collapses to OnLeftOnly (deleted); both-deleted is silently dropped.
+//
+// filter, when non-nil, gates whether an entry contributes to the result
+// (path slice + byte counter). The right entry is evaluated for OnMatch
+// — that's the post-change shape users filter on. Failed predicate
+// evaluations are silently dropped (treated as non-match) to keep status
+// useful in the face of e.g. a transient mmap error on one entry.
 type diffComparisonSink struct {
 	result *StatusResult
+	filter FilterExpr
+	ctx    *FilterContext
 }
 
-func newDiffComparisonSink() *diffComparisonSink {
+func newDiffComparisonSink(filter FilterExpr) *diffComparisonSink {
 	return &diffComparisonSink{
 		result: &StatusResult{
 			Modified: make([]string, 0),
 			Added:    make([]string, 0),
 			Deleted:  make([]string, 0),
 		},
+		filter: filter,
+		ctx:    &FilterContext{IndexType: "diff"},
 	}
+}
+
+// keep returns true when entry passes the filter (or no filter is set).
+// Errors collapse to "skip this entry" — see the type comment for why.
+func (s *diffComparisonSink) keep(entry BinaryEntryInterface) bool {
+	if s.filter == nil {
+		return true
+	}
+	ok, err := s.filter.Evaluate(entry, s.ctx)
+	return err == nil && ok
 }
 
 func (s *diffComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
@@ -152,9 +172,15 @@ func (s *diffComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 	}
 	if leftDel {
 		// Already know rightDel==false; avoid re-checking inside the helper.
+		if !s.keep(right) {
+			return nil
+		}
 		return s.recordAdded(right)
 	}
 	if rightDel {
+		if !s.keep(left) {
+			return nil
+		}
 		return s.recordDeleted(left)
 	}
 
@@ -170,6 +196,9 @@ func (s *diffComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 		return nil
 	}
 
+	if !s.keep(right) {
+		return nil
+	}
 	path, err := right.RelativePath()
 	if err != nil {
 		return fmt.Errorf("diff: right path: %w", err)
@@ -184,11 +213,17 @@ func (s *diffComparisonSink) OnLeftOnly(entry BinaryEntryInterface) error {
 	if d, _ := entry.IsDeleted(); d {
 		return nil
 	}
+	if !s.keep(entry) {
+		return nil
+	}
 	return s.recordDeleted(entry)
 }
 
 func (s *diffComparisonSink) OnRightOnly(entry BinaryEntryInterface) error {
 	if d, _ := entry.IsDeleted(); d {
+		return nil
+	}
+	if !s.keep(entry) {
 		return nil
 	}
 	return s.recordAdded(entry)

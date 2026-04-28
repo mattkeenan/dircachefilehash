@@ -145,7 +145,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Run status to create cache
-		_, err := dc.Status(context.Background(), map[string]string{})
+		_, err := dc.Status(context.Background(), map[string]string{}, nil)
 		if err != nil {
 			t.Fatalf("Status failed: %v", err)
 		}

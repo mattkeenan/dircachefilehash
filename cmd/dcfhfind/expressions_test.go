@@ -81,14 +81,14 @@ func TestPathMatching(t *testing.T) {
 
 			// Test NameTest
 			nameTest := &NameTest{Pattern: tc.pattern, CaseSensitive: true}
-			gotName, err := nameTest.Evaluate(entry, context)
+			gotName, err := nameTest.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("NameTest.Evaluate() error = %v", err)
 			}
 
 			// Test PathTest
 			pathTest := &PathTest{Pattern: tc.pattern, CaseSensitive: true}
-			gotPath, err := pathTest.Evaluate(entry, context)
+			gotPath, err := pathTest.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("PathTest.Evaluate() error = %v", err)
 			}
@@ -140,7 +140,7 @@ func TestCaseInsensitiveMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.expr.Evaluate(entry, context)
+			got, err := tt.expr.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("Expression.Evaluate() error = %v", err)
 				return
@@ -237,7 +237,7 @@ func TestHashExpressions(t *testing.T) {
 				HashType:  tt.hashType,
 			}
 
-			got, err := tt.expr.Evaluate(entry, context)
+			got, err := tt.expr.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("Expression.Evaluate() error = %v", err)
 				return
@@ -287,7 +287,7 @@ func TestExpressionEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.expr.Evaluate(tt.entry, context)
+			got, err := tt.expr.Evaluate(tt.entry.AsFilterEntry(), context)
 
 			if tt.wantErr {
 				if err == nil {

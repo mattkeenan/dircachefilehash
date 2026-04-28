@@ -170,7 +170,11 @@ func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, e
 	// always diffs the whole tree. Keep the field on the request for
 	// future use (Phase 1b+).
 	_ = req.Paths
-	return l.dc.Status(ctx, flags)
+	pred, err := BuildFilter(req.Filter)
+	if err != nil {
+		return nil, err
+	}
+	return l.dc.Status(ctx, flags, pred)
 }
 
 func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusResult, error) {
@@ -196,7 +200,11 @@ func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusR
 	if err != nil {
 		return nil, fmt.Errorf("parse right ref %q: %w", right, err)
 	}
-	return Diff(ctx, l.dc, leftRef, rightRef)
+	pred, err := BuildFilter(req.Filter)
+	if err != nil {
+		return nil, err
+	}
+	return Diff(ctx, l.dc, leftRef, rightRef, pred)
 }
 
 func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error) {

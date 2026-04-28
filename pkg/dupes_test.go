@@ -261,6 +261,18 @@ func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ..
 
 func u64(v uint64) *uint64 { return &v }
 
+// mustFilter is a test helper: build a FilterExpr from FilterOptions or
+// fail loudly. Lets DupeFilter literals stay compact in the size/date
+// test cases below.
+func mustFilter(t *testing.T, opts FilterOptions) FilterExpr {
+	t.Helper()
+	expr, err := BuildFilter(opts)
+	if err != nil {
+		t.Fatalf("BuildFilter: %v", err)
+	}
+	return expr
+}
+
 func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 	// group1 (small): two tiny duplicates → dropped by --min-size
 	// group2 (mixed): one small + one large dup of the same content;
@@ -279,7 +291,7 @@ func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 	defer func() { _ = dc.Close() }()
 
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{MinSize: u64(512), Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(512)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -306,7 +318,7 @@ func TestFindDuplicates_SizeFilter_MaxOnly(t *testing.T) {
 	defer func() { _ = dc.Close() }()
 
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{MaxSize: u64(100), Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -326,7 +338,7 @@ func TestFindDuplicates_SizeFilter_MinEqualsMax(t *testing.T) {
 	defer func() { _ = dc.Close() }()
 
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{MinSize: u64(100), MaxSize: u64(100), Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(100), MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -354,7 +366,7 @@ func TestFindDuplicates_DateFilter_Range(t *testing.T) {
 	start := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{StartTime: start, EndTime: end, Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -379,7 +391,7 @@ func TestFindDuplicates_DateFilter_BoundaryInclusivity(t *testing.T) {
 
 	// [boundary, boundary+24h): only in-files qualify.
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{StartTime: boundary, EndTime: boundary.Add(24 * time.Hour), Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: boundary, EndDate: boundary.Add(24 * time.Hour)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -410,7 +422,7 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	start := time.Date(2026, 3, 29, 0, 0, 0, 0, berlin)
 	end := time.Date(2026, 3, 30, 0, 0, 0, 0, berlin)
 	groups, err := dc.FindDuplicates(context.Background(), map[string]string{},
-		DupeFilter{StartTime: start, EndTime: end, Exclusive: true})
+		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -421,9 +433,11 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	// must exclude the post-transition group entirely.
 	narrow, err := dc.FindDuplicates(context.Background(), map[string]string{},
 		DupeFilter{
-			StartTime: time.Date(2026, 3, 29, 0, 0, 0, 0, berlin),
-			EndTime:   time.Date(2026, 3, 29, 2, 0, 0, 0, berlin), // pre-DST
 			Exclusive: true,
+			Predicate: mustFilter(t, FilterOptions{
+				StartDate: time.Date(2026, 3, 29, 0, 0, 0, 0, berlin),
+				EndDate:   time.Date(2026, 3, 29, 2, 0, 0, 0, berlin), // pre-DST
+			}),
 		})
 	if err != nil {
 		t.Fatalf("narrow FindDuplicates: %v", err)
@@ -455,9 +469,11 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 		DupeFilter{
 			Paths:     []string{"a/"},
 			Exclusive: true,
-			MinSize:   u64(512),
-			StartTime: start,
-			EndTime:   end,
+			Predicate: mustFilter(t, FilterOptions{
+				MinSize:   u64(512),
+				StartDate: start,
+				EndDate:   end,
+			}),
 		})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)

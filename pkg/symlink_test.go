@@ -123,7 +123,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	SetDebugFlags("scan,scanning,symlinks")
 	defer SetDebugFlags("")
 
-	status, err := dc.Status(ctx, flags)
+	status, err := dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after symlinks=none: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 
 	// Switch back to "all" - status should show no changes
 	flags["symlinks"] = "all"
-	status, err = dc.Status(ctx, flags)
+	status, err = dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after switching back to all: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 		t.Errorf("Expected %d files with symlinks=internal, got %d", expectedCount, fileCount)
 
 		// Debug: List all files found
-		status, err := dc.Status(ctx, flags)
+		status, err := dc.Status(ctx, flags, nil)
 		if err == nil {
 			t.Logf("Modified: %v", status.Modified)
 			t.Logf("Added: %v", status.Added)
@@ -390,7 +390,7 @@ func TestSymlinkCacheRadixBehavior(t *testing.T) {
 	// Switch to none and check status before updating
 	flags["symlinks"] = "none"
 
-	status, err := dc.Status(ctx, flags)
+	status, err := dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 	}
 
 	// The file should be marked as deleted without being hashed
-	status, err := dc.Status(ctx, flags)
+	status, err := dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

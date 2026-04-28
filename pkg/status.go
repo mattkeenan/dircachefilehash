@@ -42,7 +42,11 @@ type StatusResult struct {
 // It is a thin wrapper over Diff(main, fs-scan); the cache write is the
 // side-effect of opening fs-scan. The --v clean-status snapshot remains
 // a Status-only feature, attached to the result here.
-func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (*StatusResult, error) {
+//
+// filter, when non-nil, narrows the reported result without affecting
+// the cache write — the cache always reflects on-disk truth so a future
+// status without the filter sees the same state.
+func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
 	defer VerboseEnter()()
 
 	if err := dc.ApplyConfigOverrides(flags); err != nil {
@@ -52,7 +56,7 @@ func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string) (
 		}
 	}
 
-	result, err := Diff(ctx, dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan})
+	result, err := Diff(ctx, dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
 	if err != nil {
 		return result, err
 	}

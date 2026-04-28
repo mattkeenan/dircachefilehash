@@ -387,7 +387,7 @@ func (p *ExpressionParser) isTestExpression(token string) bool {
 }
 
 func (p *ExpressionParser) isGlobalOption(token string) bool {
-	globals := []string{"--repo", "--maxdepth", "--warn", "--nowarn"}
+	globals := []string{"--repo", "--maxdepth", "--warn", "--nowarn", "--tz"}
 	return slices.Contains(globals, token)
 }
 
@@ -411,6 +411,16 @@ func (p *ExpressionParser) parseGlobalOption() (Expression, error) {
 		p.globalArgs["--warn"] = "true"
 	case "--nowarn":
 		p.globalArgs["--nowarn"] = "true"
+	case "--tz":
+		// --tz is shared with the cmd/dcfh flat-flag dialect: it sets
+		// the IANA zone for parsing bare --start-date / --end-date
+		// values. Stored as a global so subsequent expression tokens
+		// can resolve it without needing to traverse forward.
+		if p.pos >= len(p.tokens) {
+			return nil, fmt.Errorf("--tz requires an argument")
+		}
+		value := p.next()
+		p.globalArgs["--tz"] = value
 	}
 
 	return nil, nil // Global options don't produce expressions
@@ -453,6 +463,60 @@ func (p *ExpressionParser) parseTestToken(token string) (Expression, bool, error
 		return &ValidTest{}, true, nil
 	case "--corrupt":
 		return &CorruptTest{}, true, nil
+	}
+
+	// Inclusive size and absolute-date predicates need access to parser
+	// state (zone for date parsing) or a different constructor shape
+	// than argTestTable supports, so they're inlined here.
+	switch token {
+	case "--min-size":
+		arg, err := p.requireArg(token, "a size bound (N[K|M|G|T])")
+		if err != nil {
+			return nil, true, err
+		}
+		n, err := dircachefilehash.ParseSizeBound(arg)
+		if err != nil {
+			return nil, true, fmt.Errorf("--min-size: %w", err)
+		}
+		return &dircachefilehash.MinSizeTest{Min: n}, true, nil
+	case "--max-size":
+		arg, err := p.requireArg(token, "a size bound (N[K|M|G|T])")
+		if err != nil {
+			return nil, true, err
+		}
+		n, err := dircachefilehash.ParseSizeBound(arg)
+		if err != nil {
+			return nil, true, fmt.Errorf("--max-size: %w", err)
+		}
+		return &dircachefilehash.MaxSizeTest{Max: n}, true, nil
+	case "--start-date":
+		arg, err := p.requireArg(token, "a partial ISO-8601 date")
+		if err != nil {
+			return nil, true, err
+		}
+		zone, err := dircachefilehash.ResolveZone(p.globalArgs["--tz"])
+		if err != nil {
+			return nil, true, err
+		}
+		t, err := dircachefilehash.ParsePartialDateTime(arg, zone)
+		if err != nil {
+			return nil, true, fmt.Errorf("--start-date: %w", err)
+		}
+		return &dircachefilehash.MTimeRangeTest{Start: t}, true, nil
+	case "--end-date":
+		arg, err := p.requireArg(token, "a partial ISO-8601 date")
+		if err != nil {
+			return nil, true, err
+		}
+		zone, err := dircachefilehash.ResolveZone(p.globalArgs["--tz"])
+		if err != nil {
+			return nil, true, err
+		}
+		t, err := dircachefilehash.ParsePartialDateTime(arg, zone)
+		if err != nil {
+			return nil, true, fmt.Errorf("--end-date: %w", err)
+		}
+		return &dircachefilehash.MTimeRangeTest{End: t}, true, nil
 	}
 
 	spec, ok := argTestTable[token]
@@ -628,41 +692,10 @@ func parseSizeTest(sizeSpec string) (Expression, error) {
 }
 
 func parseTimeTest(timeSpec string, timeType string) (Expression, error) {
-	if len(timeSpec) == 0 {
-		return nil, fmt.Errorf("empty time specification")
-	}
-
-	var mode string
-	var timeStr string
-
-	// Parse prefix (+, -, or exact)
-	switch timeSpec[0] {
-	case '+':
-		mode = "+"
-		timeStr = timeSpec[1:]
-	case '-':
-		mode = "-"
-		timeStr = timeSpec[1:]
-	default:
-		mode = "="
-		timeStr = timeSpec
-	}
-
-	if len(timeStr) == 0 {
-		return nil, fmt.Errorf("time specification missing numeric value")
-	}
-
-	// Parse the numeric part
-	value, err := strconv.Atoi(timeStr)
+	value, mode, err := dircachefilehash.ParseAgeSpec(timeSpec)
 	if err != nil {
-		return nil, fmt.Errorf("invalid time number: %s", timeStr)
+		return nil, err
 	}
-
-	if value < 0 {
-		return nil, fmt.Errorf("time value cannot be negative")
-	}
-
-	// Create appropriate test based on type
 	switch timeType {
 	case "mtime":
 		return &MTimeTest{Days: value, Mode: mode}, nil

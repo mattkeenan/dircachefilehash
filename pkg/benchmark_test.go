@@ -305,7 +305,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	b.Run("Status", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			cache := NewDirectoryCache(datasetDir, dcfhDir)
-			if _, err := cache.Status(context.Background(), map[string]string{}); err != nil {
+			if _, err := cache.Status(context.Background(), map[string]string{}, nil); err != nil {
 				b.Fatalf("Status failed: %v", err)
 			}
 			_ = cache.Close()
@@ -418,7 +418,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 
 		// Step 4: Run status to detect changes
 		statusStart := time.Now()
-		statusResult, err := cache.Status(context.Background(), map[string]string{"v": "1"})
+		statusResult, err := cache.Status(context.Background(), map[string]string{"v": "1"}, nil)
 		if err != nil {
 			b.Fatalf("Status failed: %v", err)
 		}

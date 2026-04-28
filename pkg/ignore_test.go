@@ -88,7 +88,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
-	status, err := dc.Status(ctx, flags)
+	status, err := dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after ignore update: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status again
-	status, err = dc.Status(ctx, flags)
+	status, err = dc.Status(ctx, flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after second ignore update: %v", err)
 	}
@@ -249,7 +249,7 @@ mode = none
 	}
 
 	// Check status - .log file should now be marked for deletion
-	status, err := dc.Status(ctx, map[string]string{})
+	status, err := dc.Status(ctx, map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

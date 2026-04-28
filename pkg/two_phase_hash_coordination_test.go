@@ -207,7 +207,7 @@ func testEndToEndStatusHashing(t *testing.T, dc *DirectoryCache, tempDir string)
 
 	// Run Status command - this should detect the modification and use two-phase coordination
 	flags := make(map[string]string)
-	result, err := dc.Status(context.Background(), flags)
+	result, err := dc.Status(context.Background(), flags, nil)
 	if err != nil {
 		t.Fatalf("Status command failed: %v", err)
 	}

@@ -23,6 +23,27 @@ type EntryInfo struct {
 	HashType  uint16
 }
 
+// entryInfoAdapter wraps *EntryInfo to satisfy FilterEntry; the wrapper
+// exists because EntryInfo's exported fields collide with the method
+// names FilterEntry requires.
+type entryInfoAdapter struct{ e *EntryInfo }
+
+// AsFilterEntry returns a FilterEntry view of e for use with FilterExpr /
+// FilterAction.
+func (e *EntryInfo) AsFilterEntry() FilterEntry { return entryInfoAdapter{e} }
+
+func (a entryInfoAdapter) RelativePath() (string, error) { return a.e.Path, nil }
+func (a entryInfoAdapter) FileSize() (uint64, error)     { return a.e.FileSize, nil }
+func (a entryInfoAdapter) Mode() (uint32, error)         { return a.e.Mode, nil }
+func (a entryInfoAdapter) UID() (uint32, error)          { return a.e.UID, nil }
+func (a entryInfoAdapter) GID() (uint32, error)          { return a.e.GID, nil }
+func (a entryInfoAdapter) Dev() (uint32, error)          { return a.e.Dev, nil }
+func (a entryInfoAdapter) MTimeWall() (uint64, error)    { return a.e.MTimeWall, nil }
+func (a entryInfoAdapter) CTimeWall() (uint64, error)    { return a.e.CTimeWall, nil }
+func (a entryInfoAdapter) HashType() (uint16, error)     { return a.e.HashType, nil }
+func (a entryInfoAdapter) HashString() (string, error)   { return a.e.HashStr, nil }
+func (a entryInfoAdapter) IsDeleted() (bool, error)      { return a.e.IsDeleted, nil }
+
 // EntryCallback is called for each entry during index iteration
 type EntryCallback func(entry *EntryInfo, indexType string) bool
 

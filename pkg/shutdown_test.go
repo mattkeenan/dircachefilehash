@@ -40,7 +40,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 
 	// Run status to add existing.txt to cache.idx
 	t.Logf("Running initial status to add existing.txt to cache index")
-	_, err := dc.Status(context.Background(), map[string]string{})
+	_, err := dc.Status(context.Background(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to run initial status: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 	start := time.Now()
 
 	// This should be interrupted by the shutdown signal
-	_, err = dc.Status(ctx, map[string]string{})
+	_, err = dc.Status(ctx, map[string]string{}, nil)
 
 	elapsed := time.Since(start)
 	t.Logf("Status completed in %v", elapsed)

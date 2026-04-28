@@ -156,7 +156,7 @@ func TestStatusUsesSingleMainMapping(t *testing.T) {
 	idxBefore := dc.mainIndex
 
 	// Run Diff(main, fs-scan) — exactly the dcfh-status code path.
-	if _, err := Diff(context.Background(), dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}); err != nil {
+	if _, err := Diff(context.Background(), dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil); err != nil {
 		t.Fatalf("diff: %v", err)
 	}
 

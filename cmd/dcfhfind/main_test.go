@@ -260,7 +260,7 @@ func TestExpressionEvaluation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.expr.Evaluate(entry, context)
+			got, err := tt.expr.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("Expression.Evaluate() error = %v", err)
 				return
@@ -332,7 +332,7 @@ func TestLogicalOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.expr.Evaluate(entry, context)
+			got, err := tt.expr.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("Expression.Evaluate() error = %v", err)
 				return
@@ -629,7 +629,7 @@ func BenchmarkExpressionEvaluation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := expr.Evaluate(entry, context)
+		_, err := expr.Evaluate(entry.AsFilterEntry(), context)
 		if err != nil {
 			b.Fatalf("Expression.Evaluate failed: %v", err)
 		}

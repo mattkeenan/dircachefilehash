@@ -297,7 +297,7 @@ func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
 	}
 	t.Logf("Files on disk: %v", diskFiles)
 
-	result, err := dc.Status(context.Background(), map[string]string{})
+	result, err := dc.Status(context.Background(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Status check failed: %v", err)
 	}
@@ -430,7 +430,7 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// First status should create cache
-	result1, err := dc.Status(context.Background(), map[string]string{})
+	result1, err := dc.Status(context.Background(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("First status failed: %v", err)
 	}
@@ -467,7 +467,7 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Second status should use cache (should be faster, same result)
-	result2, err := dc.Status(context.Background(), map[string]string{})
+	result2, err := dc.Status(context.Background(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Second status failed: %v", err)
 	}

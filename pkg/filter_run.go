@@ -176,19 +176,28 @@ func RunFilter(ctx context.Context, refs []IndexRef, req FilterRequest, warnOut 
 
 func runFilterOnIndex(ref IndexRef, req FilterRequest) (int, error) {
 	matched := 0
+	// Hoisted: IndexPath/Repository are loop-invariant across millions
+	// of entries. IndexType is overridden per ref when set; otherwise
+	// each callback supplies it (always the same value within one
+	// IterateIndexFile call). EntryPath/RelativePath are the only
+	// per-entry fields, mutated in place.
+	ctx := &FilterContext{
+		IndexPath:  ref.Path,
+		Repository: req.Repository,
+	}
+	override := ref.Type != "" && ref.Type != "file"
+	if override {
+		ctx.IndexType = ref.Type
+	}
 	err := IterateIndexFile(ref.Path, func(entry *EntryInfo, indexType string) bool {
-		if ref.Type != "" && ref.Type != "file" {
-			indexType = ref.Type
+		if !override {
+			ctx.IndexType = indexType
 		}
-		ctx := &FilterContext{
-			IndexPath:    ref.Path,
-			IndexType:    indexType,
-			Repository:   req.Repository,
-			EntryPath:    entry.Path,
-			RelativePath: entry.Path,
-		}
+		ctx.EntryPath = entry.Path
+		ctx.RelativePath = entry.Path
+		fe := entry.AsFilterEntry()
 		if req.Expression != nil {
-			ok, err := req.Expression.Evaluate(entry, ctx)
+			ok, err := req.Expression.Evaluate(fe, ctx)
 			if err != nil {
 				if req.Warn {
 					fmt.Fprintf(os.Stderr, "dcfhfind: warning: %s: %v\n", entry.Path, err)
@@ -201,7 +210,7 @@ func runFilterOnIndex(ref IndexRef, req FilterRequest) (int, error) {
 		}
 		matched++
 		for _, action := range req.Actions {
-			if err := action.Execute(entry, ctx); err != nil && req.Warn {
+			if err := action.Execute(fe, ctx); err != nil && req.Warn {
 				fmt.Fprintf(os.Stderr, "dcfhfind: warning: action failed for %s: %v\n", entry.Path, err)
 			}
 		}

@@ -66,7 +66,7 @@ func TestCacheSystem(t *testing.T) {
 
 	// Test 1: Initial status (should populate cache)
 	t.Run("InitialStatus", func(t *testing.T) {
-		result, err := dc.Status(context.Background(), map[string]string{})
+		result, err := dc.Status(context.Background(), map[string]string{}, nil)
 		if err != nil {
 			t.Fatalf("Initial status failed: %v", err)
 		}
@@ -90,7 +90,7 @@ func TestCacheSystem(t *testing.T) {
 	// Test 2: Second status (should be fast and use cache)
 	t.Run("SecondStatus", func(t *testing.T) {
 		start := time.Now()
-		result, err := dc.Status(context.Background(), map[string]string{})
+		result, err := dc.Status(context.Background(), map[string]string{}, nil)
 		duration := time.Since(start)
 
 		if err != nil {
@@ -131,7 +131,7 @@ func TestCacheSystem(t *testing.T) {
 	// Test 4: Status after update (should show clean)
 	t.Run("StatusAfterUpdate", func(t *testing.T) {
 		start := time.Now()
-		result, err := dc.Status(context.Background(), map[string]string{})
+		result, err := dc.Status(context.Background(), map[string]string{}, nil)
 		duration := time.Since(start)
 
 		if err != nil {
@@ -161,7 +161,7 @@ func TestCacheSystem(t *testing.T) {
 		}
 
 		// Status should detect the change
-		result, err := dc.Status(context.Background(), map[string]string{})
+		result, err := dc.Status(context.Background(), map[string]string{}, nil)
 		if err != nil {
 			t.Fatalf("Status after modification failed: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestCacheSystem(t *testing.T) {
 
 		// Second status should still be fast (cache working for unchanged files)
 		start := time.Now()
-		result2, err := dc.Status(context.Background(), map[string]string{})
+		result2, err := dc.Status(context.Background(), map[string]string{}, nil)
 		duration := time.Since(start)
 
 		if err != nil {

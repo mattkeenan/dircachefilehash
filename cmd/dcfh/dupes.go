@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -327,56 +326,47 @@ func buildDupeFilter(cmd *cobra.Command, paths []string) (dcfh.DupeFilter, error
 		f.IgnoreHardlinks = true
 	}
 
+	opts := dcfh.FilterOptions{TZ: dupesTZ}
 	if cmd.Flags().Changed(flagMinSize) {
-		n, err := parseSizeBound(dupesMinSizeStr)
+		n, err := dcfh.ParseSizeBound(dupesMinSizeStr)
 		if err != nil {
 			return f, fmt.Errorf("--%s: %w", flagMinSize, err)
 		}
-		f.MinSize = &n
+		opts.MinSize = &n
 	} else if dupesFSDedupe {
 		// Sub-block files already occupy a single minimum extent;
 		// deduping them wastes ioctls and reclaims nothing.
 		n := dedupeDefaultMinSize
-		f.MinSize = &n
+		opts.MinSize = &n
 	}
 	if cmd.Flags().Changed(flagMaxSize) {
-		n, err := parseSizeBound(dupesMaxSizeStr)
+		n, err := dcfh.ParseSizeBound(dupesMaxSizeStr)
 		if err != nil {
 			return f, fmt.Errorf("--%s: %w", flagMaxSize, err)
 		}
-		f.MaxSize = &n
+		opts.MaxSize = &n
 	}
 
-	var zone *time.Location
 	if cmd.Flags().Changed(flagStartDate) || cmd.Flags().Changed(flagEndDate) {
-		z, err := resolveZone(dupesTZ)
+		startStr, endStr := "", ""
+		if cmd.Flags().Changed(flagStartDate) {
+			startStr = dupesStartDateStr
+		}
+		if cmd.Flags().Changed(flagEndDate) {
+			endStr = dupesEndDateStr
+		}
+		startT, endT, err := dcfh.ResolveDates(startStr, endStr, dupesTZ)
 		if err != nil {
 			return f, err
 		}
-		zone = z
-	}
-	if cmd.Flags().Changed(flagStartDate) {
-		t, err := parsePartialDateTime(dupesStartDateStr, zone)
-		if err != nil {
-			return f, fmt.Errorf("--%s: %w", flagStartDate, err)
-		}
-		f.StartTime = t
-	}
-	if cmd.Flags().Changed(flagEndDate) {
-		t, err := parsePartialDateTime(dupesEndDateStr, zone)
-		if err != nil {
-			return f, fmt.Errorf("--%s: %w", flagEndDate, err)
-		}
-		f.EndTime = t
+		opts.StartDate, opts.EndDate = startT, endT
 	}
 
-	if f.MinSize != nil && f.MaxSize != nil && *f.MinSize > *f.MaxSize {
-		return f, fmt.Errorf("--min-size (%d) exceeds --max-size (%d)", *f.MinSize, *f.MaxSize)
+	pred, err := dcfh.BuildFilter(opts)
+	if err != nil {
+		return f, err
 	}
-	if !f.StartTime.IsZero() && !f.EndTime.IsZero() && !f.StartTime.Before(f.EndTime) {
-		return f, fmt.Errorf("--start-date (%s) is not before --end-date (%s)",
-			f.StartTime.Format(time.RFC3339), f.EndTime.Format(time.RFC3339))
-	}
+	f.Predicate = pred
 	return f, nil
 }
 

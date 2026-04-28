@@ -75,6 +75,26 @@ func TestNormaliseDupePaths(t *testing.T) {
 	}
 }
 
+// extractMinSize walks a FilterExpr tree looking for the first
+// MinSizeTest leaf (size and time predicates AND together at the top of
+// the BuildFilter output, so a left-first descent suffices for these
+// tests). Used by the FS-dedupe injection assertions below.
+func extractMinSize(pred dcfh.FilterExpr) *uint64 {
+	switch p := pred.(type) {
+	case nil:
+		return nil
+	case *dcfh.MinSizeTest:
+		v := p.Min
+		return &v
+	case *dcfh.AndExpression:
+		if v := extractMinSize(p.Left); v != nil {
+			return v
+		}
+		return extractMinSize(p.Right)
+	}
+	return nil
+}
+
 // resetDupesFlags resets the dupes-scoped globals the tests touch.
 // Keeps the resetFlags() helper in dcfh_test.go focused on the
 // root-level flags.
@@ -101,9 +121,10 @@ func TestBuildDupeFilter_FSDedupeForcesIgnoreHardlinks(t *testing.T) {
 	if !f.IgnoreHardlinks {
 		t.Error("--fs-dedupe did not force IgnoreHardlinks=true")
 	}
-	if f.MinSize == nil || *f.MinSize != dedupeDefaultMinSize {
+	min := extractMinSize(f.Predicate)
+	if min == nil || *min != dedupeDefaultMinSize {
 		t.Errorf("MinSize=%v; want default %d when --fs-dedupe and --min-size not set",
-			f.MinSize, dedupeDefaultMinSize)
+			min, dedupeDefaultMinSize)
 	}
 }
 
@@ -129,8 +150,9 @@ func TestBuildDupeFilter_FSDedupeRespectsUserMinSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
-	if f.MinSize == nil || *f.MinSize != 8192 {
-		t.Errorf("MinSize=%v; want 8192 (user-provided)", f.MinSize)
+	min := extractMinSize(f.Predicate)
+	if min == nil || *min != 8192 {
+		t.Errorf("MinSize=%v; want 8192 (user-provided)", min)
 	}
 }
 
@@ -143,8 +165,8 @@ func TestBuildDupeFilter_NoFSDedupe_NoImplicitMinSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
-	if f.MinSize != nil {
-		t.Errorf("MinSize=%v; want nil when --fs-dedupe is off", f.MinSize)
+	if min := extractMinSize(f.Predicate); min != nil {
+		t.Errorf("MinSize=%v; want nil when --fs-dedupe is off", min)
 	}
 	if f.IgnoreHardlinks {
 		t.Error("IgnoreHardlinks=true; want false when -H and --fs-dedupe are both off")

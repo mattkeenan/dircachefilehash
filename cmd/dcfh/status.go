@@ -9,6 +9,8 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
+var statusFilterFlags filterFlagsState
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the status of files in the repository",
@@ -16,7 +18,12 @@ var statusCmd = &cobra.Command{
 
 Compares the current state of files with the last recorded state
 in the index. Shows files that have been modified, added, or deleted
-since the last update operation.`,
+since the last update operation.
+
+Filter flags (--min-size, --max-size, --start-date, --end-date, --name,
+--mtime, ...) narrow which changes are reported. The cache is always
+refreshed against on-disk truth regardless of filters, so a later status
+call without the filter sees the same state.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -30,6 +37,11 @@ since the last update operation.`,
 			return err
 		}
 
+		filterOpts, err := BuildFilterOptions(&statusFilterFlags)
+		if err != nil {
+			return err
+		}
+
 		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
@@ -37,7 +49,7 @@ since the last update operation.`,
 		}
 		defer func() { _ = repo.Close() }()
 
-		status, err := repo.Diff(ctx, dcfh.DiffRequest{Options: buildOptions()})
+		status, err := repo.Diff(ctx, dcfh.DiffRequest{Options: buildOptions(), Filter: filterOpts})
 		if err != nil {
 			return err
 		}
@@ -80,5 +92,6 @@ since the last update operation.`,
 }
 
 func init() {
+	RegisterFilterFlags(statusCmd.Flags(), &statusFilterFlags)
 	rootCmd.AddCommand(statusCmd)
 }

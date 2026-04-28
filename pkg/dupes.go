@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 	"unsafe"
 )
 
@@ -17,22 +16,24 @@ type DuplicateGroup struct {
 	Count int      `json:"count"`
 }
 
-// DupeFilter narrows which index entries participate. Zero value is
-// the whole-repo fast path. Paths are forward-slash, trailing "/";
-// Exclusive is ignored when Paths is empty. StartTime is inclusive,
-// EndTime is exclusive. Size bounds use *uint64 so MinSize=0 means
-// "no lower bound" while MaxSize=&0 means "only empty files".
-// IgnoreHardlinks, when true, collapses entries sharing the same
-// (Dev, Ino) pair inside a hash-group to a single representative path,
-// so hardlinks to one inode are not reported as duplicates.
+// DupeFilter narrows which index entries participate. Zero value is the
+// whole-repo fast path. Paths are forward-slash, trailing "/"; Exclusive
+// is ignored when Paths is empty. IgnoreHardlinks, when true, collapses
+// entries sharing the same (Dev, Ino) pair inside a hash-group to a
+// single representative path, so hardlinks to one inode are not reported
+// as duplicates.
+//
+// Predicate is the per-entry filter (size / mtime / name / hash / …)
+// shared with `dcfh status`, `dcfh update`, and `dcfhfind` — see
+// pkg/flat_filter.go BuildFilter. Nil means "no per-entry filter", in
+// which case entryKeeper returns a literal-true closure to keep the
+// hot loop branch-light. Predicate runs *before* hash-bucketing so a
+// group that loses members below the ≥2 threshold is never emitted.
 type DupeFilter struct {
-	Paths           []string  `json:"paths,omitempty"`
-	Exclusive       bool      `json:"exclusive,omitempty"`
-	MinSize         *uint64   `json:"min_size,omitempty"`
-	MaxSize         *uint64   `json:"max_size,omitempty"`
-	StartTime       time.Time `json:"start_time,omitzero"`
-	EndTime         time.Time `json:"end_time,omitzero"`
-	IgnoreHardlinks bool      `json:"ignore_hardlinks,omitempty"`
+	Paths           []string   `json:"paths,omitempty"`
+	Exclusive       bool       `json:"exclusive,omitempty"`
+	IgnoreHardlinks bool       `json:"ignore_hardlinks,omitempty"`
+	Predicate       FilterExpr `json:"-"`
 }
 
 // FindDuplicates returns groups of files with identical content hashes
@@ -119,36 +120,25 @@ func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]s
 	return out, nil
 }
 
-// entryKeeper returns a predicate that applies the pre-bucket
-// filters (size / mtime / path-exclusive). The zero-filter fast path
-// returns a predicate that always keeps, letting the ForEach closure
-// stay branch-light.
+// entryKeeper returns a predicate that applies the pre-bucket filters
+// (Predicate evaluation + path-exclusive). The zero-filter fast path
+// returns a literal-true closure so the ForEach loop stays branch-light
+// for the whole-repo `dcfh dupes` invocation.
 func entryKeeper(filter DupeFilter, pathExclusive bool) func(*binaryEntry) bool {
-	hasSize := filter.MinSize != nil || filter.MaxSize != nil
-	hasTime := !filter.StartTime.IsZero() || !filter.EndTime.IsZero()
-	if !pathExclusive && !hasSize && !hasTime {
+	hasPred := filter.Predicate != nil
+	if !pathExclusive && !hasPred {
 		return func(*binaryEntry) bool { return true }
 	}
+	ctx := &FilterContext{IndexType: "dupes"}
 	return func(entry *binaryEntry) bool {
-		if hasSize {
-			if filter.MinSize != nil && entry.FileSize < *filter.MinSize {
-				return false
-			}
-			if filter.MaxSize != nil && entry.FileSize > *filter.MaxSize {
-				return false
-			}
-		}
-		if hasTime {
-			mtime := timeFromWall(entry.MTimeWall)
-			if !filter.StartTime.IsZero() && mtime.Before(filter.StartTime) {
-				return false
-			}
-			if !filter.EndTime.IsZero() && !mtime.Before(filter.EndTime) {
-				return false
-			}
-		}
 		if pathExclusive && !pathMatchesPrefix(entry.RelativePath(), filter.Paths) {
 			return false
+		}
+		if hasPred {
+			ok, err := filter.Predicate.Evaluate(entry.asFilterEntry(), ctx)
+			if err != nil || !ok {
+				return false
+			}
 		}
 		return true
 	}
