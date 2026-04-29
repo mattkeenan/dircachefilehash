@@ -23,6 +23,12 @@ type IgnoreManager struct {
 	patterns   []gitignore.Pattern
 	matcher    gitignore.Matcher
 	loaded     bool
+
+	// suppressFile makes LoadIgnorePatterns a no-op so the .dcfh/ignore
+	// file has no effect for this run. Set by --no-ignore-file before any
+	// load happens; flipping it after load does not retroactively clear
+	// already-parsed patterns (call Reload for that).
+	suppressFile bool
 }
 
 // NewIgnoreManager creates a new ignore manager.
@@ -33,6 +39,13 @@ func NewIgnoreManager(metaDir string) *IgnoreManager {
 		patterns:   make([]gitignore.Pattern, 0),
 		loaded:     false,
 	}
+}
+
+// SetSuppressFile toggles whether LoadIgnorePatterns reads .dcfh/ignore.
+// Must be called before the first load (or paired with Reload) to take
+// effect — once loaded=true, the parsed patterns stay live regardless.
+func (im *IgnoreManager) SetSuppressFile(suppress bool) {
+	im.suppressFile = suppress
 }
 
 // CompileIgnorePattern parses one gitignore-style pattern line into a
@@ -60,6 +73,10 @@ func CompileIgnorePattern(line string) (gitignore.Pattern, error) {
 // differently than it used to.
 func (im *IgnoreManager) LoadIgnorePatterns() error {
 	if im.loaded {
+		return nil
+	}
+	if im.suppressFile {
+		im.loaded = true
 		return nil
 	}
 

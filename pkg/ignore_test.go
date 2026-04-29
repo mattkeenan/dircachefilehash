@@ -258,3 +258,40 @@ mode = none
 		t.Errorf("Expected file2.log to be marked for deletion, got %v", status.Deleted)
 	}
 }
+
+// TestIgnoreManagerSuppressFile asserts that SetSuppressFile makes
+// LoadIgnorePatterns a no-op even when an .dcfh/ignore file exists with
+// real patterns.
+func TestIgnoreManagerSuppressFile(t *testing.T) {
+	tempDir := t.TempDir()
+	metaDir := filepath.Join(tempDir, ".dcfh")
+	if err := os.MkdirAll(metaDir, 0755); err != nil {
+		t.Fatalf("mkdir meta: %v", err)
+	}
+	ignorePath := filepath.Join(metaDir, "ignore")
+	if err := os.WriteFile(ignorePath, []byte("*.tmp\n"), 0644); err != nil {
+		t.Fatalf("write ignore: %v", err)
+	}
+
+	// Baseline: pattern is honoured.
+	im := NewIgnoreManager(metaDir)
+	if err := im.LoadIgnorePatterns(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !im.ShouldIgnore("foo.tmp") {
+		t.Fatal("baseline: *.tmp should match foo.tmp")
+	}
+
+	// With suppressFile set before load, patterns are not read.
+	im2 := NewIgnoreManager(metaDir)
+	im2.SetSuppressFile(true)
+	if err := im2.LoadIgnorePatterns(); err != nil {
+		t.Fatalf("load suppressed: %v", err)
+	}
+	if im2.HasPatterns() {
+		t.Errorf("suppressed manager should report no patterns; got %d", len(im2.GetPatterns()))
+	}
+	if im2.ShouldIgnore("foo.tmp") {
+		t.Errorf("suppressed manager should not match foo.tmp")
+	}
+}
