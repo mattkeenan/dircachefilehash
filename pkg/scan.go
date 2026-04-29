@@ -361,6 +361,19 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 		return false
 	}
 
+	// Mirror the IgnoreManager check for any --ignore predicate the
+	// caller pushed down. shouldIndex is only invoked from the legacy
+	// callback pipeline with a path string, so the adapter has no
+	// FileInfo — predicates that need stat/hash data return an error
+	// here and the entry is treated as non-matching (we never drop on
+	// uncertainty at scan-time; output-time evaluation has the data).
+	if dc.scanIgnore != nil && scanIgnoreMatches(dc.scanIgnore, relPath, nil) {
+		if IsDebugEnabled("scan") {
+			VerboseLog(3, "shouldIndex: ignoring path due to --ignore predicate: %s", relPath)
+		}
+		return false
+	}
+
 	return true
 }
 
@@ -432,7 +445,111 @@ func (dc *DirectoryCache) statAndFilter(currentPath string) (os.FileInfo, string
 	if dc.ignoreManager.ShouldIgnore(relPath) {
 		return nil, "", false
 	}
+	if dc.scanIgnore != nil && scanIgnoreMatches(dc.scanIgnore, relPath, info) {
+		return nil, "", false
+	}
 	return info, relPath, true
+}
+
+// scanIgnoreMatches evaluates the scan-time --ignore predicate against
+// the (relPath, info) tuple available at the chokepoint. Errors are
+// swallowed: at scan-time we have no hash and only sometimes have
+// FileInfo, so a predicate that needs missing data returns an error
+// — we treat that as "no match" to avoid dropping entries on
+// uncertainty. The output-time pass (which has hash and full metadata)
+// applies the same predicate authoritatively via the comparison sink's
+// filter.
+func scanIgnoreMatches(expr FilterExpr, relPath string, info os.FileInfo) bool {
+	matched, err := expr.Evaluate(&scanFilterEntry{relPath: relPath, info: info}, &FilterContext{})
+	return err == nil && matched
+}
+
+// scanFilterEntry adapts what the scan walker has at hand — a
+// relative path and (sometimes) an os.FileInfo — into a FilterEntry.
+// Hash and hash-type accessors return errScanFilterNoHash because
+// scan-time runs before hashing; UID/GID/Dev/CTime require the
+// underlying *syscall.Stat_t which is reachable through info.Sys().
+// When info is nil (the shouldIndex deindex path) the stat-derived
+// accessors return errScanFilterNoStat so their callers' silent-drop
+// behaviour kicks in.
+type scanFilterEntry struct {
+	relPath string
+	info    os.FileInfo
+}
+
+var (
+	errScanFilterNoStat = fmt.Errorf("scan filter: no stat info at this chokepoint")
+	errScanFilterNoHash = fmt.Errorf("scan filter: hash not yet computed at scan-time")
+)
+
+func (e *scanFilterEntry) RelativePath() (string, error) { return e.relPath, nil }
+func (e *scanFilterEntry) IsDeleted() (bool, error)      { return false, nil }
+func (e *scanFilterEntry) HashType() (uint16, error)     { return 0, errScanFilterNoHash }
+func (e *scanFilterEntry) HashString() (string, error)   { return "", errScanFilterNoHash }
+
+func (e *scanFilterEntry) FileSize() (uint64, error) {
+	if e.info == nil {
+		return 0, errScanFilterNoStat
+	}
+	return uint64(e.info.Size()), nil
+}
+
+func (e *scanFilterEntry) Mode() (uint32, error) {
+	if e.info == nil {
+		return 0, errScanFilterNoStat
+	}
+	return uint32(e.info.Mode()), nil
+}
+
+func (e *scanFilterEntry) MTimeWall() (uint64, error) {
+	if e.info == nil {
+		return 0, errScanFilterNoStat
+	}
+	t := e.info.ModTime()
+	return encodeWallTime(t.Unix(), int64(t.Nanosecond())), nil
+}
+
+func (e *scanFilterEntry) UID() (uint32, error) {
+	sys, ok := e.statSys()
+	if !ok {
+		return 0, errScanFilterNoStat
+	}
+	return sys.Uid, nil
+}
+
+func (e *scanFilterEntry) GID() (uint32, error) {
+	sys, ok := e.statSys()
+	if !ok {
+		return 0, errScanFilterNoStat
+	}
+	return sys.Gid, nil
+}
+
+func (e *scanFilterEntry) Dev() (uint32, error) {
+	sys, ok := e.statSys()
+	if !ok {
+		return 0, errScanFilterNoStat
+	}
+	return uint32(sys.Dev), nil
+}
+
+func (e *scanFilterEntry) CTimeWall() (uint64, error) {
+	sys, ok := e.statSys()
+	if !ok {
+		return 0, errScanFilterNoStat
+	}
+	return encodeWallTime(sys.Ctim.Sec, sys.Ctim.Nsec), nil
+}
+
+func (e *scanFilterEntry) statSys() (*syscall.Stat_t, bool) {
+	if e.info == nil {
+		return nil, false
+	}
+	sys, ok := e.info.Sys().(*syscall.Stat_t)
+	if !ok || sys == nil {
+		return nil, false
+	}
+	return sys, true
 }
 
 // resolveSymlinkForScan applies the symlink-mode policy to a symlink

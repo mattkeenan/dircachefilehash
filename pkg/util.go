@@ -53,6 +53,15 @@ type DirectoryCache struct {
 	ignoreIsDeindex bool           // Whether newly ignored files should be marked as deleted
 	hashWorkers     int            // Number of concurrent hash workers
 
+	// scanIgnore is an optional FilterExpr applied at the scan-walker
+	// chokepoint, parallel to ignoreManager. Set by callers that wired
+	// up `--ignore` segments and want push-down (so matched paths are
+	// never re-stat'd or re-hashed). Nil disables the check entirely
+	// — the empty-filter fast path. Lifetime is the responsibility of
+	// the setter; localRepo.Diff/Apply set + defer reset to nil so
+	// reused DirectoryCaches don't leak the predicate.
+	scanIgnore FilterExpr
+
 	// Concurrent scan synchronization
 	scanMutex      sync.RWMutex     // Protects scan operations
 	scanInProgress bool             // True if a scan is currently running
