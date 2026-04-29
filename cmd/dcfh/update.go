@@ -17,11 +17,22 @@ var updateCmd = &cobra.Command{
 
 Scans the repository (or specified paths) and updates the index
 with current file information including hashes, sizes, and timestamps.
-This operation synchronises the index with the actual file system state.`,
+This operation synchronises the index with the actual file system state.
+
+Filter flags compose via the scope-marker syntax (see ` + "`dcfh status --help`" + `).
+Only --ignore is honoured at scan-time — it short-circuits the walker
+so subtracted entries are never re-stat'd or re-hashed:
+
+  dcfh update --ignore --name '*.tmp'              — skip *.tmp during scan
+  dcfh update --no-ignore-file                     — bypass .dcfh/ignore
+
+--print segments are accepted for symmetry with status/dupes but have
+no effect on update (the cache is always refreshed against on-disk
+truth).`,
+	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		// Find the dcfh repository root
 		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			if getOutputFormat() == OutputHuman {
@@ -30,13 +41,20 @@ This operation synchronises the index with the actual file system state.`,
 			return err
 		}
 
-		// Get paths to update (if any)
+		_, prints, ignores, paths, noIgnoreFile, err := resolveScopes(args, "update")
+		if err != nil {
+			return err
+		}
+		if err := finaliseRootFlags(cmd); err != nil {
+			return err
+		}
+
 		format := getOutputFormat()
-		if len(args) > 0 {
+		if len(paths) > 0 {
 			if format == OutputHuman {
 				fmt.Printf("Updating specified paths in %s\n", repoRoot)
 				if flagVerbose > 0 {
-					for _, path := range args {
+					for _, path := range paths {
 						fmt.Printf("  %s\n", path)
 					}
 				}
@@ -47,7 +65,6 @@ This operation synchronises the index with the actual file system state.`,
 			}
 		}
 
-		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
@@ -60,7 +77,13 @@ This operation synchronises the index with the actual file system state.`,
 
 		start := time.Now()
 
-		result, err := repo.Apply(ctx, dcfh.ApplyRequest{Options: buildOptions(), Paths: args})
+		result, err := repo.Apply(ctx, dcfh.ApplyRequest{
+			Options:      buildOptions(),
+			Paths:        paths,
+			Prints:       prints,
+			Ignores:      ignores,
+			NoIgnoreFile: noIgnoreFile,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
 		}
@@ -73,15 +96,15 @@ This operation synchronises the index with the actual file system state.`,
 				Success:      true,
 				Message:      "Successfully updated index",
 				Repository:   repoRoot,
-				PathsUpdated: args,
+				PathsUpdated: paths,
 				FileCount:    fileCount,
 				TotalSize:    totalSize,
 				TimeElapsed:  duration.Round(time.Millisecond).String(),
 			}
 			outputJSON(output)
 		} else {
-			if len(args) > 0 {
-				fmt.Printf("Updated %d specified paths\n", len(args))
+			if len(paths) > 0 {
+				fmt.Printf("Updated %d specified paths\n", len(paths))
 			} else {
 				fmt.Printf("Updated index\n")
 			}

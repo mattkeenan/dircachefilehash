@@ -95,26 +95,21 @@ func extractMinSize(pred dcfh.FilterExpr) *uint64 {
 	return nil
 }
 
-// resetDupesFlags resets the dupes-scoped globals the tests touch.
-// Keeps the resetFlags() helper in dcfh_test.go focused on the
-// root-level flags.
-func resetDupesFlags() {
-	dupesExclusive = yesNoFlag(true)
-	dupesMinSizeStr = ""
-	dupesMaxSizeStr = ""
-	dupesStartDateStr = ""
-	dupesEndDateStr = ""
-	dupesTZ = ""
-	dupesIgnoreHardlinks = false
-	dupesFSDedupe = false
+// dupesState builds a fresh filterFlagsState with --fs-dedupe and -H
+// pre-set as requested. Encapsulates the segment-zero state that
+// resolveScopes would normally hand back from a real invocation.
+func dupesState(fsDedupe, ignoreHardlinks bool) *filterFlagsState {
+	s := newFilterFlagsState()
+	s.fsDedupe = fsDedupe
+	s.ignoreHardlinks = ignoreHardlinks
+	return s
 }
 
 func TestBuildDupeFilter_FSDedupeForcesIgnoreHardlinks(t *testing.T) {
-	resetDupesFlags()
-	dupesFSDedupe = true
-	// IgnoreHardlinks is left false; the --fs-dedupe branch must
-	// force it on regardless of how -H was set on the command line.
-	f, err := buildDupeFilter(dupesCmd, nil)
+	// --fs-dedupe must force IgnoreHardlinks=true regardless of -H,
+	// and inject the sub-block MinSize floor when the user didn't
+	// already constrain it via a --print segment.
+	f, err := buildDupeFilter(dupesState(true, false), []dcfh.FilterOptions{{}}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
@@ -129,24 +124,12 @@ func TestBuildDupeFilter_FSDedupeForcesIgnoreHardlinks(t *testing.T) {
 }
 
 func TestBuildDupeFilter_FSDedupeRespectsUserMinSize(t *testing.T) {
-	// Reset, then simulate `--fs-dedupe --min-size 8K`. A user who
-	// explicitly sets --min-size wins over the dedupe default.
-	resetDupesFlags()
-	dupesFSDedupe = true
-	dupesMinSizeStr = "8K"
-	// Register the transient flag value as "Changed" by parsing via
-	// the same cobra flagset a real invocation would use.
-	cmd := dupesCmd
-	if err := cmd.Flags().Set(flagMinSize, "8K"); err != nil {
-		t.Fatalf("Flags.Set: %v", err)
-	}
-	defer func() {
-		// Clean up the Changed flag state so later tests aren't polluted.
-		_ = cmd.Flags().Set(flagMinSize, "")
-		cmd.Flags().Lookup(flagMinSize).Changed = false
-	}()
-
-	f, err := buildDupeFilter(cmd, nil)
+	// Simulate `--fs-dedupe --min-size 8K`. A user who explicitly
+	// sets --min-size wins over the dedupe default — buildDupeFilter
+	// must NOT inject the 4096 floor.
+	user := uint64(8192)
+	prints := []dcfh.FilterOptions{{MinSize: &user}}
+	f, err := buildDupeFilter(dupesState(true, false), prints, nil, nil)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
@@ -160,8 +143,7 @@ func TestBuildDupeFilter_NoFSDedupe_NoImplicitMinSize(t *testing.T) {
 	// Regression gate: without --fs-dedupe, MinSize must remain nil
 	// when --min-size is absent, so non-dedupe users keep today's
 	// behaviour (dupes reports every group regardless of size).
-	resetDupesFlags()
-	f, err := buildDupeFilter(dupesCmd, nil)
+	f, err := buildDupeFilter(dupesState(false, false), []dcfh.FilterOptions{{}}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}

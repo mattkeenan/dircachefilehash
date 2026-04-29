@@ -9,8 +9,6 @@ import (
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-var statusFilterFlags filterFlagsState
-
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the status of files in the repository",
@@ -20,15 +18,41 @@ Compares the current state of files with the last recorded state
 in the index. Shows files that have been modified, added, or deleted
 since the last update operation.
 
-Filter flags (--min-size, --max-size, --start-date, --end-date, --name,
---mtime, ...) narrow which changes are reported. The cache is always
-refreshed against on-disk truth regardless of filters, so a later status
-call without the filter sees the same state.`,
-	Args: cobra.NoArgs,
+Filter flags (--name, --min-size, --start-date, --end-date, --mtime,
+--hash, …) narrow which changes are reported. Filters compose with
+the scope-marker syntax: every filter flag belongs to a --print or
+--ignore segment. Tokens before the first marker are an implicit
+--print segment.
+
+  dcfh status --name '*.go'                        — print *.go changes
+  dcfh status --print --name '*.go' --ignore --name '*_test.go'
+                                                   — print .go but not test
+  dcfh status --no-ignore-file                     — bypass .dcfh/ignore
+
+Across segments: --print groups AND together, --ignore groups OR
+together (any matching ignore subtracts). The scan refreshes the cache
+against on-disk truth regardless of filters; --ignore is the one
+exception, since it can short-circuit the scan walker.`,
+	// With DisableFlagParsing the cobra-level arg validator sees raw
+	// flag tokens (--json, --print, …) as positionals and would reject
+	// them. The RunE preamble enforces "no positional args" after
+	// scope-marker parsing instead.
+	Args:               cobra.ArbitraryArgs,
+	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		// Find the dcfh repository root
+		_, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, "status")
+		if err != nil {
+			return err
+		}
+		if len(positionals) > 0 {
+			return fmt.Errorf("status accepts no positional arguments, got: %v", positionals)
+		}
+		if err := finaliseRootFlags(cmd); err != nil {
+			return err
+		}
+
 		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			if getOutputFormat() == OutputHuman {
@@ -37,19 +61,18 @@ call without the filter sees the same state.`,
 			return err
 		}
 
-		filterOpts, err := BuildFilterOptions(&statusFilterFlags)
-		if err != nil {
-			return err
-		}
-
-		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
 		}
 		defer func() { _ = repo.Close() }()
 
-		status, err := repo.Diff(ctx, dcfh.DiffRequest{Options: buildOptions(), Filter: filterOpts})
+		status, err := repo.Diff(ctx, dcfh.DiffRequest{
+			Options:      buildOptions(),
+			Prints:       prints,
+			Ignores:      ignores,
+			NoIgnoreFile: noIgnoreFile,
+		})
 		if err != nil {
 			return err
 		}
@@ -92,6 +115,5 @@ call without the filter sees the same state.`,
 }
 
 func init() {
-	RegisterFilterFlags(statusCmd.Flags(), &statusFilterFlags)
 	rootCmd.AddCommand(statusCmd)
 }

@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
@@ -32,78 +33,13 @@ var (
 	cachedMetaDir  string
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "dcfh",
-	Short: "Directory Cache File Hash",
-	Long:  "A fast file indexing, hashing, and duplicate detection tool",
-	// Silence cobra's default usage and error printing — we handle it ourselves
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	Version:       getVersionString(),
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Validate --json vs --output mutual exclusion:
-		// --json + --output=<non-default> is a conflict
-		if flagJSON && flagOutput != "human" {
-			return fmt.Errorf("cannot use both --json and --output flags together")
-		}
-
-		// --json is an alias for --output=json
-		if flagJSON {
-			flagOutput = "json"
-		}
-
-		// -s is an alias for --symlinks=all
-		if flagSymlinksShortAll {
-			flagSymlinks = "all"
-		}
-
-		// Validate output format
-		switch flagOutput {
-		case "human", "json", "fdupes":
-			// valid
-		default:
-			return fmt.Errorf("invalid output format '%s'. Supported formats: human, json, fdupes", flagOutput)
-		}
-
-		// Initialise debug flags early
-		dcfh.InitDebugFlags(flagDebug)
-		if flagDebug != "" {
-			dcfh.LogDebugFlags()
-		}
-
-		// Set global verbose level
-		if flagVerbose > 0 {
-			dcfh.SetVerboseLevel(flagVerbose)
-		}
-
-		// If --meta-dir is set globally, resolve it and pre-populate cache.
-		// Skip for init — the directory doesn't exist yet.
-		if flagGlobalMetaDir != "" && cmd.Name() != "init" {
-			uri, err := dcfh.ParseRepoURI(flagGlobalMetaDir)
-			if err != nil {
-				return fmt.Errorf("failed to parse --meta-dir: %w", err)
-			}
-			if uri.Scheme != "file" {
-				return fmt.Errorf("%w: --meta-dir=%s; put remote URIs in [repository] root instead", dcfh.ErrRemoteNotImplemented, flagGlobalMetaDir)
-			}
-			rootDir, metaDir, err := dcfh.ResolveRepository(uri.Path)
-			if err != nil {
-				return fmt.Errorf("failed to resolve --meta-dir: %w", err)
-			}
-			cachedRepoRoot = rootDir
-			cachedMetaDir = metaDir
-		}
-
-		// Viper config binding: apply config defaults for flags not explicitly set
-		applyViperDefaults(cmd)
-
-		return nil
-	},
-}
-
-func init() {
-	pf := rootCmd.PersistentFlags()
-
+// registerRootPersistentFlags installs the root persistent flag
+// dialect on fs. Called once in init() against rootCmd.PersistentFlags()
+// (the canonical home — drives --help and cobra completion) and again
+// from RegisterCmdFlags' segment-zero parser on commands that disable
+// cobra flag parsing for scope-marker handling. Same package vars in
+// both cases, so writes from either route land on the same global.
+func registerRootPersistentFlags(pf *pflag.FlagSet) {
 	pf.StringVarP(&flagOutput, "output", "o", "human", "output format: human, json, fdupes")
 	pf.BoolVarP(&flagJSON, "json", "j", false, "output in JSON format (alias for --output=json)")
 	pf.CountVarP(&flagVerbose, "verbose", "v", "verbose level (repeat for more: -v, -vv, -vvv)")
@@ -115,6 +51,83 @@ func init() {
 	pf.IntVar(&flagIndexLockTimeout, "index-lock-timeout", 0, "timeout in seconds for index memory locks (0=use config default)")
 	pf.BoolVar(&flagDryRun, "dry-run", false, "show what would be done without actually doing it")
 	pf.StringVar(&flagGlobalMetaDir, "meta-dir", "", "path to an external .dcfh directory (overrides auto-discovery)")
+}
+
+var rootCmd = &cobra.Command{
+	Use:   "dcfh",
+	Short: "Directory Cache File Hash",
+	Long:  "A fast file indexing, hashing, and duplicate detection tool",
+	// Silence cobra's default usage and error printing — we handle it ourselves
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	Version:       getVersionString(),
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Scope-marker commands (status / update / dupes) parse their
+		// own argv inside RunE — defer normalisation there. Everything
+		// else uses cobra's normal flag parse and we can finalise now.
+		if cmd.DisableFlagParsing {
+			return nil
+		}
+		return finaliseRootFlags(cmd)
+	},
+}
+
+// finaliseRootFlags applies the post-parse normalisation that the
+// PersistentPreRunE hook would normally run: --json/-s aliasing,
+// output-format validation, debug/verbose plumbing, --meta-dir
+// resolution, and viper-driven config defaults. It expects every root
+// persistent flag global to already hold its parsed value.
+//
+// Scope-marker commands call this from RunE *after* the segment-zero
+// parser has populated the persistent globals, since their cobra
+// PersistentPreRunE pass is a no-op (DisableFlagParsing skips the
+// flag parse those globals would otherwise be filled by).
+func finaliseRootFlags(cmd *cobra.Command) error {
+	if flagJSON && flagOutput != "human" {
+		return fmt.Errorf("cannot use both --json and --output flags together")
+	}
+	if flagJSON {
+		flagOutput = "json"
+	}
+	if flagSymlinksShortAll {
+		flagSymlinks = "all"
+	}
+	switch flagOutput {
+	case "human", "json", "fdupes":
+	default:
+		return fmt.Errorf("invalid output format '%s'. Supported formats: human, json, fdupes", flagOutput)
+	}
+
+	dcfh.InitDebugFlags(flagDebug)
+	if flagDebug != "" {
+		dcfh.LogDebugFlags()
+	}
+	if flagVerbose > 0 {
+		dcfh.SetVerboseLevel(flagVerbose)
+	}
+
+	if flagGlobalMetaDir != "" && cmd.Name() != "init" {
+		uri, err := dcfh.ParseRepoURI(flagGlobalMetaDir)
+		if err != nil {
+			return fmt.Errorf("failed to parse --meta-dir: %w", err)
+		}
+		if uri.Scheme != "file" {
+			return fmt.Errorf("%w: --meta-dir=%s; put remote URIs in [repository] root instead", dcfh.ErrRemoteNotImplemented, flagGlobalMetaDir)
+		}
+		rootDir, metaDir, err := dcfh.ResolveRepository(uri.Path)
+		if err != nil {
+			return fmt.Errorf("failed to resolve --meta-dir: %w", err)
+		}
+		cachedRepoRoot = rootDir
+		cachedMetaDir = metaDir
+	}
+
+	applyViperDefaults(cmd)
+	return nil
+}
+
+func init() {
+	registerRootPersistentFlags(rootCmd.PersistentFlags())
 
 	// Register completion functions for flag values
 	_ = rootCmd.RegisterFlagCompletionFunc("output", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

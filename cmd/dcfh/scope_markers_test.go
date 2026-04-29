@@ -157,3 +157,59 @@ func TestBuildSegments(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveScopes_DupesCmdFlagsAndPositionals asserts that the
+// dupes-only flags (--exclusive, -H, --fs-dedupe) populate state and
+// that positional args after segment-zero parsing flow back as path
+// prefixes — the union of behaviours that buildDupeFilter relies on.
+func TestResolveScopes_DupesCmdFlagsAndPositionals(t *testing.T) {
+	state, prints, ignores, positionals, noIgn, err := resolveScopes(
+		[]string{"--exclusive=no", "-H", "--fs-dedupe", "sub/", "--ignore", "--name", "*.bak"},
+		"dupes",
+	)
+	if err != nil {
+		t.Fatalf("resolveScopes: %v", err)
+	}
+	if bool(state.exclusive) {
+		t.Errorf("exclusive=true; want false (--exclusive=no)")
+	}
+	if !state.ignoreHardlinks {
+		t.Errorf("ignoreHardlinks=false; want true (-H)")
+	}
+	if !state.fsDedupe {
+		t.Errorf("fsDedupe=false; want true (--fs-dedupe)")
+	}
+	if len(positionals) != 1 || positionals[0] != "sub/" {
+		t.Errorf("positionals=%v; want [\"sub/\"]", positionals)
+	}
+	if len(prints) != 1 || !prints[0].IsEmpty() {
+		t.Errorf("prints=%+v; want one empty implicit segment", prints)
+	}
+	if len(ignores) != 1 || len(ignores[0].Names) != 1 || ignores[0].Names[0] != "*.bak" {
+		t.Errorf("ignores=%+v; want one segment with Names=[*.bak]", ignores)
+	}
+	if noIgn {
+		t.Errorf("noIgnoreFile=true unexpectedly")
+	}
+}
+
+// TestResolveScopes_PersistentFlagInTailSegment asserts that root
+// persistent flags (here --verbose) parse anywhere in the argv, not
+// just inside segment zero — a regression gate for the fix that wires
+// registerRootPersistentFlags into parseSegment.
+func TestResolveScopes_PersistentFlagInTailSegment(t *testing.T) {
+	saved := flagVerbose
+	flagVerbose = 0
+	defer func() { flagVerbose = saved }()
+
+	_, _, _, _, _, err := resolveScopes(
+		[]string{"--ignore", "--name", "*.tmp", "--verbose"},
+		"status",
+	)
+	if err != nil {
+		t.Fatalf("resolveScopes: %v", err)
+	}
+	if flagVerbose != 1 {
+		t.Errorf("flagVerbose=%d after --verbose in ignore segment; want 1", flagVerbose)
+	}
+}

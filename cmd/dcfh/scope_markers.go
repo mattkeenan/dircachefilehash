@@ -80,18 +80,19 @@ func splitArgs(args []string) (segs []scopeSegment, noIgnoreFile bool) {
 	return segs, noIgnoreFile
 }
 
-// buildSegments parses each segment's args through a fresh pflag set
-// (constructed via RegisterFilterFlags) and assembles the per-kind
-// FilterOptions slices. Returns prints, ignores, and the first error
-// encountered (with the segment kind tagged in the error context).
-//
-// Empty-args segments are kept (they collapse to the identity-true
-// predicate downstream) so a bare `--print` or `--ignore` is harmless.
+// buildSegments is the test seam over parseSegment: parses every
+// segment with the empty-command, tail-segment registry view (filter
+// + persistent dialect, no command-specific flags) and bins results
+// by kind. Production callers go through resolveScopes, which adds
+// segment-zero command-specific handling and positional residual.
 func buildSegments(segs []scopeSegment) (prints, ignores []dcfh.FilterOptions, err error) {
 	for i, seg := range segs {
-		opts, perr := parseSegment(seg.args)
+		_, opts, extras, perr := parseSegment(seg.args, "", false)
 		if perr != nil {
 			return nil, nil, fmt.Errorf("%s segment #%d: %w", seg.kind, i, perr)
+		}
+		if len(extras) > 0 {
+			return nil, nil, fmt.Errorf("%s segment #%d: unexpected positional args: %v", seg.kind, i, extras)
 		}
 		switch seg.kind {
 		case scopePrint:
@@ -103,23 +104,71 @@ func buildSegments(segs []scopeSegment) (prints, ignores []dcfh.FilterOptions, e
 	return prints, ignores, nil
 }
 
-// parseSegment runs one segment's args through a one-shot pflag.FlagSet
-// configured for the shared filter dialect, returning the populated
-// FilterOptions. ContinueOnError keeps a bad flag from bringing down
-// the whole process — buildSegments wraps the error with segment
-// context.
-func parseSegment(args []string) (dcfh.FilterOptions, error) {
-	state := &filterFlagsState{}
-	fs := pflag.NewFlagSet("scope-segment", pflag.ContinueOnError)
+// parseSegment runs one segment's args through a one-shot
+// pflag.FlagSet configured via the cmdFlagRegistry. firstSegment
+// selects between the segment-zero parser (command-specific toggles
+// allowed) and the tail-segment parser used for explicit --print /
+// --ignore groups. Returns the segment's state, FilterOptions, and
+// positional residual.
+//
+// ContinueOnError keeps a bad flag from bringing down the whole
+// process — buildSegments / resolveScopes wrap the error with
+// segment context.
+func parseSegment(args []string, command string, firstSegment bool) (*filterFlagsState, dcfh.FilterOptions, []string, error) {
+	state := newFilterFlagsState()
+	name := "scope-segment"
+	if firstSegment {
+		name = "scope-segment-0"
+	}
+	fs := pflag.NewFlagSet(name, pflag.ContinueOnError)
 	fs.SetOutput(discardWriter{}) // pflag prints usage on error; suppress it.
-	RegisterFilterFlags(fs, state)
+	RegisterCmdFlags(fs, state, command, firstSegment)
 	if err := fs.Parse(args); err != nil {
-		return dcfh.FilterOptions{}, err
+		return nil, dcfh.FilterOptions{}, nil, err
 	}
-	if extras := fs.Args(); len(extras) > 0 {
-		return dcfh.FilterOptions{}, fmt.Errorf("unexpected positional args inside segment: %v", extras)
+	opts, err := BuildFilterOptions(state)
+	if err != nil {
+		return nil, dcfh.FilterOptions{}, nil, err
 	}
-	return BuildFilterOptions(state)
+	return state, opts, fs.Args(), nil
+}
+
+// resolveScopes is the canonical RunE preamble for commands that
+// support scope markers. It splits argv, parses segment 0 with the
+// command's full registry view (filter + persistent + command-
+// specific), then parses the remaining segments with the per-segment
+// view (filter + persistent only). Returns the composed
+// prints/ignores/positionals/noIgnoreFile quadruple plus the
+// segment-zero state for command-specific flag readout.
+//
+// Empty input collapses to a single empty print segment. Tail
+// segments must not produce positional residuals — only segment zero
+// owns positionals. Errors carry the offending segment's index so
+// the user knows which `--print` / `--ignore` group rejected their
+// flag.
+func resolveScopes(args []string, command string) (state *filterFlagsState, prints, ignores []dcfh.FilterOptions, positionals []string, noIgnoreFile bool, err error) {
+	segs, noIgnoreFile := splitArgs(args)
+	state, zeroOpts, positionals, err := parseSegment(segs[0].args, command, true)
+	if err != nil {
+		return nil, nil, nil, nil, false, fmt.Errorf("print segment #0: %w", err)
+	}
+	prints = []dcfh.FilterOptions{zeroOpts}
+	for i, seg := range segs[1:] {
+		_, opts, extras, perr := parseSegment(seg.args, command, false)
+		if perr != nil {
+			return nil, nil, nil, nil, false, fmt.Errorf("%s segment #%d: %w", seg.kind, i+1, perr)
+		}
+		if len(extras) > 0 {
+			return nil, nil, nil, nil, false, fmt.Errorf("%s segment #%d: unexpected positional args: %v", seg.kind, i+1, extras)
+		}
+		switch seg.kind {
+		case scopePrint:
+			prints = append(prints, opts)
+		case scopeIgnore:
+			ignores = append(ignores, opts)
+		}
+	}
+	return state, prints, ignores, positionals, noIgnoreFile, nil
 }
 
 // discardWriter swallows pflag's usage-on-error output. We surface our

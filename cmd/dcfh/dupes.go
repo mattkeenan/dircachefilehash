@@ -20,11 +20,6 @@ var runFSDedupe = fsdedupe.Run
 
 const (
 	flagExclusive       = "exclusive"
-	flagMinSize         = "min-size"
-	flagMaxSize         = "max-size"
-	flagStartDate       = "start-date"
-	flagEndDate         = "end-date"
-	flagTZ              = "tz"
 	flagIgnoreHardlinks = "ignore-hardlinks"
 	flagFSDedupe        = "fs-dedupe"
 
@@ -32,17 +27,6 @@ const (
 	// smaller than one block since dedup can reclaim nothing — they
 	// already occupy a single (minimum) extent.
 	dedupeDefaultMinSize uint64 = 4096
-)
-
-var (
-	dupesExclusive       = yesNoFlag(true)
-	dupesMinSizeStr      string
-	dupesMaxSizeStr      string
-	dupesStartDateStr    string
-	dupesEndDateStr      string
-	dupesTZ              string
-	dupesIgnoreHardlinks bool
-	dupesFSDedupe        bool
 )
 
 var dupesCmd = &cobra.Command{
@@ -61,15 +45,20 @@ behaviour of ` + "`fdupes -r sub/`" + `. With --exclusive=no, bucketing
 spans the whole index and any group with at least one member inside
 the given paths is reported.
 
-File-level filters (--min-size, --max-size, --start-date, --end-date)
-are applied before bucketing, so a group that loses members below the
-≥2 threshold is never emitted. Sizes take binary suffixes (1K=1024,
-1M=1024K, 1G, 1T). Dates accept partial ISO-8601 (YYYY, YYYY-MM,
-YYYY-MM-DD, YYYY-MM-DDTHH[:MM[:SS]]) optionally suffixed with Z or
-±hh[:mm]. --start-date is inclusive, --end-date is exclusive, so
---end-date 2027 includes all of 2026. Bare date-times are anchored in
---tz (an IANA zone) if set, otherwise the local zone (which honours
-the TZ environment variable).
+Filter flags compose via the scope-marker syntax (see
+` + "`dcfh status --help`" + `). File-level filters apply before
+bucketing, so a group that loses members below the ≥2 threshold is
+never emitted:
+
+  dcfh dupes --min-size 1M                          — duplicates ≥ 1 MiB
+  dcfh dupes --print --min-size 1M --ignore --name '*.bak'
+                                                    — exclude .bak files
+
+Sizes take binary suffixes (1K=1024, 1M=1024K, 1G, 1T). Dates accept
+partial ISO-8601 (YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH[:MM[:SS]])
+optionally suffixed with Z or ±hh[:mm]. --start-date is inclusive,
+--end-date is exclusive. Bare date-times are anchored in --tz (an IANA
+zone) if set, otherwise the local zone (which honours the TZ env var).
 
 With -H / --ignore-hardlinks, entries that refer to the same underlying
 inode (hardlinks to one on-disk file) collapse to a single representative
@@ -84,11 +73,11 @@ Files remain independent byte-for-byte; a subsequent write triggers
 COW. Combine with --dry-run to see the plan without changing anything.
 --fs-dedupe implies --ignore-hardlinks (hardlinks already share blocks)
 and defaults --min-size to 4096 (sub-block files buy nothing).`,
-	Args: cobra.ArbitraryArgs,
+	Args:               cobra.ArbitraryArgs,
+	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		// Find the dcfh repository root
 		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			if getOutputFormat() == OutputHuman {
@@ -97,17 +86,25 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 			return err
 		}
 
-		paths, err := normaliseDupePaths(repoRoot, args)
+		state, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, "dupes")
+		if err != nil {
+			return err
+		}
+		if err := finaliseRootFlags(cmd); err != nil {
+			return err
+		}
+
+		paths, err := normaliseDupePaths(repoRoot, positionals)
 		if err != nil {
 			return err
 		}
 
-		filter, err := buildDupeFilter(cmd, paths)
+		filter, err := buildDupeFilter(state, prints, ignores, paths)
 		if err != nil {
 			return err
 		}
+		filter.NoIgnoreFile = noIgnoreFile
 
-		// Open existing repository via the Repo abstraction
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
 			return fmt.Errorf("failed to open repository: %w", err)
@@ -147,7 +144,7 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 		// the OnGroup callback below.
 		if format == OutputJSON {
 			var dedupeResult *fsdedupe.Result
-			if dupesFSDedupe {
+			if state.fsDedupe {
 				dedupeResult, err = runDedupe(ctx, repoRoot, duplicates, nil)
 				if err != nil {
 					return err
@@ -189,7 +186,7 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 		}
 
 		var dedupeResult *fsdedupe.Result
-		if dupesFSDedupe {
+		if state.fsDedupe {
 			// Recover the index-side group ordering inside the
 			// callback: fsdedupe.GroupResult carries only the hash and
 			// per-file outcomes, not the original sorted file list.
@@ -293,81 +290,47 @@ func printDedupeFooter(r *fsdedupe.Result) {
 }
 
 func init() {
-	dupesCmd.Flags().Var(&dupesExclusive, flagExclusive,
-		"restrict results to groups fully inside the given paths (yes|no, default yes)")
-	dupesCmd.Flags().StringVar(&dupesMinSizeStr, flagMinSize, "",
-		"minimum file size (inclusive); binary suffixes K/M/G/T (e.g. 1K=1024)")
-	dupesCmd.Flags().StringVar(&dupesMaxSizeStr, flagMaxSize, "",
-		"maximum file size (inclusive); binary suffixes K/M/G/T")
-	dupesCmd.Flags().StringVar(&dupesStartDateStr, flagStartDate, "",
-		"minimum mtime (inclusive); partial ISO-8601, e.g. 2026 or 2026-01-01T00")
-	dupesCmd.Flags().StringVar(&dupesEndDateStr, flagEndDate, "",
-		"maximum mtime (exclusive); partial ISO-8601")
-	dupesCmd.Flags().StringVar(&dupesTZ, flagTZ, "",
-		"IANA timezone for bare date-times (default: $TZ or system local)")
-	dupesCmd.Flags().BoolVarP(&dupesIgnoreHardlinks, flagIgnoreHardlinks, "H", false,
-		"collapse hardlinks to the same inode to one entry per group")
-	dupesCmd.Flags().BoolVar(&dupesFSDedupe, flagFSDedupe, false,
-		"reclaim disk blocks from duplicates via FIDEDUPERANGE (Linux only; combine with --dry-run to see the plan without changing anything)")
 	rootCmd.AddCommand(dupesCmd)
 }
 
-func buildDupeFilter(cmd *cobra.Command, paths []string) (dcfh.DupeFilter, error) {
+// buildDupeFilter assembles a DupeFilter from the parsed segment-zero
+// state and the per-segment FilterOptions slices. --fs-dedupe forces
+// IgnoreHardlinks=true (the kernel rejects same-inode overlapping-range
+// calls anyway, and reporting hardlinks as "deduped" would be noise)
+// and synthesises a print-segment MinSize=4096 floor when the user
+// hasn't already constrained it (sub-block files reclaim nothing).
+func buildDupeFilter(state *filterFlagsState, prints, ignores []dcfh.FilterOptions, paths []string) (dcfh.DupeFilter, error) {
 	f := dcfh.DupeFilter{
 		Paths:           paths,
-		Exclusive:       bool(dupesExclusive),
-		IgnoreHardlinks: dupesIgnoreHardlinks,
+		Exclusive:       bool(state.exclusive),
+		IgnoreHardlinks: state.ignoreHardlinks,
 	}
-
-	// --fs-dedupe implies --ignore-hardlinks: the kernel rejects
-	// same-inode overlapping-range calls anyway, and reporting
-	// hardlinks as "deduped" would be noise.
-	if dupesFSDedupe {
+	if state.fsDedupe {
 		f.IgnoreHardlinks = true
+		if !anyPrintConstrainsMinSize(prints) {
+			n := dedupeDefaultMinSize
+			prints = append(prints, dcfh.FilterOptions{MinSize: &n})
+		}
 	}
 
-	opts := dcfh.FilterOptions{TZ: dupesTZ}
-	if cmd.Flags().Changed(flagMinSize) {
-		n, err := dcfh.ParseSizeBound(dupesMinSizeStr)
-		if err != nil {
-			return f, fmt.Errorf("--%s: %w", flagMinSize, err)
-		}
-		opts.MinSize = &n
-	} else if dupesFSDedupe {
-		// Sub-block files already occupy a single minimum extent;
-		// deduping them wastes ioctls and reclaims nothing.
-		n := dedupeDefaultMinSize
-		opts.MinSize = &n
-	}
-	if cmd.Flags().Changed(flagMaxSize) {
-		n, err := dcfh.ParseSizeBound(dupesMaxSizeStr)
-		if err != nil {
-			return f, fmt.Errorf("--%s: %w", flagMaxSize, err)
-		}
-		opts.MaxSize = &n
-	}
-
-	if cmd.Flags().Changed(flagStartDate) || cmd.Flags().Changed(flagEndDate) {
-		startStr, endStr := "", ""
-		if cmd.Flags().Changed(flagStartDate) {
-			startStr = dupesStartDateStr
-		}
-		if cmd.Flags().Changed(flagEndDate) {
-			endStr = dupesEndDateStr
-		}
-		startT, endT, err := dcfh.ResolveDates(startStr, endStr, dupesTZ)
-		if err != nil {
-			return f, err
-		}
-		opts.StartDate, opts.EndDate = startT, endT
-	}
-
-	pred, err := dcfh.BuildFilter(opts)
+	pred, err := dcfh.BuildPrintIgnoreTree(prints, ignores)
 	if err != nil {
 		return f, err
 	}
 	f.Predicate = pred
 	return f, nil
+}
+
+// anyPrintConstrainsMinSize reports whether any print segment carries
+// a MinSize bound — used by buildDupeFilter to decide whether
+// --fs-dedupe should inject its sub-block floor.
+func anyPrintConstrainsMinSize(prints []dcfh.FilterOptions) bool {
+	for _, p := range prints {
+		if p.MinSize != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // yesNoFlag is a cobra/pflag bool-shaped flag that accepts only "yes"

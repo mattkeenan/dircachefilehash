@@ -2,18 +2,27 @@ package main
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/spf13/pflag"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// filterFlagsState is the per-command state populated by
-// RegisterFilterFlags. The string fields hold raw flag values; size and
-// date strings are parsed into FilterOptions only when BuildFilterOptions
-// runs (so error messages reach the user via cobra's RunE rather than
-// init()).
+// filterFlagsState is the per-segment state populated by the registry
+// in RegisterCmdFlags. The string fields hold raw flag values; size
+// and date strings are parsed into FilterOptions only when
+// BuildFilterOptions runs (so error messages reach the user via
+// cobra's RunE rather than init()).
+//
+// Command-specific (non-filter) fields live alongside the filter
+// dialect because they all share one cobra-disabled, scope-marker
+// argv parse. Each per-command registration in RegisterCmdFlags
+// declares which subset of fields the command's segment-zero parser
+// touches; segments 1+ only ever see the shared filter dialect via
+// RegisterFilterFlags.
 type filterFlagsState struct {
+	// Shared filter dialect — every command, every segment.
 	minSize      string
 	maxSize      string
 	sizes        []string
@@ -33,6 +42,89 @@ type filterFlagsState struct {
 	hashTypes    []string
 	empty        bool
 	deleted      bool
+
+	// Dupes-only command flags (registered via RegisterCmdFlags("dupes")
+	// on the segment-zero parser only — meaningless inside an explicit
+	// --print / --ignore segment).
+	exclusive       yesNoFlag
+	ignoreHardlinks bool
+	fsDedupe        bool
+}
+
+// newFilterFlagsState returns a filterFlagsState seeded with defaults
+// for non-zero-value command-specific fields (today: --exclusive=yes
+// for dupes). Filter-dialect fields are zero-value by design.
+func newFilterFlagsState() *filterFlagsState {
+	return &filterFlagsState{exclusive: yesNoFlag(true)}
+}
+
+// cmdFlagGroup is one entry in the scope-marker command-flag registry.
+// commands is the set of commands the group registers for; an empty
+// list means "all scope-marker commands". perSegment, when true,
+// registers the group on every --print / --ignore segment as well as
+// segment zero — used for the root persistent dialect and the shared
+// filter dialect, both of which users expect to work anywhere on the
+// command line. Command-specific flags (e.g. dupes' --fs-dedupe) are
+// segment-zero only: they're command-level toggles, not per-segment
+// filters.
+type cmdFlagGroup struct {
+	register   func(fs *pflag.FlagSet, state *filterFlagsState)
+	commands   []string
+	perSegment bool
+}
+
+// cmdFlagRegistry is the single source of truth for which flags each
+// scope-marker command accepts. parseSegmentZero / parseSegment walk
+// this list in registration order. A new command-specific flag is one
+// new entry here plus the matching field on filterFlagsState; no
+// other call site has to learn about it.
+//
+// Order matters only for help text (the segment-zero --help would
+// list flags in this order); behaviour is independent of order
+// because the package-var globals are write-only from these calls.
+var cmdFlagRegistry = []cmdFlagGroup{
+	{
+		register:   func(fs *pflag.FlagSet, _ *filterFlagsState) { registerRootPersistentFlags(fs) },
+		perSegment: true,
+	},
+	{
+		register:   RegisterFilterFlags,
+		perSegment: true,
+	},
+	{
+		commands: []string{"dupes"},
+		register: func(fs *pflag.FlagSet, state *filterFlagsState) {
+			fs.Var(&state.exclusive, flagExclusive,
+				"restrict results to groups fully inside the given paths (yes|no, default yes)")
+			fs.BoolVarP(&state.ignoreHardlinks, flagIgnoreHardlinks, "H", false,
+				"collapse hardlinks to the same inode to one entry per group")
+			fs.BoolVar(&state.fsDedupe, flagFSDedupe, false,
+				"reclaim disk blocks from duplicates via FIDEDUPERANGE (Linux only; combine with --dry-run to see the plan without changing anything)")
+		},
+	},
+}
+
+// RegisterCmdFlags installs every flag valid for the named command +
+// segment-position on fs. firstSegment selects between the segment-
+// zero parser (where command-level toggles like --fs-dedupe are
+// allowed) and the tail-segment parser used by explicit --print /
+// --ignore groups (filter dialect + persistent flags only).
+//
+// Persistent flags are re-registered against the same package-level
+// vars cobra normally drives — necessary because scope-marker
+// commands set DisableFlagParsing=true, bypassing cobra's pre-RunE
+// flag parse. Last-write-wins for repeated tokens, matching every
+// other CLI in this codebase.
+func RegisterCmdFlags(fs *pflag.FlagSet, state *filterFlagsState, command string, firstSegment bool) {
+	for _, group := range cmdFlagRegistry {
+		if !firstSegment && !group.perSegment {
+			continue
+		}
+		if len(group.commands) > 0 && !slices.Contains(group.commands, command) {
+			continue
+		}
+		group.register(fs, state)
+	}
 }
 
 // RegisterFilterFlags registers the shared flat-flag dialect (see
