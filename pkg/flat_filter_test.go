@@ -1,6 +1,7 @@
 package dircachefilehash
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -400,4 +401,237 @@ func TestResolveDates(t *testing.T) {
 	if !endT.Equal(wantEnd) {
 		t.Errorf("end: got %v, want %v", endT, wantEnd)
 	}
+}
+
+func TestBuildPrintIgnoreTree(t *testing.T) {
+	eval := func(t *testing.T, expr FilterExpr, path string, size uint64) bool {
+		t.Helper()
+		if expr == nil {
+			return true // identity
+		}
+		info := &EntryInfo{Path: path, FileSize: size}
+		got, err := expr.Evaluate(info.AsFilterEntry(), &FilterContext{})
+		if err != nil {
+			t.Fatalf("Evaluate(%s): %v", path, err)
+		}
+		return got
+	}
+
+	t.Run("empty inputs return nil identity", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(nil, nil)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if expr != nil {
+			t.Fatalf("expected nil expr, got %v", expr)
+		}
+	})
+
+	t.Run("all-empty options on both sides also collapse to nil", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(
+			[]FilterOptions{{}, {}},
+			[]FilterOptions{{}},
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if expr != nil {
+			t.Fatalf("expected nil expr for all-empty inputs, got %v", expr)
+		}
+	})
+
+	t.Run("print only: behaves like BuildFilter", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(
+			[]FilterOptions{{Names: []string{"*.go"}}},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if !eval(t, expr, "main.go", 0) {
+			t.Error("main.go should match")
+		}
+		if eval(t, expr, "main.py", 0) {
+			t.Error("main.py should not match")
+		}
+	})
+
+	t.Run("ignore only: identity print, negated ignore", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(
+			nil,
+			[]FilterOptions{{Names: []string{"*.tmp"}}},
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if !eval(t, expr, "main.go", 0) {
+			t.Error("main.go should pass (not ignored)")
+		}
+		if eval(t, expr, "scratch.tmp", 0) {
+			t.Error("scratch.tmp should be filtered out by ignore")
+		}
+	})
+
+	t.Run("multi-print: AND across segments", func(t *testing.T) {
+		min := uint64(1024)
+		expr, err := BuildPrintIgnoreTree(
+			[]FilterOptions{
+				{Names: []string{"*.go"}},
+				{MinSize: &min},
+			},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if !eval(t, expr, "main.go", 2048) {
+			t.Error("large *.go should match")
+		}
+		if eval(t, expr, "main.go", 100) {
+			t.Error("small *.go should fail size segment")
+		}
+		if eval(t, expr, "main.py", 2048) {
+			t.Error("large *.py should fail name segment")
+		}
+	})
+
+	t.Run("multi-ignore: OR across segments, negated", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(
+			nil,
+			[]FilterOptions{
+				{Names: []string{"*.tmp"}},
+				{Names: []string{"*.bak"}},
+			},
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if !eval(t, expr, "main.go", 0) {
+			t.Error("main.go should pass")
+		}
+		if eval(t, expr, "scratch.tmp", 0) {
+			t.Error("*.tmp should be filtered")
+		}
+		if eval(t, expr, "scratch.bak", 0) {
+			t.Error("*.bak should be filtered")
+		}
+	})
+
+	t.Run("both sides: AND(prints) AND NOT(OR(ignores))", func(t *testing.T) {
+		expr, err := BuildPrintIgnoreTree(
+			[]FilterOptions{{Names: []string{"*.go"}}},
+			[]FilterOptions{{Names: []string{"*_test.go"}}},
+		)
+		if err != nil {
+			t.Fatalf("BuildPrintIgnoreTree: %v", err)
+		}
+		if !eval(t, expr, "main.go", 0) {
+			t.Error("main.go should match")
+		}
+		if eval(t, expr, "main_test.go", 0) {
+			t.Error("main_test.go should be filtered by ignore")
+		}
+		if eval(t, expr, "main.py", 0) {
+			t.Error("main.py should fail print segment")
+		}
+	})
+
+	t.Run("bad flag inside a print segment is tagged with kind+index", func(t *testing.T) {
+		min := uint64(2048)
+		max := uint64(1024)
+		_, err := BuildPrintIgnoreTree(
+			[]FilterOptions{{}, {MinSize: &min, MaxSize: &max}},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected error from inverted size bounds")
+		}
+		if !strings.Contains(err.Error(), "print segment #1") {
+			t.Errorf("error should tag print segment #1, got %q", err)
+		}
+	})
+
+	t.Run("bad flag inside an ignore segment is tagged with kind+index", func(t *testing.T) {
+		_, err := BuildPrintIgnoreTree(
+			nil,
+			[]FilterOptions{{Sizes: []string{"not-a-size"}}},
+		)
+		if err == nil {
+			t.Fatal("expected error from malformed size spec")
+		}
+		if !strings.Contains(err.Error(), "ignore segment #0") {
+			t.Errorf("error should tag ignore segment #0, got %q", err)
+		}
+	})
+}
+
+func TestBuildScanIgnore(t *testing.T) {
+	t.Run("empty input returns nil", func(t *testing.T) {
+		expr, err := BuildScanIgnore(nil)
+		if err != nil {
+			t.Fatalf("BuildScanIgnore: %v", err)
+		}
+		if expr != nil {
+			t.Fatalf("expected nil expr, got %v", expr)
+		}
+	})
+
+	t.Run("all-empty options also collapse to nil", func(t *testing.T) {
+		expr, err := BuildScanIgnore([]FilterOptions{{}, {}})
+		if err != nil {
+			t.Fatalf("BuildScanIgnore: %v", err)
+		}
+		if expr != nil {
+			t.Fatalf("expected nil expr, got %v", expr)
+		}
+	})
+
+	t.Run("single segment matches without negation", func(t *testing.T) {
+		expr, err := BuildScanIgnore([]FilterOptions{{Names: []string{"*.tmp"}}})
+		if err != nil {
+			t.Fatalf("BuildScanIgnore: %v", err)
+		}
+		info := &EntryInfo{Path: "scratch.tmp"}
+		got, err := expr.Evaluate(info.AsFilterEntry(), &FilterContext{})
+		if err != nil || !got {
+			t.Fatalf("expected match (drop), got %v err %v", got, err)
+		}
+		other := &EntryInfo{Path: "main.go"}
+		got, err = expr.Evaluate(other.AsFilterEntry(), &FilterContext{})
+		if err != nil || got {
+			t.Fatalf("expected no match, got %v err %v", got, err)
+		}
+	})
+
+	t.Run("multi-segment OR semantics", func(t *testing.T) {
+		expr, err := BuildScanIgnore([]FilterOptions{
+			{Names: []string{"*.tmp"}},
+			{Names: []string{"*.bak"}},
+		})
+		if err != nil {
+			t.Fatalf("BuildScanIgnore: %v", err)
+		}
+		for _, p := range []string{"a.tmp", "b.bak"} {
+			info := &EntryInfo{Path: p}
+			got, err := expr.Evaluate(info.AsFilterEntry(), &FilterContext{})
+			if err != nil || !got {
+				t.Fatalf("%s: expected match, got %v err %v", p, got, err)
+			}
+		}
+		info := &EntryInfo{Path: "main.go"}
+		got, err := expr.Evaluate(info.AsFilterEntry(), &FilterContext{})
+		if err != nil || got {
+			t.Fatalf("main.go: expected no match, got %v err %v", got, err)
+		}
+	})
+
+	t.Run("bad flag bubbles up tagged with index", func(t *testing.T) {
+		_, err := BuildScanIgnore([]FilterOptions{{Sizes: []string{"not-a-size"}}})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "ignore segment #0") {
+			t.Errorf("error should tag ignore segment #0, got %q", err)
+		}
+	})
 }

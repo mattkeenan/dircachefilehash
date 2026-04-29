@@ -108,6 +108,84 @@ func BuildFilter(opts FilterOptions) (FilterExpr, error) {
 	return andAll(conjuncts), nil
 }
 
+// BuildPrintIgnoreTree composes scoped print/ignore segments into the
+// final output-time predicate:
+//
+//	AND(prints...) AND NOT(OR(ignores...))
+//
+// Empty prints (or all-empty options) collapse to the identity-true
+// predicate, so the print side acts as "match everything" by default;
+// empty ignores drop the negation entirely. When neither side
+// constrains anything, the result is (nil, nil) — preserving the
+// existing nil-fast-path that callers already special-case.
+//
+// The persistent .dcfh/ignore file is composed *separately* by the
+// caller (typically via IgnoreManager at the scan-walker chokepoint),
+// not folded in here, so a `--no-ignore-file` run produces the same
+// tree as a normal one.
+func BuildPrintIgnoreTree(prints, ignores []FilterOptions) (FilterExpr, error) {
+	printExprs, err := buildOptsList("print segment", prints)
+	if err != nil {
+		return nil, err
+	}
+	ignoreExprs, err := buildOptsList("ignore segment", ignores)
+	if err != nil {
+		return nil, err
+	}
+
+	printSide := andAll(printExprs)
+	ignoreSide := orAll(ignoreExprs)
+
+	switch {
+	case printSide == nil && ignoreSide == nil:
+		return nil, nil
+	case ignoreSide == nil:
+		return printSide, nil
+	case printSide == nil:
+		return &NotExpression{Expr: ignoreSide}, nil
+	default:
+		return &AndExpression{Left: printSide, Right: &NotExpression{Expr: ignoreSide}}, nil
+	}
+}
+
+// BuildScanIgnore returns OR(ignores...) suitable for scan-time
+// short-circuit at the existing IgnoreManager chokepoint. Returns
+// (nil, nil) when ignores is empty so callers can keep their
+// branchless fast path.
+//
+// The output is *not* negated: the scan walker phrases its check as
+// "drop if predicate matches", mirroring how IgnoreManager already
+// works. Output-time composition (which does negate) is the job of
+// BuildPrintIgnoreTree.
+func BuildScanIgnore(ignores []FilterOptions) (FilterExpr, error) {
+	es, err := buildOptsList("ignore segment", ignores)
+	if err != nil {
+		return nil, err
+	}
+	return orAll(es), nil
+}
+
+// buildOptsList runs each FilterOptions through BuildFilter and drops
+// nil results (BuildFilter returns nil for empty opts). Errors are
+// tagged with the segment kind and the segment's index so a bad flag
+// inside a multi-segment command surfaces with enough context to find.
+func buildOptsList(kind string, opts []FilterOptions) ([]FilterExpr, error) {
+	if len(opts) == 0 {
+		return nil, nil
+	}
+	out := make([]FilterExpr, 0, len(opts))
+	for i, o := range opts {
+		e, err := BuildFilter(o)
+		if err != nil {
+			return nil, fmt.Errorf("%s #%d: %w", kind, i, err)
+		}
+		if e != nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 // addSizeConjuncts handles --min-size / --max-size (with cross-validation
 // that min ≤ max) and the repeatable find-style --size spec.
 func addSizeConjuncts(opts FilterOptions, add func(FilterExpr)) error {
