@@ -292,8 +292,6 @@ func TestDiffRequestIgnoresPushDown(t *testing.T) {
 	}
 	defer func() { _ = repo.Close() }()
 
-	// First Apply with --ignore *.tmp → the .tmp file should never be
-	// indexed (push-down at the scan walker).
 	if _, err := repo.Apply(ctx, ApplyRequest{
 		Ignores: []FilterOptions{{Names: []string{"*.tmp"}}},
 	}); err != nil {
@@ -341,12 +339,10 @@ func TestDiffRequestNoIgnoreFile(t *testing.T) {
 		t.Fatal("baseline: ignoreManager should have *.tmp loaded")
 	}
 
-	// A Diff with NoIgnoreFile must transiently suppress patterns.
 	if _, err := repo.Diff(ctx, DiffRequest{NoIgnoreFile: true}); err != nil {
 		t.Fatalf("Diff with NoIgnoreFile: %v", err)
 	}
 
-	// After the call, patterns must be restored.
 	if !lr.dc.ignoreManager.HasPatterns() {
 		t.Errorf("ignoreManager patterns not restored after Diff(NoIgnoreFile=true)")
 	}
