@@ -34,6 +34,16 @@ type DupeFilter struct {
 	Exclusive       bool       `json:"exclusive,omitempty"`
 	IgnoreHardlinks bool       `json:"ignore_hardlinks,omitempty"`
 	Predicate       FilterExpr `json:"-"`
+
+	// Prints/Ignores/NoIgnoreFile carry the same scope-marker shape as
+	// DiffRequest so a wire client (or a CLI that hasn't pre-built the
+	// predicate) can ship the segments. localRepo.Groups composes them
+	// into Predicate when Predicate is nil. NoIgnoreFile is accepted for
+	// API symmetry but has no effect — dupes is index-only and never
+	// triggers a scan, so .dcfh/ignore patterns aren't consulted.
+	Prints       []FilterOptions `json:"prints,omitempty"`
+	Ignores      []FilterOptions `json:"ignores,omitempty"`
+	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
 }
 
 // FindDuplicates returns groups of files with identical content hashes

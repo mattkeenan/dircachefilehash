@@ -157,6 +157,58 @@ func (l *localRepo) Stats(_ context.Context) (*RepoStats, error) {
 	return &RepoStats{FileCount: count, TotalSize: size}, nil
 }
 
+// configureFilters wires per-call filter state on the DirectoryCache:
+// Ignores becomes the scan-time push-down predicate (dc.scanIgnore);
+// noIgnoreFile suppresses .dcfh/ignore via IgnoreManager; Prints +
+// Ignores compose into the output-time predicate. The returned cleanup
+// reverts dc.scanIgnore and ignoreManager state — call defer cleanup()
+// before invoking the underlying primitive so a reused localRepo
+// doesn't leak per-request state into a later call.
+//
+// legacyFilter is the deprecated single-segment alias on Diff/Apply
+// requests: when prints is empty and legacyFilter is non-zero it is
+// promoted into a single print segment so callers that haven't migrated
+// keep their pre-scope-marker semantics.
+func (l *localRepo) configureFilters(prints, ignores []FilterOptions, legacyFilter FilterOptions, noIgnoreFile bool) (FilterExpr, func(), error) {
+	if len(prints) == 0 && !legacyFilter.IsEmpty() {
+		prints = []FilterOptions{legacyFilter}
+	}
+
+	pred, err := BuildPrintIgnoreTree(prints, ignores)
+	if err != nil {
+		return nil, nil, err
+	}
+	scanExpr, err := BuildScanIgnore(ignores)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var restores []func()
+	rollback := func() {
+		for i := len(restores) - 1; i >= 0; i-- {
+			restores[i]()
+		}
+	}
+
+	if scanExpr != nil {
+		l.dc.scanIgnore = scanExpr
+		restores = append(restores, func() { l.dc.scanIgnore = nil })
+	}
+	if noIgnoreFile && l.dc.ignoreManager != nil {
+		l.dc.ignoreManager.SetSuppressFile(true)
+		if rerr := l.dc.ignoreManager.Reload(); rerr != nil {
+			rollback()
+			return nil, nil, fmt.Errorf("reload ignore patterns: %w", rerr)
+		}
+		restores = append(restores, func() {
+			l.dc.ignoreManager.SetSuppressFile(false)
+			_ = l.dc.ignoreManager.Reload()
+		})
+	}
+
+	return pred, rollback, nil
+}
+
 func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, error) {
 	flags := req.Options.toFlags()
 	if err := l.dc.ApplyConfigOverrides(flags); err != nil {
@@ -170,10 +222,11 @@ func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, e
 	// always diffs the whole tree. Keep the field on the request for
 	// future use (Phase 1b+).
 	_ = req.Paths
-	pred, err := BuildFilter(req.Filter)
+	pred, cleanup, err := l.configureFilters(req.Prints, req.Ignores, req.Filter, req.NoIgnoreFile)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	return l.dc.Status(ctx, flags, pred)
 }
 
@@ -200,15 +253,24 @@ func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusR
 	if err != nil {
 		return nil, fmt.Errorf("parse right ref %q: %w", right, err)
 	}
-	pred, err := BuildFilter(req.Filter)
+	pred, cleanup, err := l.configureFilters(req.Prints, req.Ignores, req.Filter, req.NoIgnoreFile)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	return Diff(ctx, l.dc, leftRef, rightRef, pred)
 }
 
 func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error) {
 	flags := req.Options.toFlags()
+	// Prints / req.Filter have no output predicate to attach to on
+	// update — pass nil so configureFilters only wires scanIgnore +
+	// suppressFile.
+	_, cleanup, err := l.configureFilters(nil, req.Ignores, FilterOptions{}, req.NoIgnoreFile)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 	if err := l.dc.Update(ctx, flags, req.Paths...); err != nil {
 		return nil, err
 	}
@@ -224,7 +286,15 @@ func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult,
 }
 
 func (l *localRepo) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error) {
-	return l.dc.FindDuplicates(ctx, req.Options.toFlags(), req.Filter)
+	filter := req.Filter
+	if filter.Predicate == nil && (len(filter.Prints) > 0 || len(filter.Ignores) > 0) {
+		pred, err := BuildPrintIgnoreTree(filter.Prints, filter.Ignores)
+		if err != nil {
+			return nil, err
+		}
+		filter.Predicate = pred
+	}
+	return l.dc.FindDuplicates(ctx, req.Options.toFlags(), filter)
 }
 
 func (l *localRepo) Filter(ctx context.Context, req FilterRequest) (*FilterResult, error) {

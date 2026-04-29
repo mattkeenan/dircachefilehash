@@ -65,41 +65,64 @@ type RepoStats struct {
 }
 
 // DiffRequest selects what Diff should compare against the filesystem.
-// Empty Paths means "entire repository". Filter narrows the *reported*
-// result without affecting cache writes — see FilterOptions for the
-// shared flag dialect.
+// Empty Paths means "entire repository".
+//
+// Prints/Ignores carry --print/--ignore scope segments (see
+// BuildPrintIgnoreTree); Ignores additionally short-circuit the scan
+// walker via dc.scanIgnore so non-matching files are never hashed.
+// NoIgnoreFile suppresses .dcfh/ignore for the run.
+//
+// Filter is the legacy single-segment alias used by callers that haven't
+// migrated to the print/ignore vocabulary. When Prints is empty and
+// Filter is non-zero, Filter is promoted into a single print segment so
+// the predicate shape is identical to the old `Filter`-only path.
 //
 // Diff is a structured delta, not a listing — it reports which entries
 // were added, modified, or deleted relative to the baseline index. The
 // CLI surface is still `dcfh status`; only the internal primitive is
 // named Diff to reflect the return shape.
 type DiffRequest struct {
-	Options Options       `json:"options"`
-	Paths   []string      `json:"paths,omitempty"`
-	Filter  FilterOptions `json:"filter,omitzero"`
+	Options      Options         `json:"options"`
+	Paths        []string        `json:"paths,omitempty"`
+	Prints       []FilterOptions `json:"prints,omitempty"`
+	Ignores      []FilterOptions `json:"ignores,omitempty"`
+	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
+	Filter       FilterOptions   `json:"filter,omitzero"`
 }
 
 // DiffRefsRequest drives the generalised Diff engine, comparing two index
 // references identified by selector strings (see ResolveIndexSelectors for
 // the vocabulary). Empty Left defaults to "main"; empty Right defaults to
 // "fs-scan", giving the historical dcfh-status semantics by default.
-// Filter narrows the reported result.
+//
+// Prints/Ignores/NoIgnoreFile/Filter mirror DiffRequest — Ignores
+// short-circuits the scan walker when right="fs-scan", and the output
+// predicate is the BuildPrintIgnoreTree composition.
 type DiffRefsRequest struct {
-	Options Options       `json:"options"`
-	Left    string        `json:"left,omitempty"`
-	Right   string        `json:"right,omitempty"`
-	Filter  FilterOptions `json:"filter,omitzero"`
+	Options      Options         `json:"options"`
+	Left         string          `json:"left,omitempty"`
+	Right        string          `json:"right,omitempty"`
+	Prints       []FilterOptions `json:"prints,omitempty"`
+	Ignores      []FilterOptions `json:"ignores,omitempty"`
+	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
+	Filter       FilterOptions   `json:"filter,omitzero"`
 }
 
 // ApplyRequest is the analogue of DiffRequest for Apply (dcfh update).
 //
-// Filter is reserved for v2: useful filtering on update means push-down
-// (skip rescan/rehash for non-matching files), which v1 does not yet
-// implement. Setting Filter today is silently ignored.
+// Ignores short-circuits the scan walker (push-down — non-matching files
+// are not rescanned/rehashed) and NoIgnoreFile suppresses .dcfh/ignore
+// for the run. Prints and Filter have no effect on Apply: there is no
+// output predicate to apply (update writes the index, not a listing).
+// They are accepted on the request shape for symmetry with Diff so a
+// single CLI parser can populate either.
 type ApplyRequest struct {
-	Options Options       `json:"options"`
-	Paths   []string      `json:"paths,omitempty"`
-	Filter  FilterOptions `json:"filter,omitzero"`
+	Options      Options         `json:"options"`
+	Paths        []string        `json:"paths,omitempty"`
+	Prints       []FilterOptions `json:"prints,omitempty"`
+	Ignores      []FilterOptions `json:"ignores,omitempty"`
+	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
+	Filter       FilterOptions   `json:"filter,omitzero"`
 }
 
 // GroupsRequest selects duplicate-detection options. Filter holds the
