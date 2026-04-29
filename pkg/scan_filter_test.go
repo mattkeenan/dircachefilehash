@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// TestScanIgnoreStatAndFilter verifies that a non-nil dc.scanIgnore at
-// the scan-walker chokepoint drops matching paths even when the
-// IgnoreManager has nothing to say about them. Tests the
-// statAndFilter:432 hook.
+// TestScanIgnoreStatAndFilter asserts the scan-walker chokepoint drops
+// paths matching dc.scanIgnore even when IgnoreManager wouldn't.
 func TestScanIgnoreStatAndFilter(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -47,9 +45,9 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 	}
 }
 
-// TestScanIgnoreShouldIndex covers the second chokepoint (legacy
-// callback pipeline). shouldIndex receives only a relative path so the
-// adapter has no FileInfo; path-based predicates still fire.
+// TestScanIgnoreShouldIndex covers the legacy callback chokepoint:
+// only a relPath is available, so path-based predicates fire and
+// stat-using ones silently no-op.
 func TestScanIgnoreShouldIndex(t *testing.T) {
 	tempDir := t.TempDir()
 	dc := NewDirectoryCache(tempDir, tempDir)
@@ -74,28 +72,32 @@ func TestScanIgnoreShouldIndex(t *testing.T) {
 	}
 }
 
-// TestScanFilterEntryUnavailableData verifies that predicates needing
-// data not available at scan-time silently no-op (return error → scan
-// hook treats as "no match" → entry survives) rather than dropping
-// entries on uncertainty. A --ignore --hash X with no FileInfo must
-// not filter anything.
+// TestScanFilterEntryUnavailableData asserts that predicates whose
+// inputs aren't reachable at scan-time (--ignore --hash X always;
+// --ignore --min-size N when info is nil) do NOT drop entries — the
+// error → no-match swallow keeps the entry alive for output-time
+// evaluation.
 func TestScanFilterEntryUnavailableData(t *testing.T) {
-	// Hash predicate at the no-info shouldIndex chokepoint: error path.
-	expr, err := BuildScanIgnore([]FilterOptions{{Hashes: []string{"deadbeef"}}})
+	tempDir := t.TempDir()
+	dc := NewDirectoryCache(tempDir, tempDir)
+	defer func() { _ = dc.Close() }()
+
+	hashExpr, err := BuildScanIgnore([]FilterOptions{{Hashes: []string{"deadbeef"}}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	if scanIgnoreMatches(expr, "anything", nil) {
+	dc.scanIgnore = hashExpr
+	if dc.scanIgnoreDrops("anything", nil, "test") {
 		t.Errorf("hash predicate at scan-time must not match (data unavailable)")
 	}
 
-	// Stat predicate at the no-info chokepoint also no-ops.
 	min := uint64(1024)
-	expr2, err := BuildScanIgnore([]FilterOptions{{MinSize: &min}})
+	sizeExpr, err := BuildScanIgnore([]FilterOptions{{MinSize: &min}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	if scanIgnoreMatches(expr2, "anything", nil) {
+	dc.scanIgnore = sizeExpr
+	if dc.scanIgnoreDrops("anything", nil, "test") {
 		t.Errorf("size predicate without FileInfo must not match")
 	}
 }

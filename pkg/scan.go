@@ -2,6 +2,7 @@ package dircachefilehash
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,16 +362,9 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 		return false
 	}
 
-	// Mirror the IgnoreManager check for any --ignore predicate the
-	// caller pushed down. shouldIndex is only invoked from the legacy
-	// callback pipeline with a path string, so the adapter has no
-	// FileInfo — predicates that need stat/hash data return an error
-	// here and the entry is treated as non-matching (we never drop on
-	// uncertainty at scan-time; output-time evaluation has the data).
-	if dc.scanIgnore != nil && scanIgnoreMatches(dc.scanIgnore, relPath, nil) {
-		if IsDebugEnabled("scan") {
-			VerboseLog(3, "shouldIndex: ignoring path due to --ignore predicate: %s", relPath)
-		}
+	// Legacy callback pipeline only has the path; stat-using predicates
+	// silently no-op via scanIgnoreDrops's error swallow.
+	if dc.scanIgnoreDrops(relPath, nil, "shouldIndex") {
 		return false
 	}
 
@@ -445,74 +439,77 @@ func (dc *DirectoryCache) statAndFilter(currentPath string) (os.FileInfo, string
 	if dc.ignoreManager.ShouldIgnore(relPath) {
 		return nil, "", false
 	}
-	if dc.scanIgnore != nil && scanIgnoreMatches(dc.scanIgnore, relPath, info) {
+	if dc.scanIgnoreDrops(relPath, info, "statAndFilter") {
 		return nil, "", false
 	}
 	return info, relPath, true
 }
 
-// scanIgnoreMatches evaluates the scan-time --ignore predicate against
-// the (relPath, info) tuple available at the chokepoint. Errors are
-// swallowed: at scan-time we have no hash and only sometimes have
-// FileInfo, so a predicate that needs missing data returns an error
-// — we treat that as "no match" to avoid dropping entries on
-// uncertainty. The output-time pass (which has hash and full metadata)
-// applies the same predicate authoritatively via the comparison sink's
-// filter.
-func scanIgnoreMatches(expr FilterExpr, relPath string, info os.FileInfo) bool {
-	matched, err := expr.Evaluate(&scanFilterEntry{relPath: relPath, info: info}, &FilterContext{})
-	return err == nil && matched
+// scanIgnoreDrops evaluates the scan-time --ignore predicate against
+// (relPath, info) and returns true when the entry should be filtered
+// out. Errors from the predicate (hash predicates always; stat
+// predicates when info is nil) are swallowed so we never drop on
+// uncertainty — output-time evaluation in the comparison sink is
+// authoritative. Reuses scratch storage on the DirectoryCache to keep
+// the scan-walker hot path allocation-free.
+func (dc *DirectoryCache) scanIgnoreDrops(relPath string, info os.FileInfo, where string) bool {
+	if dc.scanIgnore == nil {
+		return false
+	}
+	dc.scanFilterEnt.relPath = relPath
+	dc.scanFilterEnt.info = info
+	matched, err := dc.scanIgnore.Evaluate(&dc.scanFilterEnt, &dc.scanFilterCtx)
+	if err != nil || !matched {
+		return false
+	}
+	if IsDebugEnabled("scan") {
+		VerboseLog(3, "%s: ignoring path due to --ignore predicate: %s", where, relPath)
+	}
+	return true
 }
 
-// scanFilterEntry adapts what the scan walker has at hand — a
-// relative path and (sometimes) an os.FileInfo — into a FilterEntry.
-// Hash and hash-type accessors return errScanFilterNoHash because
-// scan-time runs before hashing; UID/GID/Dev/CTime require the
-// underlying *syscall.Stat_t which is reachable through info.Sys().
-// When info is nil (the shouldIndex deindex path) the stat-derived
-// accessors return errScanFilterNoStat so their callers' silent-drop
-// behaviour kicks in.
+// scanFilterEntry adapts (relPath, optional os.FileInfo) into a
+// FilterEntry. Hash and stat accessors return errScanFilterUnavailable
+// when their data isn't reachable; scanIgnoreDrops swallows the error
+// so an --ignore --hash X predicate is a scan-time no-op rather than
+// a false drop.
 type scanFilterEntry struct {
 	relPath string
 	info    os.FileInfo
 }
 
-var (
-	errScanFilterNoStat = fmt.Errorf("scan filter: no stat info at this chokepoint")
-	errScanFilterNoHash = fmt.Errorf("scan filter: hash not yet computed at scan-time")
-)
+var errScanFilterUnavailable = errors.New("scan filter: predicate data not available at scan-time")
 
 func (e *scanFilterEntry) RelativePath() (string, error) { return e.relPath, nil }
 func (e *scanFilterEntry) IsDeleted() (bool, error)      { return false, nil }
-func (e *scanFilterEntry) HashType() (uint16, error)     { return 0, errScanFilterNoHash }
-func (e *scanFilterEntry) HashString() (string, error)   { return "", errScanFilterNoHash }
+func (e *scanFilterEntry) HashType() (uint16, error)     { return 0, errScanFilterUnavailable }
+func (e *scanFilterEntry) HashString() (string, error)   { return "", errScanFilterUnavailable }
 
 func (e *scanFilterEntry) FileSize() (uint64, error) {
 	if e.info == nil {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return uint64(e.info.Size()), nil
 }
 
 func (e *scanFilterEntry) Mode() (uint32, error) {
 	if e.info == nil {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return uint32(e.info.Mode()), nil
 }
 
 func (e *scanFilterEntry) MTimeWall() (uint64, error) {
 	if e.info == nil {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
-	t := e.info.ModTime()
-	return encodeWallTime(t.Unix(), int64(t.Nanosecond())), nil
+	return timeWall(e.info.ModTime()), nil
 }
 
 func (e *scanFilterEntry) UID() (uint32, error) {
 	sys, ok := e.statSys()
 	if !ok {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return sys.Uid, nil
 }
@@ -520,7 +517,7 @@ func (e *scanFilterEntry) UID() (uint32, error) {
 func (e *scanFilterEntry) GID() (uint32, error) {
 	sys, ok := e.statSys()
 	if !ok {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return sys.Gid, nil
 }
@@ -528,7 +525,7 @@ func (e *scanFilterEntry) GID() (uint32, error) {
 func (e *scanFilterEntry) Dev() (uint32, error) {
 	sys, ok := e.statSys()
 	if !ok {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return uint32(sys.Dev), nil
 }
@@ -536,7 +533,7 @@ func (e *scanFilterEntry) Dev() (uint32, error) {
 func (e *scanFilterEntry) CTimeWall() (uint64, error) {
 	sys, ok := e.statSys()
 	if !ok {
-		return 0, errScanFilterNoStat
+		return 0, errScanFilterUnavailable
 	}
 	return encodeWallTime(sys.Ctim.Sec, sys.Ctim.Nsec), nil
 }

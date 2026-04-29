@@ -108,21 +108,12 @@ func BuildFilter(opts FilterOptions) (FilterExpr, error) {
 	return andAll(conjuncts), nil
 }
 
-// BuildPrintIgnoreTree composes scoped print/ignore segments into the
-// final output-time predicate:
-//
-//	AND(prints...) AND NOT(OR(ignores...))
-//
-// Empty prints (or all-empty options) collapse to the identity-true
-// predicate, so the print side acts as "match everything" by default;
-// empty ignores drop the negation entirely. When neither side
-// constrains anything, the result is (nil, nil) — preserving the
-// existing nil-fast-path that callers already special-case.
-//
-// The persistent .dcfh/ignore file is composed *separately* by the
-// caller (typically via IgnoreManager at the scan-walker chokepoint),
-// not folded in here, so a `--no-ignore-file` run produces the same
-// tree as a normal one.
+// BuildPrintIgnoreTree composes scoped print/ignore segments into
+// AND(prints...) AND NOT(OR(ignores...)). Returns (nil, nil) when
+// neither side constrains anything, preserving the nil-fast-path
+// callers already special-case. The persistent .dcfh/ignore file is
+// composed separately by the caller (via IgnoreManager) so a
+// `--no-ignore-file` run produces the same tree as a normal one.
 func BuildPrintIgnoreTree(prints, ignores []FilterOptions) (FilterExpr, error) {
 	printExprs, err := buildOptsList("print segment", prints)
 	if err != nil {
@@ -148,15 +139,10 @@ func BuildPrintIgnoreTree(prints, ignores []FilterOptions) (FilterExpr, error) {
 	}
 }
 
-// BuildScanIgnore returns OR(ignores...) suitable for scan-time
-// short-circuit at the existing IgnoreManager chokepoint. Returns
-// (nil, nil) when ignores is empty so callers can keep their
-// branchless fast path.
-//
-// The output is *not* negated: the scan walker phrases its check as
-// "drop if predicate matches", mirroring how IgnoreManager already
-// works. Output-time composition (which does negate) is the job of
-// BuildPrintIgnoreTree.
+// BuildScanIgnore returns OR(ignores...) for the scan-time chokepoint.
+// Output is not negated — the scan walker phrases its check as "drop
+// if predicate matches", mirroring IgnoreManager. Output-time
+// composition (which does negate) is BuildPrintIgnoreTree's job.
 func BuildScanIgnore(ignores []FilterOptions) (FilterExpr, error) {
 	es, err := buildOptsList("ignore segment", ignores)
 	if err != nil {
@@ -165,10 +151,9 @@ func BuildScanIgnore(ignores []FilterOptions) (FilterExpr, error) {
 	return orAll(es), nil
 }
 
-// buildOptsList runs each FilterOptions through BuildFilter and drops
-// nil results (BuildFilter returns nil for empty opts). Errors are
-// tagged with the segment kind and the segment's index so a bad flag
-// inside a multi-segment command surfaces with enough context to find.
+// buildOptsList tags BuildFilter errors with the segment kind and
+// index so a bad flag inside a multi-segment command surfaces enough
+// context to find.
 func buildOptsList(kind string, opts []FilterOptions) ([]FilterExpr, error) {
 	if len(opts) == 0 {
 		return nil, nil
