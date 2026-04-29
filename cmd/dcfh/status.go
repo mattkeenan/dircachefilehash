@@ -42,7 +42,7 @@ exception, since it can short-circuit the scan walker.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		_, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, "status")
+		_, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, cmdStatus)
 		if err != nil {
 			return err
 		}

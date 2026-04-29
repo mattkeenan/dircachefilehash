@@ -80,49 +80,16 @@ func splitArgs(args []string) (segs []scopeSegment, noIgnoreFile bool) {
 	return segs, noIgnoreFile
 }
 
-// buildSegments is the test seam over parseSegment: parses every
-// segment with the empty-command, tail-segment registry view (filter
-// + persistent dialect, no command-specific flags) and bins results
-// by kind. Production callers go through resolveScopes, which adds
-// segment-zero command-specific handling and positional residual.
-func buildSegments(segs []scopeSegment) (prints, ignores []dcfh.FilterOptions, err error) {
-	for i, seg := range segs {
-		_, opts, extras, perr := parseSegment(seg.args, "", false)
-		if perr != nil {
-			return nil, nil, fmt.Errorf("%s segment #%d: %w", seg.kind, i, perr)
-		}
-		if len(extras) > 0 {
-			return nil, nil, fmt.Errorf("%s segment #%d: unexpected positional args: %v", seg.kind, i, extras)
-		}
-		switch seg.kind {
-		case scopePrint:
-			prints = append(prints, opts)
-		case scopeIgnore:
-			ignores = append(ignores, opts)
-		}
-	}
-	return prints, ignores, nil
-}
-
-// parseSegment runs one segment's args through a one-shot
-// pflag.FlagSet configured via the cmdFlagRegistry. firstSegment
-// selects between the segment-zero parser (command-specific toggles
-// allowed) and the tail-segment parser used for explicit --print /
-// --ignore groups. Returns the segment's state, FilterOptions, and
-// positional residual.
-//
-// ContinueOnError keeps a bad flag from bringing down the whole
-// process — buildSegments / resolveScopes wrap the error with
-// segment context.
-func parseSegment(args []string, command string, firstSegment bool) (*filterFlagsState, dcfh.FilterOptions, []string, error) {
+// parseSegmentZero parses the implicit first segment of a
+// scope-marker argv. Returns the per-segment state (carrying both
+// FilterOptions inputs and any command-specific toggles like dupes'
+// --fs-dedupe), the FilterOptions, and any positional residual —
+// only segment zero ever owns positionals.
+func parseSegmentZero(args []string, command string) (*filterFlagsState, dcfh.FilterOptions, []string, error) {
 	state := newFilterFlagsState()
-	name := "scope-segment"
-	if firstSegment {
-		name = "scope-segment-0"
-	}
-	fs := pflag.NewFlagSet(name, pflag.ContinueOnError)
-	fs.SetOutput(discardWriter{}) // pflag prints usage on error; suppress it.
-	RegisterCmdFlags(fs, state, command, firstSegment)
+	fs := pflag.NewFlagSet("scope-segment-0", pflag.ContinueOnError)
+	fs.SetOutput(discardWriter{})
+	registerSegmentZeroFlags(fs, state, command)
 	if err := fs.Parse(args); err != nil {
 		return nil, dcfh.FilterOptions{}, nil, err
 	}
@@ -133,33 +100,40 @@ func parseSegment(args []string, command string, firstSegment bool) (*filterFlag
 	return state, opts, fs.Args(), nil
 }
 
-// resolveScopes is the canonical RunE preamble for commands that
-// support scope markers. It splits argv, parses segment 0 with the
-// command's full registry view (filter + persistent + command-
-// specific), then parses the remaining segments with the per-segment
-// view (filter + persistent only). Returns the composed
-// prints/ignores/positionals/noIgnoreFile quadruple plus the
-// segment-zero state for command-specific flag readout.
-//
-// Empty input collapses to a single empty print segment. Tail
-// segments must not produce positional residuals — only segment zero
-// owns positionals. Errors carry the offending segment's index so
-// the user knows which `--print` / `--ignore` group rejected their
-// flag.
+// parseTailSegment parses one explicit --print / --ignore segment.
+// Tail segments only see filter + persistent flags and never carry
+// positionals; FilterOptions is the only meaningful output.
+func parseTailSegment(args []string) (dcfh.FilterOptions, error) {
+	state := newFilterFlagsState()
+	fs := pflag.NewFlagSet("scope-segment", pflag.ContinueOnError)
+	fs.SetOutput(discardWriter{})
+	registerTailSegmentFlags(fs, state)
+	if err := fs.Parse(args); err != nil {
+		return dcfh.FilterOptions{}, err
+	}
+	if extras := fs.Args(); len(extras) > 0 {
+		return dcfh.FilterOptions{}, fmt.Errorf("unexpected positional args: %v", extras)
+	}
+	return BuildFilterOptions(state)
+}
+
+// resolveScopes is the canonical RunE preamble for scope-marker
+// commands. Splits argv, parses segment zero with the command's full
+// registry view, then parses every explicit --print / --ignore
+// segment with the tail-segment view. Empty input collapses to a
+// single empty print segment. Errors carry the offending segment's
+// index so the user can pinpoint the rejected flag.
 func resolveScopes(args []string, command string) (state *filterFlagsState, prints, ignores []dcfh.FilterOptions, positionals []string, noIgnoreFile bool, err error) {
 	segs, noIgnoreFile := splitArgs(args)
-	state, zeroOpts, positionals, err := parseSegment(segs[0].args, command, true)
+	state, zeroOpts, positionals, err := parseSegmentZero(segs[0].args, command)
 	if err != nil {
 		return nil, nil, nil, nil, false, fmt.Errorf("print segment #0: %w", err)
 	}
 	prints = []dcfh.FilterOptions{zeroOpts}
 	for i, seg := range segs[1:] {
-		_, opts, extras, perr := parseSegment(seg.args, command, false)
+		opts, perr := parseTailSegment(seg.args)
 		if perr != nil {
 			return nil, nil, nil, nil, false, fmt.Errorf("%s segment #%d: %w", seg.kind, i+1, perr)
-		}
-		if len(extras) > 0 {
-			return nil, nil, nil, nil, false, fmt.Errorf("%s segment #%d: unexpected positional args: %v", seg.kind, i+1, extras)
 		}
 		switch seg.kind {
 		case scopePrint:

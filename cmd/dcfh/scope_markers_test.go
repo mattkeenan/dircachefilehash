@@ -96,15 +96,14 @@ func TestSplitArgs(t *testing.T) {
 	}
 }
 
-func TestBuildSegments(t *testing.T) {
+func TestResolveScopes_SegmentParsing(t *testing.T) {
 	t.Run("happy path: print + ignore both populate", func(t *testing.T) {
-		segs := []scopeSegment{
-			{kind: scopePrint, args: []string{"--name", "*.go"}},
-			{kind: scopeIgnore, args: []string{"--name", "*_test.go"}},
-		}
-		prints, ignores, err := buildSegments(segs)
+		_, prints, ignores, _, _, err := resolveScopes(
+			[]string{"--name", "*.go", "--ignore", "--name", "*_test.go"},
+			cmdStatus,
+		)
 		if err != nil {
-			t.Fatalf("buildSegments: %v", err)
+			t.Fatalf("resolveScopes: %v", err)
 		}
 		if len(prints) != 1 || len(prints[0].Names) != 1 || prints[0].Names[0] != "*.go" {
 			t.Errorf("prints: %+v", prints)
@@ -115,40 +114,39 @@ func TestBuildSegments(t *testing.T) {
 	})
 
 	t.Run("empty segment yields empty FilterOptions, kept in slot", func(t *testing.T) {
-		segs := []scopeSegment{
-			{kind: scopePrint}, // bare implicit print
-			{kind: scopeIgnore, args: []string{"--name", "*.tmp"}},
-		}
-		prints, ignores, err := buildSegments(segs)
+		_, prints, ignores, _, _, err := resolveScopes(
+			[]string{"--ignore", "--name", "*.tmp"},
+			cmdStatus,
+		)
 		if err != nil {
-			t.Fatalf("buildSegments: %v", err)
+			t.Fatalf("resolveScopes: %v", err)
 		}
 		if len(prints) != 1 || !prints[0].IsEmpty() {
-			t.Errorf("expected one empty print segment, got %+v", prints)
+			t.Errorf("expected one empty implicit print segment, got %+v", prints)
 		}
 		if len(ignores) != 1 || ignores[0].IsEmpty() {
 			t.Errorf("expected one populated ignore segment, got %+v", ignores)
 		}
 	})
 
-	t.Run("bad flag inside a segment is reported with segment context", func(t *testing.T) {
-		segs := []scopeSegment{
-			{kind: scopePrint, args: []string{"--bogus-flag", "value"}},
-		}
-		_, _, err := buildSegments(segs)
+	t.Run("bad flag in segment zero tagged as print segment #0", func(t *testing.T) {
+		_, _, _, _, _, err := resolveScopes(
+			[]string{"--bogus-flag", "value"},
+			cmdStatus,
+		)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "print segment") {
-			t.Errorf("error should tag segment kind, got %q", err)
+		if !strings.Contains(err.Error(), "print segment #0") {
+			t.Errorf("error should tag segment-0 kind, got %q", err)
 		}
 	})
 
-	t.Run("malformed size value bubbles up via BuildFilterOptions", func(t *testing.T) {
-		segs := []scopeSegment{
-			{kind: scopeIgnore, args: []string{"--min-size", "not-a-size"}},
-		}
-		_, _, err := buildSegments(segs)
+	t.Run("malformed size value tagged with kind context", func(t *testing.T) {
+		_, _, _, _, _, err := resolveScopes(
+			[]string{"--ignore", "--min-size", "not-a-size"},
+			cmdStatus,
+		)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -165,7 +163,7 @@ func TestBuildSegments(t *testing.T) {
 func TestResolveScopes_DupesCmdFlagsAndPositionals(t *testing.T) {
 	state, prints, ignores, positionals, noIgn, err := resolveScopes(
 		[]string{"--exclusive=no", "-H", "--fs-dedupe", "sub/", "--ignore", "--name", "*.bak"},
-		"dupes",
+		cmdDupes,
 	)
 	if err != nil {
 		t.Fatalf("resolveScopes: %v", err)
@@ -195,8 +193,7 @@ func TestResolveScopes_DupesCmdFlagsAndPositionals(t *testing.T) {
 
 // TestResolveScopes_PersistentFlagInTailSegment asserts that root
 // persistent flags (here --verbose) parse anywhere in the argv, not
-// just inside segment zero — a regression gate for the fix that wires
-// registerRootPersistentFlags into parseSegment.
+// just inside segment zero.
 func TestResolveScopes_PersistentFlagInTailSegment(t *testing.T) {
 	saved := flagVerbose
 	flagVerbose = 0
@@ -204,7 +201,7 @@ func TestResolveScopes_PersistentFlagInTailSegment(t *testing.T) {
 
 	_, _, _, _, _, err := resolveScopes(
 		[]string{"--ignore", "--name", "*.tmp", "--verbose"},
-		"status",
+		cmdStatus,
 	)
 	if err != nil {
 		t.Fatalf("resolveScopes: %v", err)

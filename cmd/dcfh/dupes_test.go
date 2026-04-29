@@ -109,7 +109,7 @@ func TestBuildDupeFilter_FSDedupeForcesIgnoreHardlinks(t *testing.T) {
 	// --fs-dedupe must force IgnoreHardlinks=true regardless of -H,
 	// and inject the sub-block MinSize floor when the user didn't
 	// already constrain it via a --print segment.
-	f, err := buildDupeFilter(dupesState(true, false), []dcfh.FilterOptions{{}}, nil, nil)
+	f, err := buildDupeFilter(dupesState(true, false), []dcfh.FilterOptions{{}}, nil, nil, false)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestBuildDupeFilter_FSDedupeRespectsUserMinSize(t *testing.T) {
 	// must NOT inject the 4096 floor.
 	user := uint64(8192)
 	prints := []dcfh.FilterOptions{{MinSize: &user}}
-	f, err := buildDupeFilter(dupesState(true, false), prints, nil, nil)
+	f, err := buildDupeFilter(dupesState(true, false), prints, nil, nil, false)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestBuildDupeFilter_NoFSDedupe_NoImplicitMinSize(t *testing.T) {
 	// Regression gate: without --fs-dedupe, MinSize must remain nil
 	// when --min-size is absent, so non-dedupe users keep today's
 	// behaviour (dupes reports every group regardless of size).
-	f, err := buildDupeFilter(dupesState(false, false), []dcfh.FilterOptions{{}}, nil, nil)
+	f, err := buildDupeFilter(dupesState(false, false), []dcfh.FilterOptions{{}}, nil, nil, false)
 	if err != nil {
 		t.Fatalf("buildDupeFilter: %v", err)
 	}

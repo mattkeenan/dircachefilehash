@@ -78,6 +78,14 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
+		state, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, cmdDupes)
+		if err != nil {
+			return err
+		}
+		if err := finaliseRootFlags(cmd); err != nil {
+			return err
+		}
+
 		repoRoot, metaDir, err := findDcfhRepo()
 		if err != nil {
 			if getOutputFormat() == OutputHuman {
@@ -86,24 +94,15 @@ and defaults --min-size to 4096 (sub-block files buy nothing).`,
 			return err
 		}
 
-		state, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, "dupes")
-		if err != nil {
-			return err
-		}
-		if err := finaliseRootFlags(cmd); err != nil {
-			return err
-		}
-
 		paths, err := normaliseDupePaths(repoRoot, positionals)
 		if err != nil {
 			return err
 		}
 
-		filter, err := buildDupeFilter(state, prints, ignores, paths)
+		filter, err := buildDupeFilter(state, prints, ignores, paths, noIgnoreFile)
 		if err != nil {
 			return err
 		}
-		filter.NoIgnoreFile = noIgnoreFile
 
 		repo, err := dcfh.OpenRepo(ctx, metaDir)
 		if err != nil {
@@ -297,22 +296,19 @@ func init() {
 // state and the per-segment FilterOptions slices. --fs-dedupe forces
 // IgnoreHardlinks=true (the kernel rejects same-inode overlapping-range
 // calls anyway, and reporting hardlinks as "deduped" would be noise)
-// and synthesises a print-segment MinSize=4096 floor when the user
-// hasn't already constrained it (sub-block files reclaim nothing).
-func buildDupeFilter(state *filterFlagsState, prints, ignores []dcfh.FilterOptions, paths []string) (dcfh.DupeFilter, error) {
+// and adds a print-segment MinSize=4096 floor when no print segment
+// already constrains MinSize (sub-block files reclaim nothing).
+func buildDupeFilter(state *filterFlagsState, prints, ignores []dcfh.FilterOptions, paths []string, noIgnoreFile bool) (dcfh.DupeFilter, error) {
 	f := dcfh.DupeFilter{
 		Paths:           paths,
 		Exclusive:       bool(state.exclusive),
 		IgnoreHardlinks: state.ignoreHardlinks,
+		NoIgnoreFile:    noIgnoreFile,
 	}
 	if state.fsDedupe {
 		f.IgnoreHardlinks = true
-		if !anyPrintConstrainsMinSize(prints) {
-			n := dedupeDefaultMinSize
-			prints = append(prints, dcfh.FilterOptions{MinSize: &n})
-		}
+		prints = applyFSDedupeDefaults(prints)
 	}
-
 	pred, err := dcfh.BuildPrintIgnoreTree(prints, ignores)
 	if err != nil {
 		return f, err
@@ -321,16 +317,18 @@ func buildDupeFilter(state *filterFlagsState, prints, ignores []dcfh.FilterOptio
 	return f, nil
 }
 
-// anyPrintConstrainsMinSize reports whether any print segment carries
-// a MinSize bound — used by buildDupeFilter to decide whether
-// --fs-dedupe should inject its sub-block floor.
-func anyPrintConstrainsMinSize(prints []dcfh.FilterOptions) bool {
+// applyFSDedupeDefaults appends a synthetic print segment with
+// MinSize=dedupeDefaultMinSize when no caller segment has already
+// set MinSize. Returns prints unchanged if any segment constrains
+// MinSize.
+func applyFSDedupeDefaults(prints []dcfh.FilterOptions) []dcfh.FilterOptions {
 	for _, p := range prints {
 		if p.MinSize != nil {
-			return true
+			return prints
 		}
 	}
-	return false
+	floor := dedupeDefaultMinSize
+	return append(prints, dcfh.FilterOptions{MinSize: &floor})
 }
 
 // yesNoFlag is a cobra/pflag bool-shaped flag that accepts only "yes"

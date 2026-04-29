@@ -41,7 +41,7 @@ truth).`,
 			return err
 		}
 
-		_, prints, ignores, paths, noIgnoreFile, err := resolveScopes(args, "update")
+		_, prints, ignores, paths, noIgnoreFile, err := resolveScopes(args, cmdUpdate)
 		if err != nil {
 			return err
 		}

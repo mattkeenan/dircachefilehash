@@ -34,11 +34,10 @@ var (
 )
 
 // registerRootPersistentFlags installs the root persistent flag
-// dialect on fs. Called once in init() against rootCmd.PersistentFlags()
-// (the canonical home — drives --help and cobra completion) and again
-// from RegisterCmdFlags' segment-zero parser on commands that disable
-// cobra flag parsing for scope-marker handling. Same package vars in
-// both cases, so writes from either route land on the same global.
+// dialect on pf. Called against rootCmd.PersistentFlags() at init
+// time and against the per-RunE pflag.FlagSet built by the
+// scope-marker preamble (which sets DisableFlagParsing=true and so
+// must re-parse persistent flags itself).
 func registerRootPersistentFlags(pf *pflag.FlagSet) {
 	pf.StringVarP(&flagOutput, "output", "o", "human", "output format: human, json, fdupes")
 	pf.BoolVarP(&flagJSON, "json", "j", false, "output in JSON format (alias for --output=json)")
@@ -62,9 +61,7 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	Version:       getVersionString(),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Scope-marker commands (status / update / dupes) parse their
-		// own argv inside RunE — defer normalisation there. Everything
-		// else uses cobra's normal flag parse and we can finalise now.
+		// Scope-marker commands parse argv inside RunE; finalise there.
 		if cmd.DisableFlagParsing {
 			return nil
 		}
@@ -72,16 +69,10 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// finaliseRootFlags applies the post-parse normalisation that the
-// PersistentPreRunE hook would normally run: --json/-s aliasing,
-// output-format validation, debug/verbose plumbing, --meta-dir
-// resolution, and viper-driven config defaults. It expects every root
-// persistent flag global to already hold its parsed value.
-//
-// Scope-marker commands call this from RunE *after* the segment-zero
-// parser has populated the persistent globals, since their cobra
-// PersistentPreRunE pass is a no-op (DisableFlagParsing skips the
-// flag parse those globals would otherwise be filled by).
+// finaliseRootFlags applies post-parse normalisation: --json/-s
+// aliasing, output-format validation, debug/verbose plumbing,
+// --meta-dir resolution, and viper-driven config defaults. Expects
+// every root persistent flag global to already hold its parsed value.
 func finaliseRootFlags(cmd *cobra.Command) error {
 	if flagJSON && flagOutput != "human" {
 		return fmt.Errorf("cannot use both --json and --output flags together")
