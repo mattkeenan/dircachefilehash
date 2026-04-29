@@ -46,10 +46,10 @@ func TestIgnoreTransitions(t *testing.T) {
 
 	dc := NewDirectoryCache(repoDir, repoDir)
 
-	// Create initial ignore file with only .dcfh pattern
+	// Create initial ignore file with only .dcfh pattern (gitignore syntax)
 	ignoreFile := filepath.Join(dcfhDir, "ignore")
 	if err := os.WriteFile(ignoreFile, []byte(`# Initial ignore patterns
-\.dcfh/.*
+.dcfh/
 `), 0644); err != nil {
 		t.Fatalf("Failed to create ignore file: %v", err)
 	}
@@ -76,10 +76,10 @@ func TestIgnoreTransitions(t *testing.T) {
 		t.Errorf("Expected %d files initially, got %d", expectedCount, fileCount)
 	}
 
-	// Update ignore file to exclude .log files
+	// Update ignore file to exclude .log files (gitignore syntax)
 	if err := os.WriteFile(ignoreFile, []byte(`# Updated ignore patterns
-\.dcfh/.*
-.*\.log$
+.dcfh/
+*.log
 `), 0644); err != nil {
 		t.Fatalf("Failed to update ignore file: %v", err)
 	}
@@ -129,11 +129,11 @@ func TestIgnoreTransitions(t *testing.T) {
 		t.Errorf("Expected %d files after ignoring .log files, got %d", expectedCount, fileCount)
 	}
 
-	// Add another pattern to ignore .tmp files
+	// Add another pattern to ignore .tmp files (gitignore syntax)
 	if err := os.WriteFile(ignoreFile, []byte(`# Further updated ignore patterns
-\.dcfh/.*
-.*\.log$
-.*\.tmp$
+.dcfh/
+*.log
+*.tmp
 `), 0644); err != nil {
 		t.Fatalf("Failed to update ignore file again: %v", err)
 	}
@@ -206,10 +206,10 @@ mode = none
 		t.Error("Expected ignoreIsDeindex to be false based on config")
 	}
 
-	// Create ignore file
+	// Create ignore file (gitignore syntax)
 	ignoreFile := filepath.Join(dcfhDir, "ignore")
-	if err := os.WriteFile(ignoreFile, []byte(`\.dcfh/.*
-.*\.log$
+	if err := os.WriteFile(ignoreFile, []byte(`.dcfh/
+*.log
 `), 0644); err != nil {
 		t.Fatalf("Failed to create ignore file: %v", err)
 	}

@@ -59,13 +59,13 @@ func RegisterFilterFlags(fs *pflag.FlagSet, state *filterFlagsState) {
 	fs.StringSliceVar(&state.cmins, "cmin", nil,
 		"file ctime in minutes ±N; repeatable")
 	fs.StringSliceVar(&state.names, "name", nil,
-		"basename glob; repeatable (multiple --name values are OR'd)")
+		"basename pattern (gitignore syntax — same as .dcfh/ignore lines); repeatable (OR'd within kind)")
 	fs.StringSliceVar(&state.inames, "iname", nil,
-		"basename glob, case-insensitive; repeatable")
+		"basename pattern, case-insensitive; repeatable")
 	fs.StringSliceVar(&state.paths, "path", nil,
-		"full-path glob; repeatable. Distinct from positional path-prefix args.")
+		"full-path pattern (gitignore syntax); repeatable. Distinct from positional path-prefix args.")
 	fs.StringSliceVar(&state.ipaths, "ipath", nil,
-		"full-path glob, case-insensitive; repeatable")
+		"full-path pattern, case-insensitive; repeatable")
 	fs.StringSliceVar(&state.hashes, "hash", nil,
 		"exact hash (hex); repeatable")
 	fs.StringSliceVar(&state.hashPrefixes, "hash-prefix", nil,

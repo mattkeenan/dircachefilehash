@@ -71,8 +71,8 @@ func showHelp() {
 	fmt.Printf("  .dcfh/*.idx       Shell patterns\n\n")
 
 	fmt.Printf("TESTS:\n")
-	fmt.Printf("  --name PATTERN    Match filename (glob)\n")
-	fmt.Printf("  --path PATTERN    Match full path (glob)\n")
+	fmt.Printf("  --name PATTERN    Match basename (gitignore syntax — same as .dcfh/ignore)\n")
+	fmt.Printf("  --path PATTERN    Match full path (gitignore syntax)\n")
 	fmt.Printf("  --iname PATTERN   Case-insensitive name match\n")
 	fmt.Printf("  --ipath PATTERN   Case-insensitive path match\n")
 	fmt.Printf("  --size [+-]N[cwbkMG]  Size comparison\n")
@@ -543,10 +543,10 @@ type argTestSpec struct {
 // and Expression constructor. Package-level so the map and its
 // closures are allocated exactly once, not per parse call.
 var argTestTable = map[string]argTestSpec{
-	"--name":        {"a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: true}, nil }},
-	"--iname":       {"a pattern", func(a string) (Expression, error) { return &NameTest{Pattern: a, CaseSensitive: false}, nil }},
-	"--path":        {"a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: true}, nil }},
-	"--ipath":       {"a pattern", func(a string) (Expression, error) { return &PathTest{Pattern: a, CaseSensitive: false}, nil }},
+	"--name":        {"a pattern", func(a string) (Expression, error) { return dircachefilehash.NewNameTest(a, true) }},
+	"--iname":       {"a pattern", func(a string) (Expression, error) { return dircachefilehash.NewNameTest(a, false) }},
+	"--path":        {"a pattern", func(a string) (Expression, error) { return dircachefilehash.NewPathTest(a, true) }},
+	"--ipath":       {"a pattern", func(a string) (Expression, error) { return dircachefilehash.NewPathTest(a, false) }},
 	"--size":        {"a size specification", parseSizeTest},
 	"--hash":        {"a hash value", func(a string) (Expression, error) { return &HashTest{Hash: a}, nil }},
 	"--mtime":       {"a time specification", func(a string) (Expression, error) { return parseTimeTest(a, "mtime") }},

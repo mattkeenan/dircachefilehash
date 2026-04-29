@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // shellClient is the ssh+shell WireDriver: every RPC spawns a fresh ssh
@@ -97,7 +98,7 @@ func (c *shellClient) ScanMetadata(ctx context.Context, req ScanRequest) (*ScanR
 	if err != nil {
 		return nil, fmt.Errorf("compile ignores: %w", err)
 	}
-	if len(ignorers) > 0 {
+	if ignorers != nil {
 		files = filterIgnored(files, ignorers)
 	}
 	return &ScanResponse{Files: files}, nil
@@ -369,7 +370,7 @@ func parseFindEpochNs(s string) (int64, error) {
 // filterIgnored drops FileMeta entries whose Path matches any ignorer,
 // mirroring RemoteHandler.ScanMetadata's server-side behaviour for the
 // wire variant. Order is preserved.
-func filterIgnored(in []FileMeta, ignorers []*regexp.Regexp) []FileMeta {
+func filterIgnored(in []FileMeta, ignorers gitignore.Matcher) []FileMeta {
 	out := in[:0]
 	for _, m := range in {
 		if pathIgnored(m.Path, ignorers) {

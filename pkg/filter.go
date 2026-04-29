@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // FilterEntry is the read-only entry view that predicates and actions
@@ -114,10 +116,47 @@ func (a binaryEntryAdapter) HashType() (uint16, error)     { return a.e.HashType
 func (a binaryEntryAdapter) HashString() (string, error)   { return a.e.HashString(), nil }
 func (a binaryEntryAdapter) IsDeleted() (bool, error)      { return a.e.IsDeleted(), nil }
 
-// NameTest matches filename against a glob pattern.
+// NameTest matches the entry's basename against a gitignore-style
+// pattern. The same syntax accepted by `.dcfh/ignore` works here too.
+//
+// Pat is the compiled matcher; Raw is preserved for String() and for
+// shipping the pattern over the wire. CaseSensitive=false lower-cases
+// both sides at compile/match time — an approximation that's adequate
+// for `--iname` since gitignore character classes (`[A-Z]`) lose their
+// case semantics under lower-casing but are rare in CLI use.
 type NameTest struct {
-	Pattern       string
+	Pat           gitignore.Pattern
+	Raw           string
 	CaseSensitive bool
+}
+
+// NewNameTest compiles pattern as a gitignore matcher and returns a
+// NameTest. Returns an error if the pattern is empty or a comment;
+// today the gitignore parser accepts every other input string, but the
+// signature reserves room for future validation.
+func NewNameTest(pattern string, caseSensitive bool) (*NameTest, error) {
+	src := pattern
+	if !caseSensitive {
+		src = strings.ToLower(src)
+	}
+	pat, err := CompileIgnorePattern(src)
+	if err != nil {
+		return nil, err
+	}
+	if pat == nil {
+		return nil, fmt.Errorf("empty pattern")
+	}
+	return &NameTest{Pat: pat, Raw: pattern, CaseSensitive: caseSensitive}, nil
+}
+
+// MustNewNameTest panics on compile error. For tests and other places
+// where the pattern is a constant.
+func MustNewNameTest(pattern string, caseSensitive bool) *NameTest {
+	t, err := NewNameTest(pattern, caseSensitive)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func (t *NameTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
@@ -125,26 +164,54 @@ func (t *NameTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	filename := filepath.Base(path)
-	pattern := t.Pattern
+	base := filepath.Base(path)
 	if !t.CaseSensitive {
-		filename = strings.ToLower(filename)
-		pattern = strings.ToLower(pattern)
+		base = strings.ToLower(base)
 	}
-	return filepath.Match(pattern, filename)
+	return t.Pat.Match([]string{base}, false) == gitignore.Exclude, nil
 }
 
 func (t *NameTest) String() string {
 	if t.CaseSensitive {
-		return fmt.Sprintf("--name %s", t.Pattern)
+		return fmt.Sprintf("--name %s", t.Raw)
 	}
-	return fmt.Sprintf("--iname %s", t.Pattern)
+	return fmt.Sprintf("--iname %s", t.Raw)
 }
 
-// PathTest matches full path against a glob pattern.
+// PathTest matches the entry's full forward-slash path against a
+// gitignore-style pattern. Patterns containing `/` are anchored
+// according to gitignore rules (leading `/` = repo root); patterns
+// without `/` match any path component.
 type PathTest struct {
-	Pattern       string
+	Pat           gitignore.Pattern
+	Raw           string
 	CaseSensitive bool
+}
+
+// NewPathTest compiles pattern as a gitignore matcher and returns a
+// PathTest.
+func NewPathTest(pattern string, caseSensitive bool) (*PathTest, error) {
+	src := pattern
+	if !caseSensitive {
+		src = strings.ToLower(src)
+	}
+	pat, err := CompileIgnorePattern(src)
+	if err != nil {
+		return nil, err
+	}
+	if pat == nil {
+		return nil, fmt.Errorf("empty pattern")
+	}
+	return &PathTest{Pat: pat, Raw: pattern, CaseSensitive: caseSensitive}, nil
+}
+
+// MustNewPathTest panics on compile error.
+func MustNewPathTest(pattern string, caseSensitive bool) *PathTest {
+	t, err := NewPathTest(pattern, caseSensitive)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func (t *PathTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
@@ -152,19 +219,21 @@ func (t *PathTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	pattern := t.Pattern
 	if !t.CaseSensitive {
 		path = strings.ToLower(path)
-		pattern = strings.ToLower(pattern)
 	}
-	return filepath.Match(pattern, path)
+	segs := splitForGitignore(path)
+	if len(segs) == 0 {
+		return false, nil
+	}
+	return t.Pat.Match(segs, false) == gitignore.Exclude, nil
 }
 
 func (t *PathTest) String() string {
 	if t.CaseSensitive {
-		return fmt.Sprintf("--path %s", t.Pattern)
+		return fmt.Sprintf("--path %s", t.Raw)
 	}
-	return fmt.Sprintf("--ipath %s", t.Pattern)
+	return fmt.Sprintf("--ipath %s", t.Raw)
 }
 
 // SizeTest compares file size.

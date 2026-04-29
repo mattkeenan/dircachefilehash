@@ -5,14 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
-// IgnoreManager handles ignore patterns for dcfh
+// IgnoreManager handles ignore patterns for dcfh. Patterns are
+// gitignore(5)-style — the same syntax accepted by `--name` / `--path`
+// CLI flags — so a single pattern works in either surface unchanged.
+//
+// The raw source lines are kept alongside the parsed Patterns so the
+// wire/RPC layer can ship them to a remote walker (gitignore.Pattern
+// itself doesn't expose its source string).
 type IgnoreManager struct {
 	ignorePath string
-	patterns   []*regexp.Regexp
+	rawLines   []string
+	patterns   []gitignore.Pattern
+	matcher    gitignore.Matcher
 	loaded     bool
 }
 
@@ -21,20 +30,40 @@ type IgnoreManager struct {
 func NewIgnoreManager(metaDir string) *IgnoreManager {
 	return &IgnoreManager{
 		ignorePath: filepath.Join(metaDir, "ignore"),
-		patterns:   make([]*regexp.Regexp, 0),
+		patterns:   make([]gitignore.Pattern, 0),
 		loaded:     false,
 	}
 }
 
-// LoadIgnorePatterns loads ignore patterns from the ignore file
+// CompileIgnorePattern parses one gitignore-style pattern line into a
+// matcher. Empty lines and comments (`#…`) return (nil, nil). The error
+// return is reserved: today's gitignore parser accepts every input
+// string (silently producing a no-op matcher for nonsense), but the
+// shape lets future validation surface failures without churn.
+//
+// This is the single entry point for both .dcfh/ignore lines and the
+// CLI `--name` / `--path` family — one definition of "what counts as a
+// valid dcfh pattern".
+func CompileIgnorePattern(line string) (gitignore.Pattern, error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return nil, nil
+	}
+	return gitignore.ParsePattern(line, nil), nil
+}
+
+// LoadIgnorePatterns loads ignore patterns from the ignore file.
+//
+// Lines that look like RE2 regex (a leftover from the pre-gitignore
+// dcfh format) emit a one-line stderr warning so users can spot the
+// migration; the line is still parsed as gitignore and may behave
+// differently than it used to.
 func (im *IgnoreManager) LoadIgnorePatterns() error {
 	if im.loaded {
-		return nil // Already loaded
+		return nil
 	}
 
-	// Check if ignore file exists
 	if _, err := os.Stat(im.ignorePath); os.IsNotExist(err) {
-		// Create empty ignore file
 		if err := im.CreateEmptyIgnoreFile(); err != nil {
 			return fmt.Errorf("failed to create ignore file: %w", err)
 		}
@@ -53,54 +82,80 @@ func (im *IgnoreManager) LoadIgnorePatterns() error {
 
 	for scanner.Scan() {
 		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
+		raw := scanner.Text()
+		if looksLikeRE2(raw) {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s line %d: pattern %q looks like RE2 regex; "+
+					"dcfh now uses gitignore syntax — see CHANGELOG.\n",
+				im.ignorePath, lineNum, strings.TrimSpace(raw))
+		}
+		pat, err := CompileIgnorePattern(raw)
+		if err != nil {
+			return fmt.Errorf("invalid pattern at line %d: %s - %w", lineNum, raw, err)
+		}
+		if pat == nil {
 			continue
 		}
-
-		// Compile regex pattern
-		pattern, err := regexp.Compile(line)
-		if err != nil {
-			return fmt.Errorf("invalid regex pattern at line %d: %s - %w", lineNum, line, err)
-		}
-
-		im.patterns = append(im.patterns, pattern)
+		im.patterns = append(im.patterns, pat)
+		im.rawLines = append(im.rawLines, strings.TrimSpace(raw))
 	}
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading ignore file: %w", err)
 	}
 
+	im.matcher = gitignore.NewMatcher(im.patterns)
 	im.loaded = true
 	return nil
 }
 
-// ShouldIgnore checks if a path should be ignored based on patterns
+// looksLikeRE2 heuristically detects ignore-file lines that were valid
+// in the previous RE2-regex syntax but probably aren't what the user
+// wants under gitignore. Narrow on purpose: only the strongest tells
+// (anchors and escaped dots) so we avoid false positives on legitimate
+// gitignore patterns.
+func looksLikeRE2(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	return strings.Contains(trimmed, `\.`) ||
+		strings.HasPrefix(trimmed, "^") ||
+		strings.HasSuffix(trimmed, "$")
+}
+
+// ShouldIgnore checks if a path should be ignored based on patterns.
+// relativePath is forward-slash relative to the repository root.
 func (im *IgnoreManager) ShouldIgnore(relativePath string) bool {
 	if !im.loaded {
-		// Silently load patterns if not loaded yet
 		if err := im.LoadIgnorePatterns(); err != nil {
-			return false // Don't ignore on error
+			return false
 		}
 	}
-
-	// Normalise path separators to forward slashes for consistent pattern matching
-	normalisedPath := filepath.ToSlash(relativePath)
-
-	for _, pattern := range im.patterns {
-		if pattern.MatchString(normalisedPath) {
-			return true
-		}
+	if im.matcher == nil || len(im.patterns) == 0 {
+		return false
 	}
+	segments := splitForGitignore(relativePath)
+	if len(segments) == 0 {
+		return false
+	}
+	return im.matcher.Match(segments, false)
+}
 
-	return false
+// splitForGitignore turns a relative path into the []string segment
+// form gitignore expects. Empty segments (leading "/") are dropped so
+// the matcher sees clean components.
+func splitForGitignore(relativePath string) []string {
+	rel := filepath.ToSlash(relativePath)
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return nil
+	}
+	return strings.Split(rel, "/")
 }
 
 // CreateEmptyIgnoreFile creates an empty ignore file with helpful comments
 func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
-	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(im.ignorePath), 0755); err != nil {
 		return err
 	}
@@ -111,74 +166,66 @@ func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
 	}
 	defer func() { _ = file.Close() }()
 
-	// Write helpful header comments
 	_, err = file.WriteString(`# dcfh ignore patterns
 #
-# This file contains regular expression patterns for files and directories
-# that should be ignored by dcfh indexing operations.
+# Each non-empty, non-comment line is a gitignore(5) pattern. The same
+# syntax is accepted by the --name / --path CLI flags, so a pattern
+# works identically in either place.
 #
-# Each line should contain a valid Go regular expression.
-# Lines starting with # are comments and are ignored.
-# Empty lines are also ignored.
-#
-# Note: The repository's own .dcfh/ directory is automatically skipped
+# Note: the repository's own .dcfh/ directory is automatically skipped
 # during scanning (hardcoded, not via ignore patterns). You do not need
 # to add a pattern for it here.
 #
 # Examples:
-# \.DS_Store$           # Ignore .DS_Store files
-# .*\.tmp$              # Ignore all .tmp files
-# node_modules/.*       # Ignore node_modules directory
+# .DS_Store          # ignore .DS_Store anywhere
+# *.tmp              # ignore *.tmp anywhere
+# /build             # ignore the build/ directory at the repo root only
+# node_modules/      # ignore node_modules directories
+# **/*.log           # ignore .log files at any depth
 `)
 
 	return err
 }
 
-// AddPattern adds a new ignore pattern
+// AddPattern adds a new ignore pattern (gitignore syntax).
 func (im *IgnoreManager) AddPattern(patternStr string) error {
-	pattern, err := regexp.Compile(patternStr)
+	pat, err := CompileIgnorePattern(patternStr)
 	if err != nil {
-		return fmt.Errorf("invalid regex pattern: %s - %w", patternStr, err)
+		return fmt.Errorf("invalid pattern: %s - %w", patternStr, err)
 	}
-
-	im.patterns = append(im.patterns, pattern)
+	if pat == nil {
+		return fmt.Errorf("empty pattern")
+	}
+	im.patterns = append(im.patterns, pat)
+	im.rawLines = append(im.rawLines, strings.TrimSpace(patternStr))
+	im.matcher = gitignore.NewMatcher(im.patterns)
 	return nil
 }
 
-// SaveIgnorePatterns saves current patterns to the ignore file
-func (im *IgnoreManager) SaveIgnorePatterns() error {
-	file, err := os.Create(im.ignorePath)
-	if err != nil {
-		return fmt.Errorf("failed to create ignore file: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-
-	// Write header
-	_, err = file.WriteString(`# dcfh ignore patterns
-# 
-# This file contains regular expression patterns for files and directories
-# that should be ignored by dcfh indexing operations.
-#
-
-`)
-	if err != nil {
-		return err
-	}
-
-	// Write patterns
-	for _, pattern := range im.patterns {
-		if _, err := file.WriteString(pattern.String() + "\n"); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// GetPatterns returns all loaded patterns
-func (im *IgnoreManager) GetPatterns() []*regexp.Regexp {
+// RawLines returns the source pattern strings in the order they were
+// loaded/added. Used by the wire layer to ship patterns to a remote
+// walker without losing fidelity.
+func (im *IgnoreManager) RawLines() []string {
 	if !im.loaded {
-		_ = im.LoadIgnorePatterns() // Load if not already loaded
+		_ = im.LoadIgnorePatterns()
+	}
+	return im.rawLines
+}
+
+// SaveIgnorePatterns saves the current pattern lines to the ignore file.
+//
+// We can only write back the original raw lines, but Pattern doesn't
+// expose its source string. SaveIgnorePatterns is therefore a no-op for
+// patterns added via AddPattern in-memory only — callers that need
+// round-trip support should edit the file directly.
+func (im *IgnoreManager) SaveIgnorePatterns() error {
+	return fmt.Errorf("SaveIgnorePatterns is not supported on the gitignore-backed IgnoreManager; edit %s directly", im.ignorePath)
+}
+
+// GetPatterns returns the loaded gitignore patterns.
+func (im *IgnoreManager) GetPatterns() []gitignore.Pattern {
+	if !im.loaded {
+		_ = im.LoadIgnorePatterns()
 	}
 	return im.patterns
 }
@@ -190,21 +237,31 @@ func (im *IgnoreManager) IsLoaded() bool {
 
 // Reload forces a reload of ignore patterns from file
 func (im *IgnoreManager) Reload() error {
-	im.patterns = make([]*regexp.Regexp, 0)
+	im.patterns = im.patterns[:0]
+	im.rawLines = im.rawLines[:0]
+	im.matcher = nil
 	im.loaded = false
 	return im.LoadIgnorePatterns()
 }
 
-// ValidatePattern checks if a pattern string is a valid regex
+// ValidatePattern checks if a pattern string is a usable gitignore line.
+// Empty/comment lines are rejected. Otherwise the pattern is accepted
+// (gitignore parsing has no compile-time failure mode).
 func (im *IgnoreManager) ValidatePattern(patternStr string) error {
-	_, err := regexp.Compile(patternStr)
-	return err
+	pat, err := CompileIgnorePattern(patternStr)
+	if err != nil {
+		return err
+	}
+	if pat == nil {
+		return fmt.Errorf("empty pattern")
+	}
+	return nil
 }
 
 // HasPatterns returns true if there are any ignore patterns loaded
 func (im *IgnoreManager) HasPatterns() bool {
 	if !im.loaded {
-		_ = im.LoadIgnorePatterns() // Load if not already loaded
+		_ = im.LoadIgnorePatterns()
 	}
 	return len(im.patterns) > 0
 }
@@ -212,7 +269,7 @@ func (im *IgnoreManager) HasPatterns() bool {
 // FilterIgnoredPaths filters a slice of paths, removing ignored ones
 func (im *IgnoreManager) FilterIgnoredPaths(paths []string) []string {
 	if !im.HasPatterns() {
-		return paths // No patterns, return all paths
+		return paths
 	}
 
 	filtered := make([]string, 0, len(paths))

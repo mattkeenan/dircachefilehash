@@ -82,7 +82,7 @@ func TestRemoteHandlerScanMetadataIgnores(t *testing.T) {
 	defer func() { _ = h.Close() }()
 
 	resp, err := h.ScanMetadata(context.Background(), ScanRequest{
-		Ignores: []string{`^skip(/|$)`},
+		Ignores: []string{"skip"},
 	})
 	if err != nil {
 		t.Fatal(err)

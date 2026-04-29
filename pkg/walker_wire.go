@@ -94,11 +94,7 @@ func (w *wireWalker) Walk(ctx context.Context, paths []string, resultChan chan<-
 		return err
 	}
 
-	patterns := w.dc.ignoreManager.GetPatterns()
-	ignores := make([]string, 0, len(patterns))
-	for _, p := range patterns {
-		ignores = append(ignores, p.String())
-	}
+	ignores := w.dc.ignoreManager.RawLines()
 	resp, err := client.ScanMetadata(ctx, ScanRequest{
 		Paths:    paths,
 		Symlinks: w.dc.symlinkMode,

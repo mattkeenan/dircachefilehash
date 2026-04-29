@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"sync"
 	"syscall"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // RemoteHandler implements WireHandler for the `dcfh remote` subcommand.
@@ -252,7 +253,7 @@ func hasPathPrefix(p, prefix string) bool {
 // each surviving entry. Sorts directory children so emitted entries are
 // already lexicographically ordered within each directory (final global
 // sort in ScanMetadata handles cross-root ordering).
-func (h *RemoteHandler) walkOne(ctx context.Context, abs string, ignorers []*regexp.Regexp, out *[]FileMeta) error {
+func (h *RemoteHandler) walkOne(ctx context.Context, abs string, ignorers gitignore.Matcher, out *[]FileMeta) error {
 	info, err := os.Lstat(abs)
 	if err != nil {
 		return fmt.Errorf("lstat %s: %w", abs, err)
@@ -327,32 +328,40 @@ func makeFileMeta(rel, abs string, info os.FileInfo) (FileMeta, bool) {
 	return m, true
 }
 
-// compileIgnorePatterns turns the request's ignore strings into regexps
-// matched against forward-slash relative paths (matching IgnoreManager
-// semantics). Invalid patterns error the whole request so a bad rule is
-// loud, not silent.
-func compileIgnorePatterns(patterns []string) ([]*regexp.Regexp, error) {
+// compileIgnorePatterns turns the request's ignore strings into a
+// gitignore matcher matching forward-slash relative paths. Returns nil
+// when patterns is empty so callers can short-circuit. Mirrors the
+// IgnoreManager semantics used everywhere else in dcfh.
+func compileIgnorePatterns(patterns []string) (gitignore.Matcher, error) {
 	if len(patterns) == 0 {
 		return nil, nil
 	}
-	out := make([]*regexp.Regexp, 0, len(patterns))
+	pats := make([]gitignore.Pattern, 0, len(patterns))
 	for _, p := range patterns {
-		re, err := regexp.Compile(p)
+		pat, err := CompileIgnorePattern(p)
 		if err != nil {
 			return nil, fmt.Errorf("bad ignore pattern %q: %w", p, err)
 		}
-		out = append(out, re)
+		if pat == nil {
+			continue
+		}
+		pats = append(pats, pat)
 	}
-	return out, nil
+	if len(pats) == 0 {
+		return nil, nil
+	}
+	return gitignore.NewMatcher(pats), nil
 }
 
-func pathIgnored(rel string, ignorers []*regexp.Regexp) bool {
-	for _, re := range ignorers {
-		if re.MatchString(rel) {
-			return true
-		}
+func pathIgnored(rel string, m gitignore.Matcher) bool {
+	if m == nil {
+		return false
 	}
-	return false
+	segs := splitForGitignore(rel)
+	if len(segs) == 0 {
+		return false
+	}
+	return m.Match(segs, false)
 }
 
 // hashCacheKey identifies a cached hash. Includes Algo so a later

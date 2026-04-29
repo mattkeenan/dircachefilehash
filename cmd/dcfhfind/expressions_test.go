@@ -61,18 +61,20 @@ func TestPathMatching(t *testing.T) {
 		wantName bool
 		wantPath bool
 	}{
-		// Name tests vs Path tests
+		// Name tests vs Path tests (gitignore semantics: a slash-less
+		// pattern matches any path component; PathTest sees all
+		// segments, NameTest sees only the basename.)
 		{"test.go", "*.go", true, true},
 		{"test.rs", "*.go", false, false},
 		{"main.go", "main.*", true, true},
 		{"README.md", "README*", true, true},
-		{"src/main.go", "*.go", true, false}, // name test checks filename only
+		{"src/main.go", "*.go", true, true}, // gitignore *.go matches the main.go segment
 
-		// Path-specific tests
-		{"src/main.go", "src/*", false, true}, // name test fails, path test succeeds
+		// Path-specific tests (patterns containing `/` are anchored.)
+		{"src/main.go", "src/*", false, true},
 		{"src/test/file.go", "src/test/*", false, true},
 		{"other/file.go", "src/*", false, false},
-		{"deep/nested/path/file.txt", "*/nested/*", false, false}, // glob doesn't work this way
+		{"deep/nested/path/file.txt", "*/nested/*", false, true}, // gitignore prefix-match: <any>/nested/<any>/...
 	}
 
 	for _, tc := range testCases {
@@ -80,14 +82,14 @@ func TestPathMatching(t *testing.T) {
 			entry := createMockEntry(tc.path, 1024, false)
 
 			// Test NameTest
-			nameTest := &NameTest{Pattern: tc.pattern, CaseSensitive: true}
+			nameTest := dircachefilehash.MustNewNameTest(tc.pattern, true)
 			gotName, err := nameTest.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("NameTest.Evaluate() error = %v", err)
 			}
 
 			// Test PathTest
-			pathTest := &PathTest{Pattern: tc.pattern, CaseSensitive: true}
+			pathTest := dircachefilehash.MustNewPathTest(tc.pattern, true)
 			gotPath, err := pathTest.Evaluate(entry.AsFilterEntry(), context)
 			if err != nil {
 				t.Errorf("PathTest.Evaluate() error = %v", err)
@@ -118,22 +120,22 @@ func TestCaseInsensitiveMatching(t *testing.T) {
 	}{
 		{
 			name: "case sensitive name match fails",
-			expr: &NameTest{Pattern: "*.go", CaseSensitive: true},
+			expr: dircachefilehash.MustNewNameTest("*.go", true),
 			want: false,
 		},
 		{
 			name: "case insensitive name match succeeds",
-			expr: &NameTest{Pattern: "*.go", CaseSensitive: false},
+			expr: dircachefilehash.MustNewNameTest("*.go", false),
 			want: true,
 		},
 		{
 			name: "case sensitive path match fails",
-			expr: &PathTest{Pattern: "test.go", CaseSensitive: true},
+			expr: dircachefilehash.MustNewPathTest("test.go", true),
 			want: false,
 		},
 		{
 			name: "case insensitive path match succeeds",
-			expr: &PathTest{Pattern: "test.go", CaseSensitive: false},
+			expr: dircachefilehash.MustNewPathTest("test.go", false),
 			want: true,
 		},
 	}
@@ -262,14 +264,14 @@ func TestExpressionEdgeCases(t *testing.T) {
 		{
 			name:    "empty filename pattern",
 			entry:   createMockEntry("", 1024, false),
-			expr:    &NameTest{Pattern: "*", CaseSensitive: true},
+			expr:    dircachefilehash.MustNewNameTest("*", true),
 			wantErr: false,
 		},
 		{
-			name:    "invalid pattern",
+			name:    "literal-bracket pattern matches nothing",
 			entry:   createMockEntry("test.go", 1024, false),
-			expr:    &NameTest{Pattern: "[", CaseSensitive: true}, // Invalid glob pattern
-			wantErr: true,
+			expr:    dircachefilehash.MustNewNameTest("[", true), // gitignore: opaque, no error, no match
+			wantErr: false,
 		},
 		{
 			name:    "zero size file",
@@ -326,12 +328,12 @@ func TestExpressionStrings(t *testing.T) {
 	}{
 		{
 			name: "NameTest string",
-			expr: &NameTest{Pattern: "*.go", CaseSensitive: true},
+			expr: dircachefilehash.MustNewNameTest("*.go", true),
 			want: "--name *.go",
 		},
 		{
 			name: "INameTest string",
-			expr: &NameTest{Pattern: "*.go", CaseSensitive: false},
+			expr: dircachefilehash.MustNewNameTest("*.go", false),
 			want: "--iname *.go",
 		},
 		{
@@ -347,7 +349,7 @@ func TestExpressionStrings(t *testing.T) {
 		{
 			name: "AndExpression string",
 			expr: &AndExpression{
-				Left:  &NameTest{Pattern: "*.go", CaseSensitive: true},
+				Left:  dircachefilehash.MustNewNameTest("*.go", true),
 				Right: &SizeTest{Size: 1024, Mode: "+"},
 			},
 			want: "(--name *.go --and --size +1024)",

@@ -99,7 +99,9 @@ func BuildFilter(opts FilterOptions) (FilterExpr, error) {
 	if err := addAgeConjuncts(opts, add); err != nil {
 		return nil, err
 	}
-	addGlobConjuncts(opts, add)
+	if err := addPatternConjuncts(opts, add); err != nil {
+		return nil, err
+	}
 	addHashConjuncts(opts, add)
 	addBoolConjuncts(opts, add)
 
@@ -168,25 +170,32 @@ func addAgeConjuncts(opts FilterOptions, add func(FilterExpr)) error {
 	return nil
 }
 
-// addGlobConjuncts wires --name / --iname / --path / --ipath. Within
-// each kind multiple values OR together (orGlobs); across kinds they
-// AND via the outer conjunct list.
-func addGlobConjuncts(opts FilterOptions, add func(FilterExpr)) {
+// addPatternConjuncts wires --name / --iname / --path / --ipath. Within
+// each kind multiple values OR together; across kinds they AND via the
+// outer conjunct list. Patterns are gitignore syntax — the same as
+// .dcfh/ignore lines.
+func addPatternConjuncts(opts FilterOptions, add func(FilterExpr)) error {
 	kinds := []struct {
+		flag     string
 		values   []string
 		basename bool
 		ci       bool
 	}{
-		{opts.Names, true, false},
-		{opts.INames, true, true},
-		{opts.Paths, false, false},
-		{opts.IPaths, false, true},
+		{"--name", opts.Names, true, false},
+		{"--iname", opts.INames, true, true},
+		{"--path", opts.Paths, false, false},
+		{"--ipath", opts.IPaths, false, true},
 	}
 	for _, k := range kinds {
-		if e := orGlobs(k.values, k.basename, k.ci); e != nil {
+		e, err := orPatterns(k.flag, k.values, k.basename, k.ci)
+		if err != nil {
+			return err
+		}
+		if e != nil {
 			add(e)
 		}
 	}
+	return nil
 }
 
 // addHashConjuncts wires --hash / --hash-prefix / --hash-type with the
@@ -249,16 +258,31 @@ func orAll(es []FilterExpr) FilterExpr {
 	return out
 }
 
-func orGlobs(patterns []string, basename, caseInsensitive bool) FilterExpr {
-	caseSensitive := !caseInsensitive
-	if basename {
-		return orMap(patterns, func(p string) FilterExpr {
-			return &NameTest{Pattern: p, CaseSensitive: caseSensitive}
-		})
+// orPatterns folds N gitignore-style patterns into an OR-tree of
+// NameTest or PathTest leaves. Returns the first compile error with the
+// flag name attached for error context.
+func orPatterns(flag string, patterns []string, basename, caseInsensitive bool) (FilterExpr, error) {
+	if len(patterns) == 0 {
+		return nil, nil
 	}
-	return orMap(patterns, func(p string) FilterExpr {
-		return &PathTest{Pattern: p, CaseSensitive: caseSensitive}
-	})
+	caseSensitive := !caseInsensitive
+	es := make([]FilterExpr, 0, len(patterns))
+	for _, p := range patterns {
+		var (
+			leaf FilterExpr
+			err  error
+		)
+		if basename {
+			leaf, err = NewNameTest(p, caseSensitive)
+		} else {
+			leaf, err = NewPathTest(p, caseSensitive)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s %s: %w", flag, p, err)
+		}
+		es = append(es, leaf)
+	}
+	return orAll(es), nil
 }
 
 // orMap builds an OR-tree of predicates by mapping each value through

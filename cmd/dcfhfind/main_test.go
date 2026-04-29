@@ -203,17 +203,17 @@ func TestExpressionEvaluation(t *testing.T) {
 	}{
 		{
 			name: "NameTest match",
-			expr: &NameTest{Pattern: "*.go", CaseSensitive: true},
+			expr: dircachefilehash.MustNewNameTest("*.go", true),
 			want: true,
 		},
 		{
 			name: "NameTest no match",
-			expr: &NameTest{Pattern: "*.txt", CaseSensitive: true},
+			expr: dircachefilehash.MustNewNameTest("*.txt", true),
 			want: false,
 		},
 		{
 			name: "PathTest match",
-			expr: &PathTest{Pattern: "test.go", CaseSensitive: true},
+			expr: dircachefilehash.MustNewPathTest("test.go", true),
 			want: true,
 		},
 		{
@@ -285,7 +285,7 @@ func TestLogicalOperators(t *testing.T) {
 		{
 			name: "AND both true",
 			expr: &AndExpression{
-				Left:  &NameTest{Pattern: "*.go", CaseSensitive: true},
+				Left:  dircachefilehash.MustNewNameTest("*.go", true),
 				Right: &SizeTest{Size: 1024, Mode: "="},
 			},
 			want: true,
@@ -293,7 +293,7 @@ func TestLogicalOperators(t *testing.T) {
 		{
 			name: "AND one false",
 			expr: &AndExpression{
-				Left:  &NameTest{Pattern: "*.go", CaseSensitive: true},
+				Left:  dircachefilehash.MustNewNameTest("*.go", true),
 				Right: &SizeTest{Size: 2048, Mode: "="},
 			},
 			want: false,
@@ -301,7 +301,7 @@ func TestLogicalOperators(t *testing.T) {
 		{
 			name: "OR one true",
 			expr: &OrExpression{
-				Left:  &NameTest{Pattern: "*.txt", CaseSensitive: true},
+				Left:  dircachefilehash.MustNewNameTest("*.txt", true),
 				Right: &SizeTest{Size: 1024, Mode: "="},
 			},
 			want: true,
@@ -309,7 +309,7 @@ func TestLogicalOperators(t *testing.T) {
 		{
 			name: "OR both false",
 			expr: &OrExpression{
-				Left:  &NameTest{Pattern: "*.txt", CaseSensitive: true},
+				Left:  dircachefilehash.MustNewNameTest("*.txt", true),
 				Right: &SizeTest{Size: 2048, Mode: "="},
 			},
 			want: false,
@@ -317,14 +317,14 @@ func TestLogicalOperators(t *testing.T) {
 		{
 			name: "NOT true becomes false",
 			expr: &NotExpression{
-				Expr: &NameTest{Pattern: "*.go", CaseSensitive: true},
+				Expr: dircachefilehash.MustNewNameTest("*.go", true),
 			},
 			want: false,
 		},
 		{
 			name: "NOT false becomes true",
 			expr: &NotExpression{
-				Expr: &NameTest{Pattern: "*.txt", CaseSensitive: true},
+				Expr: dircachefilehash.MustNewNameTest("*.txt", true),
 			},
 			want: true,
 		},
@@ -621,8 +621,8 @@ func BenchmarkExpressionEvaluation(b *testing.B) {
 
 	expr := &AndExpression{
 		Left: &OrExpression{
-			Left:  &NameTest{Pattern: "*.go", CaseSensitive: true},
-			Right: &NameTest{Pattern: "*.rs", CaseSensitive: true},
+			Left:  dircachefilehash.MustNewNameTest("*.go", true),
+			Right: dircachefilehash.MustNewNameTest("*.rs", true),
 		},
 		Right: &SizeTest{Size: 1000000, Mode: "+"},
 	}
