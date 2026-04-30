@@ -85,8 +85,9 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths 
 	if err != nil {
 		return fmt.Errorf("update interrupted: %w", err)
 	}
-	// Update cache using the unified workflow to reflect the new main index state
-	if _, err := dc.runStatusWorkflowUnified(ctx); err != nil {
+	// Refresh cache.idx via the modern pipeline so it reflects the new main
+	// index state (same path dcfh status takes).
+	if _, err := dc.refreshFsScanCache(ctx); err != nil {
 		return fmt.Errorf("failed to update cache: %w", err)
 	}
 
