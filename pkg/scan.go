@@ -709,25 +709,3 @@ func (dc *DirectoryCache) insertSorted(existing []string, newPaths []string) []s
 
 	return result
 }
-
-// ============================================================================
-// HWANG-LIN COMPARISON ALGORITHM
-// ============================================================================
-
-// hwangLinCompare performs Hwang-Lin algorithm comparison between scanned filesystem and skiplist
-// Note: The old hwangLinCompareToSkiplist function has been moved to v0.6/pkg/scan.go as part of
-// the v0.7 unified architecture migration. Use hwangLinUnified() with CallbackScanCoordinator instead.
-
-// ============================================================================
-// RESULT PROCESSING FUNCTIONS
-// ============================================================================
-
-// ============================================================================
-// MAIN SCAN FUNCTION
-// ============================================================================
-
-// PerformHwangLinScan performs a complete Hwang-Lin scan with asynchronous hash job coordination
-
-// PerformHwangLinScanToSkiplist has been moved to v0.6/pkg/scan.go as part of the v0.7 unified
-// architecture migration. Use runStatusWorkflowUnified() instead, which provides the
-// same functionality using the hwangLinUnified() algorithm with proper callbacks.

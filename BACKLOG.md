@@ -65,19 +65,3 @@ Scope when picked up:
 Dependency: aligns naturally with the Fix-primitive restructure above
 (non-destructive output is a property of `FixRequest` semantics).
 
-## Pipeline refactor: retire `runStatusWorkflowUnified` / `StatusCallback` (low-medium priority)
-
-The pre-Repo v0.7 status workflow is still wired in:
-- `pkg/update.go:89` — post-update cache refresh, calls `runStatusWorkflowUnified`.
-- `pkg/iterator_skiplist_unified_test.go:38`
-- `pkg/two_phase_hash_coordination_test.go:152`
-
-After Phase 3, `RunStatusPipeline` + `scanWriteSink{Delta}` covers the
-same ground. The legacy path (`runStatusWorkflowUnified`,
-`performUnifiedStatusScan`, `pkg/callback_status.go`'s `StatusCallback`,
-and the stale "Use ... instead" comments at `pkg/workflow.go:270` and
-`pkg/scan.go:618`) can be deleted once the three callers move over.
-
-Scope: switch `update.go:89` to call `RunStatusPipeline` directly; port
-the two tests; delete the legacy callback file and helpers; clean up
-stale comments. Pure dead-code removal — no user-visible change.

@@ -85,7 +85,6 @@ type HwangLinCallback interface {
 	// - operation: Description of the operation context ("new_file", "modified", "unchanged", etc.)
 	//
 	// Implementation varies by callback:
-	// - StatusCallback: Full hash coordination + cache.idx writing
 	// - UpdateCallback: Full hash coordination + main.idx writing
 	//
 	// This method should be called by ALL On* methods before returning.
