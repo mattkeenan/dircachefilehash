@@ -11,7 +11,7 @@ on-disk format — parse errors are fatal — whereas dcfhfix explicitly assumes
 an index may be corrupt and must still make forward progress (bounds-checked
 field reads via `SafeEntryAccessor`, entry-by-entry validation via
 `ValidatedEntry`, backup-stack rollback). Reshaping that around a batch-mode
-`FixRequest{commands}` primitive is a different workflow from the Survey/
+`FixRequest{commands}` primitive is a different workflow from the Diff/
 Apply/Filter path and warrants its own design pass.
 
 Why medium, not high: given dcfh's scan speed, the pragmatic recovery in
@@ -36,25 +36,6 @@ Scope when picked up:
 
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
 the remote host holds no dcfh state to repair.
-
-## Pipeline refactor: share main.idx load across Diff(main, fs-scan) (medium priority)
-
-`Diff(main, fs-scan)` opens main twice: once via `OpenRef(RefTypeMain)` for
-the left iterator, and once inside `refreshFsScanCache` (which loads main
-to feed the scan pipeline, then merges cache into it for the right
-iterator). Each load builds a fresh ~5M-entry skiplist; the second build
-is dominant cost on `dcfh status` startup at scale.
-
-Why deferred: fixing it cleanly requires either threading a pre-loaded
-mainSkiplist through `OpenRef`, or special-casing `(main, fs-scan)` in
-`Diff()` — both work against Phase 2's "single uniform path" goal. The
-`os` page cache makes the second mmap cheap; only the skiplist build
-hurts.
-
-Scope: have `Diff()` detect the `(main, fs-scan)` pair, load main once,
-pass it into a `refreshFsScanCacheWithMain(ctx, mainSkiplist)` helper,
-and skip the second build. Iterators on both sides share the same
-underlying ref slice via separate skiplist views.
 
 ## dcfhfix: default to non-destructive fix-to-new-file (medium priority)
 
