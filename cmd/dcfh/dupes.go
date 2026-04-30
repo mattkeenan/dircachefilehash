@@ -46,13 +46,14 @@ spans the whole index and any group with at least one member inside
 the given paths is reported.
 
 Filter flags compose via the scope-marker syntax (see
-` + "`dcfh status --help`" + `). File-level filters apply before
-bucketing, so a group that loses members below the ≥2 threshold is
-never emitted:
+` + "`dcfh status --help`" + ` for the full grammar and gitignore-pattern
+note). File-level filters apply before bucketing, so a group that
+loses members below the ≥2 threshold is never emitted:
 
   dcfh dupes --min-size 1M                          — duplicates ≥ 1 MiB
   dcfh dupes --print --min-size 1M --ignore --name '*.bak'
                                                     — exclude .bak files
+  dcfh dupes --no-ignore-file                       — bypass .dcfh/ignore
 
 Sizes take binary suffixes (1K=1024, 1M=1024K, 1G, 1T). Dates accept
 partial ISO-8601 (YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH[:MM[:SS]])
@@ -289,6 +290,7 @@ func printDedupeFooter(r *fsdedupe.Result) {
 }
 
 func init() {
+	registerHelpFlags(dupesCmd.Flags(), cmdDupes)
 	rootCmd.AddCommand(dupesCmd)
 }
 

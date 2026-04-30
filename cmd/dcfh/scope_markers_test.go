@@ -192,8 +192,10 @@ func TestResolveScopes_DupesCmdFlagsAndPositionals(t *testing.T) {
 }
 
 // TestResolveScopes_PersistentFlagInTailSegment asserts that root
-// persistent flags (here --verbose) parse anywhere in the argv, not
-// just inside segment zero.
+// persistent flags parse anywhere in the argv, not just inside
+// segment zero — accepted syntactically without erroring. Tail
+// segments bind to throwaways, so the value is discarded; only
+// segment-zero appearances flow through to the package globals.
 func TestResolveScopes_PersistentFlagInTailSegment(t *testing.T) {
 	saved := flagVerbose
 	flagVerbose = 0
@@ -206,7 +208,29 @@ func TestResolveScopes_PersistentFlagInTailSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveScopes: %v", err)
 	}
-	if flagVerbose != 1 {
-		t.Errorf("flagVerbose=%d after --verbose in ignore segment; want 1", flagVerbose)
+	if flagVerbose != 0 {
+		t.Errorf("flagVerbose=%d; tail-segment --verbose should not write through, want 0", flagVerbose)
+	}
+}
+
+// TestResolveScopes_PersistentFlagInSegmentZeroSurvivesTail asserts
+// that a persistent flag written by segment zero is preserved across
+// the tail-segment parse — the regression that motivated tail
+// throwaway binding (without it, the tail's BoolVar reset
+// flagJSON to its false default).
+func TestResolveScopes_PersistentFlagInSegmentZeroSurvivesTail(t *testing.T) {
+	saved := flagJSON
+	flagJSON = false
+	defer func() { flagJSON = saved }()
+
+	_, _, _, _, _, err := resolveScopes(
+		[]string{"--json", "--ignore", "--name", "*.tmp"},
+		cmdStatus,
+	)
+	if err != nil {
+		t.Fatalf("resolveScopes: %v", err)
+	}
+	if !flagJSON {
+		t.Errorf("flagJSON=false after --json in segment zero; tail parse clobbered it")
 	}
 }

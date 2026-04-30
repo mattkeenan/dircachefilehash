@@ -21,18 +21,28 @@ since the last update operation.
 Filter flags (--name, --min-size, --start-date, --end-date, --mtime,
 --hash, …) narrow which changes are reported. Filters compose with
 the scope-marker syntax: every filter flag belongs to a --print or
---ignore segment. Tokens before the first marker are an implicit
---print segment.
+--ignore segment. Tokens before the first marker form an implicit
+--print segment, so a bare flag list works like find(1):
 
   dcfh status --name '*.go'                        — print *.go changes
   dcfh status --print --name '*.go' --ignore --name '*_test.go'
                                                    — print .go but not test
+  dcfh status --ignore --name '*.tmp'              — print everything except *.tmp
   dcfh status --no-ignore-file                     — bypass .dcfh/ignore
 
 Across segments: --print groups AND together, --ignore groups OR
-together (any matching ignore subtracts). The scan refreshes the cache
-against on-disk truth regardless of filters; --ignore is the one
-exception, since it can short-circuit the scan walker.`,
+together (any matching ignore subtracts). An empty --print segment
+(no filter flags between it and the next marker, or end of argv) is
+the identity — it matches everything and constrains nothing.
+
+--name / --iname / --path / --ipath patterns use gitignore syntax
+(*, ?, [abc], **, leading '/' anchors to the repo root, trailing '/'
+matches directories only, '!' negates) — the same dialect as a line
+in .dcfh/ignore.
+
+The scan refreshes the cache against on-disk truth regardless of
+filters; --ignore is the one exception, since it can short-circuit
+the scan walker.`,
 	// With DisableFlagParsing the cobra-level arg validator sees raw
 	// flag tokens (--json, --print, …) as positionals and would reject
 	// them. The RunE preamble enforces "no positional args" after
@@ -115,5 +125,6 @@ exception, since it can short-circuit the scan walker.`,
 }
 
 func init() {
+	registerHelpFlags(statusCmd.Flags(), cmdStatus)
 	rootCmd.AddCommand(statusCmd)
 }

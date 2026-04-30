@@ -67,14 +67,13 @@ type cmdFlagGroup struct {
 	perSegment bool
 }
 
-// cmdFlagRegistry is the single source of truth for which flags each
-// scope-marker command accepts. A new command-specific flag is one
-// new entry here plus the matching field on filterFlagsState.
+// cmdFlagRegistry is the single source of truth for which non-root
+// flags each scope-marker command accepts. Root persistent flags are
+// not in the registry — every command and every segment gets them via
+// a direct registerRootPersistentFlags call. A new command-specific
+// flag is one new entry here plus the matching field on
+// filterFlagsState.
 var cmdFlagRegistry = []cmdFlagGroup{
-	{
-		register:   func(fs *pflag.FlagSet, _ *filterFlagsState) { registerRootPersistentFlags(fs) },
-		perSegment: true,
-	},
 	{
 		register:   RegisterFilterFlags,
 		perSegment: true,
@@ -92,14 +91,13 @@ var cmdFlagRegistry = []cmdFlagGroup{
 	},
 }
 
-// registerSegmentZeroFlags installs every cmdFlagRegistry entry
-// applicable to the named command on fs — filter dialect, root
-// persistent dialect, and command-specific toggles.
-//
+// registerSegmentZeroFlags installs the root persistent dialect plus
+// every cmdFlagRegistry entry applicable to the named command on fs.
 // Persistent flags are re-registered against the same package-level
 // vars cobra normally drives, since DisableFlagParsing=true on these
 // commands bypasses cobra's pre-RunE flag parse.
 func registerSegmentZeroFlags(fs *pflag.FlagSet, state *filterFlagsState, command string) {
+	registerRootPersistentFlags(fs)
 	for _, group := range cmdFlagRegistry {
 		if len(group.commands) > 0 && !slices.Contains(group.commands, command) {
 			continue
@@ -108,17 +106,45 @@ func registerSegmentZeroFlags(fs *pflag.FlagSet, state *filterFlagsState, comman
 	}
 }
 
-// registerTailSegmentFlags installs only the per-segment groups
-// (filter + persistent dialect). Command-specific toggles are
-// rejected as unknown flags inside an explicit --print / --ignore
-// segment.
+// registerTailSegmentFlags installs the per-segment registry groups
+// plus a throwaway-bound copy of the root persistent dialect.
+// Command-specific toggles are rejected as unknown flags inside an
+// explicit --print / --ignore segment. Persistent flags are accepted
+// syntactically anywhere but only segment zero writes through to the
+// package globals — a tail-segment binding to the real globals would
+// reset whatever segment zero captured back to the flag's default.
 func registerTailSegmentFlags(fs *pflag.FlagSet, state *filterFlagsState) {
+	registerThrowawayRootPersistentFlags(fs)
 	for _, group := range cmdFlagRegistry {
 		if !group.perSegment {
 			continue
 		}
 		group.register(fs, state)
 	}
+}
+
+// registerHelpFlags is the docs-only twin of registerSegmentZeroFlags.
+// It installs the filter dialect, command-specific toggles, and the
+// scope markers on fs so cobra renders them in `dcfh <cmd> --help`.
+// Root persistent flags are skipped — they appear under cobra's
+// "Global Flags" via inheritance from rootCmd. The bound state is
+// throwaway: scope-marker commands run with DisableFlagParsing=true,
+// so cobra never parses these; runtime values come from the
+// per-segment FlagSets in scope_markers.go.
+func registerHelpFlags(fs *pflag.FlagSet, command string) {
+	state := newFilterFlagsState()
+	for _, group := range cmdFlagRegistry {
+		if len(group.commands) > 0 && !slices.Contains(group.commands, command) {
+			continue
+		}
+		group.register(fs, state)
+	}
+	fs.Bool("print", false,
+		"begin a print scope: the filter flags that follow narrow what is reported (AND across multiple --print segments)")
+	fs.Bool("ignore", false,
+		"begin an ignore scope: the filter flags that follow subtract from the report (OR across multiple --ignore segments)")
+	fs.Bool("no-ignore-file", false,
+		"bypass .dcfh/ignore for this run (top-level marker; not bound to a scope)")
 }
 
 // RegisterFilterFlags registers the shared flat-flag dialect (see

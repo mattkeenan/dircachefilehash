@@ -34,22 +34,71 @@ var (
 )
 
 // registerRootPersistentFlags installs the root persistent flag
-// dialect on pf. Called against rootCmd.PersistentFlags() at init
-// time and against the per-RunE pflag.FlagSet built by the
-// scope-marker preamble (which sets DisableFlagParsing=true and so
-// must re-parse persistent flags itself).
+// dialect on pf, binding each flag to its package-level global. Used
+// by rootCmd.PersistentFlags() at init time and by the segment-zero
+// parser inside the scope-marker preamble (which sets
+// DisableFlagParsing=true and so must re-parse persistent flags
+// itself).
 func registerRootPersistentFlags(pf *pflag.FlagSet) {
-	pf.StringVarP(&flagOutput, "output", "o", "human", "output format: human, json, fdupes")
-	pf.BoolVarP(&flagJSON, "json", "j", false, "output in JSON format (alias for --output=json)")
-	pf.CountVarP(&flagVerbose, "verbose", "v", "verbose level (repeat for more: -v, -vv, -vvv)")
-	pf.StringVarP(&flagDebug, "debug", "D", "", "debug options (comma-separated)")
-	pf.StringVarP(&flagFilehash, "filehash", "f", "", "hash algorithm overrides (format: default:sha256)")
-	pf.StringVar(&flagSymlinks, "symlinks", "none", "symlink handling: all, internal, external, none")
-	pf.BoolVarP(&flagSymlinksShortAll, "follow-symlinks", "s", false, "follow symlinked directories (alias for --symlinks=all)")
-	pf.IntVarP(&flagHashWorkers, "hash-workers", "w", 0, "number of concurrent hash workers (0=use config default)")
-	pf.IntVar(&flagIndexLockTimeout, "index-lock-timeout", 0, "timeout in seconds for index memory locks (0=use config default)")
-	pf.BoolVar(&flagDryRun, "dry-run", false, "show what would be done without actually doing it")
-	pf.StringVar(&flagGlobalMetaDir, "meta-dir", "", "path to an external .dcfh directory (overrides auto-discovery)")
+	registerRootPersistentFlagsBound(pf, &rootPersistentTargets{
+		Output:           &flagOutput,
+		JSON:             &flagJSON,
+		Verbose:          &flagVerbose,
+		Debug:            &flagDebug,
+		Filehash:         &flagFilehash,
+		Symlinks:         &flagSymlinks,
+		SymlinksShortAll: &flagSymlinksShortAll,
+		HashWorkers:      &flagHashWorkers,
+		IndexLockTimeout: &flagIndexLockTimeout,
+		DryRun:           &flagDryRun,
+		GlobalMetaDir:    &flagGlobalMetaDir,
+	})
+}
+
+// rootPersistentTargets points at the variables every persistent
+// flag should bind to. Pulled out so tail-segment parsers can pass
+// throwaway locals instead of the package globals (see
+// registerTailSegmentFlags).
+type rootPersistentTargets struct {
+	Output           *string
+	JSON             *bool
+	Verbose          *int
+	Debug            *string
+	Filehash         *string
+	Symlinks         *string
+	SymlinksShortAll *bool
+	HashWorkers      *int
+	IndexLockTimeout *int
+	DryRun           *bool
+	GlobalMetaDir    *string
+}
+
+func registerRootPersistentFlagsBound(pf *pflag.FlagSet, t *rootPersistentTargets) {
+	pf.StringVarP(t.Output, "output", "o", "human", "output format: human, json, fdupes")
+	pf.BoolVarP(t.JSON, "json", "j", false, "output in JSON format (alias for --output=json)")
+	pf.CountVarP(t.Verbose, "verbose", "v", "verbose level (repeat for more: -v, -vv, -vvv)")
+	pf.StringVarP(t.Debug, "debug", "D", "", "debug options (comma-separated)")
+	pf.StringVarP(t.Filehash, "filehash", "f", "", "hash algorithm overrides (format: default:sha256)")
+	pf.StringVar(t.Symlinks, "symlinks", "none", "symlink handling: all, internal, external, none")
+	pf.BoolVarP(t.SymlinksShortAll, "follow-symlinks", "s", false, "follow symlinked directories (alias for --symlinks=all)")
+	pf.IntVarP(t.HashWorkers, "hash-workers", "w", 0, "number of concurrent hash workers (0=use config default)")
+	pf.IntVar(t.IndexLockTimeout, "index-lock-timeout", 0, "timeout in seconds for index memory locks (0=use config default)")
+	pf.BoolVar(t.DryRun, "dry-run", false, "show what would be done without actually doing it")
+	pf.StringVar(t.GlobalMetaDir, "meta-dir", "", "path to an external .dcfh directory (overrides auto-discovery)")
+}
+
+// registerThrowawayRootPersistentFlags binds the persistent dialect
+// to fresh locals on pf. Tail-segment parsers (--print / --ignore
+// segments after segment zero) use this so a persistent flag is
+// accepted syntactically without clobbering the value segment zero
+// already wrote into the package globals.
+func registerThrowawayRootPersistentFlags(pf *pflag.FlagSet) {
+	registerRootPersistentFlagsBound(pf, &rootPersistentTargets{
+		Output: new(string), JSON: new(bool), Verbose: new(int),
+		Debug: new(string), Filehash: new(string), Symlinks: new(string),
+		SymlinksShortAll: new(bool), HashWorkers: new(int),
+		IndexLockTimeout: new(int), DryRun: new(bool), GlobalMetaDir: new(string),
+	})
 }
 
 var rootCmd = &cobra.Command{

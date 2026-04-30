@@ -19,16 +19,24 @@ Scans the repository (or specified paths) and updates the index
 with current file information including hashes, sizes, and timestamps.
 This operation synchronises the index with the actual file system state.
 
-Filter flags compose via the scope-marker syntax (see ` + "`dcfh status --help`" + `).
-Only --ignore is honoured at scan-time — it short-circuits the walker
-so subtracted entries are never re-stat'd or re-hashed:
+Filter flags compose via the scope-marker syntax (see ` + "`dcfh status --help`" + `
+for the full grammar and gitignore-pattern note). Only --ignore is
+honoured at scan-time — it short-circuits the walker so subtracted
+entries are never re-stat'd or re-hashed:
 
   dcfh update --ignore --name '*.tmp'              — skip *.tmp during scan
   dcfh update --no-ignore-file                     — bypass .dcfh/ignore
 
 --print segments are accepted for symmetry with status/dupes but have
 no effect on update (the cache is always refreshed against on-disk
-truth).`,
+truth).
+
+Push-down side effect: an entry skipped at scan-time is dropped from
+the rewritten main index (the merge never sees it). The cache index
+keeps its prior entry, so no data is lost — but a subsequent
+` + "`dcfh status`" + ` will report the file as added rather than
+modified. Use --no-ignore-file or omit --ignore to round-trip
+ignored entries through the index.`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -119,5 +127,6 @@ truth).`,
 }
 
 func init() {
+	registerHelpFlags(updateCmd.Flags(), cmdUpdate)
 	rootCmd.AddCommand(updateCmd)
 }
