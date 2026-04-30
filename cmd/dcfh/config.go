@@ -58,6 +58,25 @@ func init() {
 	configCmd.Flags().BoolVar(&configListFlag, "list", false, "list all configuration variables")
 }
 
+// configValues collects every supported key into an ordered (key, value)
+// list. The value field is `any` so verbose.level survives as a JSON number
+// rather than a stringified int.
+func configValues(cfg *dcfh.AllConfig) []struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+} {
+	return []struct {
+		Key   string `json:"key"`
+		Value any    `json:"value"`
+	}{
+		{"filehash.default", cfg.Hash.Default},
+		{"output.format", cfg.Output.Format},
+		{"verbose.level", cfg.Verbose.Level},
+		{"verbose.debug", cfg.Verbose.Debug},
+		{"symlink.mode", cfg.Symlink.Mode},
+	}
+}
+
 // handleConfigList lists all configuration variables
 func handleConfigList(ctx context.Context) error {
 	_, metaDir, err := findDcfhRepo()
@@ -75,12 +94,19 @@ func handleConfigList(ctx context.Context) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	fmt.Printf("filehash.default=%s\n", allConfig.Hash.Default)
-	fmt.Printf("output.format=%s\n", allConfig.Output.Format)
-	fmt.Printf("verbose.level=%d\n", allConfig.Verbose.Level)
-	fmt.Printf("verbose.debug=%s\n", allConfig.Verbose.Debug)
-	fmt.Printf("symlink.mode=%s\n", allConfig.Symlink.Mode)
-
+	values := configValues(allConfig)
+	if getOutputFormat() == OutputJSON {
+		outputJSON(struct {
+			Items []struct {
+				Key   string `json:"key"`
+				Value any    `json:"value"`
+			} `json:"items"`
+		}{values})
+		return nil
+	}
+	for _, kv := range values {
+		fmt.Printf("%s=%v\n", kv.Key, kv.Value)
+	}
 	return nil
 }
 
@@ -101,21 +127,30 @@ func handleConfigGet(ctx context.Context, key string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	var value any
 	switch key {
 	case "filehash.default":
-		fmt.Println(allConfig.Hash.Default)
+		value = allConfig.Hash.Default
 	case "output.format":
-		fmt.Println(allConfig.Output.Format)
+		value = allConfig.Output.Format
 	case "verbose.level":
-		fmt.Println(allConfig.Verbose.Level)
+		value = allConfig.Verbose.Level
 	case "verbose.debug":
-		fmt.Println(allConfig.Verbose.Debug)
+		value = allConfig.Verbose.Debug
 	case "symlink.mode":
-		fmt.Println(allConfig.Symlink.Mode)
+		value = allConfig.Symlink.Mode
 	default:
 		return fmt.Errorf("unknown configuration key: %s", key)
 	}
 
+	if getOutputFormat() == OutputJSON {
+		outputJSON(struct {
+			Key   string `json:"key"`
+			Value any    `json:"value"`
+		}{key, value})
+		return nil
+	}
+	fmt.Println(value)
 	return nil
 }
 
@@ -135,6 +170,15 @@ func handleConfigSet(ctx context.Context, key, value string) error {
 		return err
 	}
 
+	if getOutputFormat() == OutputJSON {
+		outputJSON(struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Key     string `json:"key"`
+			Value   string `json:"value"`
+		}{true, "Configuration updated", key, value})
+		return nil
+	}
 	fmt.Printf("Configuration updated: %s = %s\n", key, value)
 	return nil
 }
