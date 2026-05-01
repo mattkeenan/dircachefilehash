@@ -514,7 +514,7 @@ This reasoning pattern is fundamental to effective development and must be consc
 - Can include AI-generated development tools and utilities
 - Should be regularly synced with main using cherry-pick or rebase
 - Never push `local-*` branches to GitHub
-- TODO.md is for general repository use but AI references should be cleaned when squashing to public branches
+- BACKLOG.md is for general repository use but AI references should be cleaned when squashing to public branches
 
 **GitHub Branches**:
 - Must not contain AI-specific tools or references
