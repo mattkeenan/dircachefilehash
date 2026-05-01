@@ -194,16 +194,19 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 **Layer 1: Foundation**
 - `pkg/util.go` - Utility functions and structs that don't belong elsewhere
 - `pkg/constants.go` - Constants used by external consumers (e.g., cmd/dcfh.go)
-- `pkg/file.go` - File hashing operations for scanned files (consider renaming to `filehash.go`)
+- `pkg/hash.go` - Hash algorithms, file hashing, symlink-target hashing
 - `pkg/index.go` - Binary index file internals and binaryEntry management
+- `pkg/index_loading.go` - Memoised index loading (main/cache/merged) into skiplists
 
 **Layer 2: Data Structures & Algorithms**
 - `pkg/skiplist.go` - Zero-copy skip list wrapper with context-aware operations and vectorio integration
 - `pkg/ignore.go` - Ignore pattern matching (.dcfhignore support)
 - `pkg/scan.go` - Directory scanning, Hwang-Lin comparison, and scan index workflow
 
-**Layer 3: Middleware/Workflows**
-- `pkg/middleware.go` (rename from `highlevel.go`) - Complex multi-step workflows, cache updates, index merging
+**Layer 3: Pipelines/Workflows**
+- `pkg/pipeline.go` - Channel-based pipeline scaffolding (comparison → hash → reorder → write)
+- `pkg/pipeline_status.go` - Status pipeline (cache refresh, dirty detection)
+- `pkg/pipeline_update.go` - Update pipeline (atomic main-index replacement)
 - `pkg/dircache.go` - Main DirectoryCache API and factory functions
 
 **Layer 4: Core Operations** (one file per CLI command)
@@ -248,10 +251,11 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 - Context identifiers: `MainContext`, `CacheContext`, `ScanContext`, `TempContext`
 - File naming: `MainIndex`, `CacheIndex`, `TempIndex` patterns
 
-**File Hashing** (`pkg/file.go`):
-- `processFileJob()` - Process individual file scan jobs
-- `hashFile()` - SHA-1 hash computation for file contents
-- File metadata extraction from `syscall.Stat_t`
+**File Hashing** (`pkg/hash.go`):
+- `HashAlgorithm` registry covering SHA-1/SHA-256/SHA-512
+- `HashFile()` / `HashFileInterruptible()` - hash file contents (the latter checks ctx for shutdown)
+- `(*DirectoryCache).hashSymlinkTargetToBytes()` - hash a symlink's target path
+- `(*DirectoryCache).GetCurrentHashType()` / `GetCurrentHashAlgorithm()` - resolve algorithm from config + flags
 
 **Index Internals** (`pkg/index.go`):
 - Binary format structs: `IndexHeader`, `MmapIndex`

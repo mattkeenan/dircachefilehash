@@ -9,8 +9,6 @@ This file tracks upcoming development tasks for the dircachefilehash project.
 ## High Priority Tasks
 
 ### Architecture & Code Quality
-- [ ] Consider renaming `pkg/file.go` to `pkg/filehash.go` for clarity
-- [ ] Consider renaming `pkg/middleware.go` to better reflect its workflow nature
 - [ ] Review layer separation and ensure proper abstraction boundaries
 - [ ] Export skiplist wrapper functions (Find, Insert, etc.) for low-level package access
   - Current skiplist wrapper is "high-level" within pkg but "low-level" for external users

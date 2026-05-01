@@ -360,9 +360,9 @@ only where kernel APIs actually diverge.
 - `pkg/binary_entry_index_file.go` — `GetBinaryEntry()` drops its
   per-call RLock/RUnlock, becomes a plain offset → pointer
   conversion.
-- `pkg/middleware.go` (post-rename: see CLAUDE.md "Layer 3"
-  intention) — `writeSkiplistWithVectorIOFiltered` drops the bulk
-  RLock acquisition phase.
+- The temp-index writer (now in the pipeline layer:
+  `pkg/pipeline_update.go` / `pkg/temp_index_writer.go`) — drop any
+  bulk RLock acquisition phase around vectorio writes.
 - `pkg/dircache.go` — removes `indexLockTimeout` field, tracking
   registration of indices for lock acquisition is no longer
   load-bearing (kept only for cleanup bookkeeping).
@@ -630,9 +630,9 @@ BSD/macOS port never lands.
 - `pkg/index.go:345-346` — `Stat_t.Ctim`/`Mtim` access (Linux-shape).
 - `pkg/binary_entry_index_file.go` (or wherever `GetBinaryEntry` lives) —
   per-entry RLock to delete.
-- `pkg/middleware.go` (post-rename per CLAUDE.md) —
-  `writeSkiplistWithVectorIOFiltered` bulk RLock acquisition to
-  delete.
+- The temp-index writer (in `pkg/pipeline_update.go` /
+  `pkg/temp_index_writer.go`) — any bulk RLock acquisition around
+  vectorio writes to delete.
 - `pkg/dircache.go` — `mainIndex`/`cacheIndex`/`scanIndices` tracking,
   `indexLockTimeout` field.
 - `cmd/dcfh/options.go` — `--index-lock-timeout` flag definition;
