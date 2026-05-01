@@ -87,8 +87,8 @@ func (dc *DirectoryCache) LoadMainIndex() (*skiplistWrapper, error) {
 	return buildSkiplistFromRefs(refs, MainContext), nil
 }
 
-// LoadMergedMainCacheIndex loads main index and merges cache index for unified architecture operations
-// This provides a reusable pattern for operations that need complete existing file state without scanning
+// LoadMergedMainCacheIndex loads the main index and merges the cache index on
+// top, giving callers the complete existing file state without scanning.
 func (dc *DirectoryCache) LoadMergedMainCacheIndex() (*skiplistWrapper, error) {
 	// Load main index as base
 	mergedSkiplist, err := dc.LoadMainIndex()
