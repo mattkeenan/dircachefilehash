@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestUnifiedFilesystemScanIterator_BasicScanning(t *testing.T) {
+func TestFilesystemScanIterator_BasicScanning(t *testing.T) {
 	// Create test directory with files
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
@@ -16,7 +16,7 @@ func TestUnifiedFilesystemScanIterator_BasicScanning(t *testing.T) {
 	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create iterator (no hash manager needed - iterator is synchronous)
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-unified")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-unified")
 	defer func() { _ = iterator.Close() }()
 
 	var entries []BinaryEntryInterface
@@ -66,14 +66,14 @@ func TestUnifiedFilesystemScanIterator_BasicScanning(t *testing.T) {
 	t.Logf("Successfully iterated through %d entries", entryCount)
 }
 
-func TestUnifiedFilesystemScanIterator_EmptyDirectory(t *testing.T) {
+func TestFilesystemScanIterator_EmptyDirectory(t *testing.T) {
 	tempDir := createTempDir(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
 	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-empty")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-empty")
 	defer func() { _ = iterator.Close() }()
 
 	// Should have no entries
@@ -91,11 +91,11 @@ func TestUnifiedFilesystemScanIterator_EmptyDirectory(t *testing.T) {
 	}
 }
 
-func TestUnifiedFilesystemScanIterator_NilDirectoryCache(t *testing.T) {
+func TestFilesystemScanIterator_NilDirectoryCache(t *testing.T) {
 	// Test with nil DirectoryCache (no hash manager needed)
 
 	// Create iterator with nil DirectoryCache
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), nil, []string{"/tmp"}, "test-nil")
+	iterator := NewFilesystemScanIterator(context.Background(), nil, []string{"/tmp"}, "test-nil")
 	defer func() { _ = iterator.Close() }()
 
 	// Should be immediately exhausted
@@ -113,14 +113,14 @@ func TestUnifiedFilesystemScanIterator_NilDirectoryCache(t *testing.T) {
 	}
 }
 
-func TestUnifiedFilesystemScanIterator_ClosedIterator(t *testing.T) {
+func TestFilesystemScanIterator_ClosedIterator(t *testing.T) {
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
 	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-closed")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-closed")
 
 	// Close the iterator immediately
 	_ = iterator.Close()
@@ -140,7 +140,7 @@ func TestUnifiedFilesystemScanIterator_ClosedIterator(t *testing.T) {
 	}
 }
 
-func TestUnifiedFilesystemScanIterator_SpecificPaths(t *testing.T) {
+func TestFilesystemScanIterator_SpecificPaths(t *testing.T) {
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
@@ -152,7 +152,7 @@ func TestUnifiedFilesystemScanIterator_SpecificPaths(t *testing.T) {
 	writeTestFile(t, testFile, "specific content")
 
 	// Create iterator for specific path
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{testFile}, "test-specific")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{testFile}, "test-specific")
 	defer func() { _ = iterator.Close() }()
 
 	// Should find exactly one entry
@@ -188,7 +188,7 @@ func TestUnifiedFilesystemScanIterator_SpecificPaths(t *testing.T) {
 	}
 }
 
-func TestUnifiedFilesystemScanIterator_HashCompletion(t *testing.T) {
+func TestFilesystemScanIterator_HashCompletion(t *testing.T) {
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
@@ -197,7 +197,7 @@ func TestUnifiedFilesystemScanIterator_HashCompletion(t *testing.T) {
 
 	// Create hash manager with multiple workers for concurrent processing
 
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-hash")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-hash")
 	defer func() { _ = iterator.Close() }()
 
 	var validHashes, emptyHashes int
@@ -238,14 +238,14 @@ func TestUnifiedFilesystemScanIterator_HashCompletion(t *testing.T) {
 	}
 }
 
-func TestUnifiedFilesystemScanIterator_ConcurrentAccess(t *testing.T) {
+func TestFilesystemScanIterator_ConcurrentAccess(t *testing.T) {
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
 	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-concurrent")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-concurrent")
 	defer func() { _ = iterator.Close() }()
 
 	// Test basic concurrent safety by accessing iterator from main thread
@@ -278,14 +278,14 @@ func TestUnifiedFilesystemScanIterator_ConcurrentAccess(t *testing.T) {
 	t.Logf("Concurrent access test completed with %d entries", entryCount)
 }
 
-func TestUnifiedFilesystemScanIterator_ResourceCleanup(t *testing.T) {
+func TestFilesystemScanIterator_ResourceCleanup(t *testing.T) {
 	tempDir := createTestDirectoryStructure(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
 	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
-	iterator := NewUnifiedFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-cleanup")
+	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-cleanup")
 
 	// Process some entries
 	for i := 0; i < 3 && iterator.HasNext(); i++ {

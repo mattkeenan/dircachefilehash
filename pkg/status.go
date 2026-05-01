@@ -99,7 +99,7 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context) (*skiplistWrap
 	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
 
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, []string{}, "scan")
+	scanIterator := NewFilesystemScanIterator(ctx, dc, []string{}, "scan")
 
 	scanErr := RunStatusPipeline(ctx, dc, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
 	finaliseStatusCache(dc, cacheTempFileName, scanErr == nil)

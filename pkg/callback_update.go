@@ -11,7 +11,7 @@ import (
 )
 
 // UpdateCallback implements HwangLinCallback for v0.7 direct temp index writing
-// Writes entries directly to main.idx temp file during hwangLinUnified execution (no skiplist building)
+// Writes entries directly to main.idx temp file during hwangLin execution (no skiplist building)
 type UpdateCallback struct {
 	// v0.7 direct temp index writing
 	dc                *DirectoryCache
@@ -28,7 +28,7 @@ type UpdateCallback struct {
 	retireSkiplist   *skiplistWrapper                // Entries ready to retire, ordered by path order ID as context
 	nextRetireIndex  uint64                          // Next path order ID sequence number expected for retirement
 	pathOrderToEntry map[uint64]BinaryEntryInterface // Track entries by path order ID for completion lookup
-	// No mutex needed - UpdateCallback runs single-threaded via hwangLinUnified
+	// No mutex needed - UpdateCallback runs single-threaded via hwangLin
 
 	// Shutdown coordination and hash job synchronization
 	ctx       context.Context
@@ -646,7 +646,7 @@ func (uc *UpdateCallback) fillBinaryDataFromInterface(entry BinaryEntryInterface
 }
 
 // findEntryByPathOrderID finds the entry that corresponds to a given path order ID
-// Safe without locking - UpdateCallback runs single-threaded via hwangLinUnified algorithm
+// Safe without locking - UpdateCallback runs single-threaded via hwangLin algorithm
 func (uc *UpdateCallback) findEntryByPathOrderID(pathOrderID uint64) BinaryEntryInterface {
 	fmt.Fprintf(os.Stderr, "[UPDATE-COMPLETE] findEntryByPathOrderID: Looking up pathOrderID=%d\n", pathOrderID)
 	entry, exists := uc.pathOrderToEntry[pathOrderID]

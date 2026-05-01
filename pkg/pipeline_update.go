@@ -43,21 +43,21 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, leftIter, rightI
 		}
 	}
 
-	// --- Stage 1: Compare (runs in this goroutine via hwangLinUnified) ---
+	// --- Stage 1: Compare (runs in this goroutine via hwangLin) ---
 	// We run comparison in a goroutine so the other stages can start concurrently.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sink := newScanWriteSink(nil, scanWriteCanonical, hashCh, bypassCh)
 		adapter := newSinkCallbackAdapter(sink)
-		err := hwangLinUnified(leftIter, rightIter, adapter, ctx)
+		err := hwangLin(leftIter, rightIter, adapter, ctx)
 		if err != nil {
 			// If the error is from context cancellation, don't double-report
 			if ctx.Err() == nil {
 				recordErr(fmt.Errorf("comparison stage: %w", err))
 			}
 			// Ensure channels are closed even on error so downstream stages unblock
-			// (OnComplete/Close may not have been called if hwangLinUnified returned early)
+			// (OnComplete/Close may not have been called if hwangLin returned early)
 			// sink.Close() is idempotent via the adapter's OnComplete
 		}
 	}()
@@ -201,7 +201,7 @@ func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) 
 	}
 }
 
-// performPipelineScan replaces performUnifiedScanToSkiplist with the pipeline architecture.
+// performPipelineScan replaces performScanToSkiplist with the pipeline architecture.
 func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) error {
 	defer VerboseEnter()()
 
@@ -227,7 +227,7 @@ func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []strin
 
 	// Create iterators
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, paths, "scan")
+	scanIterator := NewFilesystemScanIterator(ctx, dc, paths, "scan")
 
 	// Run the pipeline
 	err := RunUpdatePipeline(ctx, dc, existingIterator, scanIterator, tempMainIndexFileName)

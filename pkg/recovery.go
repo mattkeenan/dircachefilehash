@@ -81,8 +81,8 @@ func ValidationConfigWithFixes(mode ValidationMode, fixMode FixMode, verbosity i
 	}
 }
 
-// UnifiedValidationProcessor creates a configurable validation processor
-func UnifiedValidationProcessor(config ValidationConfig) EntryProcessor {
+// ValidationProcessor creates a configurable validation processor
+func ValidationProcessor(config ValidationConfig) EntryProcessor {
 	return func(entry *binaryEntry, entryIndex uint32, _ string) (bool, error) {
 		errs, strictErr := collectValidationErrors(entry, entryIndex, config)
 		if strictErr != nil {
@@ -293,24 +293,24 @@ func validateEntryLogical(entry *binaryEntry, config ValidationConfig) error {
 // RecoveryValidationProcessor validates binary entries for recovery operations.
 // Filters out corrupted or invalid entries while preserving valid ones.
 //
-// Deprecated: Use UnifiedValidationProcessor with ValidationLenient mode instead.
+// Deprecated: Use ValidationProcessor with ValidationLenient mode instead.
 func RecoveryValidationProcessor(verbosity int) EntryProcessor {
 	config := DefaultValidationConfig(ValidationLenient, verbosity)
-	return UnifiedValidationProcessor(config)
+	return ValidationProcessor(config)
 }
 
 // IdxckValidationProcessor creates a strict validation processor for index checking
 // Equivalent to the validation logic used by the idxck command
 func IdxckValidationProcessor(verbosity int) EntryProcessor {
 	config := DefaultValidationConfig(ValidationStrict, verbosity)
-	return UnifiedValidationProcessor(config)
+	return ValidationProcessor(config)
 }
 
 // DiagnosticValidationProcessor creates a validation processor that reports all issues
 // but includes all entries for diagnostic purposes
 func DiagnosticValidationProcessor(verbosity int) EntryProcessor {
 	config := DefaultValidationConfig(ValidationDiagnostic, verbosity)
-	return UnifiedValidationProcessor(config)
+	return ValidationProcessor(config)
 }
 
 // createPreRecoverySnapshot creates a complete backup of all index files before recovery
@@ -510,7 +510,7 @@ func (dc *DirectoryCache) RecoverFromIndexWithFixes(indexPath string, fixMode Fi
 
 	// Now use Hwang-Lin workflow to merge with current disk state
 	// This ensures we have the most up-to-date information
-	currentSkiplist, err := dc.performUnifiedScanToSkiplist(context.Background(), []string{}, recoverySkiplist)
+	currentSkiplist, err := dc.performScanToSkiplist(context.Background(), []string{}, recoverySkiplist)
 	if err != nil {
 		return fmt.Errorf("failed to scan current state for recovery: %w", err)
 	}
@@ -636,7 +636,7 @@ func (dc *DirectoryCache) loadIndexWithCleanCopyingEnhanced(indexPath, recoveryI
 	hdrSize := headerSizeForVersion(header.Version)
 	validEntryCount := 0
 	fixesApplied := 0
-	processor := UnifiedValidationProcessor(config)
+	processor := ValidationProcessor(config)
 
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
@@ -1142,7 +1142,7 @@ func (dc *DirectoryCache) RecoverWithStatePreservation(verbosity int) error {
 	}
 
 	// Step 5: Merge with current disk state via Hwang-Lin
-	finalSkiplist, err := dc.performUnifiedScanToSkiplist(context.Background(), []string{}, mergedSkiplist) //nolint:staticcheck // SA4006: used after os.Exit is removed
+	finalSkiplist, err := dc.performScanToSkiplist(context.Background(), []string{}, mergedSkiplist) //nolint:staticcheck // SA4006: used after os.Exit is removed
 	if err != nil {
 		return fmt.Errorf("failed to merge recovered data with current state: %w", err)
 	}

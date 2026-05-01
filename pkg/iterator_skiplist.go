@@ -17,7 +17,7 @@ type BinaryEntrySkiplistIterator struct {
 	started  bool
 }
 
-// NewBinaryEntrySkiplistIterator creates a new unified iterator for the given skiplist
+// NewBinaryEntrySkiplistIterator creates a new iterator for the given skiplist.
 func NewBinaryEntrySkiplistIterator(ctx context.Context, sl *skiplistWrapper, name string) *BinaryEntrySkiplistIterator {
 	if sl == nil || sl.Length() == 0 {
 		return &BinaryEntrySkiplistIterator{

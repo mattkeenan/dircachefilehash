@@ -34,7 +34,6 @@ type PathEntryIterator interface {
 }
 
 // BinaryEntryIterator abstracts the source of file entries using BinaryEntryInterface.
-// This is the enhanced iterator interface that works with the unified data access pattern.
 // All implementations MUST return entries in sorted path order for the Hwang-Lin algorithm.
 type BinaryEntryIterator interface {
 	// Next returns the next entry in sorted order as BinaryEntryInterface.

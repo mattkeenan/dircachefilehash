@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 )
 
-// UnifiedFilesystemScanIterator streams files directly from filesystem scanning
+// FilesystemScanIterator streams files directly from filesystem scanning
 // using BinaryEntryInterface. This provides memory-efficient iteration that
 // maintains strict sorted order required by the Hwang-Lin algorithm.
 // Hash coordination is handled by callbacks, not the iterator.
-type UnifiedFilesystemScanIterator struct {
+type FilesystemScanIterator struct {
 	iteratorBase
 
 	// Filesystem scanning
@@ -29,11 +29,11 @@ type UnifiedFilesystemScanIterator struct {
 	scanStarted bool
 }
 
-// NewUnifiedFilesystemScanIterator creates a new iterator that scans
+// NewFilesystemScanIterator creates a new iterator that scans
 // the specified paths using BinaryEntryInterface.
-func NewUnifiedFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, paths []string, name string) *UnifiedFilesystemScanIterator {
+func NewFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, paths []string, name string) *FilesystemScanIterator {
 	if dc == nil {
-		return &UnifiedFilesystemScanIterator{
+		return &FilesystemScanIterator{
 			iteratorBase: iteratorBase{
 				name:      name,
 				exhausted: true,
@@ -43,7 +43,7 @@ func NewUnifiedFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, p
 
 	childCtx, cancel := context.WithCancel(ctx)
 
-	iterator := &UnifiedFilesystemScanIterator{
+	iterator := &FilesystemScanIterator{
 		iteratorBase: iteratorBase{name: name},
 		dc:           dc,
 		paths:        paths,
@@ -56,7 +56,7 @@ func NewUnifiedFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, p
 }
 
 // Next returns the next file entry from the filesystem scan as BinaryEntryInterface
-func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) {
+func (ufsi *FilesystemScanIterator) Next() (BinaryEntryInterface, error) {
 	if err := ufsi.checkClosed(); err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Next() (BinaryEntryInterface, error) 
 }
 
 // getNextScannedFile gets the next scanned file from the scan channel
-func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, error) {
+func (ufsi *FilesystemScanIterator) getNextScannedFile() (*scannedPath, error) {
 	// If we have a next entry cached, use it
 	if ufsi.nextScanned != nil {
 		current := ufsi.nextScanned
@@ -146,14 +146,14 @@ func (ufsi *UnifiedFilesystemScanIterator) getNextScannedFile() (*scannedPath, e
 
 // createScanEntry creates a heap-allocated BEScanEntry from scannedPath
 // v0.7: No scan index file needed - direct heap allocation with lazy hashing
-func (ufsi *UnifiedFilesystemScanIterator) createScanEntry(scanned *scannedPath) BinaryEntryInterface {
+func (ufsi *FilesystemScanIterator) createScanEntry(scanned *scannedPath) BinaryEntryInterface {
 	// v0.7: Create heap-allocated entry directly (no scan index file)
 	// Entry will have metadata but no hash initially (lazy hashing)
 	return NewBEScanEntry(scanned.RelPath, scanned.Info, scanned.StatInfo)
 }
 
 // startScan begins the filesystem scanning in a separate goroutine
-func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
+func (ufsi *FilesystemScanIterator) startScan() error {
 	if ufsi.scanStarted {
 		return nil
 	}
@@ -180,7 +180,7 @@ func (ufsi *UnifiedFilesystemScanIterator) startScan() error {
 }
 
 // Close stops the filesystem scan and releases resources
-func (ufsi *UnifiedFilesystemScanIterator) Close() error {
+func (ufsi *FilesystemScanIterator) Close() error {
 	// Check if already closed to prevent double-close
 	if err := ufsi.checkClosed(); err != nil {
 		return nil //nolint:nilerr // intentional: double-close is a no-op, not an error
@@ -224,7 +224,7 @@ func (ufsi *UnifiedFilesystemScanIterator) Close() error {
 }
 
 // HasNext returns true if there might be more entries available
-func (ufsi *UnifiedFilesystemScanIterator) HasNext() bool {
+func (ufsi *FilesystemScanIterator) HasNext() bool {
 	if ufsi.exhausted || ufsi.closed {
 		return false
 	}

@@ -274,7 +274,7 @@ func emitPipelineEntry(entry BinaryEntryInterface, op PipelineOp, hash bool, seq
 }
 
 // sinkCallbackAdapter wraps a ComparisonSink as a HwangLinCallback so it can
-// be used with the existing hwangLinUnified function without modifying it.
+// be used with the existing hwangLin function without modifying it.
 type sinkCallbackAdapter struct {
 	CallbackBase
 	sink ComparisonSink

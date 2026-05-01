@@ -21,15 +21,16 @@ func (dc *DirectoryCache) Update(ctx context.Context, flags map[string]string, p
 
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
-		return dc.updateFullRepositoryUnified(ctx)
+		return dc.updateFullRepository(ctx)
 	} else {
 		// Specific paths: selective update - manage main vs cache indices
-		return dc.updateSpecificPathsUnified(ctx, paths)
+		return dc.updateSpecificPaths(ctx, paths)
 	}
 }
 
-// updateFullRepositoryUnified updates the entire repository using the unified hwangLinUnified architecture
-func (dc *DirectoryCache) updateFullRepositoryUnified(ctx context.Context) error {
+// updateFullRepository updates the entire repository: everything goes into
+// the main index, and the cache index is removed.
+func (dc *DirectoryCache) updateFullRepository(ctx context.Context) error {
 	// Load main index to use as comparison base (avoid re-hashing unchanged files)
 	comparisonSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -60,11 +61,9 @@ func (dc *DirectoryCache) updateFullRepositoryUnified(ctx context.Context) error
 	return nil
 }
 
-// updateFullRepository has been moved to v0.6/pkg/update.go as part of the v0.7 unified
-// architecture migration. Use updateFullRepositoryUnified() instead.
-
-// updateSpecificPathsUnified updates only specified paths using the unified hwangLinUnified architecture
-func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths []string) error {
+// updateSpecificPaths updates only specified paths: changed entries land in
+// the main index and the cache index is refreshed afterwards.
+func (dc *DirectoryCache) updateSpecificPaths(ctx context.Context, paths []string) error {
 	// Load main index for comparison (avoid re-hashing unchanged files)
 	comparisonSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
@@ -94,14 +93,11 @@ func (dc *DirectoryCache) updateSpecificPathsUnified(ctx context.Context, paths 
 	return nil
 }
 
-// updateSpecificPaths has been moved to v0.6/pkg/update.go as part of the v0.7 unified
-// architecture migration. Use updateSpecificPathsUnified() instead.
-
-// performUnifiedScanToSkiplist performs scan using the old callback-driven architecture.
-// This function is retained only for recovery.go which still depends on it.
+// performScanToSkiplist runs a scan via the legacy callback-driven path.
+// Retained only for recovery.go.
 //
 // Deprecated: The update path now uses performPipelineScan.
-func (dc *DirectoryCache) performUnifiedScanToSkiplist(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) performScanToSkiplist(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) (*skiplistWrapper, error) {
 	defer VerboseEnter()()
 
 	// Synchronise concurrent scans - only one scan per DirectoryCache at a time
@@ -134,15 +130,12 @@ func (dc *DirectoryCache) performUnifiedScanToSkiplist(ctx context.Context, path
 	hashJobManager := dc.newAlgorithmHashManager(ctx, dc.hashWorkers)
 	defer hashJobManager.Shutdown()
 
-	// Create iterators for unified algorithm
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
-	scanIterator := NewUnifiedFilesystemScanIterator(ctx, dc, paths, "scan")
+	scanIterator := NewFilesystemScanIterator(ctx, dc, paths, "scan")
 
-	// Create update callback for v0.7 direct temp index writing
 	updateCallback := NewUpdateCallback(ctx, dc, tempMainIndexFileName, hashJobManager)
 
-	// Run unified algorithm
-	scanErr := hwangLinUnified(existingIterator, scanIterator, updateCallback, ctx)
+	scanErr := hwangLin(existingIterator, scanIterator, updateCallback, ctx)
 	if scanErr != nil {
 		// v0.7: Mark operation as failed for proper cleanup
 		operationSuccessful = false

@@ -33,7 +33,7 @@ const (
 // by the resolved data, plus a closer that releases any resources held for
 // the duration of the iteration.
 //
-// The returned iterator is safe to drive directly with hwangLinUnified.
+// The returned iterator is safe to drive directly with hwangLin.
 // Callers MUST invoke the closer when done — for in-memory skiplists owned
 // by dc this is a no-op; for ad-hoc mmap'd files (snapshot/file/scan) the
 // closer DecRefs the underlying mapping.

@@ -41,7 +41,7 @@ func markSerialisedDeleted(data []byte) {
 	entry.EntryFlags |= EntryFlagDeleted
 }
 
-// ComparisonSink receives comparison results from hwangLinUnified.
+// ComparisonSink receives comparison results from hwangLin.
 // This is the only interface the comparison algorithm needs.
 type ComparisonSink interface {
 	// OnMatch is called when both iterators have an entry with the same path.

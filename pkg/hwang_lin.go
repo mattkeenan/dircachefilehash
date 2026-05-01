@@ -6,31 +6,22 @@ import (
 	"strings"
 )
 
-// hwangLinUnified implements the unified Hwang-Lin algorithm that works with
-// any combination of BinaryEntryIterators and HwangLinCallbacks.
-//
-// This replaces the various specialized Hwang-Lin implementations throughout
-// the codebase with a single, flexible algorithm that can handle:
-// - Status checking (main vs scan)
-// - Duplicate detection (any iterator vs any iterator)
-// - Update operations (scan vs existing indices)
-// - Any future comparison needs
-//
-// The algorithm maintains the same O(n+m) efficiency as the original
-// Hwang-Lin algorithm while providing composable, testable components.
+// hwangLin implements the Hwang-Lin merge algorithm over any pair of
+// BinaryEntryIterators driven by an HwangLinCallback. Used by status, dupes,
+// and update with O(n+m) complexity.
 //
 //nolint:gocognit,cyclop // core merge-sort comparison with three-way iterator state; helpers would obscure the ordering invariants
-func hwangLinUnified(
+func hwangLin(
 	leftIter, rightIter BinaryEntryIterator,
 	callback HwangLinCallback,
 	ctx context.Context,
 ) error {
 	if IsDebugEnabled("hash") || IsDebugEnabled("write") {
-		VerboseLog(3, "[HWANG-LIN] Starting hwangLinUnified: left=%s, right=%s", leftIter.Name(), rightIter.Name())
+		VerboseLog(3, "[HWANG-LIN] Starting hwangLin: left=%s, right=%s", leftIter.Name(), rightIter.Name())
 	}
 
 	if leftIter == nil || rightIter == nil || callback == nil {
-		return fmt.Errorf("hwangLinUnified: nil parameters not allowed")
+		return fmt.Errorf("hwangLin: nil parameters not allowed")
 	}
 
 	defer func() {

@@ -16,7 +16,7 @@ import (
 //
 // OpenRef materialises both sides into hashed iterators (fs-scan opens
 // itself by side-effecting a cache refresh, so callers don't have to
-// think about cache lifecycle) and hwangLinUnified drives a
+// think about cache lifecycle) and hwangLin drives a
 // diffComparisonSink to accumulate the result. A non-nil filter narrows
 // the result without affecting cache writes — entries filtered out are
 // excluded from Modified/Added/Deleted slices and from byte counts.
@@ -35,7 +35,7 @@ func Diff(ctx context.Context, dc *DirectoryCache, leftRef, rightRef IndexRef, f
 
 	sink := newDiffComparisonSink(filter)
 	adapter := newSinkCallbackAdapter(sink)
-	if err := hwangLinUnified(leftIter, rightIter, adapter, ctx); err != nil {
+	if err := hwangLin(leftIter, rightIter, adapter, ctx); err != nil {
 		return nil, fmt.Errorf("diff: %w", err)
 	}
 	return sink.result, nil

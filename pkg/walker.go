@@ -4,7 +4,7 @@ import "context"
 
 // Walker produces sorted filesystem metadata under a root. The channel
 // carries the existing *scannedPath type so downstream consumers
-// (UnifiedFilesystemScanIterator, Hwang-Lin callbacks) stay unchanged
+// (FilesystemScanIterator, Hwang-Lin callbacks) stay unchanged
 // when the underlying filesystem source swaps between local syscalls
 // and a wire-backed walker.
 //

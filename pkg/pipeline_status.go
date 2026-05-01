@@ -47,7 +47,7 @@ func RunStatusPipeline(ctx context.Context, dc *DirectoryCache, cacheSkiplist *s
 	go func() {
 		defer wg.Done()
 		adapter := newSinkCallbackAdapter(sink)
-		err := hwangLinUnified(leftIter, rightIter, adapter, ctx)
+		err := hwangLin(leftIter, rightIter, adapter, ctx)
 		if err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("comparison stage: %w", err))
 		}
