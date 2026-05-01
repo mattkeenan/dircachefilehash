@@ -97,182 +97,96 @@ Scope when picked up:
 Dependency: aligns naturally with the Fix-primitive restructure above
 (non-destructive output is a property of `FixRequest` semantics).
 
-## Entry: Review layer separation and ensure proper abstraction boundaries
+## Entry: Add FindEntries helper for path-array lookups
 
 ### Priority: High
 
-Layered architecture (Foundation → CLI) has accreted over many refactors; periodic review keeps abstractions honest and prevents leaks across boundaries.
-
-## Entry: Export skiplist wrapper functions for low-level package access
-
-### Priority: High
-
-External tools like `dcfhfix` need efficient O(log n) entry lookup, but the current skiplist wrapper is "high-level" inside `pkg/` while remaining "low-level" for external users — they fall back to O(n) iteration.
-
-### Scope
-- Export `Find()`, `Insert()`, `ForEach()`, and other core skiplist operations.
-- Consider adding a `FindEntries()` helper that takes an index path + paths array.
-
-## Entry: Profile memory usage during large directory scans
-
-### Priority: High
-
-No standing profile data exists for very large trees; needed to validate memory bounds and inform future tuning.
-
-## Entry: Optimise skiplist operations for better cache locality
-
-### Priority: High
-
-Cache locality of skiplist traversal hasn't been measured against alternatives; potential gains in hot paths during merge/Hwang-Lin.
-
-## Entry: Benchmark vectorio vs traditional I/O patterns
-
-### Priority: High
-
-Vectorio is used in the write path on assumption of a win; benchmarks would either confirm the assumption or surface paths where simpler I/O is preferable.
+`Find`, `Insert`, and `ForEach` are already exported on `skiplistWrapper`
+(pkg/skiplist.go), but external tools like `dcfhfix` still iterate O(n)
+when looking up multiple paths — the documented intentional fallback at
+cmd/dcfhfix/main.go:719. A `FindEntries(indexPath, paths []string)`
+helper would give callers efficient bulk O(log n) lookup.
 
 ## Entry: Add comprehensive integration tests for edge cases
 
 ### Priority: High
 
-Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages.
+Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
 
 ## Entry: Test concurrent scanning with multiple workers
 
 ### Priority: High
 
-Worker-count variation (and the interaction with shutdown coordination) is under-tested at the integration level.
+Worker-count variation is under-tested at the integration level — `pkg/algorithm_hash_manager_test.go` pins a single worker count rather than sweeping the range.
 
 ## Entry: Validate atomic index replacement under failure conditions
 
 ### Priority: High
 
-Atomicity of the temp-write + rename path needs explicit failure-injection coverage (crash mid-write, rename failure, full disk).
+Atomicity of the temp-write + rename path needs explicit failure-injection coverage (crash mid-write, rename failure, full disk). No `os.Rename` fault-injection tests exist today.
 
 ## Entry: Update API documentation with current architecture
 
 ### Priority: High
 
-Public API docs lag behind the layered/pipeline architecture; library consumers see stale guidance.
+`pkg/doc.go` and exported-symbol godoc pre-date the layered/pipeline architecture and the scan-index workflow; library consumers see stale guidance.
 
 ## Entry: Add usage examples for library consumers
 
 ### Priority: High
 
-`pkg/` has no worked examples; consumers must read source to figure out the entry points.
+`pkg/` has no `example_*_test.go` files and no `examples/` directory; consumers must read source to figure out the entry points.
 
-## Entry: Document performance characteristics and tuning guidelines
-
-### Priority: High
-
-Tuning knobs (hash workers, lock timeout, symlink modes) exist but lack a single place that explains the trade-offs and recommended starting values.
-
-## Entry: Create CONFIG.md documenting all configuration settings
-
-### Priority: High
-
-`.dcfh/config` has multiple sections (filehash, performance, symlink, …) with no consolidated reference.
-
-### Scope
-- Document each section with examples and valid values.
-- Show command-line flag equivalents.
-- Include precedence order (defaults → config file → command line).
-
-## Entry: Add configuration validation on startup
+## Entry: Implement dry-run mode for `dcfh update`
 
 ### Priority: Medium
 
-Bad config values are caught lazily at use site; a startup validation pass would surface problems immediately with better context.
-
-## Entry: Implement dry-run mode for update operations
-
-### Priority: Medium
-
-Global `--dry-run` exists for some commands; making it consistent across `update` lets users preview effects before committing.
+The global `--dry-run` flag is honoured by `snapshot` and `dupes` but `cmd/dcfh/update.go` has no dry-run plumbing. Wiring `update` to preview effects without writing would close the consistency gap.
 
 ## Entry: Add progress reporting for long-running operations
 
 ### Priority: Medium
 
-Long scans/updates currently appear silent; progress reporting (entries processed, ETA) would improve UX on large trees.
-
-## Entry: Improve error messages with actionable suggestions
-
-### Priority: Medium
-
-Many errors surface low-level wrap chains without telling the user what to do next.
-
-## Entry: Add recovery mechanisms for corrupted index files
-
-### Priority: Medium
-
-Beyond `dcfhfix`, automatic recovery paths could handle a broader class of header/entry corruption inside `dcfh` itself.
+Long scans/updates currently appear silent — no spinner, no entries-processed counter, no ETA. Progress reporting would improve UX on large trees.
 
 ## Entry: Handle edge cases in ignore pattern matching
 
 ### Priority: Medium
 
-`.dcfhignore` has corner cases (negation interaction, directory-only patterns, symlink targets) that need explicit coverage and likely fixes.
-
-## Entry: Add tab completion support
-
-### Priority: Medium
-
-Bash/zsh completion for commands, subcommands, and indexed paths would speed daily use.
+`pkg/ignore_test.go` covers only basic transitions, deindex, and suppress; no negation (`!`), directory-only (trailing `/`), or symlink-target coverage. Likely fixes follow once the gaps are exercised.
 
 ## Entry: Implement coloured output for better readability
 
 ### Priority: Medium
 
-Status output (modified/added/deleted) and diagnostics would benefit from terminal colour, gated on TTY detection.
+Status output (modified/added/deleted) and diagnostics would benefit from terminal colour, gated on TTY detection. No `isatty`/`IsTerminal` check exists today.
 
-## Entry: Add configuration file validation command
+## Entry: Add `dcfh config validate` subcommand
 
 ### Priority: Medium
 
-A `dcfh config validate` (or similar) lets users check `.dcfh/config` without running a full operation.
+`cmd/dcfh/config.go` exposes `get`/`set`/`--list` but no `validate`. The validators in `pkg/config.go` exist; surfacing them as a subcommand lets users check `.dcfh/config` without running a full operation.
 
-## Entry: Clean up temporary files on interrupted operations
+## Entry: Clean up stale scan temp files at startup
 
 ### Priority: Low
 
-Scan/temp index files can be left behind after SIGINT or unexpected exit; a startup sweep of stale temp files is overdue.
+`scan-*.idx` files left behind by SIGINT or unexpected exit are not swept on startup — `pkg/recovery.go` only cleans up after a recovery run, and `pkg/filter_run.go` globs scan files only inside filter operations. A startup sweep of stale temp files is overdue.
 
 ## Entry: Add metrics collection for performance monitoring
 
 ### Priority: Low
 
-Optional metrics (timings, throughput, lock contention) would aid both library consumers and our own benchmarking work.
-
-## Entry: Implement log rotation for verbose output
-
-### Priority: Low
-
-Verbose runs can produce large logs; rotation keeps them manageable for long-running or scheduled invocations.
-
-## Entry: Fix goreleaser deprecation warning: replace `nfpms.builds` with `nfpms.ids`
-
-### Priority: Low
-
-Current goreleaser config uses the deprecated `builds:` field under `nfpms`.
-
-### Scope
-- Either use `ids:` to reference build IDs, or remove the field entirely to include all builds.
+No prometheus/expvar/metrics hooks exist anywhere. Optional metrics (timings, throughput, lock contention) would aid both library consumers and our own benchmarking work.
 
 ## Entry: Test on additional Unix variants
 
 ### Priority: Low
 
-Coverage today is Linux-centric; portability claims need exercising on at least one BSD and macOS.
-
-## Entry: Verify memory mapping behaviour on different filesystems
-
-### Priority: Low
-
-mmap semantics vary across filesystems (nfs, tmpfs, overlayfs, zfs); known-good list is only ext4/xfs.
+`.github/workflows/ci.yml` runs only on `ubuntu-latest`. Portability claims need exercising on at least one BSD and macOS.
 
 ## Entry: Test with various Go versions
 
 ### Priority: Low
 
-We pin Go 1.24.3 in development; CI matrix across supported Go versions would catch toolchain-specific issues earlier.
+CI pins `go-version: '1.21'` with no matrix. A Go-version matrix across supported versions would catch toolchain-specific issues earlier.
