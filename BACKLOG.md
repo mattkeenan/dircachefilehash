@@ -113,12 +113,6 @@ helper would give callers efficient bulk O(log n) lookup.
 
 Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
 
-## Entry: Test concurrent scanning with multiple workers
-
-### Priority: High
-
-Worker-count variation is under-tested at the integration level — `pkg/algorithm_hash_manager_test.go` pins a single worker count rather than sweeping the range.
-
 ## Entry: Validate atomic index replacement under failure conditions
 
 ### Priority: High
