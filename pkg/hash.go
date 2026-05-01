@@ -272,3 +272,31 @@ func (dc *DirectoryCache) getHashBufferSize() (int, error) {
 	performanceConfig := dc.config.GetPerformanceConfig()
 	return ParseHumanSize(performanceConfig.HashBuffer)
 }
+
+// hashSymlinkTargetToBytes calculates hash of a symlink's target path and returns raw bytes
+func (dc *DirectoryCache) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, uint16, error) {
+	algorithm, err := dc.getDefaultHashAlgorithm()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
+	}
+
+	targetPath, err := os.Readlink(symlinkPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read symlink target: %w", err)
+	}
+
+	hasher := algorithm.NewFunc()
+	hasher.Write([]byte(targetPath))
+	return hasher.Sum(nil), algorithm.TypeID, nil
+}
+
+// getDefaultHashAlgorithm gets the default hash algorithm from config, falling
+// back to SHA256 when no config is loaded.
+func (dc *DirectoryCache) getDefaultHashAlgorithm() (*HashAlgorithm, error) {
+	if dc.config == nil {
+		return GetHashAlgorithm("sha256")
+	}
+
+	hashConfig := dc.config.GetHashConfig()
+	return GetHashAlgorithm(hashConfig.Default)
+}
