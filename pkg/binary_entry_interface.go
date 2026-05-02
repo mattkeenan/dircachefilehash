@@ -20,11 +20,10 @@ type RefCounted interface {
 // 1. Skiplist (mmap-backed) - In-memory merged view using mmap'd data
 // 2. Index file (read/write) - Direct file access without skiplist creation
 // 3. Index file (mmap + iterative skiplist) - Mmap'd index with skiplist built during HwangLin
-// 4. Scanning (mmap-backed, ephemeral) - Ephemeral entries in scan index
+// 4. Scanning (heap-allocated, ephemeral) - Ephemeral entries created during scan
 //
 // Error Handling:
-// - All accessor methods return (value, error) to handle ephemeral entry failures
-// - Ephemeral entries can fail due to munmap or mremap operations
+// - All accessor methods return (value, error) for uniform handling across storage modes
 // - Non-ephemeral entries should only return errors in exceptional circumstances
 //
 // Locking Strategy:
