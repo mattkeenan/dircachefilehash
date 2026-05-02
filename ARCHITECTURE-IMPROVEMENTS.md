@@ -41,10 +41,9 @@ Items are ordered by observed risk, not effort.
 - **What's in it**: the `DirectoryCache` struct definition (`pkg/util.go:39`), time encoding, file naming helpers, goroutine ID extractor, orphaned-file detector, build-time assertions about `binaryEntry`.
 - **Why it matters**: `DirectoryCache` is the cross-layer aggregate (it contains `Walker`, `Hasher`, scanner state, mmap memo, config — fields that span Layers 1–4 in `ARCHITECTURE.md`). Its definition lives in a foundation file alongside time-encoding utilities, so the boundary between "type" and "utilities" disappears. The file's naming ("things that don't belong elsewhere") is honest about the problem but doesn't fix it.
 
-## 7. `binary_entry_interface_test_framework.go` ships in production builds
+## 7. ~~`binary_entry_interface_test_framework.go` ships in production builds~~ — **resolved**
 
-- **Evidence**: `pkg/binary_entry_interface_test_framework.go` is a `.go` file (not `_test.go`); contains test scaffolding / mock types.
-- **Why it matters**: It compiles into any binary that links the package, adding dead code and polluting the public namespace with test-only symbols. Renaming to `*_test.go` (or moving to `pkg/internal/testutil/`) is mechanical.
+- **Status**: closed. Renamed to `pkg/binary_entry_interface_test_framework_test.go` so the Go toolchain only compiles it into test binaries. No code or package changes were needed — every consumer was already a `_test.go` file in the same `package dircachefilehash`. `BinaryEntryTestSuite`, `TestEntryData`, `CreateTestData`, and `CreateDeletedTestData` no longer appear in `dcfh`, `dcfhfind`, or `dcfhfix` production binaries.
 
 ## 8. `PathEntryIterator` is dead but still exported
 
