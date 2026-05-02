@@ -67,24 +67,13 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 		return fmt.Errorf("failed to load index: %w", err)
 	}
 
-	// Create skiplist and insert all entries
-	skiplist := NewSkiplistWrapper(16, MainContext)
+	basename := filepath.Base(indexPath)
+	ctx := ContextForIndexBasename(basename)
+	skiplist := NewSkiplistWrapper(16, ctx)
 	for _, ref := range refs {
-		skiplist.Insert(ref, MainContext)
+		skiplist.Insert(ref, ctx)
 	}
-
-	// Determine index type from path
-	indexType := "file"
-	if basename := filepath.Base(indexPath); basename != "" {
-		switch {
-		case basename == "main.idx":
-			indexType = "main"
-		case basename == "cache.idx":
-			indexType = "cache"
-		case strings.HasPrefix(basename, "scan-") && strings.HasSuffix(basename, ".idx"):
-			indexType = "scan"
-		}
-	}
+	indexType := IndexTypeForBasename(basename)
 
 	// Use ForEach to iterate through entries
 	skiplist.ForEach(func(entry *binaryEntry, entryContext string) bool {

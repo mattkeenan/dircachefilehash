@@ -50,11 +50,10 @@ Items are ordered by observed risk, not effort.
 - **Reality**: No callers in production code (`grep -rn 'PathEntryIterator' pkg/ cmd/ --include='*.go'` returns only the type definition itself).
 - **Why it matters**: An exported, undocumented "use which?" choice in the godoc surface is the wrong impression to give a library consumer. Either delete it or mark it deprecated and route the type alias to `BinaryEntryIterator`.
 
-## 9. Context dispatch is duplicated across nine files
+## 9. ~~Context dispatch is duplicated across nine files~~ — **resolved**
 
-- **Sites**: `MainContext` / `CacheContext` / `ScanContext` literals appear in `pkg/index_loading.go:87,128`, `pkg/openref.go:95,125`, `pkg/update.go:155,171,175`, `pkg/dcfhfind_support.go:71,73`, `pkg/recovery.go:632,720`, `pkg/binary_entry_scan.go:329`, `pkg/binary_entry_index_file.go:29`, `pkg/binary_entry_index_file_mmap.go:26`.
-- **Reality**: Every site decides independently which context tag a skiplist or entry should carry. There is no central dispatch table mapping "I'm loading X" to "tag with Y."
-- **Why it matters**: The context tag drives merge policy. A contributor who tags wrong introduces silent merge bugs that show up only when two contexts collide. Centralising the mapping would make it impossible to typo.
+- **Status**: closed. Investigation showed the "9 files" framing overcounted — most listed sites just *propagate* a string parameter (`buildSkiplistFromRefs(refs, ctx)` already takes context as an arg). The actual decision sites broke down into two groups: ones where the function name itself encodes the choice (`LoadMainIndex` → MainContext, `loadCacheIndex` → CacheContext, `openSnapshotRef` → MainContext, `binary_entry_scan.go:329` → ScanContext for heap entries by definition) and ones driven by an arbitrary path. The path-driven sites were the real risk.
+- **Fix**: added `ContextForIndexBasename(basename)` in `pkg/constants.go` mapping `main.idx` / `cache.idx` / `scan-*.idx` → context (unknown → ScanContext). Wired into the two path-driven sites: `openFileRef` at `pkg/openref.go:95` (the only merge-bound risk site — previously hardcoded `ScanContext` regardless of path) and `IterateIndexFile` at `pkg/dcfhfind_support.go:71` (cosmetic — output is iterated, never merged — but the `indexType` display name and the skiplist tag now share a single basename derivation, eliminating the typo trap). Function-name-encoded sites were left as direct constants because routing them through the helper is busy-work without correctness benefit. Dead `TempContext` constant deleted in the same pass.
 
 ## 10. ~~`hashJobStart` carries v0.6 and v0.7 fields concurrently~~ — **resolved**
 

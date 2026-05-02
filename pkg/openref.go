@@ -92,7 +92,7 @@ func openFileRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryE
 	if ref.ScanID != "" {
 		name = "scan-" + ref.ScanID
 	}
-	sl := buildSkiplistFromRefs(refs, ScanContext)
+	sl := buildSkiplistFromRefs(refs, ContextForIndexBasename(filepath.Base(ref.Path)))
 	closer := func() error {
 		if indexFile != nil {
 			indexFile.DecRef()

@@ -11,8 +11,39 @@ const (
 	MainContext  = "main"
 	CacheContext = "cache"
 	ScanContext  = "scan"
-	TempContext  = "temp"
 )
+
+// ContextForIndexBasename returns the context tag appropriate to an index
+// file's basename. Use this when the caller has only a path and needs to
+// pick the right context for a skiplist that may later participate in a
+// merge. Unknown basenames fall back to ScanContext (the safest tag for
+// ad-hoc index files).
+func ContextForIndexBasename(basename string) string {
+	switch basename {
+	case MainIndex:
+		return MainContext
+	case CacheIndex:
+		return CacheContext
+	default:
+		return ScanContext
+	}
+}
+
+// IndexTypeForBasename returns the user-facing index-type label for a
+// basename, matching the RefType* vocabulary from pkg/openref.go.
+// Unknown basenames return RefTypeFile.
+func IndexTypeForBasename(basename string) string {
+	switch {
+	case basename == MainIndex:
+		return RefTypeMain
+	case basename == CacheIndex:
+		return RefTypeCache
+	case strings.HasPrefix(basename, "scan-") && strings.HasSuffix(basename, ".idx"):
+		return RefTypeScan
+	default:
+		return RefTypeFile
+	}
+}
 
 // File constants
 const (
