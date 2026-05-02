@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
-	"time"
 )
 
 // Update scans the directory and updates the index file using the new workflow
@@ -91,74 +88,4 @@ func (dc *DirectoryCache) updateSpecificPaths(ctx context.Context, paths []strin
 
 	_ = dc.checkForOrphanedIndexFiles()
 	return nil
-}
-
-// loadIndexWithProcessor loads an index file with processor and returns a skiplist
-func (dc *DirectoryCache) loadIndexWithProcessor(filePath string, processor EntryProcessor) (*skiplistWrapper, error) {
-	// Load entries using existing processor function
-	entries, err := dc.LoadIndexFromFileWithProcessor(filePath, processor)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create new skiplist
-	skiplist := NewSkiplistWrapper(len(entries), CacheContext)
-
-	// Add entries to skiplist
-	for _, entryRef := range entries {
-		skiplist.Insert(entryRef, CacheContext)
-	}
-
-	return skiplist, nil
-}
-
-// ScanFileInfo represents information about a scan index file
-type ScanFileInfo struct {
-	Path    string
-	ModTime time.Time
-	Size    int64
-}
-
-// findScanIndexFiles finds all scan index files and returns them sorted by modification time (newest first)
-func (dc *DirectoryCache) findScanIndexFiles() ([]ScanFileInfo, error) {
-	metaDir := dc.MetaDir
-	entries, err := os.ReadDir(metaDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var scanFiles []ScanFileInfo
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-
-		// Check if it's a scan index file (scan-<pid>-<tid>.idx pattern)
-		if filepath.Ext(name) == ".idx" &&
-			(len(name) > 9 && name[:5] == "scan-") {
-			filePath := filepath.Join(metaDir, name)
-
-			// Get file info
-			info, err := entry.Info()
-			if err != nil {
-				continue // Skip files we can't stat
-			}
-
-			scanFiles = append(scanFiles, ScanFileInfo{
-				Path:    filePath,
-				ModTime: info.ModTime(),
-				Size:    info.Size(),
-			})
-		}
-	}
-
-	// Sort by modification time (newest first)
-	sort.Slice(scanFiles, func(i, j int) bool {
-		return scanFiles[i].ModTime.After(scanFiles[j].ModTime)
-	})
-
-	return scanFiles, nil
 }

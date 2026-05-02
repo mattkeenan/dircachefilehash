@@ -62,6 +62,20 @@ Scope when picked up:
 - Add `Repo.Fix` to the interface; `localRepo.Fix` delegates to the
   moved helpers. Interactive dcfhfix subcommands translate CLI input
   into one or more `FixRequest` batches.
+- Two operating modes, mirroring the historical evolution of `fsck`:
+  per-entry interactive (ask once per change, the legacy default) and
+  auto-fix (apply all safe repairs in one shot). Auto-fix is safe by
+  default *because* the entry below makes `dcfhfix` write to a new
+  index file rather than overwriting — there is no in-place mutation
+  to roll back, so "auto" doesn't carry the historical risk it had
+  with on-disk filesystems.
+- Land the v0.7 recovery write path here too. Rebuilding `main.idx`
+  from whatever combination of `main.idx` / `cache.idx` /
+  timestamped-cache files is readable is conceptually a Fix batch
+  with a multi-source `IndexSelector`. The orchestration shell in
+  `pkg/recovery.go` was deleted in the ARCHITECTURE-IMPROVEMENTS
+  item #4 cleanup; the validation/processor and snapshot helpers
+  that survived are reusable from this work.
 - Preserve existing dcfhfix tests (main_test.go, options_test.go).
 
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
