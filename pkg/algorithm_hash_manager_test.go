@@ -398,14 +398,7 @@ func createTestHashJobs(t *testing.T, _ *DirectoryCache, filePaths []string) []*
 			Info:    fileInfo,
 		}
 
-		// Create a mock binaryEntryRef for testing
-		entryRef := binaryEntryRef{
-			// In a real implementation, this would point to actual mmap'd memory
-			// For testing, we'll use a simplified approach
-		}
-
 		// Create a test BEScanEntry for v0.7
-		// Get syscall.Stat_t for the file
 		var stat syscall.Stat_t
 		if err := syscall.Stat(filePath, &stat); err != nil {
 			t.Fatalf("Failed to get stat for test file %s: %v", filePath, err)
@@ -416,9 +409,8 @@ func createTestHashJobs(t *testing.T, _ *DirectoryCache, filePaths []string) []*
 		job := &hashJobStart{
 			JobID:       uint64(i + 1),
 			FilePath:    filePath,
-			IndexEntry:  entryRef,
 			ScannedPath: scannedPath,
-			Entry:       testEntry, // v0.7 unified entry
+			Entry:       testEntry,
 		}
 
 		jobs = append(jobs, job)

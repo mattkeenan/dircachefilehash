@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+// hashJobStart represents a hash job being submitted to the hash manager.
+type hashJobStart struct {
+	JobID       uint64
+	Cookie      uint64 // External cookie for caller tracking
+	FilePath    string
+	ScannedPath *scannedPath
+	Entry       BinaryEntryInterface
+}
+
 // hashJobCompletion represents a completed hash job with both system JobID and caller Cookie
 type hashJobCompletion struct {
 	JobID  uint64 // System job ID
@@ -341,7 +350,6 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 					goto hashComplete
 				}
 			} else if job.ScannedPath != nil {
-				// Fallback to ScannedPath for v0.6 compatibility
 				mode = uint32(job.ScannedPath.Info.Mode())
 			} else {
 				fmt.Fprintf(os.Stderr, "[ERROR] Hash job has neither Entry nor ScannedPath\n")
