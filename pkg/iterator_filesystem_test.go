@@ -13,7 +13,6 @@ func TestFilesystemScanIterator_BasicScanning(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create iterator (no hash manager needed - iterator is synchronous)
 	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-unified")
@@ -71,7 +70,6 @@ func TestFilesystemScanIterator_EmptyDirectory(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-empty")
 	defer func() { _ = iterator.Close() }()
@@ -118,7 +116,6 @@ func TestFilesystemScanIterator_ClosedIterator(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-closed")
 
@@ -145,7 +142,6 @@ func TestFilesystemScanIterator_SpecificPaths(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create specific file to scan
 	testFile := filepath.Join(tempDir, "specific.txt")
@@ -193,7 +189,6 @@ func TestFilesystemScanIterator_HashCompletion(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create hash manager with multiple workers for concurrent processing
 
@@ -243,7 +238,6 @@ func TestFilesystemScanIterator_ConcurrentAccess(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-concurrent")
 	defer func() { _ = iterator.Close() }()
@@ -283,7 +277,6 @@ func TestFilesystemScanIterator_ResourceCleanup(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	iterator := NewFilesystemScanIterator(context.Background(), dc, []string{tempDir}, "test-cleanup")
 

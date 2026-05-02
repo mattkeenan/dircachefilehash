@@ -473,9 +473,6 @@ func (dc *DirectoryCache) registerIndex(indexType string, indexFile *mmapIndexFi
 		dc.mainIndex = indexFile
 	case "cache":
 		dc.cacheIndex = indexFile
-	case "scan":
-		// Scan indices are handled differently - add to the slice
-		dc.scanIndices = append(dc.scanIndices, indexFile)
 	}
 }
 
@@ -493,16 +490,6 @@ func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndex
 	case "cache":
 		if dc.cacheIndex == indexFile {
 			dc.cacheIndex = nil
-		}
-	case "scan":
-		// Remove from scan indices slice
-		for i, idx := range dc.scanIndices {
-			if idx == indexFile {
-				// Remove by swapping with last and truncating
-				dc.scanIndices[i] = dc.scanIndices[len(dc.scanIndices)-1]
-				dc.scanIndices = dc.scanIndices[:len(dc.scanIndices)-1]
-				break
-			}
 		}
 	}
 }

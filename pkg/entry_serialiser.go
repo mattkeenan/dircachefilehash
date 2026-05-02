@@ -141,7 +141,7 @@ func serialiseFromInterface(entry BinaryEntryInterface) ([]byte, error) {
 		return nil, err
 	}
 
-	// Path starts after the struct (matching writeBinaryEntryToMmap and RelativePath)
+	// Path starts after the struct (matching RelativePath)
 	pathOffset := int(unsafe.Sizeof(*be))
 	pathSpace := data[pathOffset:]
 	pathBytes := []byte(relPath)

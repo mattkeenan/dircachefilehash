@@ -64,17 +64,14 @@ type DirectoryCache struct {
 	scanFilterCtx FilterContext
 
 	// Concurrent scan synchronization
-	scanMutex      sync.RWMutex     // Protects scan operations
-	scanInProgress bool             // True if a scan is currently running
-	lastScanResult *skiplistWrapper // Result from the last completed scan
-	lastScanError  error            // Error from the last completed scan
-	currentScan    *mmapIndexFile   // Current scan index file (single mmap, expanded with mremap)
+	scanMutex      sync.RWMutex // Protects scan operations
+	scanInProgress bool         // True if a scan is currently running
+	lastScanError  error        // Error from the last completed scan
 
 	// Index tracking for memory protection during hash calculations
-	mainIndex        *mmapIndexFile   // Main index file (if loaded)
-	cacheIndex       *mmapIndexFile   // Cache index file (if loaded)
-	scanIndices      []*mmapIndexFile // Scan index files (may be multiple)
-	indexLockTimeout int              // Timeout in seconds for index memory locks
+	mainIndex        *mmapIndexFile // Main index file (if loaded)
+	cacheIndex       *mmapIndexFile // Cache index file (if loaded)
+	indexLockTimeout int            // Timeout in seconds for index memory locks
 
 	// Read-only mmap memo: dedups loadIndexFromFileWithTracking calls for
 	// canonical paths (main.idx, cache.idx, timestamped cache files,
@@ -465,14 +462,6 @@ func getGoroutineID() uint64 {
 	idField := strings.Fields(string(buf[:n]))[1]
 	id, _ := strconv.ParseUint(idField, 10, 64)
 	return id
-}
-
-// generateScanFileName generates a scan index filename with PID and goroutine ID
-func (dc *DirectoryCache) generateScanFileName() string {
-	pid := os.Getpid()
-	tid := getGoroutineID()
-	return filepath.Join(dc.MetaDir,
-		fmt.Sprintf("scan-%d-%d.idx", pid, tid))
 }
 
 // GenerateTimestampedFileName generates a timestamped filename using ISO 8601 format

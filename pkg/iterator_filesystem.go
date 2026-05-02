@@ -3,7 +3,6 @@ package dircachefilehash
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync/atomic"
 )
 
@@ -15,14 +14,13 @@ type FilesystemScanIterator struct {
 	iteratorBase
 
 	// Filesystem scanning
-	dc                *DirectoryCache
-	paths             []string
-	scanChan          chan *scannedPath
-	ctx               context.Context
-	cancel            context.CancelFunc
-	scanComplete      atomic.Bool
-	scanError         error
-	scanIndexFileName string // Scan index file name
+	dc           *DirectoryCache
+	paths        []string
+	scanChan     chan *scannedPath
+	ctx          context.Context
+	cancel       context.CancelFunc
+	scanComplete atomic.Bool
+	scanError    error
 
 	// Current state
 	nextScanned *scannedPath
@@ -191,15 +189,6 @@ func (ufsi *FilesystemScanIterator) Close() error {
 	// Signal shutdown to scanning goroutine
 	if ufsi.cancel != nil {
 		ufsi.cancel()
-	}
-
-	// Clean up scan index
-	if ufsi.scanIndexFileName != "" {
-		if err := ufsi.dc.cleanupCurrentScanFile(); err != nil && !os.IsNotExist(err) {
-			// Non-fatal, but log the error
-			fmt.Fprintf(os.Stderr, "Warning: failed to cleanup scan file: %v\n", err)
-		}
-		ufsi.scanIndexFileName = ""
 	}
 
 	// Drain any remaining entries from the channel (non-blocking)

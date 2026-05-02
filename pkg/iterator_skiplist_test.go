@@ -13,7 +13,6 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	dc := createTestDirectoryCache(t, tempDir)
-	defer func() { _ = dc.cleanupCurrentScanFile() }()
 
 	// Create test files
 	writeTestFile(t, filepath.Join(tempDir, "file1.txt"), "content1")

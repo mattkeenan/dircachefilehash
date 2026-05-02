@@ -208,26 +208,6 @@ func TestDirectoryCache_generateTempFileName(t *testing.T) {
 	}
 }
 
-func TestDirectoryCache_generateScanFileName(t *testing.T) {
-	dc := &DirectoryCache{}
-
-	filename := dc.generateScanFileName()
-
-	if filename == "" {
-		t.Error("Generated scan filename should not be empty")
-	}
-
-	// Should contain "scan" prefix
-	if len(filename) < 4 {
-		t.Errorf("Generated scan filename %s should contain scan prefix", filename)
-	}
-
-	// Test filename format (scan-{pid}-{tid}.idx)
-	if !strings.Contains(filename, "scan-") || !strings.HasSuffix(filename, ".idx") {
-		t.Errorf("Generated scan filename %s should match scan-{pid}-{tid}.idx pattern", filename)
-	}
-}
-
 func TestGetGoroutineID(t *testing.T) {
 	id := getGoroutineID()
 

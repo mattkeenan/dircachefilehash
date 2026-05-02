@@ -21,39 +21,10 @@ func TestBEScan(t *testing.T) {
 	suite.RunAllTests(t)
 }
 
-// testCleanupData stores cleanup information for test entries
-var testCleanupData = make(map[BinaryEntryInterface]*scanTestCleanupInfo)
-
-type scanTestCleanupInfo struct {
-	testDir string
-	dc      *DirectoryCache
-}
-
-// createBEScan creates a BEScanEntry for testing
-// This sets up a temporary scan index and adds a test entry
+// createBEScan creates a heap-allocated BEScanEntry for testing.
 func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
-	// Create temporary directory for test
-	testDir, err := os.MkdirTemp("", "dcfh-scan-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-
-	// Create DirectoryCache for the test
-	dc := NewDirectoryCache(testDir, testDir)
-
-	// Update the expected size to match what AppendEntryToScanIndex actually creates
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 
-	// Generate scan file name
-	scanFileName := dc.generateScanFileName()
-
-	// Initialize scan index
-	if err := dc.initialiseScanIndex(scanFileName); err != nil {
-		_ = os.RemoveAll(testDir)
-		t.Fatalf("Failed to initialize scan index: %v", err)
-	}
-
-	// Create mock file info and stat for the test entry
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
 		size:    int64(testData.FileSize),
@@ -71,29 +42,6 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 		Mtim: syscall.Timespec{Sec: 1234567900, Nsec: 0},
 	}
 
-	// Append entry to scan index
-	_, err = dc.AppendEntryToScanIndex(
-		scanFileName,
-		testData.RelativePath,
-		testData.Hash[:],
-		testData.HashType,
-		mockInfo,
-		mockStat,
-		testData.IsDeleted,
-	)
-	if err != nil {
-		// Cleanup on error
-		_ = os.RemoveAll(testDir)
-		t.Fatalf("Failed to create scan entry: %v", err)
-	}
-
-	// Get the scan index file to create binaryEntryRef
-	if dc.currentScan == nil {
-		_ = os.RemoveAll(testDir)
-		t.Fatalf("No current scan index after AppendEntryToScanIndex")
-	}
-
-	// Create BEScanEntry using the v0.7 constructor (metadata only, no hash)
 	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
 
 	// Post-process: apply test data that NewBEScanEntry doesn't set.
@@ -109,30 +57,13 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 		_ = scanEntry.SetDeleted(true)
 	}
 
-	// Store cleanup info in global map
-	testCleanupData[scanEntry] = &scanTestCleanupInfo{
-		testDir: testDir,
-		dc:      dc,
-	}
-
 	return scanEntry
 }
 
-// cleanupBEScan cleans up resources created during testing
-func cleanupBEScan(t *testing.T, entry BinaryEntryInterface) {
-	// Look up cleanup info from global map
-	if cleanupInfo, exists := testCleanupData[entry]; exists {
-		// Clean up test directory
-		if cleanupInfo.dc != nil {
-			_ = cleanupInfo.dc.cleanupCurrentScanFile()
-		}
-		if cleanupInfo.testDir != "" {
-			_ = os.RemoveAll(cleanupInfo.testDir)
-		}
-		// Remove from map
-		delete(testCleanupData, entry)
-	}
-}
+// cleanupBEScan releases resources created during testing.
+// Heap-allocated entries need no cleanup; this is a no-op kept to satisfy
+// the BinaryEntryTestSuite interface.
+func cleanupBEScan(t *testing.T, entry BinaryEntryInterface) {}
 
 // TestBEScanSpecific tests BEScan-specific functionality
 func TestBEScanSpecific(t *testing.T) {
@@ -261,38 +192,15 @@ func testBEScanInvalidHandling(t *testing.T) {
 	}
 }
 
-// scanTestHelper helps create scan entries for testing
-type scanTestHelper struct {
-	testDir string
-	dc      *DirectoryCache
-}
+// scanTestHelper helps create heap-allocated scan entries for testing.
+type scanTestHelper struct{}
 
-// createTestEntry creates a test scan entry and returns it with a cleanup function
+// createTestEntry creates a heap-allocated BEScanEntry for testing.
+// The cleanup function is a no-op kept for caller compatibility.
 func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
-	// Create temporary directory
-	testDir, err := os.MkdirTemp("", "dcfh-scan-specific-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	h.testDir = testDir
-
-	// Create DirectoryCache
-	h.dc = NewDirectoryCache(testDir, testDir)
-
-	// Create test data
 	testData := CreateTestData()
-	// Update the expected size to match what AppendEntryToScanIndex actually creates
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 
-	// Generate scan file name
-	scanFileName := h.dc.generateScanFileName()
-
-	// Initialize scan index
-	if err := h.dc.initialiseScanIndex(scanFileName); err != nil {
-		t.Fatalf("Failed to initialize scan index: %v", err)
-	}
-
-	// Create mock file info and stat
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
 		size:    int64(testData.FileSize),
@@ -310,34 +218,7 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 		Mtim: syscall.Timespec{Sec: 1234567900, Nsec: 0},
 	}
 
-	// Append entry to scan index
-	_, err = h.dc.AppendEntryToScanIndex(
-		scanFileName,
-		testData.RelativePath,
-		testData.Hash[:],
-		testData.HashType,
-		mockInfo,
-		mockStat,
-		testData.IsDeleted,
-	)
-	if err != nil {
-		t.Fatalf("Failed to create scan entry: %v", err)
-	}
-
-	// Create BEScanEntry using the v0.7 constructor
-	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
-
-	// Return entry and cleanup function
-	cleanup := func() {
-		if h.dc != nil {
-			_ = h.dc.cleanupCurrentScanFile()
-		}
-		if h.testDir != "" {
-			_ = os.RemoveAll(h.testDir)
-		}
-	}
-
-	return scanEntry, cleanup
+	return NewBEScanEntry(testData.RelativePath, mockInfo, mockStat), func() {}
 }
 
 // Benchmark tests for BEScan
@@ -345,21 +226,11 @@ func BenchmarkBEScan(b *testing.B) {
 	helper := &scanTestHelper{}
 
 	createFn := func() BinaryEntryInterface {
-		entry, _ := helper.createTestEntry(&testing.T{}) // This is a hack, but works for benchmarks
+		entry, _ := helper.createTestEntry(&testing.T{})
 		return entry
 	}
 
-	cleanupFn := func(entry BinaryEntryInterface) {
-		if _, ok := entry.(*BEScanEntry); ok {
-			// Manually cleanup - this is a limitation of the benchmark approach
-			if helper.dc != nil {
-				_ = helper.dc.cleanupCurrentScanFile()
-			}
-			if helper.testDir != "" {
-				_ = os.RemoveAll(helper.testDir)
-			}
-		}
-	}
+	cleanupFn := func(entry BinaryEntryInterface) {}
 
 	suite := &BinaryEntryTestSuite{}
 

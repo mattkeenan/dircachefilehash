@@ -7,18 +7,19 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unsafe"
 )
 
-// TestBEIndexFileMmap runs the implementation-neutral test suite for BEIndexFileMmap
+// TestBEIndexFileMmap runs the implementation-neutral test suite for BEIndexFileMmap.
+// SetHash/SetDeleted are not exercised: the v0.7 production load path
+// (loadIndexShared) maps PROT_READ only.
 func TestBEIndexFileMmap(t *testing.T) {
 	suite := &BinaryEntryTestSuite{
 		Name:               "BEIndexFileMmap",
 		CreateEntry:        createBEIndexFileMmap,
 		CleanupEntry:       cleanupBEIndexFileMmap,
-		SupportsSetHash:    true,
-		SupportsSetDeleted: true,
-		IsEphemeral:        false, // Mmap entries are stable (not ephemeral like scan entries)
+		SupportsSetHash:    false,
+		SupportsSetDeleted: false,
+		IsEphemeral:        false,
 	}
 
 	suite.RunAllTests(t)
@@ -29,44 +30,28 @@ var testCleanupDataIndexFileMmap = make(map[BinaryEntryInterface]*indexFileMmapT
 var cleanupMutexMmap sync.Mutex
 
 type indexFileMmapTestCleanupInfo struct {
-	testDir   string
-	indexFile string
-	mmapIndex *mmapIndexFile
-	dc        *DirectoryCache
+	testDir string
+	dc      *DirectoryCache
 }
 
-// createBEIndexFileMmap creates a BEIndexFileMmapEntry for testing
-// Uses existing scan index infrastructure to create a writable mmap'd index file
+// createBEIndexFileMmap creates a BEIndexFileMmapEntry backed by a real
+// mmap'd index file written via the production path
+// (TempIndexWriter.WriteSerialised + loadIndexShared).
 func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
-	// Create temporary directory for test
 	testDir, err := os.MkdirTemp("", "dcfh-index-file-mmap-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-
-	// Create DirectoryCache for the test
 	dc := NewDirectoryCache(testDir, testDir)
 
-	// Update the expected size to match what AppendEntryToScanIndex actually creates
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 
-	// Generate scan file name
-	scanFileName := dc.generateScanFileName()
-
-	// Initialize scan index using existing infrastructure
-	if err := dc.initialiseScanIndex(scanFileName); err != nil {
-		_ = os.RemoveAll(testDir)
-		t.Fatalf("Failed to initialize scan index: %v", err)
-	}
-
-	// Create mock file info and stat for the test entry
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
 		size:    int64(testData.FileSize),
 		mode:    os.FileMode(testData.Mode),
 		modTime: time.Unix(1234567900, 0),
 	}
-
 	mockStat := &syscall.Stat_t{
 		Dev:  uint64(testData.Dev),
 		Ino:  uint64(testData.Ino),
@@ -77,39 +62,57 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 		Mtim: syscall.Timespec{Sec: 1234567900, Nsec: 0},
 	}
 
-	// Create a binaryEntry with the test data using existing infrastructure
-	entryPtr, err := dc.AppendEntryToScanIndex(
-		scanFileName,
-		testData.RelativePath,
-		testData.Hash[:],
-		testData.HashType,
-		mockInfo,
-		mockStat,
-		(testData.EntryFlags&1) != 0, // Extract deletion flag
-	)
+	// Build a heap BEScanEntry to capture the test fields the suite expects,
+	// then serialise it through the production EntrySerialiser path.
+	scanEntry := NewBEScanEntry(testData.RelativePath, mockInfo, mockStat)
+	be, _ := scanEntry.getBinaryEntry()
+	be.CTimeWall = testData.CTimeWall
+	if testData.HashType != 0 {
+		_ = scanEntry.SetHash(testData.Hash[:], testData.HashType)
+	}
+	if (testData.EntryFlags & 1) != 0 {
+		_ = scanEntry.SetDeleted(true)
+	}
+
+	serialised, err := NewEntrySerialiser().Serialise(scanEntry)
 	if err != nil {
 		_ = os.RemoveAll(testDir)
-		t.Fatalf("Failed to append entry to scan index: %v", err)
+		t.Fatalf("Failed to serialise test entry: %v", err)
 	}
 
-	// Calculate offset from the pointer and scan index base
-	scanIndex := dc.currentScan
-	entryOffset := int(uintptr(unsafe.Pointer(entryPtr)) - uintptr(unsafe.Pointer(&scanIndex.Data[HeaderSize])))
-
-	// Create BEIndexFileMmapEntry from the scan index entry
-	entryRef := binaryEntryRef{
-		Offset:    entryOffset,
-		IndexFile: scanIndex,
+	// Write the entry to a temp index file using the production writer.
+	indexPath := filepath.Join(testDir, "test.idx")
+	writer, err := NewTempIndexWriter(dc, indexPath)
+	if err != nil {
+		_ = os.RemoveAll(testDir)
+		t.Fatalf("Failed to create temp index writer: %v", err)
 	}
-	mmapEntry := NewBEIndexFileMmapEntry(entryRef, "test")
+	if err := writer.WriteSerialised([][]byte{serialised}); err != nil {
+		_ = os.RemoveAll(testDir)
+		t.Fatalf("Failed to write serialised entry: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		_ = os.RemoveAll(testDir)
+		t.Fatalf("Failed to close temp index writer: %v", err)
+	}
 
-	// Store cleanup info with thread safety
+	// Mmap the index back through the shared loading path.
+	_, refs, err := dc.loadIndexShared(indexPath)
+	if err != nil {
+		_ = os.RemoveAll(testDir)
+		t.Fatalf("Failed to load index: %v", err)
+	}
+	if len(refs) == 0 {
+		_ = os.RemoveAll(testDir)
+		t.Fatalf("loadIndexShared returned no refs")
+	}
+
+	mmapEntry := NewBEIndexFileMmapEntry(refs[0], "test")
+
 	cleanupMutexMmap.Lock()
 	testCleanupDataIndexFileMmap[mmapEntry] = &indexFileMmapTestCleanupInfo{
-		testDir:   testDir,
-		indexFile: filepath.Join(testDir, scanFileName),
-		mmapIndex: scanIndex,
-		dc:        dc,
+		testDir: testDir,
+		dc:      dc,
 	}
 	cleanupMutexMmap.Unlock()
 
@@ -121,17 +124,13 @@ func cleanupBEIndexFileMmap(t *testing.T, entry BinaryEntryInterface) {
 	cleanupMutexMmap.Lock()
 	defer cleanupMutexMmap.Unlock()
 
-	// Look up cleanup info from global map
 	if cleanupInfo, exists := testCleanupDataIndexFileMmap[entry]; exists {
-		// Clean up mmap (if needed, though GC should handle it)
-		// The mmapIndex will be cleaned up by GC
-
-		// Clean up test directory
+		if cleanupInfo.dc != nil {
+			_ = cleanupInfo.dc.Close()
+		}
 		if cleanupInfo.testDir != "" {
 			_ = os.RemoveAll(cleanupInfo.testDir)
 		}
-
-		// Remove from map
 		delete(testCleanupDataIndexFileMmap, entry)
 	}
 }
@@ -238,54 +237,10 @@ func testBEIndexFileMmapMmapSafety(t *testing.T) {
 	}
 }
 
-// testBEIndexFileMmapWriteOperations tests in-place write operations
+// testBEIndexFileMmapWriteOperations is a no-op in v0.7: the production load
+// path maps PROT_READ only, so in-place writes are not exercised.
 func testBEIndexFileMmapWriteOperations(t *testing.T) {
-	helper := &indexFileMmapTestHelper{}
-	entry, cleanup := helper.createTestEntry(t)
-	defer cleanup()
-
-	// Test hash update (simulating iterative processing)
-	newHash := [20]byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc}
-	newHashType := HashTypeSHA256
-
-	if err := entry.SetHash(newHash[:], newHashType); err != nil {
-		t.Errorf("SetHash() returned error: %v", err)
-	}
-
-	// Verify update was successful (read from mmap)
-	if hash, err := entry.Hash(); err != nil {
-		t.Errorf("Hash() after update returned error: %v", err)
-	} else if hash != newHash {
-		t.Errorf("Hash() after update = %x, want %x", hash, newHash)
-	}
-
-	if hashType, err := entry.HashType(); err != nil {
-		t.Errorf("HashType() after update returned error: %v", err)
-	} else if hashType != newHashType {
-		t.Errorf("HashType() after update = %d, want %d", hashType, newHashType)
-	}
-
-	// Test deletion flag update
-	if err := entry.SetDeleted(true); err != nil {
-		t.Errorf("SetDeleted(true) returned error: %v", err)
-	}
-
-	if deleted, err := entry.IsDeleted(); err != nil {
-		t.Errorf("IsDeleted() after SetDeleted(true) returned error: %v", err)
-	} else if !deleted {
-		t.Errorf("IsDeleted() after SetDeleted(true) = false, want true")
-	}
-
-	// Test unsetting deletion flag
-	if err := entry.SetDeleted(false); err != nil {
-		t.Errorf("SetDeleted(false) returned error: %v", err)
-	}
-
-	if deleted, err := entry.IsDeleted(); err != nil {
-		t.Errorf("IsDeleted() after SetDeleted(false) returned error: %v", err)
-	} else if deleted {
-		t.Errorf("IsDeleted() after SetDeleted(false) = true, want false")
-	}
+	t.Skip("v0.7: BEIndexFileMmapEntry backing mmap is read-only; writes are not supported")
 }
 
 // testBEIndexFileMmapConcurrentMmapAccess tests concurrent mmap access
