@@ -24,8 +24,21 @@ linters:
 
   settings:
     govet:
+      # enable-all gives parity with `go vet` (and then some). The three
+      # disables below are analyzers govet's enable-all turns on but
+      # `cmd/vet` does not run by default — keeping them off matches
+      # the behaviour the pre-commit hook used to get from raw go vet:
+      #   - fieldalignment: binaryEntry layout is intentional and locked
+      #     by build-time assertions in pkg/binary_entry.go.
+      #   - shadow: experimental, very noisy.
+      #   - nilness: experimental, not in cmd/vet's default suite.
+      # unsafeptr stays enabled; the four known false positives in
+      # pkg/binary_entry.go are suppressed per-line via //nolint:govet.
+      enable-all: true
       disable:
-        - unsafeptr  # intentional unsafe.Pointer arithmetic for mmap/zero-copy
+        - fieldalignment
+        - shadow
+        - nilness
 
     gocritic:
       disabled-checks:

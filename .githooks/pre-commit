@@ -72,16 +72,11 @@ if command -v gopls &>/dev/null; then
     fi
 fi
 
-# Run go vet (disable unsafeptr check — this codebase uses intentional
-# unsafe.Pointer arithmetic for mmap/zero-copy operations)
-echo "Running go vet..."
-if ! go vet -unsafeptr=false ./...; then
-    echo "ERROR: go vet found issues"
-    exit 1
-fi
-
 # Run golangci-lint. In staged mode, --new only flags issues in changed
 # code (legacy stays silent). In --all mode, audit the whole codebase.
+# golangci-lint's govet linter runs the same vet analyzers (configured
+# via enable-all + targeted disables in .golangci.yml), so a separate
+# raw `go vet` pass is redundant.
 if command -v golangci-lint &>/dev/null; then
     echo "Running golangci-lint..."
     LINT_ARGS=(run ./...)
