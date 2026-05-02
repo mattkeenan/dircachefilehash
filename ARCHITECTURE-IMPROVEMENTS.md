@@ -44,11 +44,9 @@ Items are ordered by observed risk, not effort.
 
 - **Status**: closed. Renamed to `pkg/binary_entry_interface_test_framework_test.go` so the Go toolchain only compiles it into test binaries. No code or package changes were needed — every consumer was already a `_test.go` file in the same `package dircachefilehash`. `BinaryEntryTestSuite`, `TestEntryData`, `CreateTestData`, and `CreateDeletedTestData` no longer appear in `dcfh`, `dcfhfind`, or `dcfhfix` production binaries.
 
-## 8. `PathEntryIterator` is dead but still exported
+## 8. ~~`PathEntryIterator` is dead but still exported~~ — **resolved**
 
-- **Site**: `pkg/iterator.go:7` defines `PathEntryIterator` (returns `*binaryEntry`); the v0.7 surface is `BinaryEntryIterator` at `:36` of the same file.
-- **Reality**: No callers in production code (`grep -rn 'PathEntryIterator' pkg/ cmd/ --include='*.go'` returns only the type definition itself).
-- **Why it matters**: An exported, undocumented "use which?" choice in the godoc surface is the wrong impression to give a library consumer. Either delete it or mark it deprecated and route the type alias to `BinaryEntryIterator`.
+- **Status**: closed. The `PathEntryIterator` interface at `pkg/iterator.go:7-34` (a v0.6 holdover that returned the unexported `*binaryEntry`, so external implementers couldn't use it anyway) has been deleted. `BinaryEntryIterator` is now the only iterator surface in `pkg/iterator.go`. `ARCHITECTURE.md`'s description of the file was updated to drop the holdover note. References in `architecture-v0.6.md` / `architecture-v0.7.md` / `.claude/sessions/` were left alone — they are migration history and fall under the doc-sprawl prune-pass observation below.
 
 ## 9. ~~Context dispatch is duplicated across nine files~~ — **resolved**
 

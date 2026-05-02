@@ -60,7 +60,7 @@ elided for brevity.
 | `pkg/binary_entry_index_file.go` | `BEIndexFileIOEntry` — entries read via plain I/O. |
 | `pkg/binary_entry_index_file_mmap.go` | `BEIndexFileMmapEntry` — entries read via mmap, used by `dcfhfind` and recovery. |
 | `pkg/skiplist.go` | `skiplistWrapper`: the zerocopyskiplist wrapper with context-tagged entries and vectorio integration (`pkg/skiplist.go:39`). |
-| `pkg/iterator.go` | `BinaryEntryIterator` interface (the v0.7 surface; `PathEntryIterator` in the same file is a v0.6 holdover). |
+| `pkg/iterator.go` | `BinaryEntryIterator` interface and shared `iteratorBase` helpers. |
 | `pkg/iterator_skiplist.go`, `pkg/iterator_filesystem.go` | Iterator implementations for skiplists and live filesystem walks. |
 | `pkg/hwang_lin.go` | The Hwang-Lin merge of two sorted iterators (`pkg/hwang_lin.go:10`). |
 | `pkg/reorder_buffer.go` | Restores sorted order after parallel hashing — keys on `PipelineEntry.SeqNum`. |

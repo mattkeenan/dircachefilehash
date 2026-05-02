@@ -4,35 +4,6 @@ import (
 	"fmt"
 )
 
-// PathEntryIterator abstracts the source of file entries for Hwang-Lin comparison.
-// Implementations can provide entries from skiplists, streaming index files,
-// filesystem scans, or any other sorted source.
-//
-// All implementations MUST return entries in sorted path order for the
-// Hwang-Lin algorithm to work correctly.
-type PathEntryIterator interface {
-	// Next returns the next entry in sorted order.
-	// Returns (nil, nil) when exhausted.
-	// Returns (nil, error) on error.
-	Next() (*binaryEntry, error)
-
-	// CurrentPath returns the path of the last entry returned by Next().
-	// Returns empty string if Next() hasn't been called or iterator is exhausted.
-	// This is used for path comparison in the Hwang-Lin algorithm.
-	CurrentPath() string
-
-	// HasNext returns true if there are more entries available.
-	// This is a hint - callers should handle Next() returning nil.
-	HasNext() bool
-
-	// Name returns a descriptive name for this iterator (for debugging/logging).
-	Name() string
-
-	// Close releases any resources held by the iterator.
-	// Implementations should be safe to call Close() multiple times.
-	Close() error
-}
-
 // BinaryEntryIterator abstracts the source of file entries using BinaryEntryInterface.
 // All implementations MUST return entries in sorted path order for the Hwang-Lin algorithm.
 type BinaryEntryIterator interface {
