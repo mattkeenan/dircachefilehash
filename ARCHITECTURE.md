@@ -72,7 +72,7 @@ elided for brevity.
 | `pkg/pipeline_status.go` | The four-stage status pipeline (`pkg/pipeline_status.go:9`). |
 | `pkg/pipeline_update.go` | The four-stage update pipeline (`pkg/pipeline_update.go:9`); main-index rename at `pkg/pipeline_update.go:193`. |
 | `pkg/comparison_sink.go` | The two sinks: `scanWriteSink` (canonical write) and `diffComparisonSink` (delta capture). Distinction documented at `pkg/comparison_sink.go:1`. |
-| `pkg/callback.go`, `pkg/callback_update.go` | `HwangLinCallback` and `UpdateCallback` — the per-row hooks the merge fires for added / modified / deleted paths. |
+| `pkg/callback.go` | `HwangLinCallback` — the per-row hook interface the merge fires for added / modified / deleted paths. The active implementation is `sinkCallbackAdapter` in `pkg/comparison_sink.go`. |
 | `pkg/diff.go` | `Diff()` — the function `Repo.Diff` and `dc.Status` both delegate to (`pkg/diff.go:8`). |
 | `pkg/openref.go` | `OpenRef()` and the `IndexRef` vocabulary (Main / Cache / Merged / FsScan). |
 | `pkg/temp_index_writer.go` | `TempIndexWriter` — the write-only target the pipeline drains into before the atomic rename. |

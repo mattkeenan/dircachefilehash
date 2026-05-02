@@ -201,7 +201,9 @@ func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) 
 	}
 }
 
-// performPipelineScan replaces performScanToSkiplist with the pipeline architecture.
+// performPipelineScan runs the four-stage update pipeline (compare → hash →
+// reorder → write) and atomically renames the resulting temp index into
+// main.idx via the deferred finaliseMainIndex helper.
 func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) error {
 	defer VerboseEnter()()
 

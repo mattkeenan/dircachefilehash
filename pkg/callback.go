@@ -84,9 +84,6 @@ type HwangLinCallback interface {
 	// - entry: The BinaryEntryInterface that may need hashing and/or writing
 	// - operation: Description of the operation context ("new_file", "modified", "unchanged", etc.)
 	//
-	// Implementation varies by callback:
-	// - UpdateCallback: Full hash coordination + main.idx writing
-	//
 	// This method should be called by ALL On* methods before returning.
 	SubmitAndOrWriteHash(entry BinaryEntryInterface, operation string) error
 
