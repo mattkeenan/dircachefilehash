@@ -192,7 +192,10 @@ This separation provides:
 The codebase is organized in distinct layers, from low-level utilities to high-level workflows:
 
 **Layer 1: Foundation**
-- `pkg/util.go` - Utility functions and structs that don't belong elsewhere
+- `pkg/binary_entry.go` - `binaryEntry` struct + methods, `binaryEntryRef`, build-time layout assertions
+- `pkg/time_encoding.go` - Wall-time encoding (`timeWall`, `timeFromWall`, `encodeWallTime`)
+- `pkg/filenames.go` - Timestamped index filenames + `PathToSlug`
+- `pkg/human_size.go` - `ParseHumanSize` / `FormatHumanSize` / `FormatHumanRate`
 - `pkg/constants.go` - Constants used by external consumers (e.g., cmd/dcfh.go)
 - `pkg/hash.go` - Hash algorithms, file hashing, symlink-target hashing
 - `pkg/index.go` - Binary index file internals and binaryEntry management
@@ -241,12 +244,23 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 
 ### Layer 1: Foundation Components
 
-**Utilities** (`pkg/util.go`):
-- Core structs: `DirectoryCache`, `binaryEntry`, `fileJob`
-- Time encoding functions: `timeWall()`, `timeFromWall()`, `encodeWallTime()`
-- File naming: `generateTempFileName()`, `generateScanFileName()`, `generateTmpIndexFileName()`
-- Goroutine ID extraction: `getGoroutineID()`
-- Binary entry utilities: `IsDeleted()`, `SetDeleted()`, `RelativePath()`, `HashString()`
+**Binary entry** (`pkg/binary_entry.go`):
+- `binaryEntry` struct (mmap-resident on-disk layout) + `binaryEntryRef` (offset-based handle)
+- Flag methods: `IsDeleted` / `SetDeleted` / `ClearDeleted` / `IsHashed` / `SetHashed`
+- Path access: `RelativePath` (zero-copy unsafe), `RelativePathModern` (Go 1.17+ `unsafe.Slice` variant)
+- Validation: `validateLayout`, `ValidateEntry`, build-time layout assertions
+- Sizing: `EntrySize`, `BESizeFromPathLen`
+- Hash helpers: `HashString`, `IsHashEmpty`
+
+**Time encoding** (`pkg/time_encoding.go`):
+- `timeWall()` / `timeFromWall()` / `encodeWallTime()` — custom 34-bit-sec + 30-bit-nsec format with 1885 epoch (range 1885 → ~2429)
+
+**File naming** (`pkg/filenames.go`):
+- Methods on `DirectoryCache`: `GenerateTimestampedFileName`, `ScanForTimestampedCacheFiles`, `CleanupTimestampedCacheFiles`
+- `PathToSlug` — kebab-case slug for external `.dcfh` directory naming
+
+**Human-readable sizes** (`pkg/human_size.go`):
+- `ParseHumanSize` (e.g. "2M", "512k"), `FormatHumanSize`, `FormatHumanRate`
 
 **Constants** (`pkg/constants.go`):
 - Index format constants: `HeaderSize`, `ChecksumSize`, hash type constants

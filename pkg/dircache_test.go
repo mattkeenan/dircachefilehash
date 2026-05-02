@@ -3,8 +3,41 @@ package dircachefilehash
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestNewDirectoryCache(t *testing.T) {
+	rootDir := "/tmp/test/root" // Use /tmp to avoid permission issues
+	metaDir := "/tmp/test/dcfh"
+
+	dc := NewDirectoryCache(rootDir, metaDir)
+
+	if dc == nil {
+		t.Fatal("NewDirectoryCache should not return nil")
+	}
+
+	if dc.RootDir != rootDir {
+		t.Errorf("Expected RootDir %s, got %s", rootDir, dc.RootDir)
+	}
+
+	// CacheFile should be the cache.idx file in metaDir, not metaDir itself
+	expectedCacheFile := strings.TrimSuffix(metaDir, "/") + "/.dcfh/cache.idx"
+	if dc.CacheFile != expectedCacheFile {
+		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
+	}
+
+	// Check that hasher is initialised
+	if dc.hasher == nil {
+		t.Error("Hasher should be initialised")
+	}
+
+	// Check signature
+	expectedSig := [4]byte{'d', 'c', 'f', 'h'}
+	if dc.signature != expectedSig {
+		t.Errorf("Expected signature %v, got %v", expectedSig, dc.signature)
+	}
+}
 
 // realPath resolves symlinks so tests compare the same canonical form used by
 // DiscoverRepository/ResolveRepository (e.g. /tmp vs /private/tmp on macOS).

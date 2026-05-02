@@ -4,10 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
 )
+
+// getGoroutineID extracts goroutine ID from runtime stack
+func getGoroutineID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(string(buf[:n]))[1]
+	id, _ := strconv.ParseUint(idField, 10, 64)
+	return id
+}
 
 // isValidHashType reports whether hashType matches one of the supported
 // hash algorithms. Used by ValidationProcessor when checking entries

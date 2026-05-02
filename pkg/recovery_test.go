@@ -9,6 +9,20 @@ import (
 	"unsafe"
 )
 
+func TestGetGoroutineID(t *testing.T) {
+	id := getGoroutineID()
+
+	if id == 0 {
+		t.Error("Goroutine ID should not be zero")
+	}
+
+	// Should be consistent within the same goroutine
+	id2 := getGoroutineID()
+	if id != id2 {
+		t.Errorf("Goroutine ID should be consistent: %d != %d", id, id2)
+	}
+}
+
 func TestRecoveryValidationProcessor(t *testing.T) {
 	// Create a properly formatted binary entry for testing
 	// We need to allocate memory for the entry + path data

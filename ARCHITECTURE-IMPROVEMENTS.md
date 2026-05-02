@@ -36,10 +36,9 @@ Items are ordered by observed risk, not effort.
 
 - **Status**: closed. `scan.go` now owns only the walk machinery (~424 lines). Foundation types live in `pkg/scan_types.go`; symlink policy lives in `pkg/scan_symlinks.go`; `hashJobStart` moved to `pkg/algorithm_hash_manager.go` next to its only consumer; the dead `hwangLinType` enum was deleted outright.
 
-## 6. `util.go` is an overloaded grab-bag (655 lines)
+## 6. ~~`util.go` is an overloaded grab-bag (655 lines)~~ — **resolved**
 
-- **What's in it**: the `DirectoryCache` struct definition (`pkg/util.go:39`), time encoding, file naming helpers, goroutine ID extractor, orphaned-file detector, build-time assertions about `binaryEntry`.
-- **Why it matters**: `DirectoryCache` is the cross-layer aggregate (it contains `Walker`, `Hasher`, scanner state, mmap memo, config — fields that span Layers 1–4 in `ARCHITECTURE.md`). Its definition lives in a foundation file alongside time-encoding utilities, so the boundary between "type" and "utilities" disappears. The file's naming ("things that don't belong elsewhere") is honest about the problem but doesn't fix it.
+- **Status**: closed. `pkg/util.go` (and `pkg/util_test.go`) have been deleted. The contents were split along their real seams: `DirectoryCache` + `ScanIndexInfo` + `loadedIndex` + `cachedStat` moved to `pkg/dircache.go` (where its methods already live); `binaryEntry` struct + methods + `binaryEntryRef` + build-time layout assertions moved to a new `pkg/binary_entry.go` (matching the existing `binary_entry_*.go` naming pattern); the three time helpers moved to `pkg/time_encoding.go`; `GenerateTimestampedFileName` / `ScanForTimestampedCacheFiles` / `CleanupTimestampedCacheFiles` plus `PathToSlug` moved to `pkg/filenames.go`; `ParseHumanSize` / `FormatHumanSize` / `FormatHumanRate` moved to `pkg/human_size.go`; `getGoroutineID` moved to `pkg/recovery.go` next to its only caller (`createPreRecoverySnapshot` at `pkg/recovery.go:406`). The dead `generateTempFileName` (zero production callers) was deleted outright. CLAUDE.md and ARCHITECTURE.md were updated to reflect the new file inventory.
 
 ## 7. ~~`binary_entry_interface_test_framework.go` ships in production builds~~ — **resolved**
 

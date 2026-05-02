@@ -1,9 +1,7 @@
 package dircachefilehash
 
 import (
-	"strings"
 	"testing"
-	"time"
 	"unsafe"
 )
 
@@ -127,40 +125,6 @@ func TestBinaryEntry_RelativePath(t *testing.T) {
 	}
 }
 
-func TestTimeConversion(t *testing.T) {
-	// Test time conversion functions
-	now := time.Now()
-
-	// Convert to wall time and back
-	wall := timeWall(now)
-	converted := timeFromWall(wall)
-
-	// Should be very close (within reasonable precision limits)
-	diff := now.Sub(converted)
-	if diff > 10*time.Second || diff < -10*time.Second {
-		t.Errorf("Time conversion error too large: %v", diff)
-	}
-}
-
-func TestEncodeWallTime(t *testing.T) {
-	// Test wall time encoding
-	sec := int64(1234567890)
-	nsec := int64(123456789)
-
-	wall := encodeWallTime(sec, nsec)
-	if wall == 0 {
-		t.Error("Wall time should not be zero")
-	}
-
-	// Convert back and verify - just check that conversion works
-	converted := timeFromWall(wall)
-	// Don't check exact equality since time conversion might have different epoch
-	// Just verify we get a reasonable time back
-	if converted.IsZero() {
-		t.Error("Converted time should not be zero")
-	}
-}
-
 func TestBESizeFromPathLen(t *testing.T) {
 	tests := []struct {
 		pathLen  int
@@ -179,77 +143,5 @@ func TestBESizeFromPathLen(t *testing.T) {
 				t.Errorf("BESizeFromPathLen(%d) = %d, want %d", tt.pathLen, result, tt.expected)
 			}
 		})
-	}
-}
-
-func TestDirectoryCache_generateTempFileName(t *testing.T) {
-	dc := &DirectoryCache{}
-
-	// Test different prefixes
-	prefixes := []string{"scan", "tmp", "cache"}
-
-	for _, prefix := range prefixes {
-		filename := dc.generateTempFileName(prefix)
-
-		if filename == "" {
-			t.Errorf("Generated filename should not be empty for prefix %s", prefix)
-		}
-
-		// Should contain the prefix
-		if len(filename) < len(prefix) {
-			t.Errorf("Generated filename %s should contain prefix %s", filename, prefix)
-		}
-
-		// Should be unique (test by generating multiple)
-		filename2 := dc.generateTempFileName(prefix)
-		if filename == filename2 {
-			t.Errorf("Generated filenames should be unique: %s == %s", filename, filename2)
-		}
-	}
-}
-
-func TestGetGoroutineID(t *testing.T) {
-	id := getGoroutineID()
-
-	if id == 0 {
-		t.Error("Goroutine ID should not be zero")
-	}
-
-	// Should be consistent within the same goroutine
-	id2 := getGoroutineID()
-	if id != id2 {
-		t.Errorf("Goroutine ID should be consistent: %d != %d", id, id2)
-	}
-}
-
-func TestNewDirectoryCache(t *testing.T) {
-	rootDir := "/tmp/test/root" // Use /tmp to avoid permission issues
-	metaDir := "/tmp/test/dcfh"
-
-	dc := NewDirectoryCache(rootDir, metaDir)
-
-	if dc == nil {
-		t.Fatal("NewDirectoryCache should not return nil")
-	}
-
-	if dc.RootDir != rootDir {
-		t.Errorf("Expected RootDir %s, got %s", rootDir, dc.RootDir)
-	}
-
-	// CacheFile should be the cache.idx file in metaDir, not metaDir itself
-	expectedCacheFile := strings.TrimSuffix(metaDir, "/") + "/.dcfh/cache.idx"
-	if dc.CacheFile != expectedCacheFile {
-		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
-	}
-
-	// Check that hasher is initialised
-	if dc.hasher == nil {
-		t.Error("Hasher should be initialised")
-	}
-
-	// Check signature
-	expectedSig := [4]byte{'d', 'c', 'f', 'h'}
-	if dc.signature != expectedSig {
-		t.Errorf("Expected signature %v, got %v", expectedSig, dc.signature)
 	}
 }

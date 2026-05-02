@@ -3,14 +3,99 @@ package dircachefilehash
 import (
 	"crypto/sha1"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 )
+
+// ScanIndexInfo tracks memory-mapped scan index files for cleanup
+type ScanIndexInfo struct {
+	FilePath string // Path to scan index file
+	MmapData []byte // Memory-mapped data (if currently mapped)
+	FileSize int    // Size of the file
+}
+
+// DirectoryCache manages the file cache for a directory
+// Note: skiplist management moved to higher-level files
+type DirectoryCache struct {
+	RootDir         string
+	MetaDir         string // Path to .dcfh metadata directory
+	IndexFile       string
+	CacheFile       string         // Path to index.cache file
+	signature       [4]byte        // "dcfh" signature
+	version         uint32         // Index version
+	hasher          hash.Hash      // SHA-1 hasher for checksums
+	walker          Walker         // Filesystem walker (local or wire-backed)
+	fileHasher      Hasher         // Content hasher (local or wire-backed)
+	mmapIndex       *mmapIndex     // Memory-mapped index file
+	ignoreManager   *IgnoreManager // Ignore pattern manager
+	config          *Config        // Configuration manager
+	symlinkMode     string         // Current symlink handling mode
+	ignoreIsDeindex bool           // Whether newly ignored files should be marked as deleted
+	hashWorkers     int            // Number of concurrent hash workers
+
+	// scanIgnore is the scan-time --ignore predicate (nil = off). The
+	// setter (localRepo.Diff/Apply) must defer reset to nil so reused
+	// DirectoryCaches don't leak the predicate to a later call.
+	// scanFilterEnt/scanFilterCtx are scratch storage reused per
+	// chokepoint hit so a million-file scan doesn't allocate a million
+	// adapters and contexts.
+	scanIgnore    FilterExpr
+	scanFilterEnt scanFilterEntry
+	scanFilterCtx FilterContext
+
+	// Concurrent scan synchronization
+	scanMutex      sync.RWMutex // Protects scan operations
+	scanInProgress bool         // True if a scan is currently running
+	lastScanError  error        // Error from the last completed scan
+
+	// Index tracking for memory protection during hash calculations
+	mainIndex        *mmapIndexFile // Main index file (if loaded)
+	cacheIndex       *mmapIndexFile // Cache index file (if loaded)
+	indexLockTimeout int            // Timeout in seconds for index memory locks
+
+	// Read-only mmap memo: dedups loadIndexFromFileWithTracking calls for
+	// canonical paths (main.idx, cache.idx, timestamped cache files,
+	// snapshot main.idx). Keyed by absolute path. Stat-checked on every
+	// lookup so atomic-rename writes invalidate naturally.
+	//
+	// Lifetime: the memo owns the mappings. Each entry is constructed with
+	// refCount=1; eviction or Close DecRefs to 0 → cleanup. Stat-mismatch
+	// evictions move the old entry into orphanIndices instead of unmapping
+	// immediately — skiplists handed out earlier may still hold refs into
+	// that mapping. orphanIndices is drained in Close.
+	loadedIndices map[string]*loadedIndex
+	orphanIndices []*loadedIndex
+	loadedMu      sync.Mutex
+}
+
+// loadedIndex is one entry in the read-only mmap memo. The mmap is owned
+// by the memo: holding a *loadedIndex implies a live mapping. Eviction
+// (stale stat or Close) DecRefs file. The refs slice is the parsed entry
+// list — sharing it across consumers is safe because main/cache/snapshot
+// indices are PROT_READ and never mutated in memory.
+type loadedIndex struct {
+	file *mmapIndexFile
+	refs []binaryEntryRef
+	stat cachedStat
+}
+
+// cachedStat captures the identity of an on-disk index file for the memo's
+// invalidation check. Comparing dev+inode+size+mtime catches atomic
+// renames (inode changes), in-place truncation (size changes), and any
+// other rewrite (mtime changes).
+type cachedStat struct {
+	dev   uint64
+	ino   uint64
+	size  int64
+	mtime int64 // unix nanoseconds
+}
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
 func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {

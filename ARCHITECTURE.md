@@ -42,7 +42,10 @@ elided for brevity.
 | `pkg/hash.go` | Hash algorithm registry, `HashFile` / `HashFileInterruptible`, symlink-target hashing. |
 | `pkg/index.go` | Binary index format, `mmapIndexFile`, header read/write, mmap lifecycle, vectorio writes. |
 | `pkg/index_loading.go` | Memo'd shared mmap loading (see §3 metaphor 5). |
-| `pkg/util.go` | `DirectoryCache` struct definition (`pkg/util.go:39`), time encoding, file naming, goroutine ID extractor. |
+| `pkg/binary_entry.go` | `binaryEntry` struct, methods, `binaryEntryRef`, build-time layout assertions, `BESizeFromPathLen`. |
+| `pkg/time_encoding.go` | `timeWall` / `timeFromWall` / `encodeWallTime` — custom 1885-epoch wall-time format. |
+| `pkg/filenames.go` | `DirectoryCache.GenerateTimestampedFileName` / `ScanForTimestampedCacheFiles` / `CleanupTimestampedCacheFiles`, plus `PathToSlug`. |
+| `pkg/human_size.go` | `ParseHumanSize`, `FormatHumanSize`, `FormatHumanRate`. |
 | `pkg/verbose.go` | Debug flags / verbose level. |
 | `pkg/config.go` | `.dcfh/config` parsing and the validators (`ValidateHashAlgorithm` etc., `pkg/config.go:469`). |
 | `pkg/ignore.go` | `.dcfhignore` matching. |
@@ -77,7 +80,7 @@ elided for brevity.
 | `pkg/openref.go` | `OpenRef()` and the `IndexRef` vocabulary (Main / Cache / Merged / FsScan). |
 | `pkg/temp_index_writer.go` | `TempIndexWriter` — the write-only target the pipeline drains into before the atomic rename. |
 | `pkg/algorithm_hash_manager.go` | Cookie-based hash submission + completion ordering. |
-| `pkg/dircache.go` | The `DirectoryCache` constructors and high-level helpers (`CreateDirectoryCache` at `pkg/dircache.go:197`). The struct itself is in `util.go`. |
+| `pkg/dircache.go` | The `DirectoryCache` struct definition, constructors, and high-level helpers (`CreateDirectoryCache` at `pkg/dircache.go:282`). |
 | `pkg/scan.go` | Filesystem walk + symlink traversal + scan-supporting types (`scannedPath`, `hashJobStart`). |
 
 ### Layer 4 — Core operations
