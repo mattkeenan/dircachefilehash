@@ -13,36 +13,28 @@ Items are ordered by observed risk, not effort.
 
 ---
 
-## 1. `AppendEntryToScanIndex` is documented as the only write path; it's effectively dead
+## 1. ~~`AppendEntryToScanIndex` is documented as the only write path; it's effectively dead~~ — **resolved**
 
-- **Claim**: CLAUDE.md:559 — "`AppendEntryToScanIndex()` is the ONLY function that writes binaryEntries to index files."
-- **Reality**: `pkg/index.go:1008` defines it; the only remaining callers are inside `pkg/recovery.go`. The pipeline write path is `TempIndexWriter` → `vectorio.WritevRaw`.
-- **Why it matters**: The "single entry writing path" is the load-bearing constraint that the locking design rests on (see CLAUDE.md §"Memory Protection and Locking Mechanism"). If the constraint isn't true any more, neither is the safety argument that flows from it. Either restate the constraint correctly for v0.7 or remove the dead path.
+- **Status**: closed. `AppendEntryToScanIndex`, `appendEntryToNamedIndex`, `writeBinaryEntryToMmap`, `initialiseScanIndex`, `cleanupCurrentScanFile`, the unused `AppendEntryToFixIndex` / `InitializeFixIndex` / `CleanupFixIndex` siblings, and the `mremap()` call in `pkg/index.go` have all been deleted. The orphaned recovery cascade (`loadIndexWithCleanCopyingAndFixes`, `processRecoveryEntry`, `applyFixesToEntry`, etc.) that fed them has been deleted too. CLAUDE.md's §"Memory Protection and Locking Mechanism" was rewritten — the locks are now defensive rather than load-bearing.
+- **Note**: `RecoverFromIndexWithFixes` and `RecoverWithStatePreservation` remain as stubs returning "not yet implemented" — designing the v0.7 recovery write path is item 4.
 
-## 2. `BEScanEntry` is documented as mmap-backed; it's heap-allocated
+## 2. ~~`BEScanEntry` is documented as mmap-backed; it's heap-allocated~~ — **resolved**
 
-- **Claim**: `pkg/binary_entry_interface.go:25` lists "Scanning (mmap-backed, ephemeral)" as one of the four storage modes.
-- **Reality**: `pkg/binary_entry_scan.go:11` and `:28` describe it as heap-allocated; the per-type comment in the same file explicitly contrasts the v0.7 heap design with the v0.6 mmap design.
-- **Why it matters**: A reader who trusts the interface comment will think entries can disappear under them when the mapping is remapped. They can't. The metaphor "scan = mmap" is the foundation of the locking story; it doesn't apply.
+- **Status**: closed. `pkg/binary_entry_interface.go:23` now reads "Scanning (heap-allocated, ephemeral)" and the surrounding error-handling note no longer references mremap.
 
-## 3. Two rename sites for `main.idx`
+## 3. ~~Two rename sites for `main.idx`~~ — **resolved**
 
-- **Sites**:
-  - `pkg/pipeline_update.go:193` — `os.Rename(tempName, dc.IndexFile)` at the tail of the update pipeline.
-  - `pkg/callback_update.go:298` — `os.Rename(tempPath, mainIndexPath)` inside `UpdateCallback.finaliseTempIndexWriter`.
-- **Reality**: Either one is dead code or there's a double-rename / race. The two paths look like they came from different stages of the v0.7 migration and were never reconciled.
-- **Why it matters**: `main.idx` is the durable state. A subtly broken atomicity contract here means a crash mid-update produces a partially-written index that nothing detects.
+- **Status**: closed. The legacy callback path (`UpdateCallback`, `performScanToSkiplist`, `pkg/callback_update.go`) has been deleted; `finaliseMainIndex` (`pkg/pipeline_update.go:174`) is now the single owner of the `main.idx` temp+rename contract.
+- **Note**: deleting the legacy path also removed the FATAL `os.Exit(1)` scaffolding inside `RecoverFromIndexWithFixes` and `RecoverWithStatePreservation`; those wrappers now return clean "v0.7 pipeline-based recovery not yet implemented" errors so `AutoRecover`'s strategy chain can fall through. See item 4.
 
 ## 4. `recovery.go` is half-migrated to v0.7
 
-- **Evidence**: `pkg/recovery.go` (~1200 lines) has multiple commented-out write call sites where the v0.7 pipeline equivalent hasn't been wired in. Several recovery modes still call into the v0.6 mmap-scan path (item 1) because no replacement has been written.
-- **Why it matters**: Recovery is the path that runs *when things are already wrong*. Half-migrated code there means failure modes that work in tests don't work in the field, and we won't notice because nobody hits the recovery path under controlled conditions. This is the strongest argument for finishing the deferred Fix primitive.
+- **Evidence**: `pkg/recovery.go` still carries dead helpers that exist only to feed the (now stub) `RecoverFromIndexWithFixes` body — `loadIndexWithCleanCopyingAndFixes`, `loadIndexWithCleanCopyingEnhanced`, `processRecoveryEntry`, `analyzeEntryForFixes`, `applyFixesToEntry`, `promptUserForFix`, `appendRawEntryToScanIndex`, `isValidHashType`. None are reachable from a path that produces useful output.
+- **Why it matters**: Recovery is the path that runs *when things are already wrong*. Half-migrated code there means failure modes that work in tests don't work in the field, and we won't notice because nobody hits the recovery path under controlled conditions. This is the strongest argument for finishing the deferred Fix primitive. The item-3 cleanup intentionally left this cascade in place to keep that change focused; the next pass on item 4 should both delete the now-orphaned helpers and design the v0.7 recovery write path.
 
-## 5. `scan.go` identity crisis (711 lines)
+## 5. ~~`scan.go` identity crisis (711 lines)~~ — **resolved**
 
-- **History**: Hwang-Lin moved out to `hwang_lin.go`. Filesystem walk and symlink traversal stayed.
-- **What's still in there**: filesystem walk + symlink resolution + types that are foundation-level (`scannedPath`, `hwangLinType`, `hashJobStart` at `pkg/scan.go:20-47`).
-- **Why it matters**: The file's name no longer tells you what's in it, so contributors can't predict where to look. Splitting it (e.g. `scan_walk.go` for the filesystem walk, `scan_types.go` for the foundation types) would restore the layering the rest of the package follows.
+- **Status**: closed. `scan.go` now owns only the walk machinery (~424 lines). Foundation types live in `pkg/scan_types.go`; symlink policy lives in `pkg/scan_symlinks.go`; `hashJobStart` moved to `pkg/algorithm_hash_manager.go` next to its only consumer; the dead `hwangLinType` enum was deleted outright.
 
 ## 6. `util.go` is an overloaded grab-bag (655 lines)
 
@@ -66,10 +58,9 @@ Items are ordered by observed risk, not effort.
 - **Reality**: Every site decides independently which context tag a skiplist or entry should carry. There is no central dispatch table mapping "I'm loading X" to "tag with Y."
 - **Why it matters**: The context tag drives merge policy. A contributor who tags wrong introduces silent merge bugs that show up only when two contexts collide. Centralising the mapping would make it impossible to typo.
 
-## 10. `hashJobStart` carries v0.6 and v0.7 fields concurrently
+## 10. ~~`hashJobStart` carries v0.6 and v0.7 fields concurrently~~ — **resolved**
 
-- **Site**: `pkg/scan.go:38` — the struct holds both `IndexEntry binaryEntryRef` (v0.6, deprecated) and `Entry BinaryEntryInterface` (v0.7, current).
-- **Why it matters**: Two parallel hash submission paths coexist in the same type. Either is sufficient; both is a future bug. Picking one and removing the other is a self-contained cleanup.
+- **Status**: closed. The deprecated `IndexEntry binaryEntryRef` field has been removed; `hashJobStart` now holds only `Entry BinaryEntryInterface` (plus the `ScannedPath` fallback used for symlink-mode detection). The struct has moved to `pkg/algorithm_hash_manager.go` next to its consumer.
 
 ## 11. `Repo` is a thin wrapper, not a replacement
 
@@ -100,9 +91,10 @@ are the canonical going-forward; the older three are migration / design
 history. After this lands, a prune pass to mark or archive the older
 docs is overdue.
 
-**Items 1, 2, 5, 10 share a root cause.** All four are remnants of the
-v0.6 mmap-scan subsystem that v0.7 superseded but didn't remove. There
-is a coherent removal pass to be planned — delete `AppendEntryToScanIndex`
-and its callers in recovery, drop the `IndexEntry` field on `hashJobStart`,
-clean up the comment in `binary_entry_interface.go`, split `scan.go`.
-Doing them together avoids four half-finished cleanups.
+**Items 1, 2, 5, 10 share a root cause** — all four were remnants of the
+v0.6 mmap-scan subsystem that v0.7 superseded but didn't remove.
+**Resolved together** in a single coherent removal pass: deleted the
+v0.6 write path and its supporting machinery, dropped the deprecated
+`IndexEntry` field on `hashJobStart`, fixed the stale interface
+comment, split `scan.go` along its real seams, and rewrote
+CLAUDE.md's locking and lifecycle sections to match v0.7 reality.

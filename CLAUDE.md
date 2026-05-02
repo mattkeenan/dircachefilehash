@@ -201,7 +201,10 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 **Layer 2: Data Structures & Algorithms**
 - `pkg/skiplist.go` - Zero-copy skip list wrapper with context-aware operations and vectorio integration
 - `pkg/ignore.go` - Ignore pattern matching (.dcfhignore support)
-- `pkg/scan.go` - Directory scanning, Hwang-Lin comparison, and scan index workflow
+- `pkg/scan.go` - Directory walk (recursive DFS, sorted path queue, scan-time --ignore filter)
+- `pkg/scan_types.go` - Scan-pipeline types (`scannedPath`, `mockFileInfo`)
+- `pkg/scan_symlinks.go` - --symlinks policy engine (mode parsing, chain checks, follow decisions)
+- `pkg/hwang_lin.go` - Hwang-Lin comparison driver
 
 **Layer 3: Pipelines/Workflows**
 - `pkg/pipeline.go` - Channel-based pipeline scaffolding (comparison → hash → reorder → write)
@@ -259,10 +262,9 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 
 **Index Internals** (`pkg/index.go`):
 - Binary format structs: `IndexHeader`, `MmapIndex`
-- **Three distinct I/O patterns**:
-  - **Main/Cache indices**: Read-only mmap via `LoadIndexFromFile()`
-  - **Scan indices**: Read-write mmap with `AppendEntryToScanIndex()` (grows with ftruncate/mremap)  
-  - **Temp indices**: Pure vectorio with `WriteSkiplistWithVectorIO()` for atomic writes
+- **Two I/O patterns** (v0.7):
+  - **Main/Cache indices**: Read-only mmap via `loadIndexShared()`
+  - **Temp indices**: Pure vectorio via `TempIndexWriter` / `WriteSkiplistWithVectorIO()`
 - Memory mapping: loading, checksum verification, clean flag management
 - Vectorio operations: `WriteMainIndexWithVectorIO()`, `WriteSkiplistWithVectorIO()`
 
@@ -270,35 +272,35 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 
 **CRITICAL ARCHITECTURAL PRINCIPLE - Index File Lifecycle**:
 
-The scan process is how we atomically replace main/cache indices on disk. There are four distinct index file types with different lifecycles:
+The pipeline atomically replaces main/cache indices on disk. As of v0.7
+there are two on-disk index file types:
 
 **1. Main & Cache Indices** (Stable Read-Only):
-- **Access**: Memory-mapped with `PROT_READ` via `LoadIndexFromFile()`
-- **Lifecycle**: Persistent files that represent the current stable state
+- **Access**: Memory-mapped with `PROT_READ` via the shared loader (`loadIndexShared`)
+- **Lifecycle**: Persistent files representing the current stable state
 - **Usage**: Read existing index data into skiplist structures for comparison
 - **Files**: `main.idx`, `cache.idx`
 
-**2. Scan Indices** (Temporary Read-Write):
-- **Access**: Memory-mapped with `PROT_READ|PROT_WRITE` via `AppendEntryToScanIndex()`
-- **Lifecycle**: Created during scan, **deleted after scan completion**
-- **Purpose**: Collect new binaryEntries during directory scanning
-- **Concurrency**: PID+TID naming scheme (`scan-{pid}-{tid}.idx`)
-- **Constraints**: Must remain mapped until scan phase completes
-
-**3. Temp Indices** (Temporary Write-Only):
-- **Access**: Pure vectorio with `WriteSkiplistWithVectorIO()` (no mmap)
-- **Lifecycle**: Created at end of scan, **becomes new main/cache via atomic rename**
-- **Purpose**: Filtered copy of selected binaryEntries from main/cache/scan indices
-- **Atomicity**: Ensures replacement of main/cache indices is atomic operation
+**2. Temp Indices** (Transient Write-Only):
+- **Access**: Pure vectorio via `TempIndexWriter.WriteSerialised()` /
+  `WriteSkiplistWithVectorIO()` — never mmap'd for writing
+- **Lifecycle**: Written once, becomes new main/cache via atomic rename
+- **Purpose**: Single bulk write of the merged entry set
+- **Atomicity**: Ensures replacement is a single rename
 - **Selection**: Main indices exclude deleted entries, cache indices include them
 
-**4. Scan Process Workflow**:
-1. **Scan Phase**: Create scan indices (read-write mmap) to collect new entries
-2. **Merge Phase**: Create temp index (write-only vectorio) from main/cache/scan data  
-3. **Replace Phase**: Atomically replace main or cache index via `rename(temp, target)`
-4. **Cleanup Phase**: Delete scan indices, unmap any remaining scan memory
+**v0.7 in-memory scan entries**: New entries discovered during a scan
+are heap-allocated `BEScanEntry` values flowing through pipeline
+channels. There are no mmap-backed scan-*.idx files in v0.7 — that
+machinery (mremap-grown writable mmaps) was removed because it was
+no longer load-bearing once the channel pipeline shipped.
 
-This design ensures that index replacement is atomic and scan indices don't interfere with final index writing.
+**Scan workflow** (channel pipeline):
+1. **Walk**: Stream filesystem entries (sorted) via the Walker
+2. **Compare**: Hwang-Lin against the existing main+cache merge
+3. **Hash**: Pipeline workers fill in `BEScanEntry.Hash` lazily
+4. **Serialise**: `EntrySerialiser.Serialise` produces wire bytes
+5. **Write**: `TempIndexWriter.WriteSerialised` → atomic rename
 
 ### Binary Index Format Details
 
@@ -310,7 +312,7 @@ This design ensures that index replacement is atomic and scan indices don't inte
 **Entry Types**:
 - Regular entries: Active files with current metadata
 - Deleted entries: Marked with deletion flag, retained for tracking
-- Sparse entries: Used in cache/scan indices for partial updates
+- Sparse entries: Used in cache indices for partial updates
 
 ### Key Design Patterns
 
@@ -321,16 +323,15 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - **Pure file I/O**: No dependencies on external libraries for core operations
 - **Main Index Integrity**: Main index is ONLY updated on complete success - partial/interrupted operations accumulate in cache index to preserve work without compromising consistency
 
-### Data Flow (New Scan Index Workflow)
+### Data Flow (v0.7 Channel Pipeline)
 
 1. **Scan**: Walk directory tree, streaming files as found (sorted order)
-2. **Compare**: Hwang-Lin algorithm comparison with concurrent processing
-3. **Scan Index**: Create entries via `AppendEntryToScanIndex()` during comparison
-4. **Hash**: Workers update entries directly in mmap'd scan index (zero-copy)
-5. **Skiplist**: Build skiplist from scan index entries with proper context
-6. **Merge**: Combine with existing indices using context-aware operations
-7. **Write**: Atomic write via vectorio to temp file, then rename
-8. **Cleanup**: Remove scan index files after successful completion
+2. **Compare**: Hwang-Lin against the existing main+cache merge
+3. **Pipeline Entry**: Construct heap `BEScanEntry` for new/modified files
+4. **Hash**: Workers fill `BEScanEntry.Hash` via `SetHash` (heap, no mmap)
+5. **Serialise**: `EntrySerialiser.Serialise` produces wire-format bytes
+6. **Write**: `TempIndexWriter.WriteSerialised` writes the temp index
+7. **Rename**: Atomic rename promotes the temp file to main/cache
 
 ### Hash Worker Synchronization (v0.6.5+)
 
@@ -352,115 +353,38 @@ This design ensures that index replacement is atomic and scan indices don't inte
 - Workflows must continue even if workers don't exit cleanly
 - Channel closing serves as broadcast mechanism to multiple goroutines
 
-### Scan Index Workflow Integration
+### Scan Workflow Integration (v0.7)
 
 **Key Integration Points**:
-- `PerformHwangLinScanToSkiplist()`: Replaces old result-based workflow
-- `hwangLinCompareToSkiplist()`: Creates scan entries during comparison
-- `AppendEntryToScanIndex()`: Only way to write binaryEntries to scan files
-- `WriteSkiplistWithVectorIO()`: Final index writing with proper filtering
-- Hash workers: Direct updates to mmap'd scan index memory
+- `pipeline_update.go` / `pipeline_status.go`: Pipeline scaffolding
+- `hwang_lin.go`: Comparison driver that emits PipelineEntries
+- `BEScanEntry`: Heap-allocated entry produced for new/modified files
+- `EntrySerialiser.Serialise`: Wire-format bytes for the writer
+- `TempIndexWriter.WriteSerialised`: Single bulk write of merged entries
 
 ### Memory Protection and Locking Mechanism
 
-**CRITICAL: Preventing SIGSEGV from Concurrent Memory Access**
+The `mmapIndexFile.mutex` RWMutex is still acquired on every entry
+access (`GetBinaryEntry`, serialisation, etc.). In v0.7 it is
+**defensive rather than load-bearing**: the dynamically-growing
+mremap'd scan-index path that originally motivated the locking has
+been removed, so the writer side of the lock has no producer in
+production code.
 
-The codebase uses RWMutex locks to protect mmap'd memory from concurrent access issues, particularly when `mremap()` might move memory during hash calculations. Here's how the multi-level locking works:
+The locks are kept for two reasons:
+1. The `mmapIndexFile.Cleanup()` path takes the write lock to
+   coordinate munmap with any in-flight readers (refcount-driven).
+2. Removing every reader-side `mutex.RLock` would touch many files
+   and isn't justified by current performance pressure.
 
-**1. The Problem**:
-- Scan indices grow dynamically using `mremap()` which can relocate memory
-- Hash calculations (SHA1/SHA256/SHA512) read from mmap'd memory via IoVec pointers
-- If `mremap()` moves memory while a hash is being calculated → SIGSEGV crash
-- Multiple indices (main, cache, scan) can be referenced by a single skiplist
+Treat the locking as a no-op-in-practice guard. New code that mmaps
+or unmaps an index file should still go through this path; new code
+that simply reads through `binaryEntryRef.GetBinaryEntry()` does not
+need to think about mremap.
 
-**2. Two-Level Locking Design**:
-
-**Low-Level Protection (per-entry access)**:
-```go
-// In GetBinaryEntry() - protects individual entry access
-func (ref *binaryEntryRef) GetBinaryEntry() *binaryEntry {
-    ref.IndexFile.mutex.RLock()
-    defer ref.IndexFile.mutex.RUnlock()
-    // Safe to calculate pointer from offset
-    return (*binaryEntry)(unsafe.Pointer(entryPtr))
-}
-```
-- Every access to a binaryEntry acquires a read lock
-- Prevents memory from being moved during pointer calculation
-- Works for all entry access, not just during writes
-- Protects the offset-to-pointer conversion that would crash if memory moved
-
-**High-Level Protection (bulk operations)**:
-```go
-// In writeSkiplistWithVectorIOFiltered() - protects entire operation
-referencedIndices := dc.getAllReferencedIndices(skiplist)
-// Acquire locks on ALL indices in consistent order
-for _, idx := range sortedIndices {
-    idx.mutex.RLock()
-}
-defer func() {
-    for idx := range referencedIndices {
-        idx.mutex.RUnlock()
-    }
-}()
-```
-- Identifies ALL mmap'd indices referenced by skiplist entries
-- Acquires read locks in address order (prevents deadlock)
-- Holds locks for entire IoVec generation and hash calculation
-- Configurable timeout (default 5 seconds) to prevent hanging
-
-**3. Why Double Locking is Safe**:
-- Go's RWMutex allows multiple read locks from same goroutine (reentrant)
-- Provides defense in depth - protection at both levels
-- Low-level locks protect all code paths, not just writes
-- High-level locks prevent any mremap during critical sections
-
-**4. Index Tracking**:
-```go
-// DirectoryCache tracks all loaded indices
-mainIndex    *mmapIndexFile  // Main index if loaded
-cacheIndex   *mmapIndexFile  // Cache index if loaded  
-scanIndices  []*mmapIndexFile // All scan indices
-```
-- Indices are registered when loaded (`registerIndex()`)
-- Unregistered when cleaned up (`unregisterIndex()`)
-- Allows identification of which index contains each entry
-
-**5. Write Lock for mremap Operations**:
-```go
-// In appendEntryToNamedIndex() - write lock for memory expansion
-if newSize > (*indexInfo).Size {
-    (*indexInfo).mutex.Lock()  // Write lock
-    // Safe to mremap now - no readers can access
-    newMmap, err := unix.Mremap((*indexInfo).Data, newSize, unix.MREMAP_MAYMOVE)
-    (*indexInfo).Data = newMmap
-    (*indexInfo).mutex.Unlock()
-}
-```
-- Write locks exclude all readers during memory remapping
-- Ensures no hash calculations can be in progress
-- Updates Data pointer atomically under lock protection
-
-**6. Configuration**:
-- `--index-lock-timeout N`: Command line flag (seconds)
-- `.dcfh/config`: `[performance] index_lock_timeout = N`
-- Default: 5 seconds
-- Range: 1-300 seconds
-
-**7. What Happens on Timeout**:
-- Warning logged to stderr
-- Operation continues WITHOUT lock protection
-- Prevents deadlock but risks SIGSEGV if mremap occurs
-- Timeout should be rare in practice
-
-**8. Conceptual Summary**:
-The locking works like a readers-writers lock on a shared document:
-- Multiple readers (hash calculations) can access simultaneously
-- Writers (mremap operations) get exclusive access
-- Offset-based references remain valid across mremap operations
-- Pointer conversions only happen under read lock protection
-
-This design ensures safe concurrent access while maintaining performance through read-write separation and minimal lock holding times.
+The `--index-lock-timeout` flag and `[performance] index_lock_timeout`
+config knob are kept for compatibility but rarely fire under normal
+operation.
 
 ## Critical Reasoning Patterns for AI Development
 
@@ -556,14 +480,14 @@ This reasoning pattern is fundamental to effective development and must be consc
   - Close channels in proper sequence to avoid deadlocks
 
 **Critical Constraints (Must Be Enforced)**:
-1. **Single Entry Writing Path**: `AppendEntryToScanIndex()` is the ONLY function that writes binaryEntries to index files
-2. **Private Low-Level Function**: `writeBinaryEntryToMmap()` is private and only called by `AppendEntryToScanIndex()`
-3. **File Type Separation**: 
+1. **Single Entry Writing Path**: `TempIndexWriter` is the only writer of
+   binaryEntries to disk. Heap `BEScanEntry` values flow through the pipeline
+   and are serialised via `EntrySerialiser.Serialise` before write.
+2. **File Type Separation**:
    - Main/Cache: Read-only mmap
-   - Scan: Read-write mmap with controlled growth
    - Temp: Pure vectorio (no mmap)
-4. **Temp Index Flow**: Only vectorio → atomic rename for final index writing
-5. **Filtering**: Main indices exclude deleted entries, cache indices include them
+3. **Temp Index Flow**: Only vectorio → atomic rename for final index writing
+4. **Filtering**: Main indices exclude deleted entries, cache indices include them
 
 ### System Requirements
 - **Unix-like systems** (uses `syscall.Stat_t` and mmap)
@@ -573,7 +497,7 @@ This reasoning pattern is fundamental to effective development and must be consc
 ### Performance Characteristics
 - **Fast startup**: Binary format with mmap loading
 - **Low memory usage**: Zero-copy operations with skiplist
-- **Concurrent hashing**: PID+TID scan files for parallel processing
+- **Concurrent hashing**: Channel pipeline with bounded hash workers
 - **Atomic updates**: Temp files ensure data integrity
 - **Efficient I/O**: vectorio for bulk writes, mmap for reads
 
