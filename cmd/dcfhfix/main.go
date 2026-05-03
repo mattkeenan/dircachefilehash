@@ -699,52 +699,11 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 		return fmt.Errorf("no paths specified")
 	}
 
-	// Convert paths to a map for quick lookup
-	pathSet := make(map[string]bool)
-	for _, path := range paths {
-		// Normalize path (remove leading ./ etc)
-		normalizedPath := filepath.Clean(path)
-		if normalizedPath == "." {
-			normalizedPath = ""
-		}
-		pathSet[normalizedPath] = true
-	}
-
-	// Collect matching entries
-	var matchingEntries []*dircachefilehash.EntryInfo
-	var notFoundPaths []string
-	foundPaths := make(map[string]bool)
-
-	// Use IterateIndexFile to search through the index
-	// NOTE: While this is O(n), it's actually the safer approach for dcfhfix because:
-	// a) Loading into a skiplist is also O(n), so we're not adding significant overhead
-	// b) For a repair tool, we need the safer entry-by-entry iteration in case the
-	//    index file is corrupted - a skiplist load might fail on corruption
-	err := dircachefilehash.IterateIndexFile(indexFile, func(entry *dircachefilehash.EntryInfo, indexType string) bool {
-		entryPath := entry.Path
-		if pathSet[entryPath] {
-			matchingEntries = append(matchingEntries, entry)
-			foundPaths[entryPath] = true
-		}
-		return true // Continue iteration
-	})
-
+	matchingEntries, notFoundPaths, err := dircachefilehash.FindEntries(indexFile, paths)
 	if err != nil {
 		return fmt.Errorf("failed to read index file: %v", err)
 	}
 
-	// Find paths that weren't found
-	for _, path := range paths {
-		normalizedPath := filepath.Clean(path)
-		if normalizedPath == "." {
-			normalizedPath = ""
-		}
-		if !foundPaths[normalizedPath] {
-			notFoundPaths = append(notFoundPaths, path)
-		}
-	}
-
-	// Display results
 	format := getFormat(options)
 	if format == "json" {
 		return displayEntriesJSON(matchingEntries, notFoundPaths, options)

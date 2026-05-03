@@ -111,16 +111,6 @@ Scope when picked up:
 Dependency: aligns naturally with the Fix-primitive restructure above
 (non-destructive output is a property of `FixRequest` semantics).
 
-## Entry: Add FindEntries helper for path-array lookups
-
-### Priority: High
-
-`Find`, `Insert`, and `ForEach` are already exported on `skiplistWrapper`
-(pkg/skiplist.go), but external tools like `dcfhfix` still iterate O(n)
-when looking up multiple paths — the documented intentional fallback at
-cmd/dcfhfix/main.go:719. A `FindEntries(indexPath, paths []string)`
-helper would give callers efficient bulk O(log n) lookup.
-
 ## Entry: Add comprehensive integration tests for edge cases
 
 ### Priority: High

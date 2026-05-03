@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -53,18 +54,69 @@ type EntryCallback func(entry *EntryInfo, indexType string) bool
 // .dcfh nesting checks and directory creation — it only needs read-only access.
 // It also accepts any supported index version (v1 and v2) for cross-machine compatibility.
 func IterateIndexFile(indexPath string, callback EntryCallback) error {
-	// Minimal MetaStore for read-only index parsing — bypasses constructors
-	// because indexPath is inside .dcfh/ (nesting check would reject it) and we
-	// need to accept any index version (v1 and v2) for cross-machine compatibility.
-	ms := &MetaStore{
-		signature: [4]byte{'d', 'c', 'f', 'h'},
-		version:   0, // Accept any version
+	skiplist, indexType, err := loadIndexFileForValidation(indexPath)
+	if err != nil {
+		return err
 	}
 
-	// Load the index file
+	skiplist.ForEach(func(entry *binaryEntry, _ string) bool {
+		return callback(entryToInfo(entry), indexType)
+	})
+
+	return nil
+}
+
+// FindEntries loads an index file and returns the entries matching paths,
+// plus the input paths that weren't found (in their original form and order).
+// Lookup is O(log n) per path via the skiplist, replacing the O(n)
+// IterateIndexFile pattern when callers know up front which paths they want.
+//
+// Paths are normalised with filepath.Clean before lookup ("." → "" so callers
+// can pass the repo root directly). Returned entries are in path-sorted order.
+func FindEntries(indexPath string, paths []string) ([]*EntryInfo, []string, error) {
+	skiplist, _, err := loadIndexFileForValidation(indexPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	type hit struct {
+		path  string
+		entry *binaryEntry
+	}
+	hits := make([]hit, 0, len(paths))
+	var notFound []string
+	for _, p := range paths {
+		key := filepath.Clean(p)
+		if key == "." {
+			key = ""
+		}
+		entry, _ := skiplist.Find(key)
+		if entry == nil {
+			notFound = append(notFound, p)
+			continue
+		}
+		hits = append(hits, hit{path: key, entry: entry})
+	}
+
+	sort.Slice(hits, func(i, j int) bool { return hits[i].path < hits[j].path })
+	found := make([]*EntryInfo, len(hits))
+	for i, h := range hits {
+		found[i] = entryToInfo(h.entry)
+	}
+	return found, notFound, nil
+}
+
+// loadIndexFileForValidation parses indexPath via the validation-friendly
+// loader and returns a populated skiplist plus the index type. Shared by
+// IterateIndexFile and FindEntries.
+func loadIndexFileForValidation(indexPath string) (*skiplistWrapper, string, error) {
+	ms := &MetaStore{
+		signature: [4]byte{'d', 'c', 'f', 'h'},
+		version:   0,
+	}
 	refs, err := ms.LoadIndexFromFileForValidation(indexPath)
 	if err != nil {
-		return fmt.Errorf("failed to load index: %w", err)
+		return nil, "", fmt.Errorf("failed to load index: %w", err)
 	}
 
 	basename := filepath.Base(indexPath)
@@ -73,30 +125,23 @@ func IterateIndexFile(indexPath string, callback EntryCallback) error {
 	for _, ref := range refs {
 		skiplist.Insert(ref, ctx)
 	}
-	indexType := IndexTypeForBasename(basename)
+	return skiplist, IndexTypeForBasename(basename), nil
+}
 
-	// Use ForEach to iterate through entries
-	skiplist.ForEach(func(entry *binaryEntry, entryContext string) bool {
-		// Convert internal binaryEntry to exported EntryInfo
-		info := &EntryInfo{
-			Path:      entry.RelativePath(),
-			IsDeleted: entry.IsDeleted(),
-			FileSize:  entry.FileSize,
-			Mode:      entry.Mode,
-			UID:       entry.UID,
-			GID:       entry.GID,
-			Dev:       entry.Dev,
-			MTimeWall: entry.MTimeWall,
-			CTimeWall: entry.CTimeWall,
-			HashStr:   entry.HashString(),
-			HashType:  entry.HashType,
-		}
-
-		// Call the user-provided callback
-		return callback(info, indexType)
-	})
-
-	return nil
+func entryToInfo(entry *binaryEntry) *EntryInfo {
+	return &EntryInfo{
+		Path:      entry.RelativePath(),
+		IsDeleted: entry.IsDeleted(),
+		FileSize:  entry.FileSize,
+		Mode:      entry.Mode,
+		UID:       entry.UID,
+		GID:       entry.GID,
+		Dev:       entry.Dev,
+		MTimeWall: entry.MTimeWall,
+		CTimeWall: entry.CTimeWall,
+		HashStr:   entry.HashString(),
+		HashType:  entry.HashType,
+	}
 }
 
 // FindRepositoryRootFrom discovers the repository root starting from a specific directory.
