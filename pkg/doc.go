@@ -18,14 +18,11 @@
 //	result, err := repo.Diff(ctx, dircachefilehash.DiffRequest{})
 //	groups, err := repo.Groups(ctx, dircachefilehash.GroupsRequest{})
 //
-// [CreateRepo] is the corresponding factory for `dcfh init`. The legacy
-// direct surface ([CreateMetaStore] returning a [*MetaStore]) is
-// still supported and is what `Repo` delegates to internally:
-//
-//	ms := dircachefilehash.CreateMetaStore("/root", "/root/.dcfh")
-//	defer ms.Close()
-//	result, err := ms.Status(ctx, map[string]string{}, nil)
-//	err = ms.Update(ctx, map[string]string{}, "subdir/")
+// [CreateRepo] is the corresponding factory for `dcfh init`. The
+// MetaStore type ([CreateMetaStore] returning a [*MetaStore]) remains
+// public for low-level access to the on-disk index, but it no longer
+// carries the verbs — Diff / Apply / Groups live on the [Repo] surface
+// only.
 //
 // All public methods take a [context.Context] — long scans / hashes honour
 // cancellation.

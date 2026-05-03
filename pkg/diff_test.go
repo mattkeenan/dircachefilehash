@@ -43,7 +43,7 @@ func TestParseIndexRef(t *testing.T) {
 }
 
 // TestDiff_MainVsFsScan_MatchesStatus pins the canonical case: Diff(main,
-// fs-scan) must produce exactly the same StatusResult as ms.Status. Phase 1
+// fs-scan) must produce exactly the same StatusResult as runStatus. Phase 1
 // implements this via delegation; Phase 2 will reroute through the generic
 // engine, and this test guards equivalence across that change.
 func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
@@ -64,10 +64,10 @@ func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Reference path: ms.Status.
-	wantSR, err := ms.Status(ctx, ms.scanRun(), nil, nil)
+	// Reference path: runStatus.
+	wantSR, err := runStatus(ctx, ms, ms.scanRun(), nil, nil)
 	if err != nil {
-		t.Fatalf("ms.Status: %v", err)
+		t.Fatalf("runStatus: %v", err)
 	}
 
 	// Generic engine path: Diff(main, fs-scan).
@@ -96,9 +96,9 @@ func TestDiff_CacheMainVsMain(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	statusSR, err := ms.Status(ctx, ms.scanRun(), nil, nil)
+	statusSR, err := runStatus(ctx, ms, ms.scanRun(), nil, nil)
 	if err != nil {
-		t.Fatalf("ms.Status: %v", err)
+		t.Fatalf("runStatus: %v", err)
 	}
 
 	// Diff(cache+main, main) — left is the post-mutation view, right is the
@@ -148,7 +148,7 @@ func setupDiffRepo(t *testing.T) *MetaStore {
 		}
 	}
 	ms := NewMetaStore(root, filepath.Join(root, ".dcfh"))
-	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	return ms

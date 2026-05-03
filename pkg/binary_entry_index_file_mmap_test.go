@@ -97,17 +97,17 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	}
 
 	// Mmap the index back through the shared loading path.
-	_, refs, err := ms.loadIndexShared(indexPath)
+	idx, err := ms.loadIndexShared(indexPath)
 	if err != nil {
 		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to load index: %v", err)
 	}
-	if len(refs) == 0 {
+	if len(idx.Refs) == 0 {
 		_ = os.RemoveAll(testDir)
 		t.Fatalf("loadIndexShared returned no refs")
 	}
 
-	mmapEntry := NewBEIndexFileMmapEntry(refs[0], "test")
+	mmapEntry := NewBEIndexFileMmapEntry(idx.Refs[0], "test")
 
 	cleanupMutexMmap.Lock()
 	testCleanupDataIndexFileMmap[mmapEntry] = &indexFileMmapTestCleanupInfo{

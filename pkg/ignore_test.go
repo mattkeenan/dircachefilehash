@@ -61,7 +61,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	ctx := context.Background()
 	flags := map[string]string{}
 
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = ms.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
-	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err := runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after ignore update: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Update to apply the ignore changes
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update after ignore change: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = ms.ignoreManager.Reload()
 
 	// Check status again
-	status, err = ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err = runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after second ignore update: %v", err)
 	}
@@ -216,7 +216,7 @@ mode = none
 
 	// Initial update
 	ctx := context.Background()
-	if err := ms.Update(ctx, ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -249,7 +249,7 @@ mode = none
 	}
 
 	// Check status - .log file should now be marked for deletion
-	status, err := ms.Status(ctx, ms.scanRun(), map[string]string{}, nil)
+	status, err := runStatus(ctx, ms, ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

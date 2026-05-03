@@ -6,21 +6,17 @@ import (
 	"os"
 )
 
-// Update scans the directory and updates the index file using the new workflow
-func (ms *MetaStore) Update(ctx context.Context, sr *ScanRun, flags map[string]string, paths ...string) error {
-	res, _ := ms.ApplyConfigOverrides(flags)
-	if sr != nil {
-		sr.SymlinkMode = res.SymlinkMode
-		sr.HashWorkers = res.HashWorkers
-	}
+// runUpdate scans the directory and updates the index file using the
+// pipeline.
+func runUpdate(ctx context.Context, ms *MetaStore, sr *ScanRun, flags map[string]string, paths ...string) error {
+	ms.applyOverridesToScanRun(sr, flags)
 
 	if len(paths) == 0 {
 		// No specific paths: update entire repository - put everything in main index
 		return ms.updateFullRepository(ctx, sr)
-	} else {
-		// Specific paths: selective update - manage main vs cache indices
-		return ms.updateSpecificPaths(ctx, sr, paths)
 	}
+	// Specific paths: selective update - manage main vs cache indices
+	return ms.updateSpecificPaths(ctx, sr, paths)
 }
 
 // updateFullRepository updates the entire repository: everything goes into

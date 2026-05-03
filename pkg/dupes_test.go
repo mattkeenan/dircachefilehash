@@ -31,7 +31,7 @@ func TestFindDuplicates_RealDuplicates(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFindDuplicates_NoDuplicates(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestFindDuplicates_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before the call
-	_, err := ms.FindDuplicates(ctx, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	_, err := runFindDuplicates(ctx, ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -128,7 +128,7 @@ func TestFindDuplicates_PathFilter_ZeroPaths(t *testing.T) {
 	ms := dupesPathFilterFixture(t)
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestFindDuplicates_PathFilter_ExclusiveOneDir(t *testing.T) {
 
 	// Only c/ — group3 is fully inside, group1 has members outside c/
 	// so its in-c/ count drops to 0, group2 drops to a singleton.
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"c/"}, Exclusive: true})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"c/"}, Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestFindDuplicates_PathFilter_ExclusiveTwoDirs(t *testing.T) {
 	// a/ ∪ c/. group1 loses its b/x member → still dup (a/x,a/y).
 	// group2 loses a/… (none), keeps c/x only → singleton, dropped.
 	// group3 stays.
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/", "c/"}, Exclusive: true})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/", "c/"}, Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestFindDuplicates_PathFilter_NonExclusive(t *testing.T) {
 	// --exclusive=no with a/: cross-dir group1 (has a/x,a/y,b/x) is
 	// reported in full; group2 has no member in a/ so it's dropped;
 	// group3 has no member in a/ so it's dropped.
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/"}, Exclusive: false})
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/"}, Exclusive: false})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -253,7 +253,7 @@ func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ..
 		}
 	}
 	ms := NewMetaStore(root, filepath.Join(root, ".dcfh"))
-	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	return ms
@@ -290,7 +290,7 @@ func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(512)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -317,7 +317,7 @@ func TestFindDuplicates_SizeFilter_MaxOnly(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -337,7 +337,7 @@ func TestFindDuplicates_SizeFilter_MinEqualsMax(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(100), MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -365,7 +365,7 @@ func TestFindDuplicates_DateFilter_Range(t *testing.T) {
 	// [Feb 1, Mar 1): only feb files pass.
 	start := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -390,7 +390,7 @@ func TestFindDuplicates_DateFilter_BoundaryInclusivity(t *testing.T) {
 	defer func() { _ = ms.Close() }()
 
 	// [boundary, boundary+24h): only in-files qualify.
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: boundary, EndDate: boundary.Add(24 * time.Hour)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -421,7 +421,7 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	// transition. Both groups should come through regardless of DST.
 	start := time.Date(2026, 3, 29, 0, 0, 0, 0, berlin)
 	end := time.Date(2026, 3, 30, 0, 0, 0, 0, berlin)
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -431,7 +431,7 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	}
 	// A narrower range that only covers CET hours (pre-transition)
 	// must exclude the post-transition group entirely.
-	narrow, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	narrow, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{
 			Exclusive: true,
 			Predicate: mustFilter(t, FilterOptions{
@@ -465,7 +465,7 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 
 	start := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
+	groups, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{},
 		DupeFilter{
 			Paths:     []string{"a/"},
 			Exclusive: true,
@@ -513,7 +513,7 @@ func TestFindDuplicates_IgnoreHardlinks_PureHardlinkGroup(t *testing.T) {
 	)
 	defer func() { _ = ms.Close() }()
 
-	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -521,7 +521,7 @@ func TestFindDuplicates_IgnoreHardlinks_PureHardlinkGroup(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt], got %v", groupFiles(off))
 	}
 
-	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -543,7 +543,7 @@ func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
 	)
 	defer func() { _ = ms.Close() }()
 
-	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -551,7 +551,7 @@ func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
 	}
 
-	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -574,7 +574,7 @@ func TestFindDuplicates_IgnoreHardlinks_AllHardlinked(t *testing.T) {
 	)
 	defer func() { _ = ms.Close() }()
 
-	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -582,7 +582,7 @@ func TestFindDuplicates_IgnoreHardlinks_AllHardlinked(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
 	}
 
-	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -633,7 +633,7 @@ func TestMetaStore_FindDuplicates_EmptyIndex(t *testing.T) {
 
 	// Test FindDuplicates with empty flags
 	flags := map[string]string{}
-	duplicates, err := ms.FindDuplicates(context.Background(), ms.scanRun(), flags, DupeFilter{Exclusive: true})
+	duplicates, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), flags, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestMetaStore_FindDuplicates_WithFlags(t *testing.T) {
 
 	for i, flags := range testFlags {
 		t.Run("flags_test_"+string(rune(i+'0')), func(t *testing.T) {
-			duplicates, err := ms.FindDuplicates(context.Background(), ms.scanRun(), flags, DupeFilter{Exclusive: true})
+			duplicates, err := runFindDuplicates(context.Background(), ms, ms.scanRun(), flags, DupeFilter{Exclusive: true})
 			if err != nil {
 				t.Fatalf("FindDuplicates failed with flags %v: %v", flags, err)
 			}

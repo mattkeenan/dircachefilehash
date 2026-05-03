@@ -46,8 +46,8 @@ type DupeFilter struct {
 	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
 }
 
-// FindDuplicates returns groups of files with identical content hashes
-// as recorded in the merged main+cache index.
+// runFindDuplicates returns groups of files with identical content
+// hashes as recorded in the merged main+cache index.
 //
 // This is a one-pass, index-only operation — no filesystem scan runs.
 // Files removed from disk since the last `dcfh update` will still appear
@@ -77,12 +77,8 @@ type DupeFilter struct {
 // entries sharing (Dev, Ino) within a full-hash subgroup collapse to
 // the first (path-sorted) occurrence, and the ≥2 threshold is re-checked
 // so a group of pure hardlink siblings disappears.
-func (ms *MetaStore) FindDuplicates(ctx context.Context, sr *ScanRun, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
-	res, _ := ms.ApplyConfigOverrides(flags)
-	if sr != nil {
-		sr.SymlinkMode = res.SymlinkMode
-		sr.HashWorkers = res.HashWorkers
-	}
+func runFindDuplicates(ctx context.Context, ms *MetaStore, sr *ScanRun, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
+	ms.applyOverridesToScanRun(sr, flags)
 
 	skiplist, err := ms.LoadMergedMainCacheIndex()
 	if err != nil {

@@ -170,7 +170,7 @@ func createInitialFiles(t *testing.T, testDir string) map[string]TestFileContent
 
 // performInitialUpdate does the first update and captures the index state
 func performInitialUpdate(t *testing.T, ms *MetaStore) {
-	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Initial update failed: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func validateStatusDetection(t *testing.T, ms *MetaStore) {
 	}
 	t.Logf("Files on disk: %v", diskFiles)
 
-	result, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
+	result, err := runStatus(context.Background(), ms, ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Status check failed: %v", err)
 	}
@@ -347,7 +347,7 @@ func validateStatusDetection(t *testing.T, ms *MetaStore) {
 
 // performFinalUpdate updates the repository to final state
 func performFinalUpdate(t *testing.T, ms *MetaStore) {
-	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Final update failed: %v", err)
 	}
 
@@ -430,7 +430,7 @@ func validateCacheBehaviour(t *testing.T, ms *MetaStore) {
 	}
 
 	// First status should create cache
-	result1, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
+	result1, err := runStatus(context.Background(), ms, ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("First status failed: %v", err)
 	}
@@ -467,7 +467,7 @@ func validateCacheBehaviour(t *testing.T, ms *MetaStore) {
 	}
 
 	// Second status should use cache (should be faster, same result)
-	result2, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
+	result2, err := runStatus(context.Background(), ms, ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Second status failed: %v", err)
 	}

@@ -37,25 +37,19 @@ type StatusResult struct {
 	CleanStatus   *CleanStatus `json:"clean_status,omitempty"` // Only included when verbose
 }
 
-// Status compares main.idx against the current filesystem, writing changes
-// to cache.idx, and returns a structured StatusResult describing the diff.
-// It is a thin wrapper over Diff(main, fs-scan); the cache write is the
-// side-effect of opening fs-scan. The --v clean-status snapshot remains
-// a Status-only feature, attached to the result here.
+// runStatus compares main.idx against the current filesystem, writing
+// changes to cache.idx, and returns a structured StatusResult describing
+// the diff. It is a thin wrapper over Diff(main, fs-scan); the cache
+// write is the side-effect of opening fs-scan. The --v clean-status
+// snapshot remains a Status-only feature, attached to the result here.
 //
 // filter, when non-nil, narrows the reported result without affecting
 // the cache write — the cache always reflects on-disk truth so a future
 // status without the filter sees the same state.
-func (ms *MetaStore) Status(ctx context.Context, sr *ScanRun, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
+func runStatus(ctx context.Context, ms *MetaStore, sr *ScanRun, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
 	defer VerboseEnter()()
 
-	res, _ := ms.ApplyConfigOverrides(flags)
-	// Authoritative post-override values flow into sr; the caller may
-	// have built sr before flags were applied.
-	if sr != nil {
-		sr.SymlinkMode = res.SymlinkMode
-		sr.HashWorkers = res.HashWorkers
-	}
+	ms.applyOverridesToScanRun(sr, flags)
 
 	result, err := Diff(ctx, ms, sr, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
 	if err != nil {
@@ -72,7 +66,7 @@ func (ms *MetaStore) Status(ctx context.Context, sr *ScanRun, flags map[string]s
 }
 
 // refreshFsScanCache runs the cache-refreshing scan pipeline that used to
-// live inline inside ms.Status. It loads main + cache, runs the 4-stage
+// live inline inside the Status verb. It loads main + cache, runs the 4-stage
 // pipeline (writing changes to a fresh cache-{ts}.idx, renamed to cache.idx
 // on success), then re-loads the post-rename cache and merges it over the
 // in-memory main. The returned skiplist IS the cache+main view callers

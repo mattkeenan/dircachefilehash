@@ -89,7 +89,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	t.Logf("Before first update, symlink mode is: %s", res.SymlinkMode)
 
 	// Update entire repository (no specific paths)
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update with symlinks=all: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	SetDebugFlags("scan,scanning,symlinks")
 	defer SetDebugFlags("")
 
-	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err := runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after symlinks=none: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 
 	// Switch back to "all" - status should show no changes
 	flags["symlinks"] = "all"
-	status, err = ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err = runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after switching back to all: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "internal"}
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=internal: %v", err)
 	}
 
@@ -236,7 +236,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 		t.Errorf("Expected %d files with symlinks=internal, got %d", expectedCount, fileCount)
 
 		// Debug: List all files found
-		status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
+		status, err := runStatus(ctx, ms, ms.scanRun(), flags, nil)
 		if err == nil {
 			t.Logf("Modified: %v", status.Modified)
 			t.Logf("Added: %v", status.Added)
@@ -312,7 +312,7 @@ func TestSymlinkModeExternal(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "external"}
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=external: %v", err)
 	}
 
@@ -382,14 +382,14 @@ func TestSymlinkCacheRadixBehavior(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
 	// Switch to none and check status before updating
 	flags["symlinks"] = "none"
 
-	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err := runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -467,12 +467,12 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 
 	// Update with symlinks=none - the modified file should NOT be hashed
 	flags["symlinks"] = "none"
-	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
+	if err := runUpdate(ctx, ms, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=none: %v", err)
 	}
 
 	// The file should be marked as deleted without being hashed
-	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
+	status, err := runStatus(ctx, ms, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

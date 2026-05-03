@@ -358,13 +358,12 @@ func (ime *BEIndexFileMmapEntry) RefCount() int32 {
 // LoadIndexFileMmap loads an index file via mmap and creates a factory for creating entries
 // This is a helper function for creating BEIndexFileMmapEntry instances from an index file
 func LoadIndexFileMmap(filePath string, ms *MetaStore) (*mmapIndexFile, error) {
-	// Use the existing infrastructure to load the index file
-	_, indexFile, err := ms.loadIndexFromFileWithTracking(filePath)
+	idx, err := ms.loadIndexFromFileWithTracking(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load index file %s: %w", filePath, err)
 	}
 
-	return indexFile, nil
+	return idx.File, nil
 }
 
 // CreateEntryFromOffset creates a BEIndexFileMmapEntry from an offset within the loaded index

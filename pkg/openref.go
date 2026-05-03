@@ -84,7 +84,7 @@ func OpenRef(ctx context.Context, ms *MetaStore, sr *ScanRun, ref IndexRef) (Bin
 // iterator. The returned closer DecRefs the mmap so the file descriptor
 // and mapping are released when the caller finishes iterating.
 func openFileRef(ctx context.Context, ms *MetaStore, ref IndexRef) (BinaryEntryIterator, func() error, error) {
-	refs, indexFile, err := ms.loadIndexFromFileWithTracking(ref.Path)
+	idx, err := ms.loadIndexFromFileWithTracking(ref.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef %s %s: %w", ref.Type, ref.Path, err)
 	}
@@ -92,10 +92,13 @@ func openFileRef(ctx context.Context, ms *MetaStore, ref IndexRef) (BinaryEntryI
 	if ref.ScanID != "" {
 		name = "scan-" + ref.ScanID
 	}
-	sl := buildSkiplistFromRefs(refs, ContextForIndexBasename(filepath.Base(ref.Path)))
+	sl := buildSkiplistFromRefs(idx.Refs, ContextForIndexBasename(filepath.Base(ref.Path)))
+	// Capture only the mmap handle into the closer so the parsed Refs
+	// slice can be GC'd as soon as buildSkiplistFromRefs returns.
+	mmap := idx.File
 	closer := func() error {
-		if indexFile != nil {
-			indexFile.DecRef()
+		if mmap != nil {
+			mmap.DecRef()
 		}
 		return nil
 	}
@@ -118,11 +121,11 @@ func openSnapshotRef(ctx context.Context, ms *MetaStore, ref IndexRef) (BinaryEn
 		return nil, nil, fmt.Errorf("OpenRef snapshot %q: %w", ref.SnapshotID, err)
 	}
 	path := filepath.Join(ms.MetaDir, "snapshots", id, "main.idx")
-	_, refs, err := ms.loadIndexShared(path)
+	idx, err := ms.loadIndexShared(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef snapshot %s: %w", id, err)
 	}
-	sl := buildSkiplistFromRefs(refs, MainContext)
+	sl := buildSkiplistFromRefs(idx.Refs, MainContext)
 	return NewBinaryEntrySkiplistIterator(ctx, sl, "snapshot-"+id), noopCloser, nil
 }
 

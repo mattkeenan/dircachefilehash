@@ -56,7 +56,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update index
-		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+		if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Update failed: %v", err)
 		}
 
@@ -102,7 +102,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update index
-		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+		if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Update after modification failed: %v", err)
 		}
 
@@ -145,7 +145,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Run status to create cache
-		_, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
+		_, err := runStatus(context.Background(), ms, ms.scanRun(), map[string]string{}, nil)
 		if err != nil {
 			t.Fatalf("Status failed: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update main index to include the cache changes for integrity test
-		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+		if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Failed to update main index after cache test: %v", err)
 		}
 	})

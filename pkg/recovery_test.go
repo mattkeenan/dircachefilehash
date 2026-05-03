@@ -148,7 +148,7 @@ func TestPreRecoverySnapshot(t *testing.T) {
 	}
 
 	// Build a proper main index first
-	if err := ms.Update(context.Background(), ms.scanRun(), nil); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), nil); err != nil {
 		t.Fatalf("Failed to create initial index: %v", err)
 	}
 

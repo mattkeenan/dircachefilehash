@@ -59,6 +59,19 @@ func (ms *MetaStore) scanRun() *ScanRun {
 	}
 }
 
+// applyOverridesToScanRun applies command-line flags through
+// ms.ApplyConfigOverrides and propagates the resolved instrument values
+// to sr. The verb helpers (runStatus / runUpdate / runFindDuplicates)
+// share this opener; nil sr is a no-op so non-Repo callers that don't
+// need a ScanRun can still pass flags through.
+func (ms *MetaStore) applyOverridesToScanRun(sr *ScanRun, flags map[string]string) {
+	res, _ := ms.ApplyConfigOverrides(flags)
+	if sr != nil {
+		sr.SymlinkMode = res.SymlinkMode
+		sr.HashWorkers = res.HashWorkers
+	}
+}
+
 // scanIgnoreDrops evaluates the scan-time --ignore predicate against
 // (relPath, info) and returns true when the entry should be filtered
 // out. Errors from the predicate (hash predicates always; stat

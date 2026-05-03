@@ -23,7 +23,7 @@ func setupMemoTestRepo(t *testing.T) string {
 		}
 	}
 	ms := NewMetaStore(testDir, testDir)
-	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+	if err := runUpdate(context.Background(), ms, ms.scanRun(), map[string]string{}); err != nil {
 		_ = ms.Close()
 		t.Fatalf("update: %v", err)
 	}

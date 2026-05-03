@@ -22,7 +22,7 @@ type repoCore struct {
 	// Set by configureFilters; read by scanRun().
 	scanIgnore FilterExpr
 
-	// "One scan at a time" guard around ms.Update; Apply takes it,
+	// "One scan at a time" guard around runUpdate; Apply takes it,
 	// Diff/Groups don't (they don't write).
 	scanMutex      sync.Mutex
 	scanInProgress bool
@@ -220,7 +220,6 @@ func (r *repoCore) configureFilters(prints, ignores []FilterOptions, legacyFilte
 
 func (r *repoCore) Diff(ctx context.Context, req DiffRequest) (*StatusResult, error) {
 	flags := req.Options.toFlags()
-	_ = r.applyConfigOverrides(flags)
 	// Paths are intentionally unused in the current Status pipeline; it
 	// always diffs the whole tree. Keep the field on the request for
 	// future use (Phase 1b+).
@@ -230,7 +229,7 @@ func (r *repoCore) Diff(ctx context.Context, req DiffRequest) (*StatusResult, er
 		return nil, err
 	}
 	defer cleanup()
-	return r.ms.Status(ctx, r.scanRun(), flags, pred)
+	return runStatus(ctx, r.ms, r.scanRun(), flags, pred)
 }
 
 func (r *repoCore) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusResult, error) {
@@ -288,7 +287,7 @@ func (r *repoCore) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, 
 	r.scanInProgress = true
 	defer func() { r.scanInProgress = false }()
 
-	if err := r.ms.Update(ctx, r.scanRun(), flags, req.Paths...); err != nil {
+	if err := runUpdate(ctx, r.ms, r.scanRun(), flags, req.Paths...); err != nil {
 		r.lastScanError = err
 		return nil, err
 	}
@@ -313,7 +312,7 @@ func (r *repoCore) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGr
 		}
 		filter.Predicate = pred
 	}
-	return r.ms.FindDuplicates(ctx, r.scanRun(), req.Options.toFlags(), filter)
+	return runFindDuplicates(ctx, r.ms, r.scanRun(), req.Options.toFlags(), filter)
 }
 
 func (r *repoCore) Filter(ctx context.Context, req FilterRequest) (*FilterResult, error) {

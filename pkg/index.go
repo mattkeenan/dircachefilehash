@@ -616,30 +616,33 @@ func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
 	}
 }
 
-// loadIndexFromFileWithTracking loads an index file and returns both entries and the mmapIndexFile for tracking
-func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEntryRef, *mmapIndexFile, error) {
+// loadIndexFromFileWithTracking opens, mmaps, validates and parses an
+// index file, returning a fresh *Index whose File holds one construction
+// ref. Callers either hand the Index to the read-only mmap memo (which
+// adopts ownership and DecRefs on drain) or DecRef themselves via
+// idx.File.DecRef when finished. Stat is left zero — the memo fills it
+// from its own os.Stat after this call returns.
+func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) (*Index, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
+		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
 	}
 
-	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
+		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if stat.Size() < int64(V2HeaderSize) {
 		_ = file.Close()
-		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
+		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
-	// Memory map the file for reading
 	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
+		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
@@ -648,17 +651,17 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEnt
 	if err := header.ValidateSignature(ms.signature); err != nil {
 		_ = unix.Munmap(data)
 		_ = file.Close()
-		return nil, nil, err
+		return nil, err
 	}
 	if err := header.ValidateByteOrder(); err != nil {
 		_ = unix.Munmap(data)
 		_ = file.Close()
-		return nil, nil, err
+		return nil, err
 	}
 	if err := header.ValidateVersion(ms.version); err != nil {
 		_ = unix.Munmap(data)
 		_ = file.Close()
-		return nil, nil, err
+		return nil, err
 	}
 
 	hdrSize := headerSizeForVersion(header.Version)
@@ -684,7 +687,7 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEnt
 	} else {
 		if err := ms.verifyHeaderChecksum(data, header); err != nil {
 			indexFile.DecRef()
-			return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
+			return nil, fmt.Errorf("checksum verification failed: %w", err)
 		}
 	}
 
@@ -696,44 +699,37 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEnt
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
 			indexFile.DecRef()
-			return nil, nil, fmt.Errorf("unexpected end of data at entry %d", i)
+			return nil, fmt.Errorf("unexpected end of data at entry %d", i)
 		}
 
-		// Get direct pointer to binaryEntry in mmap'd memory
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 
-		// Validate binaryEntry chaining consistency
 		if err := ms.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
 			indexFile.DecRef()
-			return nil, nil, fmt.Errorf("entry %d validation failed: %w", i, err)
+			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
 
-		// Perform extra validation if debug flag is enabled
 		if IsDebugEnabled("extravalidation") {
 			if err := entry.ValidateEntry(); err != nil {
 				indexFile.DecRef()
-				return nil, nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
+				return nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
 			}
 		}
 
-		// Create binaryEntryRef wrapper using createBinaryEntryRef helper
 		ref := createBinaryEntryRef(entry, indexFile)
 		refs = append(refs, ref)
 
-		// Advance to next entry
 		nextOffset := offset + int(entry.Size)
 
-		// Validate that we're not going backwards or stuck
 		if nextOffset <= offset {
 			indexFile.DecRef()
-			return nil, nil, fmt.Errorf("entry %d has invalid size %d (would not advance)", i, entry.Size)
+			return nil, fmt.Errorf("entry %d has invalid size %d (would not advance)", i, entry.Size)
 		}
 
-		// Debug output for entry chaining if requested
 		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
 			if nextOffset >= len(entryData) {
 				indexFile.DecRef()
-				return nil, nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
+				return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
 					i, entry.Size, offset, nextOffset, len(entryData))
 			}
 		}
@@ -741,13 +737,12 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEnt
 		offset = nextOffset
 	}
 
-	// Final validation: ensure we consumed exactly the expected amount of data
 	if offset != len(entryData) {
 		indexFile.DecRef()
-		return nil, nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
+		return nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
 	}
 
-	return refs, indexFile, nil
+	return &Index{File: indexFile, Refs: refs}, nil
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header
@@ -819,16 +814,12 @@ func (ms *MetaStore) Close() error {
 	// memory-protection RWMutex machinery; the memo drain releases the
 	// actual mappings, so we just nil out those pointers here.
 	ms.loadedMu.Lock()
-	for _, li := range ms.loadedIndices {
-		if li != nil && li.file != nil {
-			li.file.DecRef()
-		}
+	for _, idx := range ms.loadedIndices {
+		idx.release()
 	}
 	ms.loadedIndices = nil
-	for _, li := range ms.orphanIndices {
-		if li != nil && li.file != nil {
-			li.file.DecRef()
-		}
+	for _, idx := range ms.orphanIndices {
+		idx.release()
 	}
 	ms.orphanIndices = nil
 	ms.loadedMu.Unlock()

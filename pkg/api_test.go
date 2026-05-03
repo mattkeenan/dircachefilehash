@@ -54,7 +54,7 @@ func TestPublicAPI(t *testing.T) {
 			t.Logf("Stats: %d entries, %d bytes", stats, size)
 		}
 
-		result, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
+		result, err := runStatus(context.Background(), ms, ms.scanRun(), map[string]string{}, nil)
 		if err != nil {
 			t.Logf("Status() returned error (acceptable for uninitialised repo): %v", err)
 		}
