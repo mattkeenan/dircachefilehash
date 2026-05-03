@@ -34,7 +34,7 @@ func TestPublicAPI(t *testing.T) {
 	})
 
 	t.Run("CoreAPI", func(t *testing.T) {
-		// Test that NewDirectoryCache and API methods handle a non-existent
+		// Test that NewMetaStore and API methods handle a non-existent
 		// repo without panicking. Operations should return errors, not crash.
 		testDir, err := os.MkdirTemp("", "api-test-*")
 		if err != nil {
@@ -42,19 +42,19 @@ func TestPublicAPI(t *testing.T) {
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := NewDirectoryCache(testDir, testDir)
-		defer func() { _ = dc.Close() }()
+		ms := NewMetaStore(testDir, testDir)
+		defer func() { _ = ms.Close() }()
 
 		// Stats and Status on uninitialised repo should not panic.
 		// They may return errors or zero results — both are acceptable.
-		stats, size, err := dc.Stats()
+		stats, size, err := ms.Stats()
 		if err != nil {
 			t.Logf("Stats() returned error (acceptable for uninitialised repo): %v", err)
 		} else {
 			t.Logf("Stats: %d entries, %d bytes", stats, size)
 		}
 
-		result, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+		result, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 		if err != nil {
 			t.Logf("Status() returned error (acceptable for uninitialised repo): %v", err)
 		}

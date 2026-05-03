@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func setupDupesRepo(t *testing.T, files map[string]string) *DirectoryCache {
+func setupDupesRepo(t *testing.T, files map[string]string) *MetaStore {
 	t.Helper()
 	sized := make(map[string]sizedFile, len(files))
 	for rel, content := range files {
@@ -20,7 +20,7 @@ func setupDupesRepo(t *testing.T, files map[string]string) *DirectoryCache {
 }
 
 func TestFindDuplicates_RealDuplicates(t *testing.T) {
-	dc := setupDupesRepo(t, map[string]string{
+	ms := setupDupesRepo(t, map[string]string{
 		"a.txt":     "shared A",
 		"b.txt":     "shared A",
 		"sub/c.txt": "shared A",
@@ -29,9 +29,9 @@ func TestFindDuplicates_RealDuplicates(t *testing.T) {
 		"f.txt":     "unique",
 		"sub/g.txt": "another unique",
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -69,14 +69,14 @@ func TestFindDuplicates_RealDuplicates(t *testing.T) {
 }
 
 func TestFindDuplicates_NoDuplicates(t *testing.T) {
-	dc := setupDupesRepo(t, map[string]string{
+	ms := setupDupesRepo(t, map[string]string{
 		"a": "one",
 		"b": "two",
 		"c": "three",
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -86,14 +86,14 @@ func TestFindDuplicates_NoDuplicates(t *testing.T) {
 }
 
 func TestFindDuplicates_ContextCancellation(t *testing.T) {
-	dc := setupDupesRepo(t, map[string]string{
+	ms := setupDupesRepo(t, map[string]string{
 		"a": "x", "b": "x", "c": "x",
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before the call
-	_, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	_, err := ms.FindDuplicates(ctx, ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -105,7 +105,7 @@ func TestFindDuplicates_ContextCancellation(t *testing.T) {
 //	group1: a/x, a/y, b/x    (cross-dir)
 //	group2: b/y, c/x         (cross-dir, no member in a/)
 //	group3: c/y, c/z         (entirely inside c/)
-func dupesPathFilterFixture(t *testing.T) *DirectoryCache {
+func dupesPathFilterFixture(t *testing.T) *MetaStore {
 	t.Helper()
 	return setupDupesRepo(t, map[string]string{
 		"a/x": "g1", "a/y": "g1", "b/x": "g1",
@@ -125,10 +125,10 @@ func groupFiles(groups []DuplicateGroup) [][]string {
 }
 
 func TestFindDuplicates_PathFilter_ZeroPaths(t *testing.T) {
-	dc := dupesPathFilterFixture(t)
-	defer func() { _ = dc.Close() }()
+	ms := dupesPathFilterFixture(t)
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -138,12 +138,12 @@ func TestFindDuplicates_PathFilter_ZeroPaths(t *testing.T) {
 }
 
 func TestFindDuplicates_PathFilter_ExclusiveOneDir(t *testing.T) {
-	dc := dupesPathFilterFixture(t)
-	defer func() { _ = dc.Close() }()
+	ms := dupesPathFilterFixture(t)
+	defer func() { _ = ms.Close() }()
 
 	// Only c/ — group3 is fully inside, group1 has members outside c/
 	// so its in-c/ count drops to 0, group2 drops to a singleton.
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"c/"}, Exclusive: true})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"c/"}, Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -156,13 +156,13 @@ func TestFindDuplicates_PathFilter_ExclusiveOneDir(t *testing.T) {
 }
 
 func TestFindDuplicates_PathFilter_ExclusiveTwoDirs(t *testing.T) {
-	dc := dupesPathFilterFixture(t)
-	defer func() { _ = dc.Close() }()
+	ms := dupesPathFilterFixture(t)
+	defer func() { _ = ms.Close() }()
 
 	// a/ ∪ c/. group1 loses its b/x member → still dup (a/x,a/y).
 	// group2 loses a/… (none), keeps c/x only → singleton, dropped.
 	// group3 stays.
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/", "c/"}, Exclusive: true})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/", "c/"}, Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -187,13 +187,13 @@ func TestFindDuplicates_PathFilter_ExclusiveTwoDirs(t *testing.T) {
 }
 
 func TestFindDuplicates_PathFilter_NonExclusive(t *testing.T) {
-	dc := dupesPathFilterFixture(t)
-	defer func() { _ = dc.Close() }()
+	ms := dupesPathFilterFixture(t)
+	defer func() { _ = ms.Close() }()
 
 	// --exclusive=no with a/: cross-dir group1 (has a/x,a/y,b/x) is
 	// reported in full; group2 has no member in a/ so it's dropped;
 	// group3 has no member in a/ so it's dropped.
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/"}, Exclusive: false})
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Paths: []string{"a/"}, Exclusive: false})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -218,7 +218,7 @@ type sizedFile struct {
 // optional extraLinks maps: each linkPath → targetPath triggers an
 // os.Link after files are written, before the initial Update, so the
 // scanner walks both names. targetPath must be in files.
-func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ...map[string]string) *DirectoryCache {
+func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ...map[string]string) *MetaStore {
 	t.Helper()
 	root := t.TempDir()
 	for rel, spec := range files {
@@ -252,11 +252,11 @@ func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ..
 			}
 		}
 	}
-	dc := NewDirectoryCache(root, filepath.Join(root, ".dcfh"))
-	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+	ms := NewMetaStore(root, filepath.Join(root, ".dcfh"))
+	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	return dc
+	return ms
 }
 
 func u64(v uint64) *uint64 { return &v }
@@ -280,7 +280,7 @@ func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 	//   → regression gate that filter-before-bucketing works.
 	// group3 (large): two large duplicates → survives.
 	mtime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"small1":  {content: "A", size: 16, mtime: mtime},
 		"small2":  {content: "A", size: 16, mtime: mtime},
 		"mixed_s": {content: "MIX", size: 16, mtime: mtime},
@@ -288,9 +288,9 @@ func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 		"large1":  {content: "BIG", size: 4096, mtime: mtime},
 		"large2":  {content: "BIG", size: 4096, mtime: mtime},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(512)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -309,15 +309,15 @@ func TestFindDuplicates_SizeFilter_MinDropsBelowTwo(t *testing.T) {
 
 func TestFindDuplicates_SizeFilter_MaxOnly(t *testing.T) {
 	mtime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"small1": {content: "A", size: 16, mtime: mtime},
 		"small2": {content: "A", size: 16, mtime: mtime},
 		"large1": {content: "BIG", size: 4096, mtime: mtime},
 		"large2": {content: "BIG", size: 4096, mtime: mtime},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -329,15 +329,15 @@ func TestFindDuplicates_SizeFilter_MaxOnly(t *testing.T) {
 
 func TestFindDuplicates_SizeFilter_MinEqualsMax(t *testing.T) {
 	mtime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"a": {content: "A", size: 100, mtime: mtime},
 		"b": {content: "A", size: 100, mtime: mtime},
 		"c": {content: "C", size: 200, mtime: mtime},
 		"d": {content: "C", size: 200, mtime: mtime},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{MinSize: u64(100), MaxSize: u64(100)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -352,7 +352,7 @@ func TestFindDuplicates_DateFilter_Range(t *testing.T) {
 	feb := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
 	mar := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 	// Two groups of same content but spanning different months.
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"j1": {content: "shared", size: 32, mtime: jan},
 		"j2": {content: "shared", size: 32, mtime: jan},
 		"f1": {content: "feb", size: 32, mtime: feb},
@@ -360,12 +360,12 @@ func TestFindDuplicates_DateFilter_Range(t *testing.T) {
 		"m1": {content: "mar", size: 32, mtime: mar},
 		"m2": {content: "mar", size: 32, mtime: mar},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
 	// [Feb 1, Mar 1): only feb files pass.
 	start := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -381,16 +381,16 @@ func TestFindDuplicates_DateFilter_Range(t *testing.T) {
 func TestFindDuplicates_DateFilter_BoundaryInclusivity(t *testing.T) {
 	// Exact start boundary: inclusive. Exact end boundary: excluded.
 	boundary := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"in1":  {content: "g1", size: 32, mtime: boundary},
 		"in2":  {content: "g1", size: 32, mtime: boundary},
 		"out1": {content: "g2", size: 32, mtime: boundary.Add(24 * time.Hour)},
 		"out2": {content: "g2", size: 32, mtime: boundary.Add(24 * time.Hour)},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
 	// [boundary, boundary+24h): only in-files qualify.
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: boundary, EndDate: boundary.Add(24 * time.Hour)})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -409,19 +409,19 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	// Files on either side of the transition.
 	before := time.Date(2026, 3, 29, 1, 30, 0, 0, berlin) // CET, 00:30 UTC
 	after := time.Date(2026, 3, 29, 4, 30, 0, 0, berlin)  // CEST, 02:30 UTC
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"pre1":  {content: "pre", size: 32, mtime: before},
 		"pre2":  {content: "pre", size: 32, mtime: before},
 		"post1": {content: "post", size: 32, mtime: after},
 		"post2": {content: "post", size: 32, mtime: after},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
 	// Ask for [March 29, March 30) in Berlin wall time — spans the
 	// transition. Both groups should come through regardless of DST.
 	start := time.Date(2026, 3, 29, 0, 0, 0, 0, berlin)
 	end := time.Date(2026, 3, 30, 0, 0, 0, 0, berlin)
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{Exclusive: true, Predicate: mustFilter(t, FilterOptions{StartDate: start, EndDate: end})})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
@@ -431,7 +431,7 @@ func TestFindDuplicates_DateFilter_BerlinDST(t *testing.T) {
 	}
 	// A narrower range that only covers CET hours (pre-transition)
 	// must exclude the post-transition group entirely.
-	narrow, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	narrow, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{
 			Exclusive: true,
 			Predicate: mustFilter(t, FilterOptions{
@@ -451,7 +451,7 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 	feb := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
 	mar := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 	// Dupes scattered across a/ and b/ with varied sizes and months.
-	dc := setupDupesRepoSized(t, map[string]sizedFile{
+	ms := setupDupesRepoSized(t, map[string]sizedFile{
 		"a/feb_big_1": {content: "ab", size: 2048, mtime: feb},
 		"a/feb_big_2": {content: "ab", size: 2048, mtime: feb},
 		"a/feb_sml_1": {content: "as", size: 16, mtime: feb}, // drops below min-size
@@ -461,11 +461,11 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 		"b/feb_big_1": {content: "bb", size: 2048, mtime: feb}, // outside path
 		"b/feb_big_2": {content: "bb", size: 2048, mtime: feb},
 	})
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
 	start := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	groups, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{},
+	groups, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{},
 		DupeFilter{
 			Paths:     []string{"a/"},
 			Exclusive: true,
@@ -495,7 +495,7 @@ func TestFindDuplicates_CombinedFilters(t *testing.T) {
 // setupDupesRepoWithLinks seeds a repo like setupDupesRepo but also
 // hardlinks each linkPath → targetPath (targetPath must be in files),
 // so both land in the index sharing (Dev, Ino).
-func setupDupesRepoWithLinks(t *testing.T, files map[string]string, links map[string]string) *DirectoryCache {
+func setupDupesRepoWithLinks(t *testing.T, files map[string]string, links map[string]string) *MetaStore {
 	t.Helper()
 	sized := make(map[string]sizedFile, len(files))
 	for rel, content := range files {
@@ -507,13 +507,13 @@ func setupDupesRepoWithLinks(t *testing.T, files map[string]string, links map[st
 func TestFindDuplicates_IgnoreHardlinks_PureHardlinkGroup(t *testing.T) {
 	// Two entries, same content, same inode (hard linked).
 	// Without the flag: one group of 2. With the flag: no group.
-	dc := setupDupesRepoWithLinks(t,
+	ms := setupDupesRepoWithLinks(t,
 		map[string]string{"a.txt": "shared"},
 		map[string]string{"b.txt": "a.txt"},
 	)
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	off, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -521,7 +521,7 @@ func TestFindDuplicates_IgnoreHardlinks_PureHardlinkGroup(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt], got %v", groupFiles(off))
 	}
 
-	on, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -534,16 +534,16 @@ func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
 	// Three entries, same content: a.txt and b.txt hard linked;
 	// c.txt is an independent copy. Flag off: group of 3.
 	// Flag on: group of 2 (representative hardlink + c.txt).
-	dc := setupDupesRepoWithLinks(t,
+	ms := setupDupesRepoWithLinks(t,
 		map[string]string{
 			"a.txt": "shared",
 			"c.txt": "shared",
 		},
 		map[string]string{"b.txt": "a.txt"},
 	)
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	off, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -551,7 +551,7 @@ func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
 	}
 
-	on, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -565,16 +565,16 @@ func TestFindDuplicates_IgnoreHardlinks_MixedGroup(t *testing.T) {
 func TestFindDuplicates_IgnoreHardlinks_AllHardlinked(t *testing.T) {
 	// Three paths, all hard linked to the same inode.
 	// Flag on: group disappears entirely.
-	dc := setupDupesRepoWithLinks(t,
+	ms := setupDupesRepoWithLinks(t,
 		map[string]string{"a.txt": "shared"},
 		map[string]string{
 			"b.txt": "a.txt",
 			"c.txt": "a.txt",
 		},
 	)
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	off, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
+	off, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (off): %v", err)
 	}
@@ -582,7 +582,7 @@ func TestFindDuplicates_IgnoreHardlinks_AllHardlinked(t *testing.T) {
 		t.Fatalf("flag off: want [a.txt b.txt c.txt], got %v", groupFiles(off))
 	}
 
-	on, err := dc.FindDuplicates(context.Background(), dc.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
+	on, err := ms.FindDuplicates(context.Background(), ms.scanRun(), map[string]string{}, DupeFilter{Exclusive: true, IgnoreHardlinks: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates (on): %v", err)
 	}
@@ -618,22 +618,22 @@ func TestDuplicateGroup_Fields(t *testing.T) {
 	}
 }
 
-func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
+func TestMetaStore_FindDuplicates_EmptyIndex(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Create DirectoryCache instance
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	// Create MetaStore instance
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
 	// Create empty index
-	if err := dc.createEmptyIndex(); err != nil {
+	if err := ms.createEmptyIndex(); err != nil {
 		t.Fatalf("Failed to create empty index: %v", err)
 	}
 
 	// Test FindDuplicates with empty flags
 	flags := map[string]string{}
-	duplicates, err := dc.FindDuplicates(context.Background(), dc.scanRun(), flags, DupeFilter{Exclusive: true})
+	duplicates, err := ms.FindDuplicates(context.Background(), ms.scanRun(), flags, DupeFilter{Exclusive: true})
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -647,16 +647,16 @@ func TestDirectoryCache_FindDuplicates_EmptyIndex(t *testing.T) {
 	t.Logf("String copy stats: %d copies out of %d accesses (%.2f%% copy rate)", copies, accesses, rate)
 }
 
-func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
+func TestMetaStore_FindDuplicates_WithFlags(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Create DirectoryCache instance
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	// Create MetaStore instance
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
 	// Create empty index
-	if err := dc.createEmptyIndex(); err != nil {
+	if err := ms.createEmptyIndex(); err != nil {
 		t.Fatalf("Failed to create empty index: %v", err)
 	}
 
@@ -670,7 +670,7 @@ func TestDirectoryCache_FindDuplicates_WithFlags(t *testing.T) {
 
 	for i, flags := range testFlags {
 		t.Run("flags_test_"+string(rune(i+'0')), func(t *testing.T) {
-			duplicates, err := dc.FindDuplicates(context.Background(), dc.scanRun(), flags, DupeFilter{Exclusive: true})
+			duplicates, err := ms.FindDuplicates(context.Background(), ms.scanRun(), flags, DupeFilter{Exclusive: true})
 			if err != nil {
 				t.Fatalf("FindDuplicates failed with flags %v: %v", flags, err)
 			}

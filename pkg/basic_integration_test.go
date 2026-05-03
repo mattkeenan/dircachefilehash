@@ -23,11 +23,11 @@ func TestBasicIntegration(t *testing.T) {
 	}
 
 	// Initialise dcfh repository
-	dc := NewDirectoryCache(testDir, testDir)
+	ms := NewMetaStore(testDir, testDir)
 
 	t.Run("EmptyRepository", func(t *testing.T) {
 		// Test empty repository initialization
-		mainSkiplist, err := dc.LoadMainIndex()
+		mainSkiplist, err := ms.LoadMainIndex()
 		if err != nil {
 			t.Fatalf("Failed to load main index: %v", err)
 		}
@@ -56,12 +56,12 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update index
-		if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Update failed: %v", err)
 		}
 
 		// Verify index contains correct files with correct hashes
-		mainSkiplist, err := dc.LoadMainIndex()
+		mainSkiplist, err := ms.LoadMainIndex()
 		if err != nil {
 			t.Fatalf("Failed to load main index: %v", err)
 		}
@@ -102,12 +102,12 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update index
-		if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Update after modification failed: %v", err)
 		}
 
 		// Verify the modified file has the new hash
-		mainSkiplist, err := dc.LoadMainIndex()
+		mainSkiplist, err := ms.LoadMainIndex()
 		if err != nil {
 			t.Fatalf("Failed to load main index after modification: %v", err)
 		}
@@ -145,18 +145,18 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Run status to create cache
-		_, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+		_, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 		if err != nil {
 			t.Fatalf("Status failed: %v", err)
 		}
 
 		// Verify cache file exists
-		if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
-			t.Errorf("Cache file should exist after status: %s", dc.CacheFile)
+		if _, err := os.Stat(ms.CacheFile); os.IsNotExist(err) {
+			t.Errorf("Cache file should exist after status: %s", ms.CacheFile)
 		}
 
 		// Load cache and verify it contains the modification
-		cacheSkiplist, err := dc.loadCacheIndex()
+		cacheSkiplist, err := ms.loadCacheIndex()
 		if err != nil {
 			t.Fatalf("Failed to load cache index: %v", err)
 		}
@@ -181,14 +181,14 @@ func TestBasicIntegration(t *testing.T) {
 		}
 
 		// Update main index to include the cache changes for integrity test
-		if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+		if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 			t.Fatalf("Failed to update main index after cache test: %v", err)
 		}
 	})
 
 	t.Run("IndexIntegrity", func(t *testing.T) {
 		// Verify all files in index have correct hashes matching disk
-		mainSkiplist, err := dc.LoadMainIndex()
+		mainSkiplist, err := ms.LoadMainIndex()
 		if err != nil {
 			t.Fatalf("Failed to load main index for integrity check: %v", err)
 		}
@@ -199,7 +199,7 @@ func TestBasicIntegration(t *testing.T) {
 				return true // Skip deleted entries
 			}
 
-			filePath := filepath.Join(dc.RootDir, entry.RelativePath())
+			filePath := filepath.Join(ms.RootDir, entry.RelativePath())
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
 				// File doesn't exist on disk - this might be expected
 				return true

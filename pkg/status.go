@@ -46,10 +46,10 @@ type StatusResult struct {
 // filter, when non-nil, narrows the reported result without affecting
 // the cache write — the cache always reflects on-disk truth so a future
 // status without the filter sees the same state.
-func (dc *DirectoryCache) Status(ctx context.Context, sr *ScanRun, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
+func (ms *MetaStore) Status(ctx context.Context, sr *ScanRun, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
 	defer VerboseEnter()()
 
-	res, _ := dc.ApplyConfigOverrides(flags)
+	res, _ := ms.ApplyConfigOverrides(flags)
 	// Authoritative post-override values flow into sr; the caller may
 	// have built sr before flags were applied.
 	if sr != nil {
@@ -57,14 +57,14 @@ func (dc *DirectoryCache) Status(ctx context.Context, sr *ScanRun, flags map[str
 		sr.HashWorkers = res.HashWorkers
 	}
 
-	result, err := Diff(ctx, dc, sr, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
+	result, err := Diff(ctx, ms, sr, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
 	if err != nil {
 		return result, err
 	}
 
 	if verbose, exists := flags["v"]; exists && verbose != "" {
 		if level, atoiErr := strconv.Atoi(verbose); atoiErr == nil && level > 0 {
-			result.CleanStatus = collectCleanStatus(dc)
+			result.CleanStatus = collectCleanStatus(ms)
 		}
 	}
 
@@ -72,7 +72,7 @@ func (dc *DirectoryCache) Status(ctx context.Context, sr *ScanRun, flags map[str
 }
 
 // refreshFsScanCache runs the cache-refreshing scan pipeline that used to
-// live inline inside dc.Status. It loads main + cache, runs the 4-stage
+// live inline inside ms.Status. It loads main + cache, runs the 4-stage
 // pipeline (writing changes to a fresh cache-{ts}.idx, renamed to cache.idx
 // on success), then re-loads the post-rename cache and merges it over the
 // in-memory main. The returned skiplist IS the cache+main view callers
@@ -80,8 +80,8 @@ func (dc *DirectoryCache) Status(ctx context.Context, sr *ScanRun, flags map[str
 //
 // On error the skiplist is nil; the cache may still have been partially
 // written (the timestamped file is left in place for startup merge).
-func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (*skiplistWrapper, error) {
-	mainSkiplist, err := dc.LoadMainIndex()
+func (ms *MetaStore) refreshFsScanCache(ctx context.Context, sr *ScanRun) (*skiplistWrapper, error) {
+	mainSkiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
 	}
@@ -89,7 +89,7 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (
 		VerboseLog(3, "refreshFsScanCache: mainSkiplist length = %d", mainSkiplist.Length())
 	}
 
-	cacheSkiplistPre, err := dc.loadCacheIndex()
+	cacheSkiplistPre, err := ms.loadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cache index: %w", err)
 	}
@@ -97,13 +97,13 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (
 		VerboseLog(3, "refreshFsScanCache: cacheSkiplist length = %d", cacheSkiplistPre.Length())
 	}
 
-	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
+	cacheTempFileName := ms.GenerateTimestampedFileName("cache")
 
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
 	scanIterator := NewFilesystemScanIterator(ctx, sr, []string{}, "scan")
 
-	scanErr := RunStatusPipeline(ctx, dc, sr, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
-	finaliseStatusCache(dc, cacheTempFileName, scanErr == nil)
+	scanErr := RunStatusPipeline(ctx, ms, sr, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
+	finaliseStatusCache(ms, cacheTempFileName, scanErr == nil)
 
 	if scanErr != nil {
 		if IsDebugEnabled("scan") {
@@ -119,7 +119,7 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (
 	// stale. Load the post-rename cache and overlay it on mainSkiplist.
 	// mainSkiplist has no other consumers at this point — mutate in place,
 	// no Copy needed.
-	cacheSkiplistPost, err := dc.loadCacheIndex()
+	cacheSkiplistPost, err := ms.loadCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload cache index: %w", err)
 	}
@@ -132,7 +132,7 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (
 // finaliseStatusCache handles the success/failure branches of the
 // Status cache lifecycle: rename to cache.idx and cleanup on success,
 // leave the timestamped file for startup merge on failure.
-func finaliseStatusCache(dc *DirectoryCache, cacheTempFileName string, ok bool) {
+func finaliseStatusCache(ms *MetaStore, cacheTempFileName string, ok bool) {
 	if !ok {
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "[STATUS] Operation incomplete - leaving %s for startup merge\n", filepath.Base(cacheTempFileName))
@@ -142,13 +142,13 @@ func finaliseStatusCache(dc *DirectoryCache, cacheTempFileName string, ok bool) 
 	if _, err := os.Stat(cacheTempFileName); err != nil {
 		return
 	}
-	if renameErr := os.Rename(cacheTempFileName, dc.CacheFile); renameErr != nil {
+	if renameErr := os.Rename(cacheTempFileName, ms.CacheFile); renameErr != nil {
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename %s to cache.idx: %v\n", cacheTempFileName, renameErr)
 		}
 		return
 	}
-	if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+	if cleanupErr := ms.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
 		fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to cleanup timestamped cache files: %v\n", cleanupErr)
 	}
 }
@@ -156,15 +156,15 @@ func finaliseStatusCache(dc *DirectoryCache, cacheTempFileName string, ok bool) 
 // collectCleanStatus gathers the verbose --v clean-status snapshot:
 // whether main/cache indices load cleanly and which temp indices are
 // present. Stat failures collapse to "false" rather than propagating.
-func collectCleanStatus(dc *DirectoryCache) *CleanStatus {
+func collectCleanStatus(ms *MetaStore) *CleanStatus {
 	cs := &CleanStatus{}
-	if _, err := os.Stat(dc.IndexFile); err == nil {
+	if _, err := os.Stat(ms.IndexFile); err == nil {
 		cs.MainIndex = true
 	}
-	if _, err := os.Stat(dc.CacheFile); err == nil {
+	if _, err := os.Stat(ms.CacheFile); err == nil {
 		cs.CacheIndex = true
 	}
-	if tempFiles, err := dc.scanForTempIndices(); err == nil {
+	if tempFiles, err := ms.scanForTempIndices(); err == nil {
 		cs.TempIndices = tempFiles
 		cs.HasTempFiles = len(tempFiles) > 0
 	}

@@ -17,18 +17,18 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 	t.Logf("Test directory path: %s", tempDir)
 
 	// Initialize dcfh repository
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
 	// Set a very small hash buffer size to guarantee interruption during large file hashing
 	// This is a test-specific override - in real usage it would come from config
-	if dc.config != nil {
-		section := dc.config.ini.Section("performance")
+	if ms.config != nil {
+		section := ms.config.ini.Section("performance")
 		section.Key("hash_buffer").SetValue("64K") // Very small buffer for testing
 	}
 
 	// Create empty index to establish baseline
-	if err := dc.createEmptyIndex(); err != nil {
+	if err := ms.createEmptyIndex(); err != nil {
 		t.Fatalf("Failed to create empty index: %v", err)
 	}
 
@@ -40,14 +40,14 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 
 	// Run status to add existing.txt to cache.idx
 	t.Logf("Running initial status to add existing.txt to cache index")
-	_, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+	_, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to run initial status: %v", err)
 	}
 
 	// Verify existing.txt is in cache index
 	cacheIndexPath := filepath.Join(tempDir, ".dcfh", "cache.idx")
-	initialEntryRefs, err := dc.LoadIndexFromFileForValidation(cacheIndexPath)
+	initialEntryRefs, err := ms.LoadIndexFromFileForValidation(cacheIndexPath)
 	if err != nil {
 		t.Fatalf("Failed to load initial cache index: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 	start := time.Now()
 
 	// This should be interrupted by the shutdown signal
-	_, err = dc.Status(ctx, dc.scanRun(), map[string]string{}, nil)
+	_, err = ms.Status(ctx, ms.scanRun(), map[string]string{}, nil)
 
 	elapsed := time.Since(start)
 	t.Logf("Status completed in %v", elapsed)
@@ -109,7 +109,7 @@ func TestGracefulShutdownDuringHash(t *testing.T) {
 	}
 
 	// Load and verify the cache index after shutdown
-	finalEntryRefs, err := dc.LoadIndexFromFileForValidation(cacheIndexPath)
+	finalEntryRefs, err := ms.LoadIndexFromFileForValidation(cacheIndexPath)
 	if err != nil {
 		t.Fatalf("Failed to load final cache index: %v", err)
 	}

@@ -9,11 +9,11 @@ import (
 )
 
 // newInProcessWireRepo spins a RemoteHandler over an io.Pipe pair and
-// returns a localRepo wired to it. root is the remote-side fixture;
+// returns a wireRepo wired to it. root is the remote-side fixture;
 // metaDir is the invoker-side .dcfh (must already exist). Delegates to
 // the production newWireRepoWithClient so future wiring additions are
 // exercised by this test automatically.
-func newInProcessWireRepo(t *testing.T, root, metaDir string, uri RepoURI) *localRepo {
+func newInProcessWireRepo(t *testing.T, root, metaDir string, uri RepoURI) *wireRepo {
 	t.Helper()
 
 	handler, err := NewRemoteHandler(root, "")
@@ -26,11 +26,11 @@ func newInProcessWireRepo(t *testing.T, root, metaDir string, uri RepoURI) *loca
 	wait := runServer(t, handler, si, so)
 	t.Cleanup(func() { _ = wait() })
 
-	dc, err := OpenDirectoryCache("", metaDir)
+	ms, err := OpenMetaStore("", metaDir)
 	if err != nil {
-		t.Fatalf("OpenDirectoryCache(%s): %v", metaDir, err)
+		t.Fatalf("OpenMetaStore(%s): %v", metaDir, err)
 	}
-	return newWireRepoWithClient(dc, uri, NewWireClient(ct))
+	return newWireRepoWithClient(ms, uri, NewWireClient(ct))
 }
 
 func TestWireRepoDiffAndApplyAgainstInProcessRemote(t *testing.T) {

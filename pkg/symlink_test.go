@@ -75,7 +75,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
 
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	// First update with "all" - should follow symlinks
 	flags := map[string]string{"symlinks": "all"}
@@ -84,17 +84,17 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	// Apply flags to configure symlink mode (resolved values are
 	// returned; verbs read them via the ScanRun they re-build per
 	// call, so storing them here would be a no-op).
-	res, _ := dc.ApplyConfigOverrides(flags)
+	res, _ := ms.ApplyConfigOverrides(flags)
 
 	t.Logf("Before first update, symlink mode is: %s", res.SymlinkMode)
 
 	// Update entire repository (no specific paths)
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update with symlinks=all: %v", err)
 	}
 
 	// Check that symlinked files are in the index
-	fileCount, _, err := dc.Stats()
+	fileCount, _, err := ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get stats after initial update: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	t.Logf("After update with symlinks=all, found %d files", fileCount)
 
 	// Check if index file was created
-	if _, err := os.Stat(dc.IndexFile); err != nil {
+	if _, err := os.Stat(ms.IndexFile); err != nil {
 		t.Logf("Main index file not found: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 	SetDebugFlags("scan,scanning,symlinks")
 	defer SetDebugFlags("")
 
-	status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after symlinks=none: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSymlinkModeTransitions(t *testing.T) {
 
 	// Switch back to "all" - status should show no changes
 	flags["symlinks"] = "all"
-	status, err = dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err = ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after switching back to all: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	// Enable debug output
 	SetDebugFlags("symlinks")
@@ -220,11 +220,11 @@ func TestSymlinkModeInternal(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "internal"}
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=internal: %v", err)
 	}
 
-	fileCount, _, err := dc.Stats()
+	fileCount, _, err := ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 		t.Errorf("Expected %d files with symlinks=internal, got %d", expectedCount, fileCount)
 
 		// Debug: List all files found
-		status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
+		status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
 		if err == nil {
 			t.Logf("Modified: %v", status.Modified)
 			t.Logf("Added: %v", status.Added)
@@ -244,7 +244,7 @@ func TestSymlinkModeInternal(t *testing.T) {
 		}
 
 		// Also try to see what's in the main index
-		mainSkiplist, err := dc.LoadMainIndex()
+		mainSkiplist, err := ms.LoadMainIndex()
 		if err == nil {
 			t.Logf("Files in main index:")
 			mainSkiplist.ForEach(func(entry *binaryEntry, context string) bool {
@@ -308,15 +308,15 @@ func TestSymlinkModeExternal(t *testing.T) {
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "external"}
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=external: %v", err)
 	}
 
-	fileCount, _, err := dc.Stats()
+	fileCount, _, err := ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
@@ -378,18 +378,18 @@ func TestSymlinkCacheRadixBehavior(t *testing.T) {
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
 	// Switch to none and check status before updating
 	flags["symlinks"] = "none"
 
-	status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	// Enable debug output to catch any hashing attempts
 	SetDebugFlags("scanning")
@@ -455,7 +455,7 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 
 	ctx := context.Background()
 	flags := map[string]string{"symlinks": "all"}
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -467,12 +467,12 @@ func TestUnfollowedSymlinkNoHashing(t *testing.T) {
 
 	// Update with symlinks=none - the modified file should NOT be hashed
 	flags["symlinks"] = "none"
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update with symlinks=none: %v", err)
 	}
 
 	// The file should be marked as deleted without being hashed
-	status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

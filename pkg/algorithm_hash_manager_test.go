@@ -11,20 +11,20 @@ import (
 
 func TestAlgorithmHashManager(t *testing.T) {
 	t.Run("BasicOperation", func(t *testing.T) {
-		// Create test directory and DirectoryCache
+		// Create test directory and MetaStore
 		testDir, err := os.MkdirTemp("", "dcfh-algorithm-test-*")
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(ctx, 2) // 2 workers
+		manager := ms.newAlgorithmHashManager(ctx, 2) // 2 workers
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -44,7 +44,7 @@ func TestAlgorithmHashManager(t *testing.T) {
 		}
 
 		// Create hash jobs
-		jobs := createTestHashJobs(t, dc, []string{testFile1, testFile2})
+		jobs := createTestHashJobs(t, ms, []string{testFile1, testFile2})
 
 		// Submit jobs
 		for _, job := range jobs {
@@ -77,20 +77,20 @@ func TestAlgorithmHashManager(t *testing.T) {
 	})
 
 	t.Run("OutOfOrderCompletion", func(t *testing.T) {
-		// Create test directory and DirectoryCache
+		// Create test directory and MetaStore
 		testDir, err := os.MkdirTemp("", "dcfh-algorithm-order-test-*")
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx := t.Context()
 
 		// Create algorithm hash manager with 1 worker to control execution order
-		manager := dc.newAlgorithmHashManager(ctx, 1)
+		manager := ms.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -145,20 +145,20 @@ func TestAlgorithmHashManager(t *testing.T) {
 	})
 
 	t.Run("MultipleIterators", func(t *testing.T) {
-		// Create test directory and DirectoryCache
+		// Create test directory and MetaStore
 		testDir, err := os.MkdirTemp("", "dcfh-algorithm-multi-test-*")
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(ctx, 2)
+		manager := ms.newAlgorithmHashManager(ctx, 2)
 		defer manager.Shutdown()
 
 		// Create multiple notification channels
@@ -204,20 +204,20 @@ func TestAlgorithmHashManager(t *testing.T) {
 	})
 
 	t.Run("RegistrationAndUnregistration", func(t *testing.T) {
-		// Create test directory and DirectoryCache
+		// Create test directory and MetaStore
 		testDir, err := os.MkdirTemp("", "dcfh-algorithm-reg-test-*")
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(ctx, 1)
+		manager := ms.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Test registration
@@ -267,20 +267,20 @@ func TestAlgorithmHashManager(t *testing.T) {
 	})
 
 	t.Run("ShutdownHandling", func(t *testing.T) {
-		// Create test directory and DirectoryCache
+		// Create test directory and MetaStore
 		testDir, err := os.MkdirTemp("", "dcfh-algorithm-shutdown-test-*")
 		if err != nil {
 			t.Fatalf("Failed to create test directory: %v", err)
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx, cancel := context.WithCancel(context.Background())
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(ctx, 2)
+		manager := ms.newAlgorithmHashManager(ctx, 2)
 
 		// Test that IsShuttingDown returns false initially
 		if manager.IsShuttingDown() {
@@ -318,13 +318,13 @@ func TestAlgorithmHashManager(t *testing.T) {
 		}
 		defer func() { _ = os.RemoveAll(testDir) }()
 
-		dc := createTestDirectoryCache(t, testDir)
+		ms := createTestMetaStore(t, testDir)
 
 		// Create context for hash manager
 		ctx := t.Context()
 
 		// Create algorithm hash manager
-		manager := dc.newAlgorithmHashManager(ctx, 1)
+		manager := ms.newAlgorithmHashManager(ctx, 1)
 		defer manager.Shutdown()
 
 		// Create notification channel
@@ -370,18 +370,18 @@ func TestAlgorithmHashManager(t *testing.T) {
 }
 
 // Helper function to create test directory cache
-func createTestDirectoryCache(t *testing.T, testDir string) *DirectoryCache {
+func createTestMetaStore(t *testing.T, testDir string) *MetaStore {
 	// Create .dcfh directory
 	dcfhDir := filepath.Join(testDir, ".dcfh")
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create .dcfh directory: %v", err)
 	}
 
-	return NewDirectoryCache(testDir, testDir)
+	return NewMetaStore(testDir, testDir)
 }
 
 // Helper function to create test hash jobs
-func createTestHashJobs(t *testing.T, _ *DirectoryCache, filePaths []string) []*hashJobStart {
+func createTestHashJobs(t *testing.T, _ *MetaStore, filePaths []string) []*hashJobStart {
 	jobs := make([]*hashJobStart, 0, len(filePaths))
 
 	for i, filePath := range filePaths {
@@ -421,14 +421,14 @@ func createTestHashJobs(t *testing.T, _ *DirectoryCache, filePaths []string) []*
 
 // Benchmark the algorithm hash manager
 func BenchmarkAlgorithmHashManager(b *testing.B) {
-	// Create test directory and DirectoryCache
+	// Create test directory and MetaStore
 	testDir, err := os.MkdirTemp("", "dcfh-algorithm-bench-*")
 	if err != nil {
 		b.Fatalf("Failed to create test directory: %v", err)
 	}
 	defer func() { _ = os.RemoveAll(testDir) }()
 
-	dc := createTestDirectoryCacheForBench(b, testDir)
+	ms := createTestMetaStoreForBench(b, testDir)
 
 	b.Run("OrderedCompletions", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -436,7 +436,7 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			// Create algorithm hash manager
-			manager := dc.newAlgorithmHashManager(ctx, 1)
+			manager := ms.newAlgorithmHashManager(ctx, 1)
 
 			// Create notification channel
 			notifyChan := make(chan uint64, 100)
@@ -464,7 +464,7 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			// Create algorithm hash manager
-			manager := dc.newAlgorithmHashManager(ctx, 1)
+			manager := ms.newAlgorithmHashManager(ctx, 1)
 
 			// Create notification channel
 			notifyChan := make(chan uint64, 100)
@@ -488,12 +488,12 @@ func BenchmarkAlgorithmHashManager(b *testing.B) {
 }
 
 // Helper function for benchmark
-func createTestDirectoryCacheForBench(b *testing.B, testDir string) *DirectoryCache {
+func createTestMetaStoreForBench(b *testing.B, testDir string) *MetaStore {
 	// Create .dcfh directory
 	dcfhDir := filepath.Join(testDir, ".dcfh")
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		b.Fatalf("Failed to create .dcfh directory: %v", err)
 	}
 
-	return NewDirectoryCache(testDir, testDir)
+	return NewMetaStore(testDir, testDir)
 }

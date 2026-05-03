@@ -19,15 +19,15 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 		}
 	}
 
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
 	// Without ScanIgnore set, both files survive statAndFilter.
-	sr := dc.scanRun()
-	if _, _, ok := dc.statAndFilter(sr, keep); !ok {
+	sr := ms.scanRun()
+	if _, _, ok := ms.statAndFilter(sr, keep); !ok {
 		t.Errorf("keep should pass with nil ScanIgnore")
 	}
-	if _, _, ok := dc.statAndFilter(sr, drop); !ok {
+	if _, _, ok := ms.statAndFilter(sr, drop); !ok {
 		t.Errorf("drop should pass with nil ScanIgnore")
 	}
 
@@ -38,10 +38,10 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 	}
 	sr.ScanIgnore = expr
 
-	if _, _, ok := dc.statAndFilter(sr, keep); !ok {
+	if _, _, ok := ms.statAndFilter(sr, keep); !ok {
 		t.Errorf("keep should still pass with ScanIgnore = *.tmp")
 	}
-	if _, _, ok := dc.statAndFilter(sr, drop); ok {
+	if _, _, ok := ms.statAndFilter(sr, drop); ok {
 		t.Errorf("drop should be filtered by ScanIgnore = *.tmp")
 	}
 }
@@ -51,12 +51,12 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 // stat-using ones silently no-op.
 func TestScanIgnoreShouldIndex(t *testing.T) {
 	tempDir := t.TempDir()
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
-	sr := dc.scanRun()
+	sr := ms.scanRun()
 	// Without ScanIgnore, shouldIndex returns true for an unfiltered path.
-	if !dc.shouldIndex(sr, "foo.tmp") {
+	if !ms.shouldIndex(sr, "foo.tmp") {
 		t.Fatal("baseline: shouldIndex should accept foo.tmp before ScanIgnore is set")
 	}
 
@@ -66,10 +66,10 @@ func TestScanIgnoreShouldIndex(t *testing.T) {
 	}
 	sr.ScanIgnore = expr
 
-	if dc.shouldIndex(sr, "foo.tmp") {
+	if ms.shouldIndex(sr, "foo.tmp") {
 		t.Errorf("shouldIndex should drop foo.tmp under --ignore --name *.tmp")
 	}
-	if !dc.shouldIndex(sr, "foo.go") {
+	if !ms.shouldIndex(sr, "foo.go") {
 		t.Errorf("shouldIndex should keep foo.go under --ignore --name *.tmp")
 	}
 }
@@ -81,10 +81,10 @@ func TestScanIgnoreShouldIndex(t *testing.T) {
 // evaluation.
 func TestScanFilterEntryUnavailableData(t *testing.T) {
 	tempDir := t.TempDir()
-	dc := NewDirectoryCache(tempDir, tempDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(tempDir, tempDir)
+	defer func() { _ = ms.Close() }()
 
-	sr := dc.scanRun()
+	sr := ms.scanRun()
 	hashExpr, err := BuildScanIgnore([]FilterOptions{{Hashes: []string{"deadbeef"}}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)

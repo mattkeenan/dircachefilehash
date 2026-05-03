@@ -124,7 +124,7 @@ func (w *wireWalker) Close() error { return nil }
 // serialises through WireClient.mu for one path at a time.
 type wireHasher struct {
 	sess *wireSession
-	dc   *DirectoryCache
+	ms   *MetaStore
 
 	algoOnce sync.Once
 	algo     *HashAlgorithm
@@ -136,7 +136,7 @@ type wireHasher struct {
 // lifetime of a session, so once is enough.
 func (h *wireHasher) resolveAlgo() (*HashAlgorithm, error) {
 	h.algoOnce.Do(func() {
-		h.algo, h.algoErr = h.dc.getDefaultHashAlgorithm()
+		h.algo, h.algoErr = h.ms.getDefaultHashAlgorithm()
 	})
 	return h.algo, h.algoErr
 }

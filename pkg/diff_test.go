@@ -43,15 +43,15 @@ func TestParseIndexRef(t *testing.T) {
 }
 
 // TestDiff_MainVsFsScan_MatchesStatus pins the canonical case: Diff(main,
-// fs-scan) must produce exactly the same StatusResult as dc.Status. Phase 1
+// fs-scan) must produce exactly the same StatusResult as ms.Status. Phase 1
 // implements this via delegation; Phase 2 will reroute through the generic
 // engine, and this test guards equivalence across that change.
 func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
-	dc := setupDiffRepo(t)
-	defer func() { _ = dc.Close() }()
+	ms := setupDiffRepo(t)
+	defer func() { _ = ms.Close() }()
 
 	// Mutate state so there's actually something to diff.
-	root := dc.RootDir
+	root := ms.RootDir
 	if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("new"), 0o644); err != nil {
 		t.Fatalf("write added.txt: %v", err)
 	}
@@ -64,14 +64,14 @@ func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Reference path: dc.Status.
-	wantSR, err := dc.Status(ctx, dc.scanRun(), nil, nil)
+	// Reference path: ms.Status.
+	wantSR, err := ms.Status(ctx, ms.scanRun(), nil, nil)
 	if err != nil {
-		t.Fatalf("dc.Status: %v", err)
+		t.Fatalf("ms.Status: %v", err)
 	}
 
 	// Generic engine path: Diff(main, fs-scan).
-	gotSR, err := Diff(ctx, dc, dc.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil)
+	gotSR, err := Diff(ctx, ms, ms.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil)
 	if err != nil {
 		t.Fatalf("Diff(main, fs-scan): %v", err)
 	}
@@ -83,11 +83,11 @@ func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
 // fs-scan). After a Status run, cache+main carries the deltas; diffing it
 // against bare main should reproduce the same changes the Status reported.
 func TestDiff_CacheMainVsMain(t *testing.T) {
-	dc := setupDiffRepo(t)
-	defer func() { _ = dc.Close() }()
+	ms := setupDiffRepo(t)
+	defer func() { _ = ms.Close() }()
 
 	// Mutate, then run Status to populate cache.idx.
-	root := dc.RootDir
+	root := ms.RootDir
 	if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("new"), 0o644); err != nil {
 		t.Fatalf("write added.txt: %v", err)
 	}
@@ -96,15 +96,15 @@ func TestDiff_CacheMainVsMain(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	statusSR, err := dc.Status(ctx, dc.scanRun(), nil, nil)
+	statusSR, err := ms.Status(ctx, ms.scanRun(), nil, nil)
 	if err != nil {
-		t.Fatalf("dc.Status: %v", err)
+		t.Fatalf("ms.Status: %v", err)
 	}
 
 	// Diff(cache+main, main) — left is the post-mutation view, right is the
 	// pre-mutation view, so the symmetry is: status's Added → diff's Deleted,
 	// status's Deleted → diff's Added, Modified is invariant.
-	diffSR, err := Diff(ctx, dc, dc.scanRun(), IndexRef{Type: RefTypeCacheMain}, IndexRef{Type: RefTypeMain}, nil)
+	diffSR, err := Diff(ctx, ms, ms.scanRun(), IndexRef{Type: RefTypeCacheMain}, IndexRef{Type: RefTypeMain}, nil)
 	if err != nil {
 		t.Fatalf("Diff(cache+main, main): %v", err)
 	}
@@ -130,7 +130,7 @@ func TestDiff_CacheMainVsMain(t *testing.T) {
 	}
 }
 
-func setupDiffRepo(t *testing.T) *DirectoryCache {
+func setupDiffRepo(t *testing.T) *MetaStore {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
@@ -147,11 +147,11 @@ func setupDiffRepo(t *testing.T) *DirectoryCache {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	dc := NewDirectoryCache(root, filepath.Join(root, ".dcfh"))
-	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+	ms := NewMetaStore(root, filepath.Join(root, ".dcfh"))
+	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	return dc
+	return ms
 }
 
 func assertStatusResultsEqual(t *testing.T, want, got *StatusResult) {

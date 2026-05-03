@@ -44,7 +44,7 @@ func TestIgnoreTransitions(t *testing.T) {
 		t.Fatalf("Failed to create .dcfh dir: %v", err)
 	}
 
-	dc := NewDirectoryCache(repoDir, repoDir)
+	ms := NewMetaStore(repoDir, repoDir)
 
 	// Create initial ignore file with only .dcfh pattern (gitignore syntax)
 	ignoreFile := filepath.Join(dcfhDir, "ignore")
@@ -55,18 +55,18 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	_ = dc.ignoreManager.Reload()
+	_ = ms.ignoreManager.Reload()
 
 	// First update - all files should be indexed
 	ctx := context.Background()
 	flags := map[string]string{}
 
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
 	// Check initial file count
-	fileCount, _, err := dc.Stats()
+	fileCount, _, err := ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
@@ -85,10 +85,10 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	_ = dc.ignoreManager.Reload()
+	_ = ms.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
-	status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err := ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after ignore update: %v", err)
 	}
@@ -114,12 +114,12 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Update to apply the ignore changes
-	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update after ignore change: %v", err)
 	}
 
 	// Check final file count
-	fileCount, _, err = dc.Stats()
+	fileCount, _, err = ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get final stats: %v", err)
 	}
@@ -139,10 +139,10 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Force reload of ignore patterns
-	_ = dc.ignoreManager.Reload()
+	_ = ms.ignoreManager.Reload()
 
 	// Check status again
-	status, err = dc.Status(ctx, dc.scanRun(), flags, nil)
+	status, err = ms.Status(ctx, ms.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after second ignore update: %v", err)
 	}
@@ -193,16 +193,16 @@ mode = none
 		t.Fatalf("Failed to create config file: %v", err)
 	}
 
-	// Create a new DirectoryCache which will load the config automatically
-	dc := NewDirectoryCache(repoDir, repoDir)
+	// Create a new MetaStore which will load the config automatically
+	ms := NewMetaStore(repoDir, repoDir)
 
 	// Apply config
-	if _, err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
+	if _, err := ms.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply config: %v", err)
 	}
 
 	// Verify ignore_is_deindex is false
-	if dc.ignoreIsDeindex {
+	if ms.ignoreIsDeindex {
 		t.Error("Expected ignoreIsDeindex to be false based on config")
 	}
 
@@ -216,12 +216,12 @@ mode = none
 
 	// Initial update
 	ctx := context.Background()
-	if err := dc.Update(ctx, dc.scanRun(), map[string]string{}); err != nil {
+	if err := ms.Update(ctx, ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
 	// All files should be indexed (even .log file because ignore_is_deindex is false)
-	fileCount, _, err := dc.Stats()
+	fileCount, _, err := ms.Stats()
 	if err != nil {
 		t.Fatalf("Failed to get stats: %v", err)
 	}
@@ -240,16 +240,16 @@ mode = none
 		t.Fatalf("Failed to update config file: %v", err)
 	}
 
-	// Reload config by recreating DirectoryCache
-	dc = NewDirectoryCache(repoDir, repoDir)
+	// Reload config by recreating MetaStore
+	ms = NewMetaStore(repoDir, repoDir)
 
 	// Apply config
-	if _, err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
+	if _, err := ms.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply updated config: %v", err)
 	}
 
 	// Check status - .log file should now be marked for deletion
-	status, err := dc.Status(ctx, dc.scanRun(), map[string]string{}, nil)
+	status, err := ms.Status(ctx, ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

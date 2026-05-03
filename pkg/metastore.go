@@ -21,13 +21,13 @@ type ScanIndexInfo struct {
 	FileSize int    // Size of the file
 }
 
-// DirectoryCache manages the .dcfh metadata directory: the maps
+// MetaStore manages the .dcfh metadata directory: the maps
 // (main.idx, cache.idx, snapshots), the ignore manager, and the loaded
 // index memo. Instrument fields (walker, file hasher, symlink mode,
 // hash workers, scan-ignore predicate, scan synchronisation state) live
-// on the Repo impl, not here — DirectoryCache is the *folder of maps*
+// on the Repo impl, not here — MetaStore is the *folder of maps*
 // in the system metaphor, not the actor that reads the territory.
-type DirectoryCache struct {
+type MetaStore struct {
 	RootDir         string
 	MetaDir         string // Path to .dcfh metadata directory
 	IndexFile       string
@@ -83,8 +83,8 @@ type cachedStat struct {
 }
 
 // checkForOrphanedIndexFiles checks for temporary index files from dead processes
-func (dc *DirectoryCache) checkForOrphanedIndexFiles() error {
-	metaDir := dc.MetaDir
+func (ms *MetaStore) checkForOrphanedIndexFiles() error {
+	metaDir := ms.MetaDir
 
 	entries, err := os.ReadDir(metaDir)
 	if err != nil {
@@ -157,8 +157,8 @@ func isProcessRunning(pid int) bool {
 }
 
 // Stats returns statistics about the cache by loading the main index
-func (dc *DirectoryCache) Stats() (int, int64, error) {
-	skiplist, err := dc.LoadMainIndex()
+func (ms *MetaStore) Stats() (int, int64, error) {
+	skiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		return 0, 0, err
 	}
@@ -178,8 +178,8 @@ func (dc *DirectoryCache) Stats() (int, int64, error) {
 }
 
 // Length returns the total number of entries in the index (including deleted)
-func (dc *DirectoryCache) Length() int {
-	skiplist, err := dc.LoadMainIndex()
+func (ms *MetaStore) Length() int {
+	skiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		return 0
 	}
@@ -188,16 +188,16 @@ func (dc *DirectoryCache) Length() int {
 
 // IndexTimestamp returns the timestamp stored in the main index header (v3+).
 // Returns zero time and false if the index is not loaded or is v2.
-func (dc *DirectoryCache) IndexTimestamp() (time.Time, bool) {
-	if dc.mainIndex == nil {
+func (ms *MetaStore) IndexTimestamp() (time.Time, bool) {
+	if ms.mainIndex == nil {
 		return time.Time{}, false
 	}
-	dc.mainIndex.mutex.RLock()
-	defer dc.mainIndex.mutex.RUnlock()
-	if dc.mainIndex.Data == nil {
+	ms.mainIndex.mutex.RLock()
+	defer ms.mainIndex.mutex.RUnlock()
+	if ms.mainIndex.Data == nil {
 		return time.Time{}, false
 	}
-	header := (*indexHeader)(unsafe.Pointer(&dc.mainIndex.Data[0]))
+	header := (*indexHeader)(unsafe.Pointer(&ms.mainIndex.Data[0]))
 	if header.Version < TimestampMinVersion || header.Timestamp == 0 {
 		return time.Time{}, false
 	}
@@ -218,11 +218,11 @@ func ResolveMetaDir(dir, rootDir string) string {
 	return filepath.Join(dir, ".dcfh")
 }
 
-// initDirectoryCacheBase creates a partially-initialised DirectoryCache with
+// initMetaStoreBase creates a partially-initialised MetaStore with
 // struct fields set but no I/O performed (no directory creation, no config loading).
 // metaDir must be the fully resolved metadata directory path.
-func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
-	return &DirectoryCache{
+func initMetaStoreBase(rootDir, metaDir string) *MetaStore {
+	return &MetaStore{
 		RootDir:       rootDir,
 		MetaDir:       metaDir,
 		IndexFile:     filepath.Join(metaDir, "main.idx"),
@@ -235,47 +235,47 @@ func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
 	}
 }
 
-// configureDirectoryCache loads config and ignore patterns from an existing .dcfh directory.
+// configureMetaStore loads config and ignore patterns from an existing .dcfh directory.
 // All errors are non-fatal (logged to stderr) to match existing behaviour.
-func configureDirectoryCache(dc *DirectoryCache, metaDir string) {
+func configureMetaStore(ms *MetaStore, metaDir string) {
 	config, err := LoadConfig(metaDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load config from %s: %v\n", metaDir, err)
 	}
-	dc.config = config
+	ms.config = config
 
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
-		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
+		ms.indexLockTimeout = performanceConfig.IndexLockTimeout
 	} else {
-		dc.indexLockTimeout = 5 // fallback default (5 seconds)
+		ms.indexLockTimeout = 5 // fallback default (5 seconds)
 	}
 
-	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
+	if err := ms.ignoreManager.LoadIgnorePatterns(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to load ignore patterns: %v\n", err)
 	}
 }
 
-// CreateDirectoryCache creates a new dcfh repository on disk.
+// CreateMetaStore creates a new dcfh repository on disk.
 // Creates the .dcfh directory and empty index file if they don't exist.
 // Use this for repository initialisation (dcfh init).
-func CreateDirectoryCache(rootDir, metaDir string) *DirectoryCache {
+func CreateMetaStore(rootDir, metaDir string) *MetaStore {
 	metaDir = ResolveMetaDir(metaDir, rootDir)
-	dc := initDirectoryCacheBase(rootDir, metaDir)
+	ms := initMetaStoreBase(rootDir, metaDir)
 
 	// Prevent creating .dcfh inside .dcfh (nested repositories).
 	// External repos place metaDir elsewhere, so only check internal layout.
 	if metaDir == filepath.Join(rootDir, ".dcfh") {
 		if filepath.Base(rootDir) == ".dcfh" {
 			fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside another .dcfh directory: %s\n", rootDir)
-			return dc
+			return ms
 		}
 
 		dir := rootDir
 		for {
 			if filepath.Base(dir) == ".dcfh" {
 				fmt.Fprintf(os.Stderr, "Error: Cannot create .dcfh repository inside .dcfh directory tree: %s\n", rootDir)
-				return dc
+				return ms
 			}
 			parent := filepath.Dir(dir)
 			if parent == dir {
@@ -285,68 +285,68 @@ func CreateDirectoryCache(rootDir, metaDir string) *DirectoryCache {
 		}
 	}
 
-	if err := os.MkdirAll(dc.MetaDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", dc.MetaDir, err)
-		return dc
+	if err := os.MkdirAll(ms.MetaDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", ms.MetaDir, err)
+		return ms
 	}
 
 	// Create default config if it doesn't exist
-	if _, err := LoadConfig(dc.MetaDir); err != nil {
-		if _, err := CreateDefaultConfig(dc.MetaDir); err != nil {
+	if _, err := LoadConfig(ms.MetaDir); err != nil {
+		if _, err := CreateDefaultConfig(ms.MetaDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to create default config: %v\n", err)
 		}
 	}
 
-	configureDirectoryCache(dc, dc.MetaDir)
+	configureMetaStore(ms, ms.MetaDir)
 
 	// Create empty index if it doesn't exist
-	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
-		if err := dc.createEmptyIndex(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to create empty index file %s: %v\n", dc.IndexFile, err)
+	if _, err := os.Stat(ms.IndexFile); os.IsNotExist(err) {
+		if err := ms.createEmptyIndex(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create empty index file %s: %v\n", ms.IndexFile, err)
 		}
 	}
 
-	return dc
+	return ms
 }
 
-// OpenDirectoryCache opens an existing dcfh repository.
+// OpenMetaStore opens an existing dcfh repository.
 // Returns an error if the .dcfh directory does not exist.
 // Use this for operations on existing repositories (status, update, dupes).
-func OpenDirectoryCache(rootDir, metaDir string) (*DirectoryCache, error) {
+func OpenMetaStore(rootDir, metaDir string) (*MetaStore, error) {
 	metaDir = ResolveMetaDir(metaDir, rootDir)
-	dc := initDirectoryCacheBase(rootDir, metaDir)
+	ms := initMetaStoreBase(rootDir, metaDir)
 
-	info, err := os.Stat(dc.MetaDir)
+	info, err := os.Stat(ms.MetaDir)
 	if err != nil {
-		return nil, fmt.Errorf("repository not found: %s does not exist", dc.MetaDir)
+		return nil, fmt.Errorf("repository not found: %s does not exist", ms.MetaDir)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("repository not found: %s is not a directory", dc.MetaDir)
+		return nil, fmt.Errorf("repository not found: %s is not a directory", ms.MetaDir)
 	}
 
-	configureDirectoryCache(dc, dc.MetaDir)
+	configureMetaStore(ms, ms.MetaDir)
 
 	// For external repos, resolve rootDir from the config we just loaded
-	if rootDir == "" && dc.config != nil {
-		repoConfig := dc.config.GetRepositoryConfig()
+	if rootDir == "" && ms.config != nil {
+		repoConfig := ms.config.GetRepositoryConfig()
 		if repoConfig.Root != "" {
-			dc.RootDir = repoConfig.Root
+			ms.RootDir = repoConfig.Root
 		}
 	}
 
-	return dc, nil
+	return ms, nil
 }
 
-// NewDirectoryCache creates a new directory cache instance.
+// NewMetaStore creates a new directory cache instance.
 //
-// Deprecated: Use CreateDirectoryCache for new repositories or OpenDirectoryCache for existing ones.
-func NewDirectoryCache(rootDir, metaDir string) *DirectoryCache {
-	return CreateDirectoryCache(rootDir, metaDir)
+// Deprecated: Use CreateMetaStore for new repositories or OpenMetaStore for existing ones.
+func NewMetaStore(rootDir, metaDir string) *MetaStore {
+	return CreateMetaStore(rootDir, metaDir)
 }
 
 // ResolvedOverrides bundles the post-flag instrument settings produced
 // by ApplyConfigOverrides. The caller (Repo impl or test) writes these
-// onto its own ScanRun-bearing storage; DirectoryCache no longer holds
+// onto its own ScanRun-bearing storage; MetaStore no longer holds
 // instrument state.
 type ResolvedOverrides struct {
 	SymlinkMode string
@@ -355,13 +355,13 @@ type ResolvedOverrides struct {
 
 // ApplyConfigOverrides applies configuration overrides from the flags
 // map. MetaDir-side state (Config, ignoreIsDeindex, indexLockTimeout)
-// is mutated on dc as before. Instrument-side state (symlink mode,
+// is mutated on ms as before. Instrument-side state (symlink mode,
 // hash workers) is returned in ResolvedOverrides — the caller decides
 // where to store it.
 //
 // Resolved values are populated even when err != nil so callers
 // honour --symlinks / --hash-workers when no config is loaded.
-func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (ResolvedOverrides, error) {
+func (ms *MetaStore) ApplyConfigOverrides(flags map[string]string) (ResolvedOverrides, error) {
 	out := ResolvedOverrides{}
 
 	// Symlink mode: flags > config > default. Resolved regardless of
@@ -369,8 +369,8 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (Resolve
 	// the config-loading path fails below.
 	if symlinkMode, exists := flags["symlinks"]; exists {
 		out.SymlinkMode = symlinkMode
-	} else if dc.config != nil {
-		out.SymlinkMode = dc.config.GetSymlinkConfig().Mode
+	} else if ms.config != nil {
+		out.SymlinkMode = ms.config.GetSymlinkConfig().Mode
 	} else {
 		out.SymlinkMode = "none"
 	}
@@ -387,13 +387,13 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (Resolve
 		}
 		hashWorkersFromFlags = n
 		out.HashWorkers = n
-	} else if dc.config != nil {
-		out.HashWorkers = dc.config.GetPerformanceConfig().HashWorkers
+	} else if ms.config != nil {
+		out.HashWorkers = ms.config.GetPerformanceConfig().HashWorkers
 	} else {
 		out.HashWorkers = 2
 	}
 
-	if dc.config == nil {
+	if ms.config == nil {
 		return out, fmt.Errorf("no configuration loaded, cannot apply overrides")
 	}
 
@@ -403,8 +403,8 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (Resolve
 		allOverrides = append(allOverrides, filehashOverride)
 	}
 
-	// Ignore-deindex behaviour stays on dc (MetaDir-side).
-	dc.ignoreIsDeindex = dc.config.GetIgnoreConfig().IgnoreIsDeindex
+	// Ignore-deindex behaviour stays on ms (MetaDir-side).
+	ms.ignoreIsDeindex = ms.config.GetIgnoreConfig().IgnoreIsDeindex
 
 	if hashWorkersFromFlags > 0 {
 		allOverrides = append(allOverrides, "hash_workers:"+strconv.Itoa(hashWorkersFromFlags))
@@ -418,15 +418,15 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (Resolve
 		if err := ValidateIndexLockTimeout(indexLockTimeout); err != nil {
 			return out, fmt.Errorf("invalid index lock timeout configuration: %w", err)
 		}
-		dc.indexLockTimeout = indexLockTimeout
+		ms.indexLockTimeout = indexLockTimeout
 		allOverrides = append(allOverrides, "index_lock_timeout:"+indexLockTimeoutStr)
 	}
 
 	if len(allOverrides) > 0 {
-		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
+		if err := ms.config.ApplyOverrides(allOverrides); err != nil {
 			return out, fmt.Errorf("failed to apply configuration overrides: %w", err)
 		}
-		if err := dc.validateAllConfigs(); err != nil {
+		if err := ms.validateAllConfigs(); err != nil {
 			return out, fmt.Errorf("invalid configuration after overrides: %w", err)
 		}
 	}
@@ -435,8 +435,8 @@ func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (Resolve
 }
 
 // validateAllConfigs validates all configuration options
-func (dc *DirectoryCache) validateAllConfigs() error {
-	allConfig := dc.config.GetAllConfig()
+func (ms *MetaStore) validateAllConfigs() error {
+	allConfig := ms.config.GetAllConfig()
 
 	// Validate hash algorithm
 	if err := ValidateHashAlgorithm(allConfig.Hash.Default); err != nil {
@@ -477,8 +477,8 @@ func (dc *DirectoryCache) validateAllConfigs() error {
 }
 
 // GetConfig returns the configuration instance
-func (dc *DirectoryCache) GetConfig() *Config {
-	return dc.config
+func (ms *MetaStore) GetConfig() *Config {
+	return ms.config
 }
 
 // ResolveRepository resolves rootDir for a known metaDir (typically from
@@ -546,33 +546,16 @@ func DiscoverRepository(startDir string) (string, string, error) {
 }
 
 // registerIndex tracks an mmap'd index file for memory protection
-func (dc *DirectoryCache) registerIndex(indexType string, indexFile *mmapIndexFile) {
+func (ms *MetaStore) registerIndex(indexType string, indexFile *mmapIndexFile) {
 	if indexFile == nil {
 		return
 	}
 
 	switch indexType {
 	case "main":
-		dc.mainIndex = indexFile
+		ms.mainIndex = indexFile
 	case "cache":
-		dc.cacheIndex = indexFile
+		ms.cacheIndex = indexFile
 	}
 }
 
-// unregisterIndex removes tracking of an mmap'd index file
-func (dc *DirectoryCache) unregisterIndex(indexType string, indexFile *mmapIndexFile) {
-	if indexFile == nil {
-		return
-	}
-
-	switch indexType {
-	case "main":
-		if dc.mainIndex == indexFile {
-			dc.mainIndex = nil
-		}
-	case "cache":
-		if dc.cacheIndex == indexFile {
-			dc.cacheIndex = nil
-		}
-	}
-}

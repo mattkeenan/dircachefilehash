@@ -31,7 +31,7 @@ var cleanupMutexMmap sync.Mutex
 
 type indexFileMmapTestCleanupInfo struct {
 	testDir string
-	dc      *DirectoryCache
+	ms      *MetaStore
 }
 
 // createBEIndexFileMmap creates a BEIndexFileMmapEntry backed by a real
@@ -42,7 +42,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	dc := NewDirectoryCache(testDir, testDir)
+	ms := NewMetaStore(testDir, testDir)
 
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 
@@ -82,7 +82,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 
 	// Write the entry to a temp index file using the production writer.
 	indexPath := filepath.Join(testDir, "test.idx")
-	writer, err := NewTempIndexWriter(dc, indexPath)
+	writer, err := NewTempIndexWriter(ms, indexPath)
 	if err != nil {
 		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to create temp index writer: %v", err)
@@ -97,7 +97,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	}
 
 	// Mmap the index back through the shared loading path.
-	_, refs, err := dc.loadIndexShared(indexPath)
+	_, refs, err := ms.loadIndexShared(indexPath)
 	if err != nil {
 		_ = os.RemoveAll(testDir)
 		t.Fatalf("Failed to load index: %v", err)
@@ -112,7 +112,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 	cleanupMutexMmap.Lock()
 	testCleanupDataIndexFileMmap[mmapEntry] = &indexFileMmapTestCleanupInfo{
 		testDir: testDir,
-		dc:      dc,
+		ms:      ms,
 	}
 	cleanupMutexMmap.Unlock()
 
@@ -125,8 +125,8 @@ func cleanupBEIndexFileMmap(t *testing.T, entry BinaryEntryInterface) {
 	defer cleanupMutexMmap.Unlock()
 
 	if cleanupInfo, exists := testCleanupDataIndexFileMmap[entry]; exists {
-		if cleanupInfo.dc != nil {
-			_ = cleanupInfo.dc.Close()
+		if cleanupInfo.ms != nil {
+			_ = cleanupInfo.ms.Close()
 		}
 		if cleanupInfo.testDir != "" {
 			_ = os.RemoveAll(cleanupInfo.testDir)

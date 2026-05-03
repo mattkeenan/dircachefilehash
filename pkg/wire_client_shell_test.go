@@ -290,12 +290,12 @@ func TestShellRepoDiffAndApplyLocal(t *testing.T) {
 		t.Fatalf("bootstrap Close: %v", err)
 	}
 
-	dc, err := OpenDirectoryCache("", invokerMeta)
+	ms, err := OpenMetaStore("", invokerMeta)
 	if err != nil {
-		t.Fatalf("OpenDirectoryCache: %v", err)
+		t.Fatalf("OpenMetaStore: %v", err)
 	}
 	sc := &shellClient{uri: uri, runner: localShRunner()}
-	repo := newWireRepoWithClient(dc, uri, sc)
+	repo := newWireRepoWithClient(ms, uri, sc)
 	defer func() { _ = repo.Close() }()
 
 	diff, err := repo.Diff(ctx, DiffRequest{})

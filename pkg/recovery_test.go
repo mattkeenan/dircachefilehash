@@ -132,11 +132,11 @@ func TestPreRecoverySnapshot(t *testing.T) {
 	// Create temporary test directory
 	tempDir := t.TempDir()
 
-	// Create DirectoryCache instance
-	dc := NewDirectoryCache(tempDir, tempDir)
+	// Create MetaStore instance
+	ms := NewMetaStore(tempDir, tempDir)
 
 	// Ensure the .dcfh directory exists
-	dcfhDir := dc.MetaDir
+	dcfhDir := ms.MetaDir
 	if err := os.MkdirAll(dcfhDir, 0755); err != nil {
 		t.Fatalf("Failed to create dcfh directory: %v", err)
 	}
@@ -148,22 +148,22 @@ func TestPreRecoverySnapshot(t *testing.T) {
 	}
 
 	// Build a proper main index first
-	if err := dc.Update(context.Background(), dc.scanRun(), nil); err != nil {
+	if err := ms.Update(context.Background(), ms.scanRun(), nil); err != nil {
 		t.Fatalf("Failed to create initial index: %v", err)
 	}
 
 	// Create cache file and scan file for testing
-	if err := copyFile(dc.IndexFile, dc.CacheFile); err != nil {
+	if err := copyFile(ms.IndexFile, ms.CacheFile); err != nil {
 		t.Fatalf("Failed to create cache file: %v", err)
 	}
 
 	scanFile := filepath.Join(dcfhDir, "scan-123-456.idx")
-	if err := copyFile(dc.IndexFile, scanFile); err != nil {
+	if err := copyFile(ms.IndexFile, scanFile); err != nil {
 		t.Fatalf("Failed to create scan file: %v", err)
 	}
 
 	// Test the pre-recovery snapshot function directly
-	err := dc.createPreRecoverySnapshot(2)
+	err := ms.createPreRecoverySnapshot(2)
 	if err != nil {
 		t.Fatalf("createPreRecoverySnapshot failed: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestPreRecoverySnapshot(t *testing.T) {
 	}
 
 	// Verify file metadata preservation by checking one file
-	originalMainStat, err := os.Stat(dc.IndexFile)
+	originalMainStat, err := os.Stat(ms.IndexFile)
 	if err != nil {
 		t.Fatalf("Failed to stat original main.idx: %v", err)
 	}

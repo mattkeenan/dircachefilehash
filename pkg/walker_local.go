@@ -18,12 +18,12 @@ func (lw *localWalker) Close() error { return nil }
 
 // localHasher hashes files on the local filesystem through the existing
 // HashFileInterruptibleToBytes pipeline. Paths are resolved against
-// dc.RootDir so callers pass repository-relative paths.
-type localHasher struct{ dc *DirectoryCache }
+// ms.RootDir so callers pass repository-relative paths.
+type localHasher struct{ ms *MetaStore }
 
 func (lh *localHasher) HashOne(ctx context.Context, relPath string, buffer []byte) ([]byte, uint16, error) {
-	filePath := filepath.Join(lh.dc.RootDir, relPath)
-	return lh.dc.HashFileInterruptibleToBytes(ctx, filePath, buffer)
+	filePath := filepath.Join(lh.ms.RootDir, relPath)
+	return lh.ms.HashFileInterruptibleToBytes(ctx, filePath, buffer)
 }
 
 func (lh *localHasher) Close() error { return nil }

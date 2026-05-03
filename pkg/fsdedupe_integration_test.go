@@ -55,13 +55,13 @@ func TestFSDedupe_Integration_DryRun(t *testing.T) {
 		"b2.bin":        string(beta),
 		"singleton.bin": "not shared",
 	}
-	dc := setupDupesRepo(t, content)
-	defer func() { _ = dc.Close() }()
+	ms := setupDupesRepo(t, content)
+	defer func() { _ = ms.Close() }()
 
-	repoRoot := dc.RootDir
+	repoRoot := ms.RootDir
 
 	ctx := context.Background()
-	groups, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
+	groups, err := ms.FindDuplicates(ctx, ms.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -140,17 +140,17 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 		"b1.bin":     string(beta),
 		"b2.bin":     string(beta),
 	}
-	dc := setupDupesRepo(t, content)
-	defer func() { _ = dc.Close() }()
+	ms := setupDupesRepo(t, content)
+	defer func() { _ = ms.Close() }()
 
 	ctx := context.Background()
-	groups, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
+	groups, err := ms.FindDuplicates(ctx, ms.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
 	var streamed []fsdedupe.GroupResult
 	res, err := fsdedupe.Run(ctx, toFSDedupeGroups(groups), fsdedupe.Options{
-		RepoRoot: dc.RootDir,
+		RepoRoot: ms.RootDir,
 		OnGroup: func(gr fsdedupe.GroupResult) {
 			streamed = append(streamed, gr)
 		},
@@ -182,7 +182,7 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 
 	// Reflinks are semantically invisible — content must still match.
 	for rel, want := range content {
-		got, err := os.ReadFile(filepath.Join(dc.RootDir, rel))
+		got, err := os.ReadFile(filepath.Join(ms.RootDir, rel))
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
 		}
@@ -193,11 +193,11 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 
 	// A second apply must be idempotent: extents are already shared,
 	// so bytes_deduped is 0 for every target but outcome stays ok.
-	groups2, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
+	groups2, err := ms.FindDuplicates(ctx, ms.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates (2nd): %v", err)
 	}
-	res2, err := fsdedupe.Run(ctx, toFSDedupeGroups(groups2), fsdedupe.Options{RepoRoot: dc.RootDir})
+	res2, err := fsdedupe.Run(ctx, toFSDedupeGroups(groups2), fsdedupe.Options{RepoRoot: ms.RootDir})
 	if err != nil {
 		t.Fatalf("fsdedupe.Run (re-apply): %v", err)
 	}

@@ -77,14 +77,14 @@ type DupeFilter struct {
 // entries sharing (Dev, Ino) within a full-hash subgroup collapse to
 // the first (path-sorted) occurrence, and the ≥2 threshold is re-checked
 // so a group of pure hardlink siblings disappears.
-func (dc *DirectoryCache) FindDuplicates(ctx context.Context, sr *ScanRun, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
-	res, _ := dc.ApplyConfigOverrides(flags)
+func (ms *MetaStore) FindDuplicates(ctx context.Context, sr *ScanRun, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
+	res, _ := ms.ApplyConfigOverrides(flags)
 	if sr != nil {
 		sr.SymlinkMode = res.SymlinkMode
 		sr.HashWorkers = res.HashWorkers
 	}
 
-	skiplist, err := dc.LoadMergedMainCacheIndex()
+	skiplist, err := ms.LoadMergedMainCacheIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load merged index: %w", err)
 	}

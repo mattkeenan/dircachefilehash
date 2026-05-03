@@ -28,7 +28,7 @@ var testCleanupDataSkiplist = make(map[BinaryEntryInterface]*skiplistTestCleanup
 
 type skiplistTestCleanupInfo struct {
 	testDir  string
-	dc       *DirectoryCache
+	ms       *MetaStore
 	skiplist *skiplistWrapper
 }
 
@@ -85,7 +85,7 @@ func createBESkiplist(t *testing.T, testData *TestEntryData) BinaryEntryInterfac
 	// Store cleanup info (just need to track the allocated entry)
 	testCleanupDataSkiplist[skiplistEntry] = &skiplistTestCleanupInfo{
 		testDir:  "", // No directory to clean up
-		dc:       nil,
+		ms:       nil,
 		skiplist: nil,
 	}
 
@@ -404,7 +404,7 @@ func testBESkiplistEntryMmapSafety(t *testing.T) {
 // skiplistTestHelper helps create skiplist entries for testing
 type skiplistTestHelper struct {
 	testDir string
-	dc      *DirectoryCache
+	ms      *MetaStore
 }
 
 // createTestEntry creates a test skiplist entry and returns it with a cleanup function
@@ -416,8 +416,8 @@ func (h *skiplistTestHelper) createTestEntry(t *testing.T) (*BESkiplistEntry, fu
 	}
 	h.testDir = testDir
 
-	// Create DirectoryCache
-	h.dc = NewDirectoryCache(testDir, testDir)
+	// Create MetaStore
+	h.ms = NewMetaStore(testDir, testDir)
 
 	// Create test data
 	testData := CreateTestData()

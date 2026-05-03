@@ -12,15 +12,15 @@ import (
 )
 
 // GenerateTimestampedFileName generates a timestamped filename using ISO 8601 format
-func (dc *DirectoryCache) GenerateTimestampedFileName(prefix string) string {
+func (ms *MetaStore) GenerateTimestampedFileName(prefix string) string {
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	return filepath.Join(dc.MetaDir,
+	return filepath.Join(ms.MetaDir,
 		fmt.Sprintf("%s-%s.idx", prefix, timestamp))
 }
 
 // ScanForTimestampedCacheFiles finds all cache-{timestamp}.idx files in chronological order
-func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
-	metaDir := dc.MetaDir
+func (ms *MetaStore) ScanForTimestampedCacheFiles() ([]string, error) {
+	metaDir := ms.MetaDir
 	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .dcfh directory: %w", err)
@@ -49,8 +49,8 @@ func (dc *DirectoryCache) ScanForTimestampedCacheFiles() ([]string, error) {
 }
 
 // CleanupTimestampedCacheFiles removes all timestamped cache files after successful operation
-func (dc *DirectoryCache) CleanupTimestampedCacheFiles() error {
-	timestampedCaches, err := dc.ScanForTimestampedCacheFiles()
+func (ms *MetaStore) CleanupTimestampedCacheFiles() error {
+	timestampedCaches, err := ms.ScanForTimestampedCacheFiles()
 	if err != nil {
 		return fmt.Errorf("failed to scan for timestamped cache files: %w", err)
 	}

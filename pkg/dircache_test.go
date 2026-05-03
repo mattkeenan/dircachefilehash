@@ -7,35 +7,35 @@ import (
 	"testing"
 )
 
-func TestNewDirectoryCache(t *testing.T) {
+func TestNewMetaStore(t *testing.T) {
 	rootDir := "/tmp/test/root" // Use /tmp to avoid permission issues
 	metaDir := "/tmp/test/dcfh"
 
-	dc := NewDirectoryCache(rootDir, metaDir)
+	ms := NewMetaStore(rootDir, metaDir)
 
-	if dc == nil {
-		t.Fatal("NewDirectoryCache should not return nil")
+	if ms == nil {
+		t.Fatal("NewMetaStore should not return nil")
 	}
 
-	if dc.RootDir != rootDir {
-		t.Errorf("Expected RootDir %s, got %s", rootDir, dc.RootDir)
+	if ms.RootDir != rootDir {
+		t.Errorf("Expected RootDir %s, got %s", rootDir, ms.RootDir)
 	}
 
 	// CacheFile should be the cache.idx file in metaDir, not metaDir itself
 	expectedCacheFile := strings.TrimSuffix(metaDir, "/") + "/.dcfh/cache.idx"
-	if dc.CacheFile != expectedCacheFile {
-		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, dc.CacheFile)
+	if ms.CacheFile != expectedCacheFile {
+		t.Errorf("Expected CacheFile %s, got %s", expectedCacheFile, ms.CacheFile)
 	}
 
 	// Check that hasher is initialised
-	if dc.hasher == nil {
+	if ms.hasher == nil {
 		t.Error("Hasher should be initialised")
 	}
 
 	// Check signature
 	expectedSig := [4]byte{'d', 'c', 'f', 'h'}
-	if dc.signature != expectedSig {
-		t.Errorf("Expected signature %v, got %v", expectedSig, dc.signature)
+	if ms.signature != expectedSig {
+		t.Errorf("Expected signature %v, got %v", expectedSig, ms.signature)
 	}
 }
 

@@ -29,13 +29,13 @@ operations on maps mean*.
 
 | Term | What it is | Where it lives | Code today |
 |---|---|---|---|
-| **Repo** / **RootDir** / **working tree** / **territory** | The directory tree being tracked. Same thing — three names because they show up in different contexts. | On disk, possibly on another machine via ssh. | `Repo` interface (verbs); `RootDir` field on `DirectoryCache` (state) |
-| **`.dcfh` directory** / **MetaDir** | A folder of maps, plus config and ignore patterns. *Always* on the local filesystem — even an ssh-attached repo has a local `.dcfh`. | One per Repo. | `MetaDir` field on `DirectoryCache` |
+| **Repo** / **RootDir** / **working tree** / **territory** | The directory tree being tracked. Same thing — three names because they show up in different contexts. | On disk, possibly on another machine via ssh. | `Repo` interface (verbs); `RootDir` field on `MetaStore` (state) |
+| **`.dcfh` directory** / **MetaDir** | A folder of maps, plus config and ignore patterns. *Always* on the local filesystem — even an ssh-attached repo has a local `.dcfh`. | One per Repo. | `MetaDir` field on `MetaStore` |
 | **Map** / **Cache** / **Index** / **`.idx` file** | A sorted list of `(path, fstat, hash)` records — a snapshot of the territory at one moment. One file = one map. | Inside `.dcfh`. | `mmapIndexFile`; records reached via `binaryEntryRef` |
 | **`main.idx`** | The canonical clean map. Deleted entries excluded. | Inside `.dcfh`. | `IndexFile` field; `mainIndex` |
 | **`cache.idx`** | The sparse delta map — in-progress work. Deletions retained. | Inside `.dcfh`. | `CacheFile` field; `cacheIndex` |
 | **Snapshot** | A map filed under a stable name for later reference. | Inside `.dcfh/snapshots/`. | `SnapshotRepository` |
-| **Walker** / **Hasher** | The instruments used to *redraw* a map by reading the territory. | Conceptually attached to the Repo (varies by where the territory lives). | `walker`, `fileHasher` fields — currently on `DirectoryCache`, which is the wrong home |
+| **Walker** / **Hasher** | The instruments used to *redraw* a map by reading the territory. | Conceptually attached to the Repo (varies by where the territory lives). | `walker`, `fileHasher` fields on `repoCore` (embedded by `localRepo` / `wireRepo`); per-call state travels via `*ScanRun` |
 
 ### Verbs on a Repo
 
@@ -101,81 +101,62 @@ through it.
 
 - **Status**: closed. The deprecated `IndexEntry binaryEntryRef` field has been removed; `hashJobStart` now holds only `Entry BinaryEntryInterface` (plus the `ScannedPath` fallback used for symlink-mode detection). The struct has moved to `pkg/algorithm_hash_manager.go` next to its consumer.
 
-## 11. `DirectoryCache` mixes three roles the metaphor keeps separate
+## 11. ~~`DirectoryCache` mixed three roles the metaphor keeps separate~~ — **partially resolved (Stages 1+2+5); Stages 3+4 deferred**
 
-- **Reality**: under the metaphor there are three things: the **Repo**
-  (territory + verbs), the **MetaDir** (folder of maps + config), and
-  the **walker/hasher** (instruments used by Repo verbs to read the
-  territory). The Go type `DirectoryCache` (`pkg/dircache.go:26`)
-  conflates all three. Concretely, its fields fall into:
+- **Resolved in this pass**:
+  - **Stage 1 (peer Repo impls)**: `wireRepo` is now a real peer of
+    `localRepo` in `pkg/repo_wire.go`. The shared verb machinery
+    lives on an embedded `repoCore` so neither pretends to be the
+    other; `wireRepo` adds only the `*wireSession` it owns. The old
+    swap pattern (`pkg/repo_local.go:117-118` mutating walker /
+    fileHasher on the embedded cache) is gone.
+  - **Stage 2 (instruments off the cache)**: 10 instrument fields
+    (`walker`, `fileHasher`, `symlinkMode`, `hashWorkers`,
+    `scanIgnore`, `scanFilterEnt`, `scanFilterCtx`, `scanMutex`,
+    `scanInProgress`, `lastScanError`) moved off `MetaStore` onto
+    `repoCore`. Per-call instrument state travels through a new
+    `*ScanRun` value (`pkg/scan_context.go`) threaded into every verb
+    (`Status`, `Update`, `FindDuplicates`, `Diff`, `OpenRef`, …).
+    `ApplyConfigOverrides` returns a `ResolvedOverrides` struct
+    instead of mutating cache fields in place.
+  - **Stage 5 (rename)**: `DirectoryCache` → `MetaStore`,
+    `pkg/dircache.go` → `pkg/metastore.go`; constructors renamed
+    (`NewDirectoryCache` → `NewMetaStore`, etc.); receiver and field
+    name renamed (`dc` → `ms`).
+  - **Divergences from the original split**:
+    - `MetaStore` retains the SHA-1 `hasher` field. Index-file
+      checksum is MetaDir-side machinery (it lives with the atomic
+      rename / temp-index plumbing), not a per-Repo content-hash
+      instrument, so it stayed put.
+    - The new per-call type is `ScanRun`, not `ScanContext`, to avoid
+      colliding with the existing merge-tag string constants
+      `MainContext` / `CacheContext` / `ScanContext`.
 
-  - *Repo identity & instruments*: `RootDir`, `walker`, `fileHasher`,
-    `hasher`, `symlinkMode`, `hashWorkers`, `scanIgnore`,
-    `scanFilterEnt`, `scanFilterCtx`, `scanMutex`, `scanInProgress`,
-    `lastScanError`. None of these belong on a folder of maps.
-  - *MetaDir state*: `MetaDir`, `IndexFile`, `CacheFile`, `signature`,
-    `version`, `config`, `ignoreManager`, `ignoreIsDeindex`,
-    `mainIndex`, `cacheIndex`, `mmapIndex`, `loadedIndices`,
-    `orphanIndices`, `loadedMu`, `indexLockTimeout`. These do.
-  - *Repo verbs misfiled as cache methods*: `dc.Status`, `dc.Update`,
-    `dc.FindDuplicates`. These are operations on the territory, not
-    on the maps; they only live here because `DirectoryCache`
-    predates the `Repo` interface.
+- **Still outstanding**:
+  - **Stage 3 — verbs still live on `MetaStore`**. `Status`,
+    `Update`, `FindDuplicates`, `OpenRef`, `Diff` (free function)
+    remain methods/free functions taking `(*MetaStore, *ScanRun)`.
+    The peer impls now wrap them through `repoCore` rather than
+    being them, but the verb code itself hasn't moved onto the repo
+    impls. Splitting that is its own design call (do verbs become
+    methods on `repoCore`, or stay as free functions taking
+    `(MetaStore, ScanRun)`?) and is deferred until the post-this-PR
+    shape is in front of us.
+  - **Stage 4 — first-class `Index` type**. `mmapIndexFile` (mmap'd
+    bytes) and `binaryEntryRef` (record handles) are still separate.
+    Consolidation is independent of the Repo split and sequenced
+    after Stage 3.
+  - **Item 12 (Fix verb)** — `dcfhfix` and recovery still go through
+    `MetaStore` directly. Tracked under item 12 below;
+    `BACKLOG.md` Phase 1b-2 is the schedule.
 
-- **Reality, continued**: the `Repo` interface (`pkg/repo.go:154`)
-  exists and promises polymorphism over local / wire / colocated
-  repos, but the only implementation (`localRepo` at
-  `pkg/repo_local.go:15`) is a one-field wrapper holding a
-  `*DirectoryCache`. Local-vs-wire is not a polymorphism choice; it's
-  a *swap* of `walker` and `fileHasher` on the embedded
-  `DirectoryCache` (`pkg/repo_local.go:117-118`). The interface
-  exists; the polymorphism doesn't.
-
-- **Why it matters**: the metaphor predicts a clean three-way split
-  and the code currently delivers a two-headed black box. The
-  practical costs:
-
-  1. **Phase 3 (colocated repos) inherits the swap pattern.** Adding a
-     third "kind of repo" today means more conditional wiring inside
-     a single overloaded struct, not a new peer implementation.
-  2. **The Fix verb (item 12) has nowhere to land.** Recovery and
-     `dcfhfix` go through `DirectoryCache` directly because that's
-     where the territory-shaped operations live — but Fix should be
-     a `Repo` verb so it works for ssh-attached repos too.
-  3. **Public-API surface is doubled.** `DirectoryCache.Status` and
-     `Repo.Diff` are both reachable from `cmd/`, with no signal which
-     is the supported door. The metaphor says only `Repo.Diff` should
-     be — `DirectoryCache` shouldn't have verbs at all.
-
-- **Fix shape (not a plan)**: three types matching the metaphor.
-
-  - `Repo` (interface) keeps its current verb set. Add `Fix` when item
-    12 lands.
-  - `localRepo` / `wireRepo` / `colocatedRepo` become **peer**
-    implementations of `Repo`. Each holds its own `walker` /
-    `fileHasher` / `symlinkMode` / `hashWorkers` / per-scan state,
-    plus a `*DirectoryCache` for the maps side. The
-    `wireSession`-bearing impl stops pretending to be a `localRepo`.
-  - `DirectoryCache` is repurposed (and probably renamed —
-    `MetaStore` / `MetaDir` / `Repository` are candidates) to be the
-    in-memory `.dcfh` container only: config, ignore manager,
-    snapshot enumeration, the table of loaded `Index` caches,
-    atomic-rename machinery for `main.idx`. **No Repo verbs.**
-  - Each `.idx` file gets a first-class type — `Index` or
-    `CacheFile` — exposing load / lookup / iterate / write. Today
-    that role is split between `mmapIndexFile` (the mmap'd bytes)
-    and `binaryEntryRef` (the records); under the metaphor it
-    deserves a single name.
-
-- **Cost**: not small. `DirectoryCache.Status` / `.Update` /
-  `.FindDuplicates` have callers in `cmd/dcfh`, `cmd/dcfhfind`, and
-  `cmd/dcfhfix`. The migration is a multi-step refactor, not a
-  one-day pass. Sequencing it alongside item 12 (Fix primitive) makes
-  sense — they're the same shape of work.
+- **`cmd/` was untouched**: `cmd/dcfh`, `cmd/dcfhfind`, `cmd/dcfhfix`
+  reach the cache only through the `Repo` interface, so no consumer
+  changes were required.
 
 ## 12. No `Repo.Fix` primitive
 
-- **Reality**: `dcfhfix` and recovery still go through `DirectoryCache` directly. The deferred Fix primitive is the only currently-tracked path to closure (see the Phase 1b-2 entry in `BACKLOG.md`).
+- **Reality**: `dcfhfix` and recovery still go through `MetaStore` directly. The deferred Fix primitive is the only currently-tracked path to closure (see the Phase 1b-2 entry in `BACKLOG.md`).
 - **Why it matters**: As long as recovery isn't behind `Repo`, an SSH-attached repo can't be repaired remotely — the wire protocol has no Fix verb. That's a footgun for the audit-mode story (Phase 2).
 
 ---

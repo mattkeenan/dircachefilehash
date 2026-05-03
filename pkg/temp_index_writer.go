@@ -20,12 +20,12 @@ type TempIndexWriter struct {
 	tempPath       string
 	headerWritten  bool
 	entryCount     uint32
-	dc             *DirectoryCache
+	ms             *MetaStore
 	checksumWriter hash.Hash // Incremental checksum calculation
 }
 
 // NewTempIndexWriter creates a new temp index writer for the specified temp file
-func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, error) {
+func NewTempIndexWriter(ms *MetaStore, tempPath string) (*TempIndexWriter, error) {
 	// Create temp index file
 	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -34,7 +34,7 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 
 	// Create a new hasher instance based on the configured hash type
 	var checksumWriter hash.Hash
-	currentHashType := dc.GetCurrentHashType()
+	currentHashType := ms.GetCurrentHashType()
 	switch currentHashType {
 	case HashTypeSHA1:
 		checksumWriter = sha1.New()
@@ -51,7 +51,7 @@ func NewTempIndexWriter(dc *DirectoryCache, tempPath string) (*TempIndexWriter, 
 		tempPath:       tempPath,
 		headerWritten:  false,
 		entryCount:     0,
-		dc:             dc,
+		ms:             ms,
 		checksumWriter: checksumWriter, // Use new hasher instance
 	}, nil
 }
@@ -96,7 +96,7 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 func (tiw *TempIndexWriter) writePlaceholderHeader() error {
 	// Create placeholder header (will be rewritten in Close() with correct count/checksum)
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, 0, 0, tiw.dc.GetCurrentHashType())
+	header.SetHeaderForWritableIndex(tiw.ms.signature, tiw.ms.version, 0, 0, tiw.ms.GetCurrentHashType())
 
 	// Create header IoVec
 	headerIovec := syscall.Iovec{
@@ -173,7 +173,7 @@ func (tiw *TempIndexWriter) Close() error {
 
 	// Create final header with correct entry count
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.dc.signature, tiw.dc.version, tiw.entryCount, 0, tiw.dc.GetCurrentHashType())
+	header.SetHeaderForWritableIndex(tiw.ms.signature, tiw.ms.version, tiw.entryCount, 0, tiw.ms.GetCurrentHashType())
 
 	// Mark header as clean
 	header.setClean()

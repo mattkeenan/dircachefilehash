@@ -125,7 +125,7 @@ func TestIndexHeader_ValidateVersion(t *testing.T) {
 	}
 }
 
-func TestDirectoryCache_scanForTempIndices(t *testing.T) {
+func TestMetaStore_scanForTempIndices(t *testing.T) {
 	// Create temporary directory structure
 	tempDir := t.TempDir()
 	dcfhDir := filepath.Join(tempDir, ".dcfh")
@@ -149,14 +149,14 @@ func TestDirectoryCache_scanForTempIndices(t *testing.T) {
 		}
 	}
 
-	// Create DirectoryCache instance
-	dc := &DirectoryCache{
+	// Create MetaStore instance
+	ms := &MetaStore{
 		MetaDir:   dcfhDir,
 		IndexFile: filepath.Join(dcfhDir, "main.idx"),
 	}
 
 	// Test scanForTempIndices
-	tempFiles, err := dc.scanForTempIndices()
+	tempFiles, err := ms.scanForTempIndices()
 	if err != nil {
 		t.Fatalf("scanForTempIndices failed: %v", err)
 	}

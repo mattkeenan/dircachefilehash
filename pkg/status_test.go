@@ -119,7 +119,7 @@ func TestCleanStatusFields(t *testing.T) {
 	}
 }
 
-func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
+func TestMetaStore_Status_VerboseFlag(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
@@ -164,12 +164,12 @@ func TestDirectoryCache_Status_VerboseFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create DirectoryCache instance - use tempDir as both root and dcfh location
-			dc := NewDirectoryCache(tempDir, tempDir)
-			defer func() { _ = dc.Close() }()
+			// Create MetaStore instance - use tempDir as both root and dcfh location
+			ms := NewMetaStore(tempDir, tempDir)
+			defer func() { _ = ms.Close() }()
 
 			// Initialise with empty index to avoid complex setup
-			if err := dc.createEmptyIndex(); err != nil {
+			if err := ms.createEmptyIndex(); err != nil {
 				t.Fatalf("Failed to create empty index: %v", err)
 			}
 

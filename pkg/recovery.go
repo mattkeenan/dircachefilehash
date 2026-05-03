@@ -333,8 +333,8 @@ func DiagnosticValidationProcessor(verbosity int) EntryProcessor {
 }
 
 // createPreRecoverySnapshot creates a complete backup of all index files before recovery
-func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
-	metaDir := dc.MetaDir
+func (ms *MetaStore) createPreRecoverySnapshot(verbosity int) error {
+	metaDir := ms.MetaDir
 	recoveryDir := filepath.Join(metaDir, "recovery")
 
 	// Create recovery directory if it doesn't exist
@@ -362,7 +362,7 @@ func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
 		destPath := filepath.Join(recoveryDir, entry.Name())
 
 		// Copy file preserving metadata
-		if err := dc.copyFileWithMetadata(sourcePath, destPath, verbosity); err != nil {
+		if err := ms.copyFileWithMetadata(sourcePath, destPath, verbosity); err != nil {
 			if verbosity >= 1 {
 				VerboseLog(1, "Warning: failed to backup %s: %v", entry.Name(), err)
 			}
@@ -383,7 +383,7 @@ func (dc *DirectoryCache) createPreRecoverySnapshot(verbosity int) error {
 }
 
 // copyFileWithMetadata copies a file while preserving its mtime and ctime
-func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) error {
+func (ms *MetaStore) copyFileWithMetadata(src, dst string, verbosity int) error {
 	// Get source file info
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -412,31 +412,8 @@ func (dc *DirectoryCache) copyFileWithMetadata(src, dst string, verbosity int) e
 	return nil
 }
 
-// generateRecoveryBackupName creates a backup filename for recovery operations
-func (dc *DirectoryCache) generateRecoveryBackupName(recoveryType string) string {
-	return filepath.Join(dc.MetaDir, fmt.Sprintf("recover-%s-%d-%d.idx", recoveryType, os.Getpid(), getGoroutineID()))
-}
-
-// createRecoveryBackup creates a backup copy of a broken index file
-func (dc *DirectoryCache) createRecoveryBackup(sourcePath, backupPath string, verbosity int) error {
-	sourceData, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to read source file: %w", err)
-	}
-
-	if err := os.WriteFile(backupPath, sourceData, 0644); err != nil {
-		return fmt.Errorf("failed to write backup file: %w", err)
-	}
-
-	if verbosity >= 2 {
-		VerboseLog(2, "Created recovery backup: %s (%d bytes)", backupPath, len(sourceData))
-	}
-
-	return nil
-}
-
 // CreatePreRecoverySnapshotForIdxck creates a pre-recovery snapshot specifically for idxck operations
 // This is a public wrapper that can be called from CLI code
-func (dc *DirectoryCache) CreatePreRecoverySnapshotForIdxck(verbosity int) error {
-	return dc.createPreRecoverySnapshot(verbosity)
+func (ms *MetaStore) CreatePreRecoverySnapshotForIdxck(verbosity int) error {
+	return ms.createPreRecoverySnapshot(verbosity)
 }

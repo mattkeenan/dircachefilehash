@@ -60,7 +60,7 @@ func (ufsi *FilesystemScanIterator) Next() (BinaryEntryInterface, error) {
 		return nil, err
 	}
 
-	// Check if we're already exhausted (e.g., due to nil DirectoryCache)
+	// Check if we're already exhausted (e.g., due to nil MetaStore)
 	if ufsi.exhausted {
 		return nil, nil
 	}

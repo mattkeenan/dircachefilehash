@@ -141,13 +141,13 @@ func GetHashSize(hashType uint16) int {
 
 // GetCurrentHashType returns the current hash type to use based on command line options,
 // config file settings, and defaults (in that order of precedence)
-func (dc *DirectoryCache) GetCurrentHashType() uint16 {
+func (ms *MetaStore) GetCurrentHashType() uint16 {
 	// 1. Check command line options first (via overrides)
 	// Command line overrides are already applied to the config during initialization
 
 	// 2. Check config file settings (which may include command line overrides)
-	if dc.config != nil {
-		hashConfig := dc.config.GetHashConfig()
+	if ms.config != nil {
+		hashConfig := ms.config.GetHashConfig()
 		if hashConfig != nil && hashConfig.Default != "" {
 			// Get the hash algorithm configuration
 			if algorithm, err := GetHashAlgorithm(hashConfig.Default); err == nil {
@@ -161,8 +161,8 @@ func (dc *DirectoryCache) GetCurrentHashType() uint16 {
 }
 
 // GetCurrentHashAlgorithm returns the current hash algorithm configuration
-func (dc *DirectoryCache) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
-	hashType := dc.GetCurrentHashType()
+func (ms *MetaStore) GetCurrentHashAlgorithm() (*HashAlgorithm, error) {
+	hashType := ms.GetCurrentHashType()
 	return GetHashAlgorithmByType(hashType)
 }
 
@@ -238,16 +238,16 @@ func HashFileInterruptible(ctx context.Context, filePath string, algorithm *Hash
 // type ID. If buffer is nil, a new buffer is allocated from the configured size.
 // Callers that hash many files (e.g. worker pools) should pre-allocate a buffer
 // and pass it here to avoid per-file allocation and GC pressure.
-func (dc *DirectoryCache) HashFileInterruptibleToBytes(ctx context.Context, filePath string, buffer []byte) ([]byte, uint16, error) {
+func (ms *MetaStore) HashFileInterruptibleToBytes(ctx context.Context, filePath string, buffer []byte) ([]byte, uint16, error) {
 	// Get default algorithm
-	algorithm, err := dc.getDefaultHashAlgorithm()
+	algorithm, err := ms.getDefaultHashAlgorithm()
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 	}
 
 	// Allocate buffer if caller didn't provide one
 	if buffer == nil {
-		bufferSize, err := dc.getHashBufferSize()
+		bufferSize, err := ms.getHashBufferSize()
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get hash buffer size: %w", err)
 		}
@@ -263,19 +263,19 @@ func (dc *DirectoryCache) HashFileInterruptibleToBytes(ctx context.Context, file
 }
 
 // getHashBufferSize gets the configured hash buffer size in bytes
-func (dc *DirectoryCache) getHashBufferSize() (int, error) {
-	if dc.config == nil {
+func (ms *MetaStore) getHashBufferSize() (int, error) {
+	if ms.config == nil {
 		// Fallback to 2MB if no config
 		return 2 * 1024 * 1024, nil
 	}
 
-	performanceConfig := dc.config.GetPerformanceConfig()
+	performanceConfig := ms.config.GetPerformanceConfig()
 	return ParseHumanSize(performanceConfig.HashBuffer)
 }
 
 // hashSymlinkTargetToBytes calculates hash of a symlink's target path and returns raw bytes
-func (dc *DirectoryCache) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, uint16, error) {
-	algorithm, err := dc.getDefaultHashAlgorithm()
+func (ms *MetaStore) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, uint16, error) {
+	algorithm, err := ms.getDefaultHashAlgorithm()
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get default hash algorithm: %w", err)
 	}
@@ -292,11 +292,11 @@ func (dc *DirectoryCache) hashSymlinkTargetToBytes(symlinkPath string) ([]byte, 
 
 // getDefaultHashAlgorithm gets the default hash algorithm from config, falling
 // back to SHA256 when no config is loaded.
-func (dc *DirectoryCache) getDefaultHashAlgorithm() (*HashAlgorithm, error) {
-	if dc.config == nil {
+func (ms *MetaStore) getDefaultHashAlgorithm() (*HashAlgorithm, error) {
+	if ms.config == nil {
 		return GetHashAlgorithm("sha256")
 	}
 
-	hashConfig := dc.config.GetHashConfig()
+	hashConfig := ms.config.GetHashConfig()
 	return GetHashAlgorithm(hashConfig.Default)
 }

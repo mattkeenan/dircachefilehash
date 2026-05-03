@@ -35,7 +35,7 @@ const (
 //
 // The returned iterator is safe to drive directly with hwangLin.
 // Callers MUST invoke the closer when done — for in-memory skiplists owned
-// by dc this is a no-op; for ad-hoc mmap'd files (snapshot/file/scan) the
+// by ms this is a no-op; for ad-hoc mmap'd files (snapshot/file/scan) the
 // closer DecRefs the underlying mapping.
 //
 // fs-scan is a side-effecting case: opening it triggers a Status-style
@@ -43,37 +43,37 @@ const (
 // cache+main. The user-visible cache write semantics are preserved by
 // design — every fs-scan banks its hashing work, regardless of which Diff
 // caller asked for it.
-func OpenRef(ctx context.Context, dc *DirectoryCache, sr *ScanRun, ref IndexRef) (BinaryEntryIterator, func() error, error) {
+func OpenRef(ctx context.Context, ms *MetaStore, sr *ScanRun, ref IndexRef) (BinaryEntryIterator, func() error, error) {
 	switch ref.Type {
 	case RefTypeMain:
-		sl, err := dc.LoadMainIndex()
+		sl, err := ms.LoadMainIndex()
 		if err != nil {
 			return nil, nil, fmt.Errorf("OpenRef main: %w", err)
 		}
 		return NewBinaryEntrySkiplistIterator(ctx, sl, "main"), noopCloser, nil
 
 	case RefTypeCache:
-		sl, err := dc.loadCacheIndex()
+		sl, err := ms.loadCacheIndex()
 		if err != nil {
 			return nil, nil, fmt.Errorf("OpenRef cache: %w", err)
 		}
 		return NewBinaryEntrySkiplistIterator(ctx, sl, "cache"), noopCloser, nil
 
 	case RefTypeCacheMain:
-		sl, err := dc.LoadMergedMainCacheIndex()
+		sl, err := ms.LoadMergedMainCacheIndex()
 		if err != nil {
 			return nil, nil, fmt.Errorf("OpenRef cache+main: %w", err)
 		}
 		return NewBinaryEntrySkiplistIterator(ctx, sl, "cache+main"), noopCloser, nil
 
 	case RefTypeFile, RefTypeScan:
-		return openFileRef(ctx, dc, ref)
+		return openFileRef(ctx, ms, ref)
 
 	case RefTypeSnapshot:
-		return openSnapshotRef(ctx, dc, ref)
+		return openSnapshotRef(ctx, ms, ref)
 
 	case RefTypeFsScan:
-		return openFsScanRef(ctx, dc, sr)
+		return openFsScanRef(ctx, ms, sr)
 
 	default:
 		return nil, nil, fmt.Errorf("OpenRef: unknown ref type %q", ref.Type)
@@ -83,8 +83,8 @@ func OpenRef(ctx context.Context, dc *DirectoryCache, sr *ScanRun, ref IndexRef)
 // openFileRef opens an arbitrary .idx file (or a scan-<id>.idx) as an
 // iterator. The returned closer DecRefs the mmap so the file descriptor
 // and mapping are released when the caller finishes iterating.
-func openFileRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryEntryIterator, func() error, error) {
-	refs, indexFile, err := dc.loadIndexFromFileWithTracking(ref.Path)
+func openFileRef(ctx context.Context, ms *MetaStore, ref IndexRef) (BinaryEntryIterator, func() error, error) {
+	refs, indexFile, err := ms.loadIndexFromFileWithTracking(ref.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef %s %s: %w", ref.Type, ref.Path, err)
 	}
@@ -109,16 +109,16 @@ func openFileRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryE
 // Goes through the read-only mmap memo, so repeated `dcfh snapshot status`
 // calls against the same snapshot in one process share a single mapping.
 // The memo owns lifetime; the returned closer is a no-op.
-func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryEntryIterator, func() error, error) {
+func openSnapshotRef(ctx context.Context, ms *MetaStore, ref IndexRef) (BinaryEntryIterator, func() error, error) {
 	if ref.SnapshotID == "" {
 		return nil, nil, fmt.Errorf("OpenRef snapshot: SnapshotID is required")
 	}
-	id, err := ResolveSnapshotID(dc.MetaDir, ref.SnapshotID)
+	id, err := ResolveSnapshotID(ms.MetaDir, ref.SnapshotID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef snapshot %q: %w", ref.SnapshotID, err)
 	}
-	path := filepath.Join(dc.MetaDir, "snapshots", id, "main.idx")
-	_, refs, err := dc.loadIndexShared(path)
+	path := filepath.Join(ms.MetaDir, "snapshots", id, "main.idx")
+	_, refs, err := ms.loadIndexShared(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef snapshot %s: %w", id, err)
 	}
@@ -130,8 +130,8 @@ func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (Bin
 // The cache write is a structural property of opening fs-scan — every
 // scan banks its hashing work into cache.idx — so callers driving Diff
 // over fs-scan never have to think about cache lifecycle.
-func openFsScanRef(ctx context.Context, dc *DirectoryCache, sr *ScanRun) (BinaryEntryIterator, func() error, error) {
-	merged, err := dc.refreshFsScanCache(ctx, sr)
+func openFsScanRef(ctx context.Context, ms *MetaStore, sr *ScanRun) (BinaryEntryIterator, func() error, error) {
+	merged, err := ms.refreshFsScanCache(ctx, sr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef fs-scan: %w", err)
 	}

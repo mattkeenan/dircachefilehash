@@ -9,7 +9,7 @@ import (
 )
 
 // setupMemoTestRepo creates a populated dcfh repo and closes the
-// originating DirectoryCache, so the test can open a fresh one with an
+// originating MetaStore, so the test can open a fresh one with an
 // empty memo against the on-disk state.
 func setupMemoTestRepo(t *testing.T) string {
 	t.Helper()
@@ -22,13 +22,13 @@ func setupMemoTestRepo(t *testing.T) string {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	dc := NewDirectoryCache(testDir, testDir)
-	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
-		_ = dc.Close()
+	ms := NewMetaStore(testDir, testDir)
+	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
+		_ = ms.Close()
 		t.Fatalf("update: %v", err)
 	}
-	if err := dc.Close(); err != nil {
-		t.Fatalf("close setup dc: %v", err)
+	if err := ms.Close(); err != nil {
+		t.Fatalf("close setup ms: %v", err)
 	}
 	return testDir
 }
@@ -39,24 +39,24 @@ func setupMemoTestRepo(t *testing.T) string {
 func TestLoadMainIndexSharesMmap(t *testing.T) {
 	testDir := setupMemoTestRepo(t)
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
-	sl1, err := dc.LoadMainIndex()
+	sl1, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("load #1: %v", err)
 	}
-	idx1 := dc.mainIndex
+	idx1 := ms.mainIndex
 	if idx1 == nil {
-		t.Fatal("dc.mainIndex nil after load #1")
+		t.Fatal("ms.mainIndex nil after load #1")
 	}
 
-	sl2, err := dc.LoadMainIndex()
+	sl2, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("load #2: %v", err)
 	}
-	if dc.mainIndex != idx1 {
-		t.Errorf("expected memo hit (same *mmapIndexFile); got idx1=%p idx2=%p", idx1, dc.mainIndex)
+	if ms.mainIndex != idx1 {
+		t.Errorf("expected memo hit (same *mmapIndexFile); got idx1=%p idx2=%p", idx1, ms.mainIndex)
 	}
 	if sl1.Length() != sl2.Length() || sl1.Length() == 0 {
 		t.Errorf("skiplist lengths: sl1=%d sl2=%d", sl1.Length(), sl2.Length())
@@ -70,32 +70,32 @@ func TestLoadMainIndexSharesMmap(t *testing.T) {
 func TestLoadMainIndexInvalidatesOnMtimeChange(t *testing.T) {
 	testDir := setupMemoTestRepo(t)
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
-	if _, err := dc.LoadMainIndex(); err != nil {
+	if _, err := ms.LoadMainIndex(); err != nil {
 		t.Fatalf("load #1: %v", err)
 	}
-	idx1 := dc.mainIndex
+	idx1 := ms.mainIndex
 
 	// Bump mtime forward; dev/inode/size unchanged but the memo's
 	// cachedStat compares mtime too, so this triggers invalidation.
 	future := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(dc.IndexFile, future, future); err != nil {
+	if err := os.Chtimes(ms.IndexFile, future, future); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if _, err := dc.LoadMainIndex(); err != nil {
+	if _, err := ms.LoadMainIndex(); err != nil {
 		t.Fatalf("load #2: %v", err)
 	}
-	if dc.mainIndex == idx1 {
+	if ms.mainIndex == idx1 {
 		t.Errorf("expected stat-mismatch invalidation; both loads returned %p", idx1)
 	}
 
-	dc.loadedMu.Lock()
-	orphans := len(dc.orphanIndices)
-	cached := len(dc.loadedIndices)
-	dc.loadedMu.Unlock()
+	ms.loadedMu.Lock()
+	orphans := len(ms.orphanIndices)
+	cached := len(ms.loadedIndices)
+	ms.loadedMu.Unlock()
 	if orphans != 1 {
 		t.Errorf("expected exactly 1 orphan after invalidation, got %d", orphans)
 	}
@@ -107,34 +107,34 @@ func TestLoadMainIndexInvalidatesOnMtimeChange(t *testing.T) {
 // TestLoadMainIndexNoLeak verifies that repeated LoadMainIndex calls
 // (no on-disk change between them) leave a single cached mapping with
 // refCount=1 and no orphans. The pre-memo behaviour overwrote
-// dc.mainIndex on each call without DecRef, leaking mappings until
+// ms.mainIndex on each call without DecRef, leaking mappings until
 // process exit.
 func TestLoadMainIndexNoLeak(t *testing.T) {
 	testDir := setupMemoTestRepo(t)
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
 	for i := range 10 {
-		if _, err := dc.LoadMainIndex(); err != nil {
+		if _, err := ms.LoadMainIndex(); err != nil {
 			t.Fatalf("load #%d: %v", i, err)
 		}
 	}
 
-	dc.loadedMu.Lock()
-	cached := len(dc.loadedIndices)
-	orphans := len(dc.orphanIndices)
-	dc.loadedMu.Unlock()
+	ms.loadedMu.Lock()
+	cached := len(ms.loadedIndices)
+	orphans := len(ms.orphanIndices)
+	ms.loadedMu.Unlock()
 	if cached != 1 {
 		t.Errorf("expected 1 cached mapping, got %d", cached)
 	}
 	if orphans != 0 {
 		t.Errorf("expected 0 orphans, got %d", orphans)
 	}
-	if dc.mainIndex == nil {
-		t.Fatal("dc.mainIndex nil after 10 loads")
+	if ms.mainIndex == nil {
+		t.Fatal("ms.mainIndex nil after 10 loads")
 	}
-	if rc := dc.mainIndex.RefCount(); rc != 1 {
+	if rc := ms.mainIndex.RefCount(); rc != 1 {
 		t.Errorf("expected refCount=1 (memo's single ref), got %d", rc)
 	}
 }
@@ -146,30 +146,30 @@ func TestLoadMainIndexNoLeak(t *testing.T) {
 func TestStatusUsesSingleMainMapping(t *testing.T) {
 	testDir := setupMemoTestRepo(t)
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
 	// Prime the memo so we observe the steady state.
-	if _, err := dc.LoadMainIndex(); err != nil {
+	if _, err := ms.LoadMainIndex(); err != nil {
 		t.Fatalf("prime: %v", err)
 	}
-	idxBefore := dc.mainIndex
+	idxBefore := ms.mainIndex
 
 	// Run Diff(main, fs-scan) — exactly the dcfh-status code path.
-	if _, err := Diff(context.Background(), dc, dc.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil); err != nil {
+	if _, err := Diff(context.Background(), ms, ms.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil); err != nil {
 		t.Fatalf("diff: %v", err)
 	}
 
-	// dc.mainIndex should still point at the same mapping as before:
+	// ms.mainIndex should still point at the same mapping as before:
 	// both OpenRef(RefTypeMain) and refreshFsScanCache hit the memo.
-	if dc.mainIndex != idxBefore {
+	if ms.mainIndex != idxBefore {
 		t.Errorf("Diff(main, fs-scan) replaced main mapping; expected memo hit on both sides")
 	}
 
 	// And there should be no orphans accumulated from the diff itself.
-	dc.loadedMu.Lock()
-	orphans := len(dc.orphanIndices)
-	dc.loadedMu.Unlock()
+	ms.loadedMu.Lock()
+	orphans := len(ms.orphanIndices)
+	ms.loadedMu.Unlock()
 	if orphans != 0 {
 		t.Errorf("Diff(main, fs-scan) produced %d orphan mappings; expected 0", orphans)
 	}

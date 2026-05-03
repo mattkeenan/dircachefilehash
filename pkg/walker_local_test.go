@@ -27,13 +27,13 @@ func TestLocalWalkerProducesSortedScanPaths(t *testing.T) {
 		}
 	}
 
-	dc := CreateDirectoryCache(root, "")
-	if dc == nil {
+	ms := CreateMetaStore(root, "")
+	if ms == nil {
 		t.Fatal("failed to create directory cache")
 	}
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	sr := dc.scanRun()
+	sr := ms.scanRun()
 	if sr.Walker == nil {
 		t.Fatal("scanRun should populate Walker")
 	}
@@ -68,20 +68,20 @@ func TestLocalHasherMatchesHashFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dc := CreateDirectoryCache(root, "")
-	if dc == nil {
+	ms := CreateMetaStore(root, "")
+	if ms == nil {
 		t.Fatal("failed to create directory cache")
 	}
-	defer func() { _ = dc.Close() }()
+	defer func() { _ = ms.Close() }()
 
-	sr := dc.scanRun()
+	sr := ms.scanRun()
 	if sr.FileHasher == nil {
 		t.Fatal("scanRun should populate FileHasher")
 	}
 
 	// Set the algorithm to sha256 so the result is deterministic and
 	// comparable without routing through dcfh's hash-type tables.
-	if err := dc.GetConfig().SetHashDefault("sha256"); err != nil {
+	if err := ms.GetConfig().SetHashDefault("sha256"); err != nil {
 		t.Fatalf("SetHashDefault: %v", err)
 	}
 

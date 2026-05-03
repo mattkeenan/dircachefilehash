@@ -55,7 +55,7 @@ type algorithmHashManager struct {
 }
 
 // newAlgorithmHashManager creates a new algorithm-specific hash manager
-func (dc *DirectoryCache) newAlgorithmHashManager(ctx context.Context, numWorkers int) *algorithmHashManager {
+func (ms *MetaStore) newAlgorithmHashManager(ctx context.Context, numWorkers int) *algorithmHashManager {
 	manager := &algorithmHashManager{
 		hashJobChan:            make(chan *hashJobStart, 100),
 		callFinishChan:         make(chan uint64, 100),
@@ -72,7 +72,7 @@ func (dc *DirectoryCache) newAlgorithmHashManager(ctx context.Context, numWorker
 	// Start hash workers (same as simpleHashManager)
 	for range numWorkers {
 		manager.wg.Add(1)
-		go manager.hashWorker(dc)
+		go manager.hashWorker(ms)
 	}
 
 	// Start completion processor
@@ -305,11 +305,11 @@ func (ahm *algorithmHashManager) FinishSubmitting() {
 // interruption invariants the body encodes.
 //
 //nolint:gocognit // worker loop with interleaved job consumption, interruption signalling, and shutdown coordination
-func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
+func (ahm *algorithmHashManager) hashWorker(ms *MetaStore) {
 	defer ahm.wg.Done()
 
 	// Pre-allocate hash buffer for reuse across all files this worker processes
-	bufferSize, err := dc.getHashBufferSize()
+	bufferSize, err := ms.getHashBufferSize()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Failed to get hash buffer size: %v\n", err)
 		return
@@ -359,10 +359,10 @@ func (ahm *algorithmHashManager) hashWorker(dc *DirectoryCache) {
 
 			if os.FileMode(mode)&os.ModeSymlink != 0 {
 				// This is a symlink - hash the target path
-				hashBytes, hashType, err = dc.hashSymlinkTargetToBytes(job.FilePath)
+				hashBytes, hashType, err = ms.hashSymlinkTargetToBytes(job.FilePath)
 			} else {
 				// Regular file - hash the file contents with interruptible hashing
-				hashBytes, hashType, err = dc.HashFileInterruptibleToBytes(ahm.ctx, job.FilePath, buffer)
+				hashBytes, hashType, err = ms.HashFileInterruptibleToBytes(ahm.ctx, job.FilePath, buffer)
 			}
 
 		hashComplete:

@@ -22,18 +22,18 @@ func TestIntegrationWorkflow(t *testing.T) {
 	defer func() { _ = os.RemoveAll(testDir) }()
 
 	// Initialise dcfh repository
-	dc := NewDirectoryCache(testDir, testDir)
+	ms := NewMetaStore(testDir, testDir)
 
 	// Phase 1: Initial state - empty repository
 	t.Run("Phase1_InitialState", func(t *testing.T) {
-		validateInitialState(t, dc)
+		validateInitialState(t, ms)
 	})
 
 	// Phase 2: Create initial files and do first update
 	t.Run("Phase2_InitialFiles", func(t *testing.T) {
 		createInitialFiles(t, testDir)
-		performInitialUpdate(t, dc)
-		validateInitialIndex(t, dc)
+		performInitialUpdate(t, ms)
+		validateInitialIndex(t, ms)
 	})
 
 	// Phase 3: File operations (create, modify, delete)
@@ -44,24 +44,24 @@ func TestIntegrationWorkflow(t *testing.T) {
 	// Phase 4: Status check - validate detection of changes
 	t.Run("Phase4_StatusCheck", func(t *testing.T) {
 		t.Skip("Status detection tests require status callback hash infrastructure — pending pipeline migration")
-		validateStatusDetection(t, dc)
+		validateStatusDetection(t, ms)
 	})
 
 	// Phase 5: Update and validate final state
 	t.Run("Phase5_FinalUpdate", func(t *testing.T) {
-		performFinalUpdate(t, dc)
-		validateFinalIndex(t, dc)
+		performFinalUpdate(t, ms)
+		validateFinalIndex(t, ms)
 	})
 
 	// Phase 6: Hash integrity validation (before cache behaviour modifies files)
 	t.Run("Phase6_HashIntegrity", func(t *testing.T) {
-		validateHashIntegrity(t, dc)
+		validateHashIntegrity(t, ms)
 	})
 
 	// Phase 7: Cache behaviour validation
 	t.Run("Phase7_CacheValidation", func(t *testing.T) {
 		t.Skip("Cache validation requires status callback cache writing — pending pipeline migration")
-		validateCacheBehaviour(t, dc)
+		validateCacheBehaviour(t, ms)
 	})
 }
 
@@ -90,9 +90,9 @@ func createDeterministicSandbox(t *testing.T) string {
 }
 
 // validateInitialState checks that a new repository starts correctly
-func validateInitialState(t *testing.T, dc *DirectoryCache) {
-	// After NewDirectoryCache, we should have empty main index
-	mainSkiplist, err := dc.LoadMainIndex()
+func validateInitialState(t *testing.T, ms *MetaStore) {
+	// After NewMetaStore, we should have empty main index
+	mainSkiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("Failed to load initial main index: %v", err)
 	}
@@ -102,8 +102,8 @@ func validateInitialState(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// No cache index should exist yet
-	if _, err := os.Stat(dc.CacheFile); !os.IsNotExist(err) {
-		t.Errorf("Cache file should not exist initially: %s", dc.CacheFile)
+	if _, err := os.Stat(ms.CacheFile); !os.IsNotExist(err) {
+		t.Errorf("Cache file should not exist initially: %s", ms.CacheFile)
 	}
 }
 
@@ -169,24 +169,24 @@ func createInitialFiles(t *testing.T, testDir string) map[string]TestFileContent
 }
 
 // performInitialUpdate does the first update and captures the index state
-func performInitialUpdate(t *testing.T, dc *DirectoryCache) {
-	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+func performInitialUpdate(t *testing.T, ms *MetaStore) {
+	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Initial update failed: %v", err)
 	}
 
 	// Verify main index was created
-	if _, err := os.Stat(dc.IndexFile); os.IsNotExist(err) {
-		t.Fatalf("Main index file was not created: %s", dc.IndexFile)
+	if _, err := os.Stat(ms.IndexFile); os.IsNotExist(err) {
+		t.Fatalf("Main index file was not created: %s", ms.IndexFile)
 	}
 
 	// Cache file should not exist after full update
-	if _, err := os.Stat(dc.CacheFile); !os.IsNotExist(err) {
-		t.Errorf("Cache file should not exist after full update, but found: %s", dc.CacheFile)
+	if _, err := os.Stat(ms.CacheFile); !os.IsNotExist(err) {
+		t.Errorf("Cache file should not exist after full update, but found: %s", ms.CacheFile)
 	}
 }
 
 // validateInitialIndex checks the main index contains expected entries with correct hashes
-func validateInitialIndex(t *testing.T, dc *DirectoryCache) {
+func validateInitialIndex(t *testing.T, ms *MetaStore) {
 	// Re-create the test files to get expected hashes
 	expectedFiles := map[string]string{
 		"file1.txt":          calculateSHA256("This is file 1 content\n"),
@@ -197,7 +197,7 @@ func validateInitialIndex(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Load main index and verify contents
-	mainSkiplist, err := dc.LoadMainIndex()
+	mainSkiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("Failed to load main index: %v", err)
 	}
@@ -233,7 +233,7 @@ func validateInitialIndex(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Save index state for later comparison
-	saveIndexSnapshot(t, dc.IndexFile, "initial")
+	saveIndexSnapshot(t, ms.IndexFile, "initial")
 
 	t.Logf("Initial index validation passed: %d files with correct hashes", len(expectedFiles))
 }
@@ -279,15 +279,15 @@ func performFileOperations(t *testing.T, testDir string) {
 }
 
 // validateStatusDetection checks that status correctly identifies changes
-func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
+func validateStatusDetection(t *testing.T, ms *MetaStore) {
 	// Debug: Check what files actually exist on disk
 	diskFiles := make(map[string]bool)
-	err := filepath.Walk(dc.RootDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(ms.RootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			relPath, _ := filepath.Rel(dc.RootDir, path)
+			relPath, _ := filepath.Rel(ms.RootDir, path)
 			diskFiles[relPath] = true
 		}
 		return nil
@@ -297,7 +297,7 @@ func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
 	}
 	t.Logf("Files on disk: %v", diskFiles)
 
-	result, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+	result, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Status check failed: %v", err)
 	}
@@ -334,31 +334,31 @@ func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Verify cache file was created during status check
-	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
-		t.Errorf("Cache file should exist after status check: %s", dc.CacheFile)
+	if _, err := os.Stat(ms.CacheFile); os.IsNotExist(err) {
+		t.Errorf("Cache file should exist after status check: %s", ms.CacheFile)
 	}
 
 	// Save cache state snapshot
-	saveIndexSnapshot(t, dc.CacheFile, "after_status")
+	saveIndexSnapshot(t, ms.CacheFile, "after_status")
 
 	t.Logf("Status detection validated: %d added, %d modified, %d deleted",
 		len(result.Added), len(result.Modified), len(result.Deleted))
 }
 
 // performFinalUpdate updates the repository to final state
-func performFinalUpdate(t *testing.T, dc *DirectoryCache) {
-	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
+func performFinalUpdate(t *testing.T, ms *MetaStore) {
+	if err := ms.Update(context.Background(), ms.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Final update failed: %v", err)
 	}
 
 	// After full update, cache should be removed
-	if _, err := os.Stat(dc.CacheFile); !os.IsNotExist(err) {
-		t.Errorf("Cache file should be removed after full update, but found: %s", dc.CacheFile)
+	if _, err := os.Stat(ms.CacheFile); !os.IsNotExist(err) {
+		t.Errorf("Cache file should be removed after full update, but found: %s", ms.CacheFile)
 	}
 }
 
 // validateFinalIndex checks the final state matches expected outcome with correct hashes
-func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
+func validateFinalIndex(t *testing.T, ms *MetaStore) {
 	// Expected final state with known hashes - binary.bin is unchanged at this point
 	expectedFinalFiles := map[string]string{
 		"binary.bin":         calculateSHA256("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD"),  // unchanged
@@ -369,7 +369,7 @@ func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
 		// file2.txt should be gone (deleted)
 	}
 
-	mainSkiplist, err := dc.LoadMainIndex()
+	mainSkiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("Failed to load final main index: %v", err)
 	}
@@ -410,7 +410,7 @@ func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Save final index state
-	saveIndexSnapshot(t, dc.IndexFile, "final")
+	saveIndexSnapshot(t, ms.IndexFile, "final")
 
 	// Compare with initial state to verify changes
 	compareIndexSnapshots(t, "initial", "final")
@@ -419,18 +419,18 @@ func validateFinalIndex(t *testing.T, dc *DirectoryCache) {
 }
 
 // validateCacheBehaviour tests cache system behaviour with hash consistency
-func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
+func validateCacheBehaviour(t *testing.T, ms *MetaStore) {
 	// Create a small modification with known hash
 	newContent := []byte("\x00\x01\x02\x03\x04\x05\xFF\xFE\xFD\x42")
 	expectedHash := calculateSHA256(string(newContent))
 
-	testFile := filepath.Join(dc.RootDir, "binary.bin")
+	testFile := filepath.Join(ms.RootDir, "binary.bin")
 	if err := os.WriteFile(testFile, newContent, 0644); err != nil {
 		t.Fatalf("Failed to modify test file: %v", err)
 	}
 
 	// First status should create cache
-	result1, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+	result1, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("First status failed: %v", err)
 	}
@@ -440,11 +440,11 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Verify cache exists and contains correct hash
-	if _, err := os.Stat(dc.CacheFile); os.IsNotExist(err) {
-		t.Errorf("Cache file should exist after status: %s", dc.CacheFile)
+	if _, err := os.Stat(ms.CacheFile); os.IsNotExist(err) {
+		t.Errorf("Cache file should exist after status: %s", ms.CacheFile)
 	} else {
 		// Load cache and verify hash
-		cacheSkiplist, err := dc.loadCacheIndex()
+		cacheSkiplist, err := ms.loadCacheIndex()
 		if err != nil {
 			t.Errorf("Failed to load cache: %v", err)
 		} else {
@@ -467,7 +467,7 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Second status should use cache (should be faster, same result)
-	result2, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
+	result2, err := ms.Status(context.Background(), ms.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Second status failed: %v", err)
 	}
@@ -482,9 +482,9 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 }
 
 // validateHashIntegrity performs comprehensive hash validation across all index operations
-func validateHashIntegrity(t *testing.T, dc *DirectoryCache) {
+func validateHashIntegrity(t *testing.T, ms *MetaStore) {
 	// Load current index state
-	mainSkiplist, err := dc.LoadMainIndex()
+	mainSkiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("Failed to load main index for hash validation: %v", err)
 	}
@@ -496,7 +496,7 @@ func validateHashIntegrity(t *testing.T, dc *DirectoryCache) {
 			return true // Skip deleted entries
 		}
 
-		filePath := filepath.Join(dc.RootDir, entry.RelativePath())
+		filePath := filepath.Join(ms.RootDir, entry.RelativePath())
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			t.Errorf("Index contains entry for non-existent file: %s", entry.RelativePath())
 			return true

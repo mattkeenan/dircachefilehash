@@ -17,7 +17,7 @@ import (
 //
 // On success, the temp file is atomically renamed to main.idx.
 // On failure, the temp file is deleted.
-func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
+func RunUpdatePipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
 	// Channel buffer size: absorbs burst between stages without excessive memory
 	const bufSize = 100
 
@@ -66,7 +66,7 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, lef
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pool := newHashPool(dc, sr, hashCh, hashedCh, sr.HashWorkers)
+		pool := newHashPool(ms, sr, hashCh, hashedCh, sr.HashWorkers)
 		if err := pool.Run(ctx); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("hash stage: %w", err))
 		}
@@ -86,7 +86,7 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, lef
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := runWriteStage(ctx, dc, tempPath, retiredCh)
+		err := runWriteStage(ctx, ms, tempPath, retiredCh)
 		if err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("write stage: %w", err))
 		}
@@ -102,8 +102,8 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, lef
 
 // runWriteStage reads ordered entries from retiredCh, serialises them,
 // and writes them to a temp index file using TempIndexWriter.
-func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, retiredCh <-chan *PipelineEntry) error {
-	writer, err := NewTempIndexWriter(dc, tempPath)
+func runWriteStage(ctx context.Context, ms *MetaStore, tempPath string, retiredCh <-chan *PipelineEntry) error {
+	writer, err := NewTempIndexWriter(ms, tempPath)
 	if err != nil {
 		return fmt.Errorf("failed to create temp index writer: %w", err)
 	}
@@ -171,7 +171,7 @@ func runWriteStage(ctx context.Context, dc *DirectoryCache, tempPath string, ret
 // on failure, remove the incomplete temp file. logPrefix tags stderr
 // diagnostics so pipeline vs legacy-update call sites stay
 // distinguishable in captured logs.
-func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) {
+func finaliseMainIndex(ms *MetaStore, tempName, logPrefix string, ok bool) {
 	if !ok {
 		if _, err := os.Stat(tempName); err != nil {
 			return
@@ -188,15 +188,15 @@ func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) 
 		return
 	}
 	if IsDebugEnabled("write") {
-		VerboseLog(3, "%s Renaming %s (%d bytes) -> %s", logPrefix, tempName, stat.Size(), dc.IndexFile)
+		VerboseLog(3, "%s Renaming %s (%d bytes) -> %s", logPrefix, tempName, stat.Size(), ms.IndexFile)
 	}
-	if renameErr := os.Rename(tempName, dc.IndexFile); renameErr != nil {
+	if renameErr := os.Rename(tempName, ms.IndexFile); renameErr != nil {
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "%s Warning: failed to rename %s to main.idx: %v\n", logPrefix, tempName, renameErr)
 		}
 		return
 	}
-	if cleanupErr := dc.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
+	if cleanupErr := ms.CleanupTimestampedCacheFiles(); cleanupErr != nil && IsDebugEnabled("scan") {
 		fmt.Fprintf(os.Stderr, "%s Warning: failed to cleanup timestamped cache files: %v\n", logPrefix, cleanupErr)
 	}
 }
@@ -209,21 +209,21 @@ func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) 
 // lastScanError) used to live here. It is now owned by the Repo impl
 // and acquired around the verb call (see localRepo.Apply); this
 // function performs the work, the caller serialises the calls.
-func (dc *DirectoryCache) performPipelineScan(ctx context.Context, sr *ScanRun, paths []string, compareSkiplist *skiplistWrapper) error {
+func (ms *MetaStore) performPipelineScan(ctx context.Context, sr *ScanRun, paths []string, compareSkiplist *skiplistWrapper) error {
 	defer VerboseEnter()()
 
 	// Generate timestamped main index filename
-	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
+	tempMainIndexFileName := ms.GenerateTimestampedFileName("main")
 
 	var operationSuccessful bool
-	defer func() { finaliseMainIndex(dc, tempMainIndexFileName, "[PIPELINE]", operationSuccessful) }()
+	defer func() { finaliseMainIndex(ms, tempMainIndexFileName, "[PIPELINE]", operationSuccessful) }()
 
 	// Create iterators
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
 	scanIterator := NewFilesystemScanIterator(ctx, sr, paths, "scan")
 
 	// Run the pipeline
-	err := RunUpdatePipeline(ctx, dc, sr, existingIterator, scanIterator, tempMainIndexFileName)
+	err := RunUpdatePipeline(ctx, ms, sr, existingIterator, scanIterator, tempMainIndexFileName)
 	if err != nil {
 		return err
 	}

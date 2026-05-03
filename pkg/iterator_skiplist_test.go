@@ -12,7 +12,7 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 	tempDir := createTempDir(t)
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	dc := createTestDirectoryCache(t, tempDir)
+	ms := createTestMetaStore(t, tempDir)
 
 	// Create test files
 	writeTestFile(t, filepath.Join(tempDir, "file1.txt"), "content1")
@@ -26,19 +26,19 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 	writeTestFile(t, filepath.Join(subDir, "file3.txt"), "content3")
 
 	// Load main index to get a real skiplist with actual entries
-	skiplist, err := dc.LoadMainIndex()
+	skiplist, err := ms.LoadMainIndex()
 	if err != nil {
 		t.Fatalf("Failed to load main index: %v", err)
 	}
 
 	// If main index is empty, do a quick scan to populate it
 	if skiplist.Length() == 0 {
-		if err := dc.Update(context.Background(), dc.scanRun(), nil); err != nil {
+		if err := ms.Update(context.Background(), ms.scanRun(), nil); err != nil {
 			t.Logf("Warning: failed to populate index: %v", err)
 		}
 
 		// Reload main index
-		skiplist, err = dc.LoadMainIndex()
+		skiplist, err = ms.LoadMainIndex()
 		if err != nil {
 			t.Fatalf("Failed to reload main index: %v", err)
 		}

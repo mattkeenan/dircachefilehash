@@ -44,7 +44,7 @@ elided for brevity.
 | `pkg/index_loading.go` | Memo'd shared mmap loading (see §3 metaphor 5). |
 | `pkg/binary_entry.go` | `binaryEntry` struct, methods, `binaryEntryRef`, build-time layout assertions, `BESizeFromPathLen`. |
 | `pkg/time_encoding.go` | `timeWall` / `timeFromWall` / `encodeWallTime` — custom 1885-epoch wall-time format. |
-| `pkg/filenames.go` | `DirectoryCache.GenerateTimestampedFileName` / `ScanForTimestampedCacheFiles` / `CleanupTimestampedCacheFiles`, plus `PathToSlug`. |
+| `pkg/filenames.go` | `MetaStore.GenerateTimestampedFileName` / `ScanForTimestampedCacheFiles` / `CleanupTimestampedCacheFiles`, plus `PathToSlug`. |
 | `pkg/human_size.go` | `ParseHumanSize`, `FormatHumanSize`, `FormatHumanRate`. |
 | `pkg/verbose.go` | Debug flags / verbose level. |
 | `pkg/config.go` | `.dcfh/config` parsing and the validators (`ValidateHashAlgorithm` etc., `pkg/config.go:469`). |
@@ -80,7 +80,7 @@ elided for brevity.
 | `pkg/openref.go` | `OpenRef()` and the `IndexRef` vocabulary (Main / Cache / Merged / FsScan). |
 | `pkg/temp_index_writer.go` | `TempIndexWriter` — the write-only target the pipeline drains into before the atomic rename. |
 | `pkg/algorithm_hash_manager.go` | Cookie-based hash submission + completion ordering. |
-| `pkg/dircache.go` | The `DirectoryCache` struct definition, constructors, and high-level helpers (`CreateDirectoryCache` at `pkg/dircache.go:282`). |
+| `pkg/metastore.go` | The `MetaStore` struct definition, constructors, and high-level helpers (`CreateMetaStore`). |
 | `pkg/scan.go` | Filesystem walk + symlink traversal + scan-supporting types (`scannedPath`, `hashJobStart`). |
 
 ### Layer 4 — Core operations
@@ -103,7 +103,7 @@ repositories. CLAUDE.md's older five-layer description does not name it.
 | File | Role |
 |------|------|
 | `pkg/repo.go` | The `Repo` interface (`pkg/repo.go:154`), `OpenRepo` (`pkg/repo.go:322`), `CreateRepo` (`pkg/repo.go:345`), and the request/response types. |
-| `pkg/repo_local.go` | `localRepo` — the local implementation; currently delegates to `DirectoryCache.Status` / `.Update`. |
+| `pkg/repo_local.go` | `localRepo` — the local implementation; currently delegates to `MetaStore.Status` / `.Update`. |
 | `pkg/walker.go` | `Walker` and `Hasher` interfaces — the swap point that turns a local pipeline into a remote one. |
 | `pkg/walker_local.go` | Local filesystem implementations of `Walker` / `Hasher`. |
 | `pkg/walker_wire.go` | RPC-backed implementations that hash on the remote host. |
@@ -178,7 +178,7 @@ sorted order before the write stage. The write stage drains into a
 tuple. If the on-disk file changes (size, inode, mtime), the cache
 entry is *moved* to an orphan list rather than unmapped immediately —
 because outstanding skiplist entries may still hold pointers into the
-old mapping. The orphan list is drained at `DirectoryCache.Close()`.
+old mapping. The orphan list is drained at `MetaStore.Close()`.
 
 This is the only correct way to load an index from inside the package.
 Direct mmap callers are a bug.
@@ -228,13 +228,13 @@ guarantee.
 `Repo` (`pkg/repo.go:154`) is the transport-neutral surface. Every CLI
 command goes through it. There are two implementations:
 
-- `localRepo` (`pkg/repo_local.go`) — wraps a `DirectoryCache`. Its
+- `localRepo` (`pkg/repo_local.go`) — wraps a `MetaStore`. Its
   methods currently delegate back to `dc.Status` / `dc.Update` etc.
   rather than implementing fresh logic, so for now `Repo` and
-  `DirectoryCache` are two public faces of the same code.
+  `MetaStore` are two public faces of the same code.
 - A future colocated wrapper (Phase 3 in the migration plan) will proxy
   the full interface for SSH-attached repositories without dragging the
-  whole `DirectoryCache` across the wire.
+  whole `MetaStore` across the wire.
 
 The swap point that turns a local pipeline into a remote one is the
 `Walker` / `Hasher` pair at `pkg/walker.go`. A `Walker` produces

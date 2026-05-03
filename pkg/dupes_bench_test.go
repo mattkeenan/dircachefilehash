@@ -101,7 +101,7 @@ func primeDupesFixture(tb testing.TB, cfg dupesFixtureConfig) (string, string) {
 
 	buildDupesFixture(tb, datasetDir, cfg)
 
-	cache := NewDirectoryCache(datasetDir, metaDir)
+	cache := NewMetaStore(datasetDir, metaDir)
 	if err := cache.Update(context.Background(), cache.scanRun(), map[string]string{}); err != nil {
 		tb.Fatalf("initial update: %v", err)
 	}
@@ -134,12 +134,12 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 	datasetDir, metaDir := primeDupesFixture(b, cfg)
 	budget := budgetFromEnv()
 
-	openCache := func() *DirectoryCache {
-		dc, err := OpenDirectoryCache(datasetDir, metaDir)
+	openCache := func() *MetaStore {
+		ms, err := OpenMetaStore(datasetDir, metaDir)
 		if err != nil {
 			b.Fatalf("open cache: %v", err)
 		}
-		return dc
+		return ms
 	}
 
 	// Warm-up / budget check: run one iteration with a timeout; if it

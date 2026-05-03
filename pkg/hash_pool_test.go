@@ -24,9 +24,9 @@ func TestHashPoolBasic(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	// Create DirectoryCache
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	// Create MetaStore
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
 	// Create a BEScanEntry for the test file
 	info, err := os.Stat(testFile)
@@ -43,7 +43,7 @@ func TestHashPoolBasic(t *testing.T) {
 	// Set up channels
 	input := make(chan *PipelineEntry, 1)
 	output := make(chan *PipelineEntry, 1)
-	pool := newHashPool(dc, dc.scanRun(), input, output, 2)
+	pool := newHashPool(ms, ms.scanRun(), input, output, 2)
 
 	// Send entry
 	input <- &PipelineEntry{
@@ -93,12 +93,12 @@ func TestHashPoolContextCancellation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(testDir) }()
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
 	input := make(chan *PipelineEntry)
 	output := make(chan *PipelineEntry, 10)
-	pool := newHashPool(dc, dc.scanRun(), input, output, 1)
+	pool := newHashPool(ms, ms.scanRun(), input, output, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -123,13 +123,13 @@ func TestHashPoolMultipleFiles(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(testDir) }()
 
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
 	const nFiles = 10
 	input := make(chan *PipelineEntry, nFiles)
 	output := make(chan *PipelineEntry, nFiles)
-	pool := newHashPool(dc, dc.scanRun(), input, output, 4)
+	pool := newHashPool(ms, ms.scanRun(), input, output, 4)
 
 	// Create files and entries
 	for i := range nFiles {
@@ -176,10 +176,10 @@ func TestHashPoolClosesOutput(t *testing.T) {
 
 	testDir, _ := os.MkdirTemp("", "hashpool-close-*")
 	defer func() { _ = os.RemoveAll(testDir) }()
-	dc := NewDirectoryCache(testDir, testDir)
-	defer func() { _ = dc.Close() }()
+	ms := NewMetaStore(testDir, testDir)
+	defer func() { _ = ms.Close() }()
 
-	pool := newHashPool(dc, dc.scanRun(), input, output, 1)
+	pool := newHashPool(ms, ms.scanRun(), input, output, 1)
 	close(input)
 
 	if err := pool.Run(context.Background()); err != nil {

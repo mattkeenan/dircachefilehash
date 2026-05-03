@@ -202,11 +202,11 @@ func TestCreateAndOpenWireRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenRepo(wire): %v", err)
 	}
-	lr, ok := repo2.(*localRepo)
+	wr, ok := repo2.(*wireRepo)
 	if !ok {
-		t.Fatalf("expected *localRepo, got %T", repo2)
+		t.Fatalf("expected *wireRepo, got %T", repo2)
 	}
-	if lr.session == nil {
+	if wr.session == nil {
 		t.Errorf("expected wire session on reopened wire repo")
 	}
 	_ = repo2.Close()
@@ -272,7 +272,7 @@ func TestLocalRepoLifecycle(t *testing.T) {
 
 // TestDiffRequestIgnoresPushDown asserts that DiffRequest.Ignores
 // short-circuits the scan walker (push-down) and that
-// localRepo.configureFilters resets dc.scanIgnore after the call so a
+// localRepo.configureFilters resets ms.scanIgnore after the call so a
 // reused Repo doesn't leak the predicate.
 func TestDiffRequestIgnoresPushDown(t *testing.T) {
 	tmp := t.TempDir()
@@ -328,14 +328,14 @@ func TestDiffRequestNoIgnoreFile(t *testing.T) {
 	defer func() { _ = repo.Close() }()
 
 	lr := repo.(*localRepo)
-	ignorePath := filepath.Join(lr.dc.MetaDir, "ignore")
+	ignorePath := filepath.Join(lr.ms.MetaDir, "ignore")
 	if err := os.WriteFile(ignorePath, []byte("*.tmp\n"), 0644); err != nil {
 		t.Fatalf("write ignore: %v", err)
 	}
-	if err := lr.dc.ignoreManager.Reload(); err != nil {
+	if err := lr.ms.ignoreManager.Reload(); err != nil {
 		t.Fatalf("reload ignore: %v", err)
 	}
-	if !lr.dc.ignoreManager.HasPatterns() {
+	if !lr.ms.ignoreManager.HasPatterns() {
 		t.Fatal("baseline: ignoreManager should have *.tmp loaded")
 	}
 
@@ -343,7 +343,7 @@ func TestDiffRequestNoIgnoreFile(t *testing.T) {
 		t.Fatalf("Diff with NoIgnoreFile: %v", err)
 	}
 
-	if !lr.dc.ignoreManager.HasPatterns() {
+	if !lr.ms.ignoreManager.HasPatterns() {
 		t.Errorf("ignoreManager patterns not restored after Diff(NoIgnoreFile=true)")
 	}
 }

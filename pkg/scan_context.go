@@ -5,7 +5,7 @@ import "os"
 // ScanRun bundles the per-invocation instruments and scratch state used
 // by territory-reading verbs (Diff, Apply, Groups). The Repo impl
 // assembles one before each verb invocation; it propagates explicitly
-// through the scan/pipeline machinery so DirectoryCache never has to
+// through the scan/pipeline machinery so MetaStore never has to
 // know about instruments it doesn't own.
 //
 // (Named ScanRun rather than ScanContext to avoid colliding with the
@@ -26,7 +26,7 @@ type ScanRun struct {
 	// so scan-time helpers can reach repository identity (RootDir,
 	// MetaDir, ignoreManager) without an extra parameter on every
 	// signature. Never nil during a live verb call.
-	Store *DirectoryCache
+	Store *MetaStore
 
 	Walker      Walker
 	FileHasher  Hasher
@@ -46,16 +46,16 @@ type ScanRun struct {
 	filterCtx FilterContext
 }
 
-// scanRun returns a fresh ScanRun pointing at dc with default-local
+// scanRun returns a fresh ScanRun pointing at ms with default-local
 // instruments and zero per-call state. Convenience for tests and
 // internal helpers that need to drive scan-time code without a Repo
 // impl in the loop. Production verb calls go through localRepo.scanRun
 // which fills in the repo's per-call instrument values.
-func (dc *DirectoryCache) scanRun() *ScanRun {
+func (ms *MetaStore) scanRun() *ScanRun {
 	return &ScanRun{
-		Store:      dc,
+		Store:      ms,
 		Walker:     &localWalker{},
-		FileHasher: &localHasher{dc: dc},
+		FileHasher: &localHasher{ms: ms},
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 // isPathContained checks if targetPath is contained within containerPath.
 // Used by symlink-policy checks to decide whether a target is internal
 // to the repository root.
-func (dc *DirectoryCache) isPathContained(targetPath, containerPath string) bool {
+func (ms *MetaStore) isPathContained(targetPath, containerPath string) bool {
 	targetPath = filepath.Clean(targetPath)
 	containerPath = filepath.Clean(containerPath)
 
@@ -64,7 +64,7 @@ func parseSymlinkMode(mode string) (baseMode string, strict bool) {
 // checkSymlinkChain walks a symlink chain and reports whether all hops
 // are internal (target inside RootDir) or all external. In non-strict
 // mode only the final target is checked.
-func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (allInternal, allExternal bool, err error) {
+func (ms *MetaStore) checkSymlinkChain(symlinkPath string, strict bool) (allInternal, allExternal bool, err error) {
 	allInternal = true
 	allExternal = true
 
@@ -95,7 +95,7 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 			target = filepath.Join(filepath.Dir(currentPath), target)
 		}
 
-		isInternal := dc.isPathContained(target, dc.RootDir)
+		isInternal := ms.isPathContained(target, ms.RootDir)
 
 		if strict {
 			if isInternal {
@@ -117,7 +117,7 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 		if err != nil {
 			return false, false, err
 		}
-		isInternal := dc.isPathContained(finalTarget, dc.RootDir)
+		isInternal := ms.isPathContained(finalTarget, ms.RootDir)
 		return isInternal, !isInternal, nil
 	}
 
@@ -127,7 +127,7 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 // shouldFollowSymlink applies the configured --symlinks mode to a single
 // symlink path. Used by shouldIndex to decide whether files reached via
 // a parent symlink are still in scope.
-func (dc *DirectoryCache) shouldFollowSymlink(sr *ScanRun, symlinkPath string) bool {
+func (ms *MetaStore) shouldFollowSymlink(sr *ScanRun, symlinkPath string) bool {
 	baseMode, strict := parseSymlinkMode(sr.SymlinkMode)
 
 	if IsDebugEnabled("scan") {
@@ -140,10 +140,10 @@ func (dc *DirectoryCache) shouldFollowSymlink(sr *ScanRun, symlinkPath string) b
 	case "all":
 		return true
 	case "internal":
-		allInternal, _, err := dc.checkSymlinkChain(symlinkPath, strict)
+		allInternal, _, err := ms.checkSymlinkChain(symlinkPath, strict)
 		return err == nil && allInternal
 	case "external":
-		_, allExternal, err := dc.checkSymlinkChain(symlinkPath, strict)
+		_, allExternal, err := ms.checkSymlinkChain(symlinkPath, strict)
 		return err == nil && allExternal
 	default:
 		return true
@@ -155,7 +155,7 @@ func (dc *DirectoryCache) shouldFollowSymlink(sr *ScanRun, symlinkPath string) b
 // the scanner recurses in; for file symlinks it returns the original
 // lstat info unchanged. Returns skip=true for symlinks that should be
 // dropped (broken target, policy rejection, etc.).
-func (dc *DirectoryCache) resolveSymlinkForScan(sr *ScanRun, currentPath string, info os.FileInfo) (os.FileInfo, bool) {
+func (ms *MetaStore) resolveSymlinkForScan(sr *ScanRun, currentPath string, info os.FileInfo) (os.FileInfo, bool) {
 	targetInfo, err := os.Stat(currentPath)
 	if err != nil {
 		return nil, true
@@ -163,7 +163,7 @@ func (dc *DirectoryCache) resolveSymlinkForScan(sr *ScanRun, currentPath string,
 	if !targetInfo.IsDir() {
 		return info, false
 	}
-	if dc.shouldFollowDirSymlink(sr, currentPath) {
+	if ms.shouldFollowDirSymlink(sr, currentPath) {
 		return targetInfo, false
 	}
 	return nil, true
@@ -172,7 +172,7 @@ func (dc *DirectoryCache) resolveSymlinkForScan(sr *ScanRun, currentPath string,
 // shouldFollowDirSymlink applies the symlink-mode policy (none /
 // internal / external / all) to a directory symlink. Debug logs
 // describe every decision.
-func (dc *DirectoryCache) shouldFollowDirSymlink(sr *ScanRun, currentPath string) bool {
+func (ms *MetaStore) shouldFollowDirSymlink(sr *ScanRun, currentPath string) bool {
 	baseMode, strict := parseSymlinkMode(sr.SymlinkMode)
 	switch baseMode {
 	case "none":
@@ -181,9 +181,9 @@ func (dc *DirectoryCache) shouldFollowDirSymlink(sr *ScanRun, currentPath string
 		}
 		return false
 	case "internal":
-		return dc.checkDirSymlinkChain(currentPath, strict, true)
+		return ms.checkDirSymlinkChain(currentPath, strict, true)
 	case "external":
-		return dc.checkDirSymlinkChain(currentPath, strict, false)
+		return ms.checkDirSymlinkChain(currentPath, strict, false)
 	case "all":
 		if IsDebugEnabled("symlinks") {
 			finalTarget, _ := filepath.EvalSymlinks(currentPath)
@@ -200,9 +200,9 @@ func (dc *DirectoryCache) shouldFollowDirSymlink(sr *ScanRun, currentPath string
 
 // checkDirSymlinkChain drives the internal/external symlink-chain
 // check. internal=true requires all links in the chain to point
-// inside dc.RootDir; internal=false requires all external.
-func (dc *DirectoryCache) checkDirSymlinkChain(currentPath string, strict, internal bool) bool {
-	allInternal, allExternal, err := dc.checkSymlinkChain(currentPath, strict)
+// inside ms.RootDir; internal=false requires all external.
+func (ms *MetaStore) checkDirSymlinkChain(currentPath string, strict, internal bool) bool {
+	allInternal, allExternal, err := ms.checkSymlinkChain(currentPath, strict)
 	if err != nil {
 		if IsDebugEnabled("symlinks") {
 			fmt.Fprintf(os.Stderr, "[SYMLINK] Error checking symlink chain: %s - %v\n", currentPath, err)
@@ -219,14 +219,14 @@ func (dc *DirectoryCache) checkDirSymlinkChain(currentPath string, strict, inter
 		if IsDebugEnabled("symlinks") {
 			finalTarget, _ := filepath.EvalSymlinks(currentPath)
 			fmt.Fprintf(os.Stderr, "[SYMLINK] Skipping directory symlink (not %s): %s -> %s (root: %s, strict: %v)\n",
-				label, currentPath, finalTarget, dc.RootDir, strict)
+				label, currentPath, finalTarget, ms.RootDir, strict)
 		}
 		return false
 	}
 	if IsDebugEnabled("symlinks") {
 		finalTarget, _ := filepath.EvalSymlinks(currentPath)
 		fmt.Fprintf(os.Stderr, "[SYMLINK] Following %s directory symlink: %s -> %s (root: %s, strict: %v)\n",
-			label, currentPath, finalTarget, dc.RootDir, strict)
+			label, currentPath, finalTarget, ms.RootDir, strict)
 	}
 	return true
 }

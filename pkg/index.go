@@ -293,8 +293,8 @@ func (ih *indexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint
 }
 
 // calculateAndStoreHeaderChecksum calculates checksum and stores it in header
-func (dc *DirectoryCache) calculateAndStoreHeaderChecksum(header *indexHeader, entryData []byte, entrySize int) {
-	hasher := dc.hasher
+func (ms *MetaStore) calculateAndStoreHeaderChecksum(header *indexHeader, entryData []byte, entrySize int) {
+	hasher := ms.hasher
 	hasher.Reset()
 
 	// IMPORTANT: Use same order as TempIndexWriter: entry data first, then header fields
@@ -335,30 +335,30 @@ func (ih *indexHeader) clearClean() {
 type EntryProcessor func(entry *binaryEntry, entryIndex uint32, filePath string) (shouldInclude bool, err error)
 
 // LoadIndexFromFileForValidation is a public wrapper for loadIndexFromFile used by dcfh index commands
-func (dc *DirectoryCache) LoadIndexFromFileForValidation(filePath string) ([]binaryEntryRef, error) {
+func (ms *MetaStore) LoadIndexFromFileForValidation(filePath string) ([]binaryEntryRef, error) {
 	// Use verbose processor for validation operations to maintain existing behaviour
-	return dc.loadIndexFromFileWithProcessor(filePath, VerboseEntryProcessor())
+	return ms.loadIndexFromFileWithProcessor(filePath, VerboseEntryProcessor())
 }
 
 // LoadIndexFromFileWithProcessor loads an index file with custom entry processing
-func (dc *DirectoryCache) LoadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
-	return dc.loadIndexFromFileWithProcessor(filePath, processor)
+func (ms *MetaStore) LoadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	return ms.loadIndexFromFileWithProcessor(filePath, processor)
 }
 
 // loadIndexFromFileWithProcessor is the internal implementation with callback support
-func (dc *DirectoryCache) loadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
-	indexFile, header, err := dc.openAndValidateIndex(filePath)
+func (ms *MetaStore) loadIndexFromFileWithProcessor(filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	indexFile, header, err := ms.openAndValidateIndex(filePath)
 	if err != nil {
 		return nil, err
 	}
-	return dc.collectEntryRefs(indexFile, header, filePath, processor)
+	return ms.collectEntryRefs(indexFile, header, filePath, processor)
 }
 
 // openAndValidateIndex opens the file, mmaps it, and runs the fixed
 // header checks (signature, byte order, version, clean-flag checksum).
 // On error it cleans up the fd/mmap; on success the caller owns the
 // returned indexFile and must close+munmap it when done.
-func (dc *DirectoryCache) openAndValidateIndex(filePath string) (*mmapIndexFile, *indexHeader, error) {
+func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *indexHeader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -381,9 +381,9 @@ func (dc *DirectoryCache) openAndValidateIndex(filePath string) (*mmapIndexFile,
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 	cleanup := func() { _ = unix.Munmap(data); _ = file.Close() }
 	for _, check := range []func() error{
-		func() error { return header.ValidateSignature(dc.signature) },
+		func() error { return header.ValidateSignature(ms.signature) },
 		func() error { return header.ValidateByteOrder() },
-		func() error { return header.ValidateVersion(dc.version) },
+		func() error { return header.ValidateVersion(ms.version) },
 	} {
 		if err := check(); err != nil {
 			cleanup()
@@ -402,7 +402,7 @@ func (dc *DirectoryCache) openAndValidateIndex(filePath string) (*mmapIndexFile,
 
 	if (header.Flags & IndexFlagClean) == 0 {
 		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
-	} else if err := dc.verifyHeaderChecksum(data, header); err != nil {
+	} else if err := ms.verifyHeaderChecksum(data, header); err != nil {
 		return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
 	}
 	return indexFile, header, nil
@@ -411,7 +411,7 @@ func (dc *DirectoryCache) openAndValidateIndex(filePath string) (*mmapIndexFile,
 // collectEntryRefs walks the entry region, validating each entry and
 // invoking the user's processor. Returns refs for entries the
 // processor accepted.
-func (dc *DirectoryCache) collectEntryRefs(indexFile *mmapIndexFile, header *indexHeader, filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+func (ms *MetaStore) collectEntryRefs(indexFile *mmapIndexFile, header *indexHeader, filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
 	entryData := indexFile.Data[indexFile.headerSize:]
 	var refs []binaryEntryRef
 	offset := 0
@@ -420,7 +420,7 @@ func (dc *DirectoryCache) collectEntryRefs(indexFile *mmapIndexFile, header *ind
 			return nil, fmt.Errorf("unexpected end of data at entry %d", i)
 		}
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
-		if err := dc.validateSingleEntry(entry, offset, entryData, int(i)); err != nil {
+		if err := ms.validateSingleEntry(entry, offset, entryData, int(i)); err != nil {
 			return nil, err
 		}
 		include, err := runEntryProcessor(processor, entry, i, filePath)
@@ -445,8 +445,8 @@ func (dc *DirectoryCache) collectEntryRefs(indexFile *mmapIndexFile, header *ind
 
 // validateSingleEntry wraps the chaining / extra-validation checks in
 // one place so collectEntryRefs stays straight-line.
-func (dc *DirectoryCache) validateSingleEntry(entry *binaryEntry, offset int, entryData []byte, index int) error {
-	if err := dc.validateEntryChaining(entry, offset, entryData, index); err != nil {
+func (ms *MetaStore) validateSingleEntry(entry *binaryEntry, offset int, entryData []byte, index int) error {
+	if err := ms.validateEntryChaining(entry, offset, entryData, index); err != nil {
 		return fmt.Errorf("entry %d validation failed: %w", index, err)
 	}
 	if IsDebugEnabled("extravalidation") {
@@ -617,7 +617,7 @@ func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
 }
 
 // loadIndexFromFileWithTracking loads an index file and returns both entries and the mmapIndexFile for tracking
-func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]binaryEntryRef, *mmapIndexFile, error) {
+func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) ([]binaryEntryRef, *mmapIndexFile, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
@@ -645,7 +645,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
 
 	// Verify header; on failure, clean up both mmap and file
-	if err := header.ValidateSignature(dc.signature); err != nil {
+	if err := header.ValidateSignature(ms.signature); err != nil {
 		_ = unix.Munmap(data)
 		_ = file.Close()
 		return nil, nil, err
@@ -655,7 +655,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		_ = file.Close()
 		return nil, nil, err
 	}
-	if err := header.ValidateVersion(dc.version); err != nil {
+	if err := header.ValidateVersion(ms.version); err != nil {
 		_ = unix.Munmap(data)
 		_ = file.Close()
 		return nil, nil, err
@@ -672,7 +672,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		// Start with refCount=1 so existing error-cleanup DecRef paths
 		// (and the read-only mmap memo's drain in Close) reach 0 and
 		// trigger Cleanup. The construction ref is owned by whoever
-		// receives indexFile — for memo'd loads, the DirectoryCache; for
+		// receives indexFile — for memo'd loads, the MetaStore; for
 		// direct callers like openFileRef, the returned closer.
 		refCount: 1,
 	}
@@ -682,7 +682,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 	if !isClean {
 		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
 	} else {
-		if err := dc.verifyHeaderChecksum(data, header); err != nil {
+		if err := ms.verifyHeaderChecksum(data, header); err != nil {
 			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
 		}
@@ -703,7 +703,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 
 		// Validate binaryEntry chaining consistency
-		if err := dc.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
+		if err := ms.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
 			indexFile.DecRef()
 			return nil, nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
@@ -751,7 +751,7 @@ func (dc *DirectoryCache) loadIndexFromFileWithTracking(filePath string) ([]bina
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header
-func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader) error {
+func (ms *MetaStore) verifyHeaderChecksum(data []byte, header *indexHeader) error {
 	// Get the stored checksum from header
 	storedChecksum := header.Checksum[:]
 
@@ -798,53 +798,53 @@ func (dc *DirectoryCache) verifyHeaderChecksum(data []byte, header *indexHeader)
 }
 
 // Close cleans up mmap'd resources and checks for orphaned index files
-func (dc *DirectoryCache) Close() error {
+func (ms *MetaStore) Close() error {
 	// Check for orphaned index files first (ignore errors during check)
-	_ = dc.checkForOrphanedIndexFiles()
+	_ = ms.checkForOrphanedIndexFiles()
 
 	// Clean up old mmapIndex if still present
-	if dc.mmapIndex != nil {
-		if err := unix.Munmap(dc.mmapIndex.data); err != nil {
+	if ms.mmapIndex != nil {
+		if err := unix.Munmap(ms.mmapIndex.data); err != nil {
 			return fmt.Errorf("failed to unmap: %w", err)
 		}
-		if err := dc.mmapIndex.file.Close(); err != nil {
+		if err := ms.mmapIndex.file.Close(); err != nil {
 			return fmt.Errorf("failed to close file: %w", err)
 		}
-		dc.mmapIndex = nil
+		ms.mmapIndex = nil
 	}
 
 	// Drain the read-only mmap memo (owns lifetime of main/cache/snapshot
-	// mappings loaded via loadIndexShared). dc.mainIndex/dc.cacheIndex are
+	// mappings loaded via loadIndexShared). ms.mainIndex/ms.cacheIndex are
 	// non-owning per-type pointers maintained by registerIndex for the
 	// memory-protection RWMutex machinery; the memo drain releases the
 	// actual mappings, so we just nil out those pointers here.
-	dc.loadedMu.Lock()
-	for _, li := range dc.loadedIndices {
+	ms.loadedMu.Lock()
+	for _, li := range ms.loadedIndices {
 		if li != nil && li.file != nil {
 			li.file.DecRef()
 		}
 	}
-	dc.loadedIndices = nil
-	for _, li := range dc.orphanIndices {
+	ms.loadedIndices = nil
+	for _, li := range ms.orphanIndices {
 		if li != nil && li.file != nil {
 			li.file.DecRef()
 		}
 	}
-	dc.orphanIndices = nil
-	dc.loadedMu.Unlock()
+	ms.orphanIndices = nil
+	ms.loadedMu.Unlock()
 
-	dc.mainIndex = nil
-	dc.cacheIndex = nil
+	ms.mainIndex = nil
+	ms.cacheIndex = nil
 
 	return nil
 }
 
-func (dc *DirectoryCache) createEmptyIndex() error {
+func (ms *MetaStore) createEmptyIndex() error {
 	totalSize := HeaderSize
 
-	file, err := os.Create(dc.IndexFile)
+	file, err := os.Create(ms.IndexFile)
 	if err != nil {
-		return fmt.Errorf("failed to create index file %s: %w", dc.IndexFile, err)
+		return fmt.Errorf("failed to create index file %s: %w", ms.IndexFile, err)
 	}
 	defer func() { _ = file.Close() }()
 
@@ -865,10 +865,10 @@ func (dc *DirectoryCache) createEmptyIndex() error {
 
 	// Write header directly to mmap'd memory (zero-copy)
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(dc.signature, dc.version, 0, 0, dc.GetCurrentHashType()) // No flags for empty index
+	header.SetHeader(ms.signature, ms.version, 0, 0, ms.GetCurrentHashType()) // No flags for empty index
 
 	// Calculate and store checksum (no entries for empty index)
-	dc.calculateAndStoreHeaderChecksum(header, nil, 0)
+	ms.calculateAndStoreHeaderChecksum(header, nil, 0)
 
 	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
 		return fmt.Errorf("failed to sync mmap: %w", err)
@@ -902,10 +902,10 @@ func getSystemIOVMax() int {
 }
 
 // scanForTempIndices scans the .dcfh directory for temporary index files
-func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
+func (ms *MetaStore) scanForTempIndices() ([]string, error) {
 	var tempFiles []string
 
-	entries, err := os.ReadDir(dc.MetaDir)
+	entries, err := os.ReadDir(ms.MetaDir)
 	if err != nil {
 		return nil, err
 	}
@@ -931,7 +931,7 @@ func (dc *DirectoryCache) scanForTempIndices() ([]string, error) {
 
 // validateEntryChaining validates the consistency of a binaryEntry's internal structure
 // and its position within the mmap'd data
-func (dc *DirectoryCache) validateEntryChaining(entry *binaryEntry, offset int, entryData []byte, entryIndex int) error {
+func (ms *MetaStore) validateEntryChaining(entry *binaryEntry, offset int, entryData []byte, entryIndex int) error {
 	// Basic size validation
 	if entry.Size == 0 {
 		return fmt.Errorf("entry has zero size at offset %d (entry index %d)", offset, entryIndex)

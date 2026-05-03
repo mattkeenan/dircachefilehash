@@ -12,7 +12,7 @@ import (
 )
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []string, resultChan chan<- *scannedPath) error {
+func (ms *MetaStore) scanPath(ctx context.Context, sr *ScanRun, paths []string, resultChan chan<- *scannedPath) error {
 	defer VerboseEnter()()
 	defer close(resultChan)
 
@@ -26,14 +26,14 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []str
 	}
 
 	// Load ignore patterns if not already loaded
-	if err := dc.ignoreManager.LoadIgnorePatterns(); err != nil {
+	if err := ms.ignoreManager.LoadIgnorePatterns(); err != nil {
 		return fmt.Errorf("failed to load ignore patterns: %w", err)
 	}
 
 	// Convert to absolute paths and clean them
 	var absPaths []string
 	if IsDebugEnabled("scan") {
-		VerboseLog(3, "scanPath: dc.RootDir = %s", dc.RootDir)
+		VerboseLog(3, "scanPath: ms.RootDir = %s", ms.RootDir)
 	}
 	for _, inputPath := range paths {
 		absPath := inputPath
@@ -41,7 +41,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []str
 			VerboseLog(3, "scanPath: processing inputPath = %s, IsAbs = %t", inputPath, filepath.IsAbs(inputPath))
 		}
 		if !filepath.IsAbs(inputPath) {
-			absPath = filepath.Join(dc.RootDir, inputPath)
+			absPath = filepath.Join(ms.RootDir, inputPath)
 			if IsDebugEnabled("scan") {
 				VerboseLog(3, "scanPath: joined to absPath = %s", absPath)
 			}
@@ -54,7 +54,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []str
 	}
 
 	// Sort paths and remove redundant ones (subdirectories/subfiles of other paths)
-	dedupedPaths := dc.deduplicatePaths(absPaths)
+	dedupedPaths := ms.deduplicatePaths(absPaths)
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPath: deduplicated paths: %v", dedupedPaths)
 	}
@@ -64,7 +64,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []str
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "scanPath: scanning deduplicated path: %s", absPath)
 		}
-		if err := dc.scanPathRecursive(ctx, sr, absPath, resultChan); err != nil {
+		if err := ms.scanPathRecursive(ctx, sr, absPath, resultChan); err != nil {
 			return fmt.Errorf("failed to scan path %s: %w", absPath, err)
 		}
 	}
@@ -79,7 +79,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []str
 //
 // This optimisation reduces redundant scanning since "/home/user/docs/file.txt"
 // will be found when we scan "/home/user/docs" anyway.
-func (dc *DirectoryCache) deduplicatePaths(paths []string) []string {
+func (ms *MetaStore) deduplicatePaths(paths []string) []string {
 	if len(paths) <= 1 {
 		return paths
 	}
@@ -96,7 +96,7 @@ func (dc *DirectoryCache) deduplicatePaths(paths []string) []string {
 			prevPath := paths[j]
 
 			// Check if current path is under the previous path
-			if dc.isPathUnder(path, prevPath) {
+			if ms.isPathUnder(path, prevPath) {
 				isRedundant = true
 				break
 			}
@@ -111,7 +111,7 @@ func (dc *DirectoryCache) deduplicatePaths(paths []string) []string {
 }
 
 // isPathUnder checks if childPath is under parentPath
-func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
+func (ms *MetaStore) isPathUnder(childPath, parentPath string) bool {
 	// Make sure both paths are clean
 	childPath = filepath.Clean(childPath)
 	parentPath = filepath.Clean(parentPath)
@@ -130,14 +130,14 @@ func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
 // - Symlink following rules (for directory symlinks in the path)
 // - Ignore patterns
 // Returns false if the file should be treated as deleted/not indexed
-func (dc *DirectoryCache) shouldIndex(sr *ScanRun, relPath string) bool {
+func (ms *MetaStore) shouldIndex(sr *ScanRun, relPath string) bool {
 	// Check if any parent directory is an unfollowed symlink
 	dir := filepath.Dir(relPath)
 	for dir != "." && dir != "/" && dir != "" {
-		fullPath := filepath.Join(dc.RootDir, dir)
+		fullPath := filepath.Join(ms.RootDir, dir)
 		if info, err := os.Lstat(fullPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			// This is a symlink - check if we would follow it
-			if !dc.shouldFollowSymlink(sr, fullPath) {
+			if !ms.shouldFollowSymlink(sr, fullPath) {
 				if IsDebugEnabled("symlinks") {
 					fmt.Fprintf(os.Stderr, "[SYMLINK] File %s under unfollowed symlink %s\n", relPath, dir)
 				}
@@ -148,7 +148,7 @@ func (dc *DirectoryCache) shouldIndex(sr *ScanRun, relPath string) bool {
 	}
 
 	// Check ignore patterns if deindexing is enabled
-	if dc.ignoreIsDeindex && dc.ignoreManager.ShouldIgnore(relPath) {
+	if ms.ignoreIsDeindex && ms.ignoreManager.ShouldIgnore(relPath) {
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "shouldIndex: ignoring path due to ignore pattern: %s", relPath)
 		}
@@ -169,12 +169,12 @@ func (dc *DirectoryCache) shouldIndex(sr *ScanRun, relPath string) bool {
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, sr *ScanRun, rootPath string, resultChan chan<- *scannedPath) error {
+func (ms *MetaStore) scanPathRecursive(ctx context.Context, sr *ScanRun, rootPath string, resultChan chan<- *scannedPath) error {
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
 	pathQueue := []string{rootPath}
-	metaDir := dc.MetaDir
+	metaDir := ms.MetaDir
 
 	for len(pathQueue) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -187,13 +187,13 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, sr *ScanRun, ro
 		currentPath := pathQueue[0]
 		pathQueue = pathQueue[1:]
 
-		info, relPath, ok := dc.statAndFilter(sr, currentPath)
+		info, relPath, ok := ms.statAndFilter(sr, currentPath)
 		if !ok {
 			continue
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			resolved, skip := dc.resolveSymlinkForScan(sr, currentPath, info)
+			resolved, skip := ms.resolveSymlinkForScan(sr, currentPath, info)
 			if skip {
 				continue
 			}
@@ -205,9 +205,9 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, sr *ScanRun, ro
 			if currentPath == metaDir {
 				continue
 			}
-			pathQueue = dc.enqueueDirChildren(pathQueue, currentPath)
+			pathQueue = ms.enqueueDirChildren(pathQueue, currentPath)
 		case info.Mode().IsRegular(), info.Mode()&os.ModeSymlink != 0:
-			if currentPath == dc.IndexFile || currentPath == dc.CacheFile {
+			if currentPath == ms.IndexFile || currentPath == ms.CacheFile {
 				continue
 			}
 			resultChan <- makeScannedPath(currentPath, relPath, info)
@@ -220,16 +220,16 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, sr *ScanRun, ro
 // statAndFilter lstat's path, computes the relative path, and applies
 // the ignore-manager filter. Returns (info, relPath, true) to
 // process, or a zero (nil, "", false) to skip entirely.
-func (dc *DirectoryCache) statAndFilter(sr *ScanRun, currentPath string) (os.FileInfo, string, bool) {
+func (ms *MetaStore) statAndFilter(sr *ScanRun, currentPath string) (os.FileInfo, string, bool) {
 	info, err := os.Lstat(currentPath)
 	if err != nil {
 		return nil, "", false
 	}
-	relPath, err := filepath.Rel(dc.RootDir, currentPath)
+	relPath, err := filepath.Rel(ms.RootDir, currentPath)
 	if err != nil {
 		return nil, "", false
 	}
-	if dc.ignoreManager.ShouldIgnore(relPath) {
+	if ms.ignoreManager.ShouldIgnore(relPath) {
 		return nil, "", false
 	}
 	if sr.scanIgnoreDrops(relPath, info, "statAndFilter") {
@@ -321,7 +321,7 @@ func (e *scanFilterEntry) statSys() (*syscall.Stat_t, bool) {
 
 // enqueueDirChildren reads the given directory's entries, sorts them,
 // and merges the new paths into the sorted pathQueue.
-func (dc *DirectoryCache) enqueueDirChildren(pathQueue []string, currentPath string) []string {
+func (ms *MetaStore) enqueueDirChildren(pathQueue []string, currentPath string) []string {
 	entries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return pathQueue
@@ -331,7 +331,7 @@ func (dc *DirectoryCache) enqueueDirChildren(pathQueue []string, currentPath str
 	for _, entry := range entries {
 		newPaths = append(newPaths, filepath.Join(currentPath, entry.Name()))
 	}
-	return dc.insertSorted(pathQueue, newPaths)
+	return ms.insertSorted(pathQueue, newPaths)
 }
 
 // makeScannedPath builds the *scannedPath sent downstream. Debug
@@ -358,7 +358,7 @@ func makeScannedPath(currentPath, relPath string, info os.FileInfo) *scannedPath
 }
 
 // insertSorted inserts new paths into an existing sorted slice maintaining order
-func (dc *DirectoryCache) insertSorted(existing []string, newPaths []string) []string {
+func (ms *MetaStore) insertSorted(existing []string, newPaths []string) []string {
 	if len(newPaths) == 0 {
 		return existing
 	}

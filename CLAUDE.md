@@ -213,7 +213,7 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 - `pkg/pipeline.go` - Channel-based pipeline scaffolding (comparison → hash → reorder → write)
 - `pkg/pipeline_status.go` - Status pipeline (cache refresh, dirty detection)
 - `pkg/pipeline_update.go` - Update pipeline (atomic main-index replacement)
-- `pkg/dircache.go` - Main DirectoryCache API and factory functions
+- `pkg/metastore.go` - Main MetaStore API and factory functions
 
 **Layer 4: Core Operations** (one file per CLI command)
 - `pkg/status.go` - Status reporting (`dcfh status` command)
@@ -221,7 +221,7 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 - `pkg/dupes.go` - Duplicate file detection (`dcfh dupes` command)
 - `pkg/snapshot.go` - Snapshot management (`dcfh snapshot` commands)
 - `pkg/recovery.go` - Index recovery and validation (`dcfh index recover` commands)
-- (Note: `init` functionality is in `pkg/dircache.go` as `NewDirectoryCache`)
+- (Note: `init` functionality is in `pkg/metastore.go` as `NewMetaStore`)
 
 **Layer 5: CLI Interface** (separated into daily-use and specialized tooling)
 
@@ -256,7 +256,7 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 - `timeWall()` / `timeFromWall()` / `encodeWallTime()` — custom 34-bit-sec + 30-bit-nsec format with 1885 epoch (range 1885 → ~2429)
 
 **File naming** (`pkg/filenames.go`):
-- Methods on `DirectoryCache`: `GenerateTimestampedFileName`, `ScanForTimestampedCacheFiles`, `CleanupTimestampedCacheFiles`
+- Methods on `MetaStore`: `GenerateTimestampedFileName`, `ScanForTimestampedCacheFiles`, `CleanupTimestampedCacheFiles`
 - `PathToSlug` — kebab-case slug for external `.dcfh` directory naming
 
 **Human-readable sizes** (`pkg/human_size.go`):
@@ -271,8 +271,8 @@ The codebase is organized in distinct layers, from low-level utilities to high-l
 **File Hashing** (`pkg/hash.go`):
 - `HashAlgorithm` registry covering SHA-1/SHA-256/SHA-512
 - `HashFile()` / `HashFileInterruptible()` - hash file contents (the latter checks ctx for shutdown)
-- `(*DirectoryCache).hashSymlinkTargetToBytes()` - hash a symlink's target path
-- `(*DirectoryCache).GetCurrentHashType()` / `GetCurrentHashAlgorithm()` - resolve algorithm from config + flags
+- `(*MetaStore).hashSymlinkTargetToBytes()` - hash a symlink's target path
+- `(*MetaStore).GetCurrentHashType()` / `GetCurrentHashAlgorithm()` - resolve algorithm from config + flags
 
 **Index Internals** (`pkg/index.go`):
 - Binary format structs: `IndexHeader`, `MmapIndex`

@@ -20,14 +20,14 @@ import (
 // diffComparisonSink to accumulate the result. A non-nil filter narrows
 // the result without affecting cache writes — entries filtered out are
 // excluded from Modified/Added/Deleted slices and from byte counts.
-func Diff(ctx context.Context, dc *DirectoryCache, sr *ScanRun, leftRef, rightRef IndexRef, filter FilterExpr) (*StatusResult, error) {
-	leftIter, leftClose, err := OpenRef(ctx, dc, sr, leftRef)
+func Diff(ctx context.Context, ms *MetaStore, sr *ScanRun, leftRef, rightRef IndexRef, filter FilterExpr) (*StatusResult, error) {
+	leftIter, leftClose, err := OpenRef(ctx, ms, sr, leftRef)
 	if err != nil {
 		return nil, fmt.Errorf("diff: open left %s: %w", leftRef.Type, err)
 	}
 	defer func() { _ = leftClose() }()
 
-	rightIter, rightClose, err := OpenRef(ctx, dc, sr, rightRef)
+	rightIter, rightClose, err := OpenRef(ctx, ms, sr, rightRef)
 	if err != nil {
 		return nil, fmt.Errorf("diff: open right %s: %w", rightRef.Type, err)
 	}

@@ -57,7 +57,7 @@ type RepoInfo struct {
 }
 
 // RepoStats reports aggregate counts and total size for the active index.
-// Named distinctly from the existing DirectoryCache.Stats method to avoid
+// Named distinctly from the existing MetaStore.Stats method to avoid
 // collision in wrapper code.
 type RepoStats struct {
 	FileCount int   `json:"file_count"`
@@ -69,7 +69,7 @@ type RepoStats struct {
 //
 // Prints/Ignores carry --print/--ignore scope segments (see
 // BuildPrintIgnoreTree); Ignores additionally short-circuit the scan
-// walker via dc.scanIgnore so non-matching files are never hashed.
+// walker via ms.scanIgnore so non-matching files are never hashed.
 // NoIgnoreFile suppresses .dcfh/ignore for the run.
 //
 // Filter is the legacy single-segment alias used by callers that haven't
@@ -143,7 +143,7 @@ type UpdateResult struct {
 }
 
 // Repo is the transport-neutral surface that every CLI command uses.
-// Implementations: localRepo wrapping a DirectoryCache; the DirectoryCache's
+// Implementations: localRepo wrapping a MetaStore; the MetaStore's
 // walker/hasher pair is swapped to the wire-backed pair for ssh:// roots.
 // colocatedRepo (Phase 3) will proxy the full interface. Fix is deferred
 // to Phase 1b.

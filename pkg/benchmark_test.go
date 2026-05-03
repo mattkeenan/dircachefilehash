@@ -217,7 +217,7 @@ func benchmarkDirectoryScan(b *testing.B, config BenchmarkConfig) {
 	for i := 0; i < b.N; i++ {
 		// Create directory cache
 		dcfhDir := filepath.Join(tempDir, fmt.Sprintf("dcfh_%d", i))
-		cache := NewDirectoryCache(datasetDir, dcfhDir)
+		cache := NewMetaStore(datasetDir, dcfhDir)
 
 		// Time the full update operation
 		updateStart := time.Now()
@@ -283,7 +283,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 
 	// Create initial index
 	dcfhDir := filepath.Join(tempDir, "dcfh")
-	cache := NewDirectoryCache(datasetDir, dcfhDir)
+	cache := NewMetaStore(datasetDir, dcfhDir)
 	if err := cache.Update(context.Background(), cache.scanRun(), map[string]string{}); err != nil {
 		b.Fatalf("Initial update failed: %v", err)
 	}
@@ -293,7 +293,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	// Benchmark index loading operations
 	b.Run("LoadIndex", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			cache := NewDirectoryCache(datasetDir, dcfhDir)
+			cache := NewMetaStore(datasetDir, dcfhDir)
 			if _, err := cache.LoadMainIndex(); err != nil {
 				b.Fatalf("LoadMainIndex failed: %v", err)
 			}
@@ -304,7 +304,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	// Benchmark status operations
 	b.Run("Status", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			cache := NewDirectoryCache(datasetDir, dcfhDir)
+			cache := NewMetaStore(datasetDir, dcfhDir)
 			if _, err := cache.Status(context.Background(), cache.scanRun(), map[string]string{}, nil); err != nil {
 				b.Fatalf("Status failed: %v", err)
 			}
@@ -315,7 +315,7 @@ func benchmarkIndexOperations(b *testing.B, config BenchmarkConfig) {
 	// Benchmark duplicate detection
 	b.Run("FindDuplicates", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			cache := NewDirectoryCache(datasetDir, dcfhDir)
+			cache := NewMetaStore(datasetDir, dcfhDir)
 			if _, err := cache.LoadMainIndex(); err != nil {
 				b.Fatalf("LoadMainIndex failed: %v", err)
 			}
@@ -362,7 +362,7 @@ func BenchmarkFullWorkflowMedium(b *testing.B) {
 
 		// Step 1: Initialise repository from scratch
 		initStart := time.Now()
-		cache := NewDirectoryCache(datasetDir, dcfhDir)
+		cache := NewMetaStore(datasetDir, dcfhDir)
 		if err := cache.createEmptyIndex(); err != nil {
 			b.Fatalf("Failed to initialise repository: %v", err)
 		}
@@ -483,7 +483,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	b.Run("MemoryEfficiency", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			dcfhDir := filepath.Join(tempDir, fmt.Sprintf("dcfh_%d", i))
-			cache := NewDirectoryCache(datasetDir, dcfhDir)
+			cache := NewMetaStore(datasetDir, dcfhDir)
 
 			// Force GC before measurement
 			b.StopTimer()

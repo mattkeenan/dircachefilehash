@@ -15,7 +15,7 @@ import (
 // Ownership: each PipelineEntry is owned by exactly one worker while being
 // hashed, then ownership transfers to the output channel consumer.
 type hashPool struct {
-	dc      *DirectoryCache
+	ms      *MetaStore
 	sr      *ScanRun
 	input   <-chan *PipelineEntry
 	output  chan<- *PipelineEntry
@@ -24,14 +24,14 @@ type hashPool struct {
 
 // newHashPool creates a hash pool. The caller must close input when no more
 // entries will be sent. The pool closes output after all workers finish.
-// The hasher used per file comes from sr.FileHasher; dc is held only for
+// The hasher used per file comes from sr.FileHasher; ms is held only for
 // hashSymlinkTargetToBytes (territory-side helper) and getHashBufferSize.
-func newHashPool(dc *DirectoryCache, sr *ScanRun, input <-chan *PipelineEntry, output chan<- *PipelineEntry, workers int) *hashPool {
+func newHashPool(ms *MetaStore, sr *ScanRun, input <-chan *PipelineEntry, output chan<- *PipelineEntry, workers int) *hashPool {
 	if workers < 1 {
 		workers = 1
 	}
 	return &hashPool{
-		dc:      dc,
+		ms:      ms,
 		sr:      sr,
 		input:   input,
 		output:  output,
@@ -71,7 +71,7 @@ func (hp *hashPool) Run(ctx context.Context) error {
 // worker processes entries from the input channel until it is closed or the
 // context is cancelled.
 func (hp *hashPool) worker(ctx context.Context) error {
-	bufferSize, err := hp.dc.getHashBufferSize()
+	bufferSize, err := hp.ms.getHashBufferSize()
 	if err != nil {
 		return fmt.Errorf("failed to get hash buffer size: %w", err)
 	}
@@ -122,8 +122,8 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 	var hashType uint16
 
 	if os.FileMode(mode)&os.ModeSymlink != 0 {
-		filePath := filepath.Join(hp.dc.RootDir, relPath)
-		hashBytes, hashType, err = hp.dc.hashSymlinkTargetToBytes(filePath)
+		filePath := filepath.Join(hp.ms.RootDir, relPath)
+		hashBytes, hashType, err = hp.ms.hashSymlinkTargetToBytes(filePath)
 	} else {
 		hashBytes, hashType, err = hp.sr.FileHasher.HashOne(ctx, relPath, buffer)
 	}

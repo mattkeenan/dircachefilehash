@@ -19,13 +19,13 @@
 //	groups, err := repo.Groups(ctx, dircachefilehash.GroupsRequest{})
 //
 // [CreateRepo] is the corresponding factory for `dcfh init`. The legacy
-// direct surface ([CreateDirectoryCache] returning a [*DirectoryCache]) is
+// direct surface ([CreateMetaStore] returning a [*MetaStore]) is
 // still supported and is what `Repo` delegates to internally:
 //
-//	dc := dircachefilehash.CreateDirectoryCache("/root", "/root/.dcfh")
-//	defer dc.Close()
-//	result, err := dc.Status(ctx, map[string]string{}, nil)
-//	err = dc.Update(ctx, map[string]string{}, "subdir/")
+//	ms := dircachefilehash.CreateMetaStore("/root", "/root/.dcfh")
+//	defer ms.Close()
+//	result, err := ms.Status(ctx, map[string]string{}, nil)
+//	err = ms.Update(ctx, map[string]string{}, "subdir/")
 //
 // All public methods take a [context.Context] — long scans / hashes honour
 // cancellation.
@@ -85,7 +85,7 @@
 //   - [Repo] / [SnapshotRepo] / [ConfigRepo] and their request/response
 //     types ([DiffRequest], [ApplyRequest], [GroupsRequest], [FilterRequest],
 //     [StatusResult], [UpdateResult], [DuplicateGroup], etc.).
-//   - [DirectoryCache] and its public methods (Status, Update,
+//   - [MetaStore] and its public methods (Status, Update,
 //     FindDuplicates, snapshot operations).
 //   - [SetDebugFlags], [SetVerboseLevel].
 //
