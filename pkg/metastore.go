@@ -14,13 +14,6 @@ import (
 	"unsafe"
 )
 
-// ScanIndexInfo tracks memory-mapped scan index files for cleanup
-type ScanIndexInfo struct {
-	FilePath string // Path to scan index file
-	MmapData []byte // Memory-mapped data (if currently mapped)
-	FileSize int    // Size of the file
-}
-
 // MetaStore manages the .dcfh metadata directory: the maps
 // (main.idx, cache.idx, snapshots), the ignore manager, and the loaded
 // index memo. Instrument fields (walker, file hasher, symlink mode,
@@ -558,4 +551,3 @@ func (ms *MetaStore) registerIndex(indexType string, indexFile *mmapIndexFile) {
 		ms.cacheIndex = indexFile
 	}
 }
-

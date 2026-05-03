@@ -8,41 +8,30 @@ import (
 	"sync"
 )
 
-// repoCore is the shared base for the peer Repo impls (localRepo,
-// wireRepo). It holds the .dcfh container plus per-repo instruments and
-// the per-call scan state that any verb needs. Each peer impl embeds
-// *repoCore by value and adds only the bits unique to its transport
-// (e.g. wireRepo's session).
-//
-// All Repo verbs live on *repoCore so neither impl pretends to be the
-// other; they're peers that share state machinery without inheritance.
+// repoCore is the shared base embedded by the peer Repo impls
+// (localRepo, wireRepo). All Repo verbs live here so each impl only
+// adds what's unique to its transport (e.g. wireRepo's session).
 type repoCore struct {
 	ms *MetaStore
 
-	// Instruments. The local pair lives in walker_local.go / hash.go;
-	// the wire pair (wireWalker / wireHasher) is wired by the wire impl
-	// constructor. The fields are typed at the interface level so the
-	// embedded repoCore methods don't care which concrete type is in
-	// play.
 	walker      Walker
 	fileHasher  Hasher
 	symlinkMode string
 	hashWorkers int
 
-	// Per-call scan-time filter state. Set by configureFilters; read
-	// by scanRun() when assembling the per-call ScanRun.
+	// Set by configureFilters; read by scanRun().
 	scanIgnore FilterExpr
 
-	// "One scan at a time" guard. Acquired by Apply around ms.Update;
-	// other verbs do not take it (Diff/Groups don't write).
-	scanMutex      sync.RWMutex
+	// "One scan at a time" guard around ms.Update; Apply takes it,
+	// Diff/Groups don't (they don't write).
+	scanMutex      sync.Mutex
 	scanInProgress bool
 	lastScanError  error
 }
 
-// localRepo implements Repo for filesystem-local roots. It carries no
-// state beyond repoCore — the local walker/hasher pair is wired in by
-// newLocalRepo and the embedded core does the rest.
+// localRepo implements Repo for filesystem-local roots. The local
+// walker/hasher pair is wired in by newLocalRepo; everything else
+// comes from the embedded repoCore.
 type localRepo struct {
 	repoCore
 }
@@ -104,10 +93,6 @@ func createLocalRepo(_ context.Context, rootDir, metaDir string) (*localRepo, er
 	return newLocalRepo(ms), nil
 }
 
-// newLocalRepo wires a localRepo with default local instruments and
-// the ms's currently-loaded config-derived instrument values
-// (symlinkMode, hashWorkers). Subsequent verb calls update those
-// values via configureFilters / applyConfigOverrides.
 func newLocalRepo(ms *MetaStore) *localRepo {
 	l := &localRepo{
 		repoCore: repoCore{
@@ -116,15 +101,14 @@ func newLocalRepo(ms *MetaStore) *localRepo {
 			fileHasher: &localHasher{ms: ms},
 		},
 	}
-	l.seedFromDC()
+	l.seedFromConfig()
 	return l
 }
 
-// seedFromDC primes the repo's config-derived instrument fields from
-// the ms's current config (or sensible defaults). Constructors call
-// this so a freshly-built repo has usable defaults before any
+// seedFromConfig primes config-derived instrument fields so a
+// freshly-built repo has usable defaults before any
 // applyConfigOverrides call lands.
-func (r *repoCore) seedFromDC() {
+func (r *repoCore) seedFromConfig() {
 	if cfg := r.ms.GetConfig(); cfg != nil {
 		r.symlinkMode = cfg.GetSymlinkConfig().Mode
 		r.hashWorkers = cfg.GetPerformanceConfig().HashWorkers
@@ -134,9 +118,6 @@ func (r *repoCore) seedFromDC() {
 	r.hashWorkers = 2
 }
 
-// scanRun assembles the per-call ScanRun from the repo's instrument
-// fields. Called by every Repo verb wrapper before dispatching to the
-// underlying ms method.
 func (r *repoCore) scanRun() *ScanRun {
 	return &ScanRun{
 		Store:       r.ms,
@@ -148,10 +129,6 @@ func (r *repoCore) scanRun() *ScanRun {
 	}
 }
 
-// applyConfigOverrides delegates to ms.ApplyConfigOverrides for
-// config-side bookkeeping (Config / IgnoreIsDeindex / IndexLockTimeout)
-// then writes the resolved instrument values into the repo's own
-// fields.
 func (r *repoCore) applyConfigOverrides(flags map[string]string) error {
 	res, err := r.ms.ApplyConfigOverrides(flags)
 	r.symlinkMode = res.SymlinkMode

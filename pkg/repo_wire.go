@@ -2,14 +2,13 @@ package dircachefilehash
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-// wireRepo implements Repo for ssh:// roots. It is a peer of localRepo —
-// not an extension. The shared verb implementations (Diff, Apply, …)
-// live on the embedded repoCore so neither type masquerades as the
-// other; wireRepo only adds the bits unique to the ssh transport (the
-// session that owns the ssh dial).
+// wireRepo implements Repo for ssh:// roots. The shared verbs (Diff,
+// Apply, …) come from the embedded repoCore; wireRepo only adds the
+// session that owns the ssh dial.
 type wireRepo struct {
 	repoCore
 	session *wireSession
@@ -68,14 +67,13 @@ func newWireRepoWithClient(ms *MetaStore, uri RepoURI, preBuilt WireDriver) *wir
 		},
 		session: sess,
 	}
-	w.seedFromDC()
+	w.seedFromConfig()
 	return w
 }
 
 // Close tears down the ssh session in addition to the embedded core's
-// ms close. The two errors are coalesced to the first non-nil so a
-// failing ms.Close still reports while still attempting the session
-// teardown (and vice-versa).
+// ms close. Both teardowns always run; errors are joined so a failure
+// on one side doesn't mask a failure on the other.
 func (w *wireRepo) Close() error {
 	coreErr := w.repoCore.Close()
 	var sessErr error
@@ -83,8 +81,5 @@ func (w *wireRepo) Close() error {
 		sessErr = w.session.Close()
 		w.session = nil
 	}
-	if coreErr != nil {
-		return coreErr
-	}
-	return sessErr
+	return errors.Join(coreErr, sessErr)
 }
