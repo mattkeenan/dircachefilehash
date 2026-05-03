@@ -43,7 +43,7 @@ func TestHashPoolBasic(t *testing.T) {
 	// Set up channels
 	input := make(chan *PipelineEntry, 1)
 	output := make(chan *PipelineEntry, 1)
-	pool := newHashPool(dc, input, output, 2)
+	pool := newHashPool(dc, dc.scanRun(), input, output, 2)
 
 	// Send entry
 	input <- &PipelineEntry{
@@ -98,7 +98,7 @@ func TestHashPoolContextCancellation(t *testing.T) {
 
 	input := make(chan *PipelineEntry)
 	output := make(chan *PipelineEntry, 10)
-	pool := newHashPool(dc, input, output, 1)
+	pool := newHashPool(dc, dc.scanRun(), input, output, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -129,7 +129,7 @@ func TestHashPoolMultipleFiles(t *testing.T) {
 	const nFiles = 10
 	input := make(chan *PipelineEntry, nFiles)
 	output := make(chan *PipelineEntry, nFiles)
-	pool := newHashPool(dc, input, output, 4)
+	pool := newHashPool(dc, dc.scanRun(), input, output, 4)
 
 	// Create files and entries
 	for i := range nFiles {
@@ -179,7 +179,7 @@ func TestHashPoolClosesOutput(t *testing.T) {
 	dc := NewDirectoryCache(testDir, testDir)
 	defer func() { _ = dc.Close() }()
 
-	pool := newHashPool(dc, input, output, 1)
+	pool := newHashPool(dc, dc.scanRun(), input, output, 1)
 	close(input)
 
 	if err := pool.Run(context.Background()); err != nil {

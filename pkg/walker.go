@@ -11,8 +11,12 @@ import "context"
 // Implementations MUST close resultChan when the walk completes, whether
 // normally or due to context cancellation; streaming errors are reported
 // by closing the channel and returning from Walk.
+//
+// sr carries the per-call instruments and scratch state (symlink mode,
+// scan-time --ignore predicate, etc.). Walkers read what they need
+// from sr; the per-repo identity lives in sr.Store.
 type Walker interface {
-	Walk(ctx context.Context, paths []string, resultChan chan<- *scannedPath) error
+	Walk(ctx context.Context, paths []string, sr *ScanRun, resultChan chan<- *scannedPath) error
 	Close() error
 }
 

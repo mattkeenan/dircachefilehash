@@ -16,6 +16,7 @@ import (
 // hashed, then ownership transfers to the output channel consumer.
 type hashPool struct {
 	dc      *DirectoryCache
+	sr      *ScanRun
 	input   <-chan *PipelineEntry
 	output  chan<- *PipelineEntry
 	workers int
@@ -23,12 +24,15 @@ type hashPool struct {
 
 // newHashPool creates a hash pool. The caller must close input when no more
 // entries will be sent. The pool closes output after all workers finish.
-func newHashPool(dc *DirectoryCache, input <-chan *PipelineEntry, output chan<- *PipelineEntry, workers int) *hashPool {
+// The hasher used per file comes from sr.FileHasher; dc is held only for
+// hashSymlinkTargetToBytes (territory-side helper) and getHashBufferSize.
+func newHashPool(dc *DirectoryCache, sr *ScanRun, input <-chan *PipelineEntry, output chan<- *PipelineEntry, workers int) *hashPool {
 	if workers < 1 {
 		workers = 1
 	}
 	return &hashPool{
 		dc:      dc,
+		sr:      sr,
 		input:   input,
 		output:  output,
 		workers: workers,
@@ -121,7 +125,7 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 		filePath := filepath.Join(hp.dc.RootDir, relPath)
 		hashBytes, hashType, err = hp.dc.hashSymlinkTargetToBytes(filePath)
 	} else {
-		hashBytes, hashType, err = hp.dc.fileHasher.HashOne(ctx, relPath, buffer)
+		hashBytes, hashType, err = hp.sr.FileHasher.HashOne(ctx, relPath, buffer)
 	}
 
 	if err != nil {

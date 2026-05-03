@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 )
 
-// localWalker delegates filesystem scanning to the owning DirectoryCache's
-// scanPath. It is the default Walker on every DirectoryCache and what
-// `ssh://` routes replace at the factory in commit 5.
-type localWalker struct{ dc *DirectoryCache }
+// localWalker delegates filesystem scanning to the metaStore's scanPath.
+// Stateless — the per-call ScanRun carries everything walker-relevant;
+// territory identity (RootDir) is reached via sr.Store.
+type localWalker struct{}
 
-func (lw *localWalker) Walk(ctx context.Context, paths []string, resultChan chan<- *scannedPath) error {
-	return lw.dc.scanPath(ctx, paths, resultChan)
+func (lw *localWalker) Walk(ctx context.Context, paths []string, sr *ScanRun, resultChan chan<- *scannedPath) error {
+	return sr.Store.scanPath(ctx, sr, paths, resultChan)
 }
 
 func (lw *localWalker) Close() error { return nil }

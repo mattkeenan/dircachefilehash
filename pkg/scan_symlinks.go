@@ -127,11 +127,11 @@ func (dc *DirectoryCache) checkSymlinkChain(symlinkPath string, strict bool) (al
 // shouldFollowSymlink applies the configured --symlinks mode to a single
 // symlink path. Used by shouldIndex to decide whether files reached via
 // a parent symlink are still in scope.
-func (dc *DirectoryCache) shouldFollowSymlink(symlinkPath string) bool {
-	baseMode, strict := parseSymlinkMode(dc.symlinkMode)
+func (dc *DirectoryCache) shouldFollowSymlink(sr *ScanRun, symlinkPath string) bool {
+	baseMode, strict := parseSymlinkMode(sr.SymlinkMode)
 
 	if IsDebugEnabled("scan") {
-		VerboseLog(3, "shouldFollowSymlink: path=%s, mode=%s (base=%s, strict=%v)", symlinkPath, dc.symlinkMode, baseMode, strict)
+		VerboseLog(3, "shouldFollowSymlink: path=%s, mode=%s (base=%s, strict=%v)", symlinkPath, sr.SymlinkMode, baseMode, strict)
 	}
 
 	switch baseMode {
@@ -155,7 +155,7 @@ func (dc *DirectoryCache) shouldFollowSymlink(symlinkPath string) bool {
 // the scanner recurses in; for file symlinks it returns the original
 // lstat info unchanged. Returns skip=true for symlinks that should be
 // dropped (broken target, policy rejection, etc.).
-func (dc *DirectoryCache) resolveSymlinkForScan(currentPath string, info os.FileInfo) (os.FileInfo, bool) {
+func (dc *DirectoryCache) resolveSymlinkForScan(sr *ScanRun, currentPath string, info os.FileInfo) (os.FileInfo, bool) {
 	targetInfo, err := os.Stat(currentPath)
 	if err != nil {
 		return nil, true
@@ -163,7 +163,7 @@ func (dc *DirectoryCache) resolveSymlinkForScan(currentPath string, info os.File
 	if !targetInfo.IsDir() {
 		return info, false
 	}
-	if dc.shouldFollowDirSymlink(currentPath) {
+	if dc.shouldFollowDirSymlink(sr, currentPath) {
 		return targetInfo, false
 	}
 	return nil, true
@@ -172,8 +172,8 @@ func (dc *DirectoryCache) resolveSymlinkForScan(currentPath string, info os.File
 // shouldFollowDirSymlink applies the symlink-mode policy (none /
 // internal / external / all) to a directory symlink. Debug logs
 // describe every decision.
-func (dc *DirectoryCache) shouldFollowDirSymlink(currentPath string) bool {
-	baseMode, strict := parseSymlinkMode(dc.symlinkMode)
+func (dc *DirectoryCache) shouldFollowDirSymlink(sr *ScanRun, currentPath string) bool {
+	baseMode, strict := parseSymlinkMode(sr.SymlinkMode)
 	switch baseMode {
 	case "none":
 		if IsDebugEnabled("symlinks") {

@@ -33,7 +33,7 @@ func TestBinaryEntrySkiplistIterator_BasicIteration(t *testing.T) {
 
 	// If main index is empty, do a quick scan to populate it
 	if skiplist.Length() == 0 {
-		if err := dc.Update(context.Background(), nil); err != nil {
+		if err := dc.Update(context.Background(), dc.scanRun(), nil); err != nil {
 			t.Logf("Warning: failed to populate index: %v", err)
 		}
 

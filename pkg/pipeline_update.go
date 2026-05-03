@@ -17,7 +17,7 @@ import (
 //
 // On success, the temp file is atomically renamed to main.idx.
 // On failure, the temp file is deleted.
-func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
+func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
 	// Channel buffer size: absorbs burst between stages without excessive memory
 	const bufSize = 100
 
@@ -66,7 +66,7 @@ func RunUpdatePipeline(ctx context.Context, dc *DirectoryCache, leftIter, rightI
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pool := newHashPool(dc, hashCh, hashedCh, dc.hashWorkers)
+		pool := newHashPool(dc, sr, hashCh, hashedCh, sr.HashWorkers)
 		if err := pool.Run(ctx); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("hash stage: %w", err))
 		}
@@ -204,22 +204,13 @@ func finaliseMainIndex(dc *DirectoryCache, tempName, logPrefix string, ok bool) 
 // performPipelineScan runs the four-stage update pipeline (compare → hash →
 // reorder → write) and atomically renames the resulting temp index into
 // main.idx via the deferred finaliseMainIndex helper.
-func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []string, compareSkiplist *skiplistWrapper) error {
+//
+// The "only one scan at a time" guard (scanMutex / scanInProgress /
+// lastScanError) used to live here. It is now owned by the Repo impl
+// and acquired around the verb call (see localRepo.Apply); this
+// function performs the work, the caller serialises the calls.
+func (dc *DirectoryCache) performPipelineScan(ctx context.Context, sr *ScanRun, paths []string, compareSkiplist *skiplistWrapper) error {
 	defer VerboseEnter()()
-
-	// Synchronise concurrent scans
-	dc.scanMutex.Lock()
-	defer dc.scanMutex.Unlock()
-
-	if dc.scanInProgress {
-		if dc.lastScanError != nil {
-			return dc.lastScanError
-		}
-		return nil
-	}
-
-	dc.scanInProgress = true
-	defer func() { dc.scanInProgress = false }()
 
 	// Generate timestamped main index filename
 	tempMainIndexFileName := dc.GenerateTimestampedFileName("main")
@@ -229,16 +220,14 @@ func (dc *DirectoryCache) performPipelineScan(ctx context.Context, paths []strin
 
 	// Create iterators
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, compareSkiplist, "existing")
-	scanIterator := NewFilesystemScanIterator(ctx, dc, paths, "scan")
+	scanIterator := NewFilesystemScanIterator(ctx, sr, paths, "scan")
 
 	// Run the pipeline
-	err := RunUpdatePipeline(ctx, dc, existingIterator, scanIterator, tempMainIndexFileName)
+	err := RunUpdatePipeline(ctx, dc, sr, existingIterator, scanIterator, tempMainIndexFileName)
 	if err != nil {
-		dc.lastScanError = err
 		return err
 	}
 
 	operationSuccessful = true
-	dc.lastScanError = nil
 	return nil
 }

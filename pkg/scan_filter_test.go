@@ -7,7 +7,7 @@ import (
 )
 
 // TestScanIgnoreStatAndFilter asserts the scan-walker chokepoint drops
-// paths matching dc.scanIgnore even when IgnoreManager wouldn't.
+// paths matching the per-call ScanIgnore even when IgnoreManager wouldn't.
 func TestScanIgnoreStatAndFilter(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -22,12 +22,13 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 	defer func() { _ = dc.Close() }()
 
-	// Without scanIgnore set, both files survive statAndFilter.
-	if _, _, ok := dc.statAndFilter(keep); !ok {
-		t.Errorf("keep should pass with nil scanIgnore")
+	// Without ScanIgnore set, both files survive statAndFilter.
+	sr := dc.scanRun()
+	if _, _, ok := dc.statAndFilter(sr, keep); !ok {
+		t.Errorf("keep should pass with nil ScanIgnore")
 	}
-	if _, _, ok := dc.statAndFilter(drop); !ok {
-		t.Errorf("drop should pass with nil scanIgnore")
+	if _, _, ok := dc.statAndFilter(sr, drop); !ok {
+		t.Errorf("drop should pass with nil ScanIgnore")
 	}
 
 	// Wire up an --ignore predicate matching *.tmp.
@@ -35,13 +36,13 @@ func TestScanIgnoreStatAndFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	dc.scanIgnore = expr
+	sr.ScanIgnore = expr
 
-	if _, _, ok := dc.statAndFilter(keep); !ok {
-		t.Errorf("keep should still pass with scanIgnore = *.tmp")
+	if _, _, ok := dc.statAndFilter(sr, keep); !ok {
+		t.Errorf("keep should still pass with ScanIgnore = *.tmp")
 	}
-	if _, _, ok := dc.statAndFilter(drop); ok {
-		t.Errorf("drop should be filtered by scanIgnore = *.tmp")
+	if _, _, ok := dc.statAndFilter(sr, drop); ok {
+		t.Errorf("drop should be filtered by ScanIgnore = *.tmp")
 	}
 }
 
@@ -53,21 +54,22 @@ func TestScanIgnoreShouldIndex(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 	defer func() { _ = dc.Close() }()
 
-	// Without scanIgnore, shouldIndex returns true for an unfiltered path.
-	if !dc.shouldIndex("foo.tmp") {
-		t.Fatal("baseline: shouldIndex should accept foo.tmp before scanIgnore is set")
+	sr := dc.scanRun()
+	// Without ScanIgnore, shouldIndex returns true for an unfiltered path.
+	if !dc.shouldIndex(sr, "foo.tmp") {
+		t.Fatal("baseline: shouldIndex should accept foo.tmp before ScanIgnore is set")
 	}
 
 	expr, err := BuildScanIgnore([]FilterOptions{{Names: []string{"*.tmp"}}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	dc.scanIgnore = expr
+	sr.ScanIgnore = expr
 
-	if dc.shouldIndex("foo.tmp") {
+	if dc.shouldIndex(sr, "foo.tmp") {
 		t.Errorf("shouldIndex should drop foo.tmp under --ignore --name *.tmp")
 	}
-	if !dc.shouldIndex("foo.go") {
+	if !dc.shouldIndex(sr, "foo.go") {
 		t.Errorf("shouldIndex should keep foo.go under --ignore --name *.tmp")
 	}
 }
@@ -82,12 +84,13 @@ func TestScanFilterEntryUnavailableData(t *testing.T) {
 	dc := NewDirectoryCache(tempDir, tempDir)
 	defer func() { _ = dc.Close() }()
 
+	sr := dc.scanRun()
 	hashExpr, err := BuildScanIgnore([]FilterOptions{{Hashes: []string{"deadbeef"}}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	dc.scanIgnore = hashExpr
-	if dc.scanIgnoreDrops("anything", nil, "test") {
+	sr.ScanIgnore = hashExpr
+	if sr.scanIgnoreDrops("anything", nil, "test") {
 		t.Errorf("hash predicate at scan-time must not match (data unavailable)")
 	}
 
@@ -96,8 +99,8 @@ func TestScanFilterEntryUnavailableData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)
 	}
-	dc.scanIgnore = sizeExpr
-	if dc.scanIgnoreDrops("anything", nil, "test") {
+	sr.ScanIgnore = sizeExpr
+	if sr.scanIgnoreDrops("anything", nil, "test") {
 		t.Errorf("size predicate without FileInfo must not match")
 	}
 }

@@ -65,13 +65,13 @@ func TestDiff_MainVsFsScan_MatchesStatus(t *testing.T) {
 	ctx := context.Background()
 
 	// Reference path: dc.Status.
-	wantSR, err := dc.Status(ctx, nil, nil)
+	wantSR, err := dc.Status(ctx, dc.scanRun(), nil, nil)
 	if err != nil {
 		t.Fatalf("dc.Status: %v", err)
 	}
 
 	// Generic engine path: Diff(main, fs-scan).
-	gotSR, err := Diff(ctx, dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil)
+	gotSR, err := Diff(ctx, dc, dc.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil)
 	if err != nil {
 		t.Fatalf("Diff(main, fs-scan): %v", err)
 	}
@@ -96,7 +96,7 @@ func TestDiff_CacheMainVsMain(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	statusSR, err := dc.Status(ctx, nil, nil)
+	statusSR, err := dc.Status(ctx, dc.scanRun(), nil, nil)
 	if err != nil {
 		t.Fatalf("dc.Status: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestDiff_CacheMainVsMain(t *testing.T) {
 	// Diff(cache+main, main) — left is the post-mutation view, right is the
 	// pre-mutation view, so the symmetry is: status's Added → diff's Deleted,
 	// status's Deleted → diff's Added, Modified is invariant.
-	diffSR, err := Diff(ctx, dc, IndexRef{Type: RefTypeCacheMain}, IndexRef{Type: RefTypeMain}, nil)
+	diffSR, err := Diff(ctx, dc, dc.scanRun(), IndexRef{Type: RefTypeCacheMain}, IndexRef{Type: RefTypeMain}, nil)
 	if err != nil {
 		t.Fatalf("Diff(cache+main, main): %v", err)
 	}
@@ -148,7 +148,7 @@ func setupDiffRepo(t *testing.T) *DirectoryCache {
 		}
 	}
 	dc := NewDirectoryCache(root, filepath.Join(root, ".dcfh"))
-	if err := dc.Update(context.Background(), map[string]string{}); err != nil {
+	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	return dc

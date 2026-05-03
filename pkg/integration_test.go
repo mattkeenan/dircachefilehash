@@ -170,7 +170,7 @@ func createInitialFiles(t *testing.T, testDir string) map[string]TestFileContent
 
 // performInitialUpdate does the first update and captures the index state
 func performInitialUpdate(t *testing.T, dc *DirectoryCache) {
-	if err := dc.Update(context.Background(), map[string]string{}); err != nil {
+	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Initial update failed: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
 	}
 	t.Logf("Files on disk: %v", diskFiles)
 
-	result, err := dc.Status(context.Background(), map[string]string{}, nil)
+	result, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Status check failed: %v", err)
 	}
@@ -347,7 +347,7 @@ func validateStatusDetection(t *testing.T, dc *DirectoryCache) {
 
 // performFinalUpdate updates the repository to final state
 func performFinalUpdate(t *testing.T, dc *DirectoryCache) {
-	if err := dc.Update(context.Background(), map[string]string{}); err != nil {
+	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Final update failed: %v", err)
 	}
 
@@ -430,7 +430,7 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// First status should create cache
-	result1, err := dc.Status(context.Background(), map[string]string{}, nil)
+	result1, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("First status failed: %v", err)
 	}
@@ -467,7 +467,7 @@ func validateCacheBehaviour(t *testing.T, dc *DirectoryCache) {
 	}
 
 	// Second status should use cache (should be faster, same result)
-	result2, err := dc.Status(context.Background(), map[string]string{}, nil)
+	result2, err := dc.Status(context.Background(), dc.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Second status failed: %v", err)
 	}

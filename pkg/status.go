@@ -46,17 +46,18 @@ type StatusResult struct {
 // filter, when non-nil, narrows the reported result without affecting
 // the cache write — the cache always reflects on-disk truth so a future
 // status without the filter sees the same state.
-func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
+func (dc *DirectoryCache) Status(ctx context.Context, sr *ScanRun, flags map[string]string, filter FilterExpr) (*StatusResult, error) {
 	defer VerboseEnter()()
 
-	if err := dc.ApplyConfigOverrides(flags); err != nil {
-		// Fall back to applying symlink mode directly when no config is loaded.
-		if symlinkMode, exists := flags["symlinks"]; exists {
-			dc.symlinkMode = symlinkMode
-		}
+	res, _ := dc.ApplyConfigOverrides(flags)
+	// Authoritative post-override values flow into sr; the caller may
+	// have built sr before flags were applied.
+	if sr != nil {
+		sr.SymlinkMode = res.SymlinkMode
+		sr.HashWorkers = res.HashWorkers
 	}
 
-	result, err := Diff(ctx, dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
+	result, err := Diff(ctx, dc, sr, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, filter)
 	if err != nil {
 		return result, err
 	}
@@ -79,7 +80,7 @@ func (dc *DirectoryCache) Status(ctx context.Context, flags map[string]string, f
 //
 // On error the skiplist is nil; the cache may still have been partially
 // written (the timestamped file is left in place for startup merge).
-func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context) (*skiplistWrapper, error) {
+func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context, sr *ScanRun) (*skiplistWrapper, error) {
 	mainSkiplist, err := dc.LoadMainIndex()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load main index: %w", err)
@@ -99,9 +100,9 @@ func (dc *DirectoryCache) refreshFsScanCache(ctx context.Context) (*skiplistWrap
 	cacheTempFileName := dc.GenerateTimestampedFileName("cache")
 
 	existingIterator := NewBinaryEntrySkiplistIterator(ctx, mainSkiplist, "existing")
-	scanIterator := NewFilesystemScanIterator(ctx, dc, []string{}, "scan")
+	scanIterator := NewFilesystemScanIterator(ctx, sr, []string{}, "scan")
 
-	scanErr := RunStatusPipeline(ctx, dc, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
+	scanErr := RunStatusPipeline(ctx, dc, sr, cacheSkiplistPre, existingIterator, scanIterator, cacheTempFileName)
 	finaliseStatusCache(dc, cacheTempFileName, scanErr == nil)
 
 	if scanErr != nil {

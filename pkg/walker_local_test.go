@@ -33,13 +33,14 @@ func TestLocalWalkerProducesSortedScanPaths(t *testing.T) {
 	}
 	defer func() { _ = dc.Close() }()
 
-	if dc.walker == nil {
-		t.Fatal("walker should be populated by initDirectoryCacheBase")
+	sr := dc.scanRun()
+	if sr.Walker == nil {
+		t.Fatal("scanRun should populate Walker")
 	}
 
 	ch := make(chan *scannedPath, 16)
 	walkErr := make(chan error, 1)
-	go func() { walkErr <- dc.walker.Walk(context.Background(), nil, ch) }()
+	go func() { walkErr <- sr.Walker.Walk(context.Background(), nil, sr, ch) }()
 
 	var got []string
 	for sp := range ch {
@@ -73,8 +74,9 @@ func TestLocalHasherMatchesHashFile(t *testing.T) {
 	}
 	defer func() { _ = dc.Close() }()
 
-	if dc.fileHasher == nil {
-		t.Fatal("fileHasher should be populated by initDirectoryCacheBase")
+	sr := dc.scanRun()
+	if sr.FileHasher == nil {
+		t.Fatal("scanRun should populate FileHasher")
 	}
 
 	// Set the algorithm to sha256 so the result is deterministic and
@@ -84,7 +86,7 @@ func TestLocalHasherMatchesHashFile(t *testing.T) {
 	}
 
 	buf := make([]byte, 64*1024)
-	got, _, err := dc.fileHasher.HashOne(context.Background(), rel, buf)
+	got, _, err := sr.FileHasher.HashOne(context.Background(), rel, buf)
 	if err != nil {
 		t.Fatalf("HashOne: %v", err)
 	}

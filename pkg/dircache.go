@@ -21,8 +21,12 @@ type ScanIndexInfo struct {
 	FileSize int    // Size of the file
 }
 
-// DirectoryCache manages the file cache for a directory
-// Note: skiplist management moved to higher-level files
+// DirectoryCache manages the .dcfh metadata directory: the maps
+// (main.idx, cache.idx, snapshots), the ignore manager, and the loaded
+// index memo. Instrument fields (walker, file hasher, symlink mode,
+// hash workers, scan-ignore predicate, scan synchronisation state) live
+// on the Repo impl, not here — DirectoryCache is the *folder of maps*
+// in the system metaphor, not the actor that reads the territory.
 type DirectoryCache struct {
 	RootDir         string
 	MetaDir         string // Path to .dcfh metadata directory
@@ -30,30 +34,11 @@ type DirectoryCache struct {
 	CacheFile       string         // Path to index.cache file
 	signature       [4]byte        // "dcfh" signature
 	version         uint32         // Index version
-	hasher          hash.Hash      // SHA-1 hasher for checksums
-	walker          Walker         // Filesystem walker (local or wire-backed)
-	fileHasher      Hasher         // Content hasher (local or wire-backed)
+	hasher          hash.Hash      // SHA-1 hasher for index-file checksums (MetaDir-side)
 	mmapIndex       *mmapIndex     // Memory-mapped index file
 	ignoreManager   *IgnoreManager // Ignore pattern manager
 	config          *Config        // Configuration manager
-	symlinkMode     string         // Current symlink handling mode
 	ignoreIsDeindex bool           // Whether newly ignored files should be marked as deleted
-	hashWorkers     int            // Number of concurrent hash workers
-
-	// scanIgnore is the scan-time --ignore predicate (nil = off). The
-	// setter (localRepo.Diff/Apply) must defer reset to nil so reused
-	// DirectoryCaches don't leak the predicate to a later call.
-	// scanFilterEnt/scanFilterCtx are scratch storage reused per
-	// chokepoint hit so a million-file scan doesn't allocate a million
-	// adapters and contexts.
-	scanIgnore    FilterExpr
-	scanFilterEnt scanFilterEntry
-	scanFilterCtx FilterContext
-
-	// Concurrent scan synchronization
-	scanMutex      sync.RWMutex // Protects scan operations
-	scanInProgress bool         // True if a scan is currently running
-	lastScanError  error        // Error from the last completed scan
 
 	// Index tracking for memory protection during hash calculations
 	mainIndex        *mmapIndexFile // Main index file (if loaded)
@@ -237,7 +222,7 @@ func ResolveMetaDir(dir, rootDir string) string {
 // struct fields set but no I/O performed (no directory creation, no config loading).
 // metaDir must be the fully resolved metadata directory path.
 func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
-	dc := &DirectoryCache{
+	return &DirectoryCache{
 		RootDir:       rootDir,
 		MetaDir:       metaDir,
 		IndexFile:     filepath.Join(metaDir, "main.idx"),
@@ -248,9 +233,6 @@ func initDirectoryCacheBase(rootDir, metaDir string) *DirectoryCache {
 		mmapIndex:     nil,
 		ignoreManager: NewIgnoreManager(metaDir),
 	}
-	dc.walker = &localWalker{dc: dc}
-	dc.fileHasher = &localHasher{dc: dc}
-	return dc
 }
 
 // configureDirectoryCache loads config and ignore patterns from an existing .dcfh directory.
@@ -264,10 +246,8 @@ func configureDirectoryCache(dc *DirectoryCache, metaDir string) {
 
 	if config != nil {
 		performanceConfig := config.GetPerformanceConfig()
-		dc.hashWorkers = performanceConfig.HashWorkers
 		dc.indexLockTimeout = performanceConfig.IndexLockTimeout
 	} else {
-		dc.hashWorkers = 2      // fallback default
 		dc.indexLockTimeout = 5 // fallback default (5 seconds)
 	}
 
@@ -364,76 +344,94 @@ func NewDirectoryCache(rootDir, metaDir string) *DirectoryCache {
 	return CreateDirectoryCache(rootDir, metaDir)
 }
 
-// ApplyConfigOverrides applies configuration overrides from the flags map
-func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) error {
+// ResolvedOverrides bundles the post-flag instrument settings produced
+// by ApplyConfigOverrides. The caller (Repo impl or test) writes these
+// onto its own ScanRun-bearing storage; DirectoryCache no longer holds
+// instrument state.
+type ResolvedOverrides struct {
+	SymlinkMode string
+	HashWorkers int
+}
+
+// ApplyConfigOverrides applies configuration overrides from the flags
+// map. MetaDir-side state (Config, ignoreIsDeindex, indexLockTimeout)
+// is mutated on dc as before. Instrument-side state (symlink mode,
+// hash workers) is returned in ResolvedOverrides — the caller decides
+// where to store it.
+//
+// Resolved values are populated even when err != nil so callers
+// honour --symlinks / --hash-workers when no config is loaded.
+func (dc *DirectoryCache) ApplyConfigOverrides(flags map[string]string) (ResolvedOverrides, error) {
+	out := ResolvedOverrides{}
+
+	// Symlink mode: flags > config > default. Resolved regardless of
+	// whether config is present, so the caller can apply it even if
+	// the config-loading path fails below.
+	if symlinkMode, exists := flags["symlinks"]; exists {
+		out.SymlinkMode = symlinkMode
+	} else if dc.config != nil {
+		out.SymlinkMode = dc.config.GetSymlinkConfig().Mode
+	} else {
+		out.SymlinkMode = "none"
+	}
+
+	// Hash workers: flags > config > default.
+	hashWorkersFromFlags := 0
+	if hashWorkersStr, exists := flags["hash_workers"]; exists {
+		n, err := strconv.Atoi(hashWorkersStr)
+		if err != nil {
+			return out, fmt.Errorf("invalid hash workers value '%s': %w", hashWorkersStr, err)
+		}
+		if err := ValidateHashWorkers(n); err != nil {
+			return out, fmt.Errorf("invalid hash workers configuration: %w", err)
+		}
+		hashWorkersFromFlags = n
+		out.HashWorkers = n
+	} else if dc.config != nil {
+		out.HashWorkers = dc.config.GetPerformanceConfig().HashWorkers
+	} else {
+		out.HashWorkers = 2
+	}
+
 	if dc.config == nil {
-		return fmt.Errorf("no configuration loaded, cannot apply overrides")
+		return out, fmt.Errorf("no configuration loaded, cannot apply overrides")
 	}
 
 	var allOverrides []string
 
-	// Collect hash algorithm override
 	if filehashOverride, exists := flags["filehash"]; exists {
 		allOverrides = append(allOverrides, filehashOverride)
 	}
 
-	// Set symlink mode from flags or config
-	if symlinkMode, exists := flags["symlinks"]; exists {
-		dc.symlinkMode = symlinkMode
-	} else if dc.config != nil {
-		symlinkConfig := dc.config.GetSymlinkConfig()
-		dc.symlinkMode = symlinkConfig.Mode
-	} else {
-		dc.symlinkMode = "none" // default fallback
+	// Ignore-deindex behaviour stays on dc (MetaDir-side).
+	dc.ignoreIsDeindex = dc.config.GetIgnoreConfig().IgnoreIsDeindex
+
+	if hashWorkersFromFlags > 0 {
+		allOverrides = append(allOverrides, "hash_workers:"+strconv.Itoa(hashWorkersFromFlags))
 	}
 
-	// Set ignore deindex behavior from config
-	if dc.config != nil {
-		ignoreConfig := dc.config.GetIgnoreConfig()
-		dc.ignoreIsDeindex = ignoreConfig.IgnoreIsDeindex
-	} else {
-		dc.ignoreIsDeindex = true // default fallback
-	}
-
-	// Set hash workers from flags or keep current config value
-	if hashWorkersStr, exists := flags["hash_workers"]; exists {
-		hashWorkers, err := strconv.Atoi(hashWorkersStr)
-		if err != nil {
-			return fmt.Errorf("invalid hash workers value '%s': %w", hashWorkersStr, err)
-		}
-		if err := ValidateHashWorkers(hashWorkers); err != nil {
-			return fmt.Errorf("invalid hash workers configuration: %w", err)
-		}
-		dc.hashWorkers = hashWorkers
-		allOverrides = append(allOverrides, "hash_workers:"+hashWorkersStr)
-	}
-
-	// Set index lock timeout from flags or keep current config value
 	if indexLockTimeoutStr, exists := flags["index_lock_timeout"]; exists {
 		indexLockTimeout, err := strconv.Atoi(indexLockTimeoutStr)
 		if err != nil {
-			return fmt.Errorf("invalid index lock timeout value '%s': %w", indexLockTimeoutStr, err)
+			return out, fmt.Errorf("invalid index lock timeout value '%s': %w", indexLockTimeoutStr, err)
 		}
 		if err := ValidateIndexLockTimeout(indexLockTimeout); err != nil {
-			return fmt.Errorf("invalid index lock timeout configuration: %w", err)
+			return out, fmt.Errorf("invalid index lock timeout configuration: %w", err)
 		}
 		dc.indexLockTimeout = indexLockTimeout
 		allOverrides = append(allOverrides, "index_lock_timeout:"+indexLockTimeoutStr)
 	}
 
-	// Apply all overrides
 	if len(allOverrides) > 0 {
 		if err := dc.config.ApplyOverrides(allOverrides); err != nil {
-			return fmt.Errorf("failed to apply configuration overrides: %w", err)
+			return out, fmt.Errorf("failed to apply configuration overrides: %w", err)
 		}
-
-		// Validate all configurations
 		if err := dc.validateAllConfigs(); err != nil {
-			return fmt.Errorf("invalid configuration after overrides: %w", err)
+			return out, fmt.Errorf("invalid configuration after overrides: %w", err)
 		}
 	}
 
-	return nil
+	return out, nil
 }
 
 // validateAllConfigs validates all configuration options

@@ -14,7 +14,7 @@ type FilesystemScanIterator struct {
 	iteratorBase
 
 	// Filesystem scanning
-	dc           *DirectoryCache
+	sr           *ScanRun
 	paths        []string
 	scanChan     chan *scannedPath
 	ctx          context.Context
@@ -28,9 +28,10 @@ type FilesystemScanIterator struct {
 }
 
 // NewFilesystemScanIterator creates a new iterator that scans
-// the specified paths using BinaryEntryInterface.
-func NewFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, paths []string, name string) *FilesystemScanIterator {
-	if dc == nil {
+// the specified paths using BinaryEntryInterface. sr carries the
+// walker, ignore predicate, and territory back-reference (sr.Store).
+func NewFilesystemScanIterator(ctx context.Context, sr *ScanRun, paths []string, name string) *FilesystemScanIterator {
+	if sr == nil || sr.Store == nil {
 		return &FilesystemScanIterator{
 			iteratorBase: iteratorBase{
 				name:      name,
@@ -43,7 +44,7 @@ func NewFilesystemScanIterator(ctx context.Context, dc *DirectoryCache, paths []
 
 	iterator := &FilesystemScanIterator{
 		iteratorBase: iteratorBase{name: name},
-		dc:           dc,
+		sr:           sr,
 		paths:        paths,
 		scanChan:     make(chan *scannedPath, 100), // Buffered for performance
 		ctx:          childCtx,
@@ -156,8 +157,8 @@ func (ufsi *FilesystemScanIterator) startScan() error {
 		return nil
 	}
 
-	if ufsi.dc == nil {
-		return fmt.Errorf("DirectoryCache is nil")
+	if ufsi.sr == nil || ufsi.sr.Store == nil {
+		return fmt.Errorf("ScanRun or its Store is nil")
 	}
 
 	ufsi.scanStarted = true
@@ -169,7 +170,7 @@ func (ufsi *FilesystemScanIterator) startScan() error {
 			// scanPath already closes the channel, so we don't need to close it
 		}()
 
-		if err := ufsi.dc.walker.Walk(ufsi.ctx, ufsi.paths, ufsi.scanChan); err != nil {
+		if err := ufsi.sr.Walker.Walk(ufsi.ctx, ufsi.paths, ufsi.sr, ufsi.scanChan); err != nil {
 			ufsi.scanError = err
 		}
 	}()

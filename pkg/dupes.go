@@ -77,13 +77,11 @@ type DupeFilter struct {
 // entries sharing (Dev, Ino) within a full-hash subgroup collapse to
 // the first (path-sorted) occurrence, and the ≥2 threshold is re-checked
 // so a group of pure hardlink siblings disappears.
-func (dc *DirectoryCache) FindDuplicates(ctx context.Context, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
-	if err := dc.ApplyConfigOverrides(flags); err != nil {
-		// No config loaded (fresh/partial repos): honour --symlinks
-		// directly so the call still succeeds.
-		if symlinkMode, ok := flags["symlinks"]; ok {
-			dc.symlinkMode = symlinkMode
-		}
+func (dc *DirectoryCache) FindDuplicates(ctx context.Context, sr *ScanRun, flags map[string]string, filter DupeFilter) ([]DuplicateGroup, error) {
+	res, _ := dc.ApplyConfigOverrides(flags)
+	if sr != nil {
+		sr.SymlinkMode = res.SymlinkMode
+		sr.HashWorkers = res.HashWorkers
 	}
 
 	skiplist, err := dc.LoadMergedMainCacheIndex()

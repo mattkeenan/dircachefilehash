@@ -81,12 +81,15 @@ func (s *wireSession) Close() error {
 // wireWalker issues one ScanMetadata request per Walk and adapts the
 // sorted []FileMeta response into the existing scannedPath channel so
 // the downstream Hwang-Lin pipeline is unaware of the wire layer.
+//
+// The session is per-Repo (held by wireRepo); per-call params (paths,
+// symlinks mode, ignore lines) come from sr at Walk time. RawLines is
+// reachable via sr.Store.ignoreManager.
 type wireWalker struct {
 	sess *wireSession
-	dc   *DirectoryCache
 }
 
-func (w *wireWalker) Walk(ctx context.Context, paths []string, resultChan chan<- *scannedPath) error {
+func (w *wireWalker) Walk(ctx context.Context, paths []string, sr *ScanRun, resultChan chan<- *scannedPath) error {
 	defer close(resultChan)
 
 	client, err := w.sess.Client(ctx)
@@ -94,10 +97,10 @@ func (w *wireWalker) Walk(ctx context.Context, paths []string, resultChan chan<-
 		return err
 	}
 
-	ignores := w.dc.ignoreManager.RawLines()
+	ignores := sr.Store.ignoreManager.RawLines()
 	resp, err := client.ScanMetadata(ctx, ScanRequest{
 		Paths:    paths,
-		Symlinks: w.dc.symlinkMode,
+		Symlinks: sr.SymlinkMode,
 		Ignores:  ignores,
 	})
 	if err != nil {

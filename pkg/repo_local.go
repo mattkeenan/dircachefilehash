@@ -5,21 +5,42 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 )
 
 // localRepo implements Repo by wrapping an open DirectoryCache. For ssh://
-// roots the DirectoryCache's walker/hasher pair is swapped to wire-backed
-// implementations sharing a single wireSession (held here so Close can
-// tear it down). The Repo surface is identical between local and wire
-// cases — only the filesystem side of the pipeline moves onto the wire.
+// roots the walker/hasher pair is swapped to wire-backed implementations
+// sharing a single wireSession (held here so Close can tear it down). The
+// Repo surface is identical between local and wire cases — only the
+// filesystem side of the pipeline moves onto the wire.
+//
+// Instrument fields live here, not on dc: dc is the .dcfh container
+// (paths, config, ignore manager, loaded indices), the repo impl owns
+// what reads the territory.
 type localRepo struct {
 	dc      *DirectoryCache
 	session *wireSession // non-nil for ssh:// repos
+
+	// Instruments.
+	walker      Walker
+	fileHasher  Hasher
+	symlinkMode string
+	hashWorkers int
+
+	// Per-call scan-time filter state. Set by configureFilters; read
+	// by scanRun() when assembling the per-call ScanRun.
+	scanIgnore FilterExpr
+
+	// "One scan at a time" guard. Acquired by Apply around dc.Update;
+	// other verbs do not take it (Diff/Groups don't write).
+	scanMutex      sync.RWMutex
+	scanInProgress bool
+	lastScanError  error
 }
 
 // openRepoFromMetaDir opens a Repo for metaDir. A root URI with an ssh
 // scheme swaps in the wire-backed walker/hasher; anything else uses the
-// default local pair established by initDirectoryCacheBase.
+// default local pair.
 func openRepoFromMetaDir(_ context.Context, metaDir string) (Repo, error) {
 	rootDir, resolvedMeta, err := ResolveRepository(metaDir)
 	if err != nil {
@@ -49,7 +70,7 @@ func openRepoFromMetaDir(_ context.Context, metaDir string) (Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &localRepo{dc: dc}, nil
+	return newLocalRepo(dc), nil
 }
 
 // createLocalRepo creates a new repository on disk. metaDir "" means
@@ -69,7 +90,21 @@ func createLocalRepo(_ context.Context, rootDir, metaDir string) (*localRepo, er
 			return nil, fmt.Errorf("failed to record repository root in config: %w", err)
 		}
 	}
-	return &localRepo{dc: dc}, nil
+	return newLocalRepo(dc), nil
+}
+
+// newLocalRepo wires a localRepo with default local instruments and
+// the dc's currently-loaded config-derived instrument values
+// (symlinkMode, hashWorkers). Subsequent verb calls update those
+// values via configureFilters / applyConfigOverrides.
+func newLocalRepo(dc *DirectoryCache) *localRepo {
+	l := &localRepo{
+		dc:         dc,
+		walker:     &localWalker{},
+		fileHasher: &localHasher{dc: dc},
+	}
+	l.seedFromDC()
+	return l
 }
 
 // createWireRepo creates a fresh invoker-side .dcfh at metaDir whose
@@ -114,9 +149,53 @@ func newWireRepo(dc *DirectoryCache, uri RepoURI) *localRepo {
 // ready shellClient; tests pass a wire client wired to a pipe pair.
 func newWireRepoWithClient(dc *DirectoryCache, uri RepoURI, preBuilt WireDriver) *localRepo {
 	sess := &wireSession{uri: uri, client: preBuilt}
-	dc.walker = &wireWalker{sess: sess, dc: dc}
-	dc.fileHasher = &wireHasher{sess: sess, dc: dc}
-	return &localRepo{dc: dc, session: sess}
+	l := &localRepo{
+		dc:         dc,
+		session:    sess,
+		walker:     &wireWalker{sess: sess},
+		fileHasher: &wireHasher{sess: sess, dc: dc},
+	}
+	l.seedFromDC()
+	return l
+}
+
+// seedFromDC primes the localRepo's config-derived instrument fields
+// from the dc's current config (or sensible defaults). Constructors
+// call this so a freshly-built repo has usable defaults before any
+// applyConfigOverrides call lands.
+func (l *localRepo) seedFromDC() {
+	if cfg := l.dc.GetConfig(); cfg != nil {
+		l.symlinkMode = cfg.GetSymlinkConfig().Mode
+		l.hashWorkers = cfg.GetPerformanceConfig().HashWorkers
+		return
+	}
+	l.symlinkMode = "none"
+	l.hashWorkers = 2
+}
+
+// scanRun assembles the per-call ScanRun from the repo's instrument
+// fields. Called by every Repo verb wrapper before dispatching to the
+// underlying dc method.
+func (l *localRepo) scanRun() *ScanRun {
+	return &ScanRun{
+		Store:       l.dc,
+		Walker:      l.walker,
+		FileHasher:  l.fileHasher,
+		SymlinkMode: l.symlinkMode,
+		HashWorkers: l.hashWorkers,
+		ScanIgnore:  l.scanIgnore,
+	}
+}
+
+// applyConfigOverrides delegates to dc.ApplyConfigOverrides for
+// config-side bookkeeping (Config / IgnoreIsDeindex / IndexLockTimeout)
+// then writes the resolved instrument values into localRepo's own
+// fields.
+func (l *localRepo) applyConfigOverrides(flags map[string]string) error {
+	res, err := l.dc.ApplyConfigOverrides(flags)
+	l.symlinkMode = res.SymlinkMode
+	l.hashWorkers = res.HashWorkers
+	return err
 }
 
 func (l *localRepo) Close() error {
@@ -191,8 +270,8 @@ func (l *localRepo) configureFilters(prints, ignores []FilterOptions, legacyFilt
 	}
 
 	if scanExpr != nil {
-		l.dc.scanIgnore = scanExpr
-		restores = append(restores, func() { l.dc.scanIgnore = nil })
+		l.scanIgnore = scanExpr
+		restores = append(restores, func() { l.scanIgnore = nil })
 	}
 	if noIgnoreFile && l.dc.ignoreManager != nil {
 		l.dc.ignoreManager.SetSuppressFile(true)
@@ -211,13 +290,7 @@ func (l *localRepo) configureFilters(prints, ignores []FilterOptions, legacyFilt
 
 func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, error) {
 	flags := req.Options.toFlags()
-	if err := l.dc.ApplyConfigOverrides(flags); err != nil {
-		// Match existing behaviour in Status: fall back to applying
-		// symlink mode directly if config isn't loaded.
-		if symlinkMode, ok := flags["symlinks"]; ok {
-			l.dc.symlinkMode = symlinkMode
-		}
-	}
+	_ = l.applyConfigOverrides(flags)
 	// Paths are intentionally unused in the current Status pipeline; it
 	// always diffs the whole tree. Keep the field on the request for
 	// future use (Phase 1b+).
@@ -227,16 +300,12 @@ func (l *localRepo) Diff(ctx context.Context, req DiffRequest) (*StatusResult, e
 		return nil, err
 	}
 	defer cleanup()
-	return l.dc.Status(ctx, flags, pred)
+	return l.dc.Status(ctx, l.scanRun(), flags, pred)
 }
 
 func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusResult, error) {
 	flags := req.Options.toFlags()
-	if err := l.dc.ApplyConfigOverrides(flags); err != nil {
-		if symlinkMode, ok := flags["symlinks"]; ok {
-			l.dc.symlinkMode = symlinkMode
-		}
-	}
+	_ = l.applyConfigOverrides(flags)
 	left := req.Left
 	if left == "" {
 		left = "main"
@@ -258,7 +327,7 @@ func (l *localRepo) DiffRefs(ctx context.Context, req DiffRefsRequest) (*StatusR
 		return nil, err
 	}
 	defer cleanup()
-	return Diff(ctx, l.dc, leftRef, rightRef, pred)
+	return Diff(ctx, l.dc, l.scanRun(), leftRef, rightRef, pred)
 }
 
 func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error) {
@@ -271,9 +340,29 @@ func (l *localRepo) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult,
 		return nil, err
 	}
 	defer cleanup()
-	if err := l.dc.Update(ctx, flags, req.Paths...); err != nil {
+
+	// Serialise concurrent Apply calls through this repo handle. The
+	// guard used to live inside performPipelineScan; moving it here
+	// matches the metaphor (Repo verbs are the level at which "one
+	// scan at a time" is enforced).
+	l.scanMutex.Lock()
+	defer l.scanMutex.Unlock()
+	if l.scanInProgress {
+		if l.lastScanError != nil {
+			return nil, l.lastScanError
+		}
+		// Match prior behaviour: treat a re-entrant call as a silent no-op.
+		count, size, _ := l.dc.Stats()
+		return &UpdateResult{FileCount: count, TotalSize: size, PathsUpdated: req.Paths}, nil
+	}
+	l.scanInProgress = true
+	defer func() { l.scanInProgress = false }()
+
+	if err := l.dc.Update(ctx, l.scanRun(), flags, req.Paths...); err != nil {
+		l.lastScanError = err
 		return nil, err
 	}
+	l.lastScanError = nil
 	count, size, err := l.dc.Stats()
 	if err != nil {
 		return nil, err
@@ -294,7 +383,7 @@ func (l *localRepo) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateG
 		}
 		filter.Predicate = pred
 	}
-	return l.dc.FindDuplicates(ctx, req.Options.toFlags(), filter)
+	return l.dc.FindDuplicates(ctx, l.scanRun(), req.Options.toFlags(), filter)
 }
 
 func (l *localRepo) Filter(ctx context.Context, req FilterRequest) (*FilterResult, error) {

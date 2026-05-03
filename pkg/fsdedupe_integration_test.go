@@ -61,7 +61,7 @@ func TestFSDedupe_Integration_DryRun(t *testing.T) {
 	repoRoot := dc.RootDir
 
 	ctx := context.Background()
-	groups, err := dc.FindDuplicates(ctx, map[string]string{}, DupeFilter{})
+	groups, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 	defer func() { _ = dc.Close() }()
 
 	ctx := context.Background()
-	groups, err := dc.FindDuplicates(ctx, map[string]string{}, DupeFilter{})
+	groups, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestFSDedupe_Integration_Apply(t *testing.T) {
 
 	// A second apply must be idempotent: extents are already shared,
 	// so bytes_deduped is 0 for every target but outcome stays ok.
-	groups2, err := dc.FindDuplicates(ctx, map[string]string{}, DupeFilter{})
+	groups2, err := dc.FindDuplicates(ctx, dc.scanRun(), map[string]string{}, DupeFilter{})
 	if err != nil {
 		t.Fatalf("FindDuplicates (2nd): %v", err)
 	}

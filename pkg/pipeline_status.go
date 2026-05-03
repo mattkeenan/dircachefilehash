@@ -16,7 +16,7 @@ import (
 // Only entries that differ from main are written to the cache (sparse delta).
 // The resulting cache file IS the status — its entries are the changes.
 // The caller derives StatusResult by reading the cache after the pipeline completes.
-func RunStatusPipeline(ctx context.Context, dc *DirectoryCache, cacheSkiplist *skiplistWrapper, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
+func RunStatusPipeline(ctx context.Context, dc *DirectoryCache, sr *ScanRun, cacheSkiplist *skiplistWrapper, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
 	const bufSize = 100
 
 	hashCh := make(chan *PipelineEntry, bufSize)
@@ -57,7 +57,7 @@ func RunStatusPipeline(ctx context.Context, dc *DirectoryCache, cacheSkiplist *s
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pool := newHashPool(dc, hashCh, hashedCh, dc.hashWorkers)
+		pool := newHashPool(dc, sr, hashCh, hashedCh, sr.HashWorkers)
 		if err := pool.Run(ctx); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("hash stage: %w", err))
 		}

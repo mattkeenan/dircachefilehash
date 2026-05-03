@@ -306,13 +306,13 @@ func TestDiffRequestIgnoresPushDown(t *testing.T) {
 	}
 
 	// scanIgnore must have been reset — verify by looking at the local
-	// dc directly (the only consumer of scanIgnore lifetime).
+	// repo directly (the only consumer of scanIgnore lifetime).
 	lr, ok := repo.(*localRepo)
 	if !ok {
 		t.Fatalf("expected *localRepo, got %T", repo)
 	}
-	if lr.dc.scanIgnore != nil {
-		t.Errorf("dc.scanIgnore not reset after Apply; value=%v", lr.dc.scanIgnore)
+	if lr.scanIgnore != nil {
+		t.Errorf("localRepo.scanIgnore not reset after Apply; value=%v", lr.scanIgnore)
 	}
 }
 

@@ -102,7 +102,7 @@ func primeDupesFixture(tb testing.TB, cfg dupesFixtureConfig) (string, string) {
 	buildDupesFixture(tb, datasetDir, cfg)
 
 	cache := NewDirectoryCache(datasetDir, metaDir)
-	if err := cache.Update(context.Background(), map[string]string{}); err != nil {
+	if err := cache.Update(context.Background(), cache.scanRun(), map[string]string{}); err != nil {
 		tb.Fatalf("initial update: %v", err)
 	}
 	_ = cache.Close()
@@ -148,7 +148,7 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 	warmCache := openCache()
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	start := time.Now()
-	groups, err := warmCache.FindDuplicates(ctx, map[string]string{}, DupeFilter{Exclusive: true})
+	groups, err := warmCache.FindDuplicates(ctx, warmCache.scanRun(), map[string]string{}, DupeFilter{Exclusive: true})
 	elapsed := time.Since(start)
 	cancel()
 	_ = warmCache.Close()
@@ -164,7 +164,7 @@ func runDupesBench(b *testing.B, cfg dupesFixtureConfig) {
 
 	for range b.N {
 		cache := openCache()
-		if _, err := cache.FindDuplicates(context.Background(), map[string]string{}, DupeFilter{Exclusive: true}); err != nil {
+		if _, err := cache.FindDuplicates(context.Background(), cache.scanRun(), map[string]string{}, DupeFilter{Exclusive: true}); err != nil {
 			b.Fatalf("FindDuplicates: %v", err)
 		}
 		_ = cache.Close()

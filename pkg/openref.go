@@ -43,7 +43,7 @@ const (
 // cache+main. The user-visible cache write semantics are preserved by
 // design — every fs-scan banks its hashing work, regardless of which Diff
 // caller asked for it.
-func OpenRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryEntryIterator, func() error, error) {
+func OpenRef(ctx context.Context, dc *DirectoryCache, sr *ScanRun, ref IndexRef) (BinaryEntryIterator, func() error, error) {
 	switch ref.Type {
 	case RefTypeMain:
 		sl, err := dc.LoadMainIndex()
@@ -73,7 +73,7 @@ func OpenRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (BinaryEntry
 		return openSnapshotRef(ctx, dc, ref)
 
 	case RefTypeFsScan:
-		return openFsScanRef(ctx, dc)
+		return openFsScanRef(ctx, dc, sr)
 
 	default:
 		return nil, nil, fmt.Errorf("OpenRef: unknown ref type %q", ref.Type)
@@ -130,8 +130,8 @@ func openSnapshotRef(ctx context.Context, dc *DirectoryCache, ref IndexRef) (Bin
 // The cache write is a structural property of opening fs-scan — every
 // scan banks its hashing work into cache.idx — so callers driving Diff
 // over fs-scan never have to think about cache lifecycle.
-func openFsScanRef(ctx context.Context, dc *DirectoryCache) (BinaryEntryIterator, func() error, error) {
-	merged, err := dc.refreshFsScanCache(ctx)
+func openFsScanRef(ctx context.Context, dc *DirectoryCache, sr *ScanRun) (BinaryEntryIterator, func() error, error) {
+	merged, err := dc.refreshFsScanCache(ctx, sr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OpenRef fs-scan: %w", err)
 	}

@@ -23,7 +23,7 @@ func setupMemoTestRepo(t *testing.T) string {
 		}
 	}
 	dc := NewDirectoryCache(testDir, testDir)
-	if err := dc.Update(context.Background(), map[string]string{}); err != nil {
+	if err := dc.Update(context.Background(), dc.scanRun(), map[string]string{}); err != nil {
 		_ = dc.Close()
 		t.Fatalf("update: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestStatusUsesSingleMainMapping(t *testing.T) {
 	idxBefore := dc.mainIndex
 
 	// Run Diff(main, fs-scan) — exactly the dcfh-status code path.
-	if _, err := Diff(context.Background(), dc, IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil); err != nil {
+	if _, err := Diff(context.Background(), dc, dc.scanRun(), IndexRef{Type: RefTypeMain}, IndexRef{Type: RefTypeFsScan}, nil); err != nil {
 		t.Fatalf("diff: %v", err)
 	}
 

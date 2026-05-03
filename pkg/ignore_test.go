@@ -61,7 +61,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	ctx := context.Background()
 	flags := map[string]string{}
 
-	if err := dc.Update(ctx, flags); err != nil {
+	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status - should show .log files as deleted
-	status, err := dc.Status(ctx, flags, nil)
+	status, err := dc.Status(ctx, dc.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after ignore update: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	}
 
 	// Update to apply the ignore changes
-	if err := dc.Update(ctx, flags); err != nil {
+	if err := dc.Update(ctx, dc.scanRun(), flags); err != nil {
 		t.Fatalf("Failed update after ignore change: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestIgnoreTransitions(t *testing.T) {
 	_ = dc.ignoreManager.Reload()
 
 	// Check status again
-	status, err = dc.Status(ctx, flags, nil)
+	status, err = dc.Status(ctx, dc.scanRun(), flags, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status after second ignore update: %v", err)
 	}
@@ -197,7 +197,7 @@ mode = none
 	dc := NewDirectoryCache(repoDir, repoDir)
 
 	// Apply config
-	if err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
+	if _, err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply config: %v", err)
 	}
 
@@ -216,7 +216,7 @@ mode = none
 
 	// Initial update
 	ctx := context.Background()
-	if err := dc.Update(ctx, map[string]string{}); err != nil {
+	if err := dc.Update(ctx, dc.scanRun(), map[string]string{}); err != nil {
 		t.Fatalf("Failed initial update: %v", err)
 	}
 
@@ -244,12 +244,12 @@ mode = none
 	dc = NewDirectoryCache(repoDir, repoDir)
 
 	// Apply config
-	if err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
+	if _, err := dc.ApplyConfigOverrides(map[string]string{}); err != nil {
 		t.Fatalf("Failed to apply updated config: %v", err)
 	}
 
 	// Check status - .log file should now be marked for deletion
-	status, err := dc.Status(ctx, map[string]string{}, nil)
+	status, err := dc.Status(ctx, dc.scanRun(), map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("Failed to get status: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 // scanPath scans filesystem paths in sorted order and sends them via channel as they're found
-func (dc *DirectoryCache) scanPath(ctx context.Context, paths []string, resultChan chan<- *scannedPath) error {
+func (dc *DirectoryCache) scanPath(ctx context.Context, sr *ScanRun, paths []string, resultChan chan<- *scannedPath) error {
 	defer VerboseEnter()()
 	defer close(resultChan)
 
@@ -64,7 +64,7 @@ func (dc *DirectoryCache) scanPath(ctx context.Context, paths []string, resultCh
 		if IsDebugEnabled("scan") {
 			VerboseLog(3, "scanPath: scanning deduplicated path: %s", absPath)
 		}
-		if err := dc.scanPathRecursive(ctx, absPath, resultChan); err != nil {
+		if err := dc.scanPathRecursive(ctx, sr, absPath, resultChan); err != nil {
 			return fmt.Errorf("failed to scan path %s: %w", absPath, err)
 		}
 	}
@@ -130,14 +130,14 @@ func (dc *DirectoryCache) isPathUnder(childPath, parentPath string) bool {
 // - Symlink following rules (for directory symlinks in the path)
 // - Ignore patterns
 // Returns false if the file should be treated as deleted/not indexed
-func (dc *DirectoryCache) shouldIndex(relPath string) bool {
+func (dc *DirectoryCache) shouldIndex(sr *ScanRun, relPath string) bool {
 	// Check if any parent directory is an unfollowed symlink
 	dir := filepath.Dir(relPath)
 	for dir != "." && dir != "/" && dir != "" {
 		fullPath := filepath.Join(dc.RootDir, dir)
 		if info, err := os.Lstat(fullPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			// This is a symlink - check if we would follow it
-			if !dc.shouldFollowSymlink(fullPath) {
+			if !dc.shouldFollowSymlink(sr, fullPath) {
 				if IsDebugEnabled("symlinks") {
 					fmt.Fprintf(os.Stderr, "[SYMLINK] File %s under unfollowed symlink %s\n", relPath, dir)
 				}
@@ -157,7 +157,7 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 
 	// Legacy callback pipeline only has the path; stat-using predicates
 	// silently no-op via scanIgnoreDrops's error swallow.
-	if dc.scanIgnoreDrops(relPath, nil, "shouldIndex") {
+	if sr.scanIgnoreDrops(relPath, nil, "shouldIndex") {
 		return false
 	}
 
@@ -169,7 +169,7 @@ func (dc *DirectoryCache) shouldIndex(relPath string) bool {
 // 1. No memory buildup - results are streamed immediately
 // 2. Hwang-Lin comparison can start before scanning is complete
 // 3. Maintains sorted order by processing paths alphabetically
-func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string, resultChan chan<- *scannedPath) error {
+func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, sr *ScanRun, rootPath string, resultChan chan<- *scannedPath) error {
 	if IsDebugEnabled("scan") {
 		VerboseLog(3, "scanPathRecursive: starting scan of rootPath: %s", rootPath)
 	}
@@ -187,13 +187,13 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 		currentPath := pathQueue[0]
 		pathQueue = pathQueue[1:]
 
-		info, relPath, ok := dc.statAndFilter(currentPath)
+		info, relPath, ok := dc.statAndFilter(sr, currentPath)
 		if !ok {
 			continue
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			resolved, skip := dc.resolveSymlinkForScan(currentPath, info)
+			resolved, skip := dc.resolveSymlinkForScan(sr, currentPath, info)
 			if skip {
 				continue
 			}
@@ -220,7 +220,7 @@ func (dc *DirectoryCache) scanPathRecursive(ctx context.Context, rootPath string
 // statAndFilter lstat's path, computes the relative path, and applies
 // the ignore-manager filter. Returns (info, relPath, true) to
 // process, or a zero (nil, "", false) to skip entirely.
-func (dc *DirectoryCache) statAndFilter(currentPath string) (os.FileInfo, string, bool) {
+func (dc *DirectoryCache) statAndFilter(sr *ScanRun, currentPath string) (os.FileInfo, string, bool) {
 	info, err := os.Lstat(currentPath)
 	if err != nil {
 		return nil, "", false
@@ -232,33 +232,10 @@ func (dc *DirectoryCache) statAndFilter(currentPath string) (os.FileInfo, string
 	if dc.ignoreManager.ShouldIgnore(relPath) {
 		return nil, "", false
 	}
-	if dc.scanIgnoreDrops(relPath, info, "statAndFilter") {
+	if sr.scanIgnoreDrops(relPath, info, "statAndFilter") {
 		return nil, "", false
 	}
 	return info, relPath, true
-}
-
-// scanIgnoreDrops evaluates the scan-time --ignore predicate against
-// (relPath, info) and returns true when the entry should be filtered
-// out. Errors from the predicate (hash predicates always; stat
-// predicates when info is nil) are swallowed so we never drop on
-// uncertainty — output-time evaluation in the comparison sink is
-// authoritative. Reuses scratch storage on the DirectoryCache to keep
-// the scan-walker hot path allocation-free.
-func (dc *DirectoryCache) scanIgnoreDrops(relPath string, info os.FileInfo, where string) bool {
-	if dc.scanIgnore == nil {
-		return false
-	}
-	dc.scanFilterEnt.relPath = relPath
-	dc.scanFilterEnt.info = info
-	matched, err := dc.scanIgnore.Evaluate(&dc.scanFilterEnt, &dc.scanFilterCtx)
-	if err != nil || !matched {
-		return false
-	}
-	if IsDebugEnabled("scan") {
-		VerboseLog(3, "%s: ignoring path due to --ignore predicate: %s", where, relPath)
-	}
-	return true
 }
 
 // scanFilterEntry adapts (relPath, optional os.FileInfo) into a
