@@ -1,0 +1,950 @@
+#!/usr/bin/env perl
+#
+# CWF Management Script
+# Manage an installed CWF instance: status, list-releases, update, rollback.
+#
+# Usage:
+#   cwf-manage status          Show installed version and method
+#   cwf-manage list-releases   List available tagged releases
+#   cwf-manage update [ref]    Update to ref (default: latest)
+#   cwf-manage rollback <ref>  Revert to a previous version
+#   cwf-manage help            Show this help
+#
+# Environment:
+#   CWF_SOURCE   Override CWF source repo URL (default: cwf_source from .cwf/version)
+#
+use strict;
+use warnings;
+use utf8;
+use File::Basename;
+use File::Temp qw(tempdir);
+use File::Path qw(rmtree make_path);
+use File::Find;
+use File::Copy qw(copy);
+use File::Spec ();
+use Cwd qw(getcwd);
+use Fcntl qw(:flock O_RDWR O_CREAT O_NOFOLLOW);
+use Digest::SHA qw(sha256_hex);
+use JSON::PP;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use List::Util qw(first);
+use CWF::Common qw(parse_semver version_cmp);
+use CWF::ArtefactHelpers qw(read_json_file);
+use CWF::Validate::Config           ();
+use CWF::Validate::Workflow         ();
+use CWF::Validate::Consistency      ();
+use CWF::Validate::Security         ();
+use CWF::Validate::PerlConventions  ();
+use CWF::Validate::Templates        ();
+
+# --- Helpers ------------------------------------------------------------------
+
+sub log_msg { print "[CWF] @_\n"; return; }
+
+sub die_msg {
+    print STDERR "[CWF] ERROR: @_\n";
+    exit 1;
+}
+
+# --- Version file -------------------------------------------------------------
+
+sub find_git_root {
+    my $root = `git rev-parse --show-toplevel 2>/dev/null`;
+    chomp $root;
+    die_msg("Not inside a git repository") unless $root;
+    return $root;
+}
+
+sub read_version_file {
+    my ($git_root) = @_;
+    my $path = "$git_root/.cwf/version";
+    die_msg("No .cwf/version file found — is CWF installed?") unless -f $path;
+
+    my %version;
+    open my $fh, '<', $path or die_msg("Cannot read $path: $!");
+    while (<$fh>) {
+        chomp;
+        next if /^\s*#/ || /^\s*$/;
+        if (/^(\w+)=(.*)$/) {
+            $version{$1} = $2;
+        }
+    }
+    close $fh;
+    return %version;
+}
+
+sub write_version_file {
+    my ($git_root, %version) = @_;
+    my $path = "$git_root/.cwf/version";
+    open my $fh, '>', $path or die_msg("Cannot write $path: $!");
+    for my $key (sort keys %version) {
+        print $fh "$key=$version{$key}\n";
+    }
+    close $fh;
+    return;
+}
+
+# --- Source resolution --------------------------------------------------------
+
+sub resolve_source {
+    my ($v) = @_;
+    my $env  = $ENV{CWF_SOURCE};
+    my $file = $v->{cwf_source};
+    return ($env,  'CWF_SOURCE env var') if defined $env  && $env  ne '';
+    return ($file, '.cwf/version')        if defined $file && $file ne '';
+    die_msg("No CWF source: CWF_SOURCE unset and cwf_source missing/empty in .cwf/version");
+}
+
+# --- Working-tree safety -----------------------------------------------------
+
+sub check_clean_tree {
+    my ($git_root) = @_;
+
+    open(my $fh, '-|', 'git', '-C', $git_root,
+         'status', '--porcelain', '-z', '--untracked-files=all',
+         '--', '.cwf', '.cwf-skills', '.cwf-rules', '.cwf-agents')
+        or die_msg("Failed to spawn git status: $!");
+    local $/;
+    my $output = <$fh> // '';
+    close $fh;
+    die_msg("Failed to check working tree status (git status exited non-zero)")
+        if $? != 0;
+
+    my @records = grep { length } split /\0/, $output;
+    return unless @records;
+
+    my $list = join("\n", map { "  $_" } @records);
+    die_msg(<<"END");
+Working tree has uncommitted changes under .cwf, .cwf-skills, .cwf-rules, .cwf-agents:
+$list
+Stash or commit them, then re-run:
+  git stash
+  cwf-manage update [ref]
+  git stash pop
+END
+}
+
+# --- Ref resolution -----------------------------------------------------------
+
+# Phase-1 lexical validation of a user-supplied ref, BEFORE it ever reaches
+# git (FR9). Closes the option-injection / metacharacter surface independently
+# of the list-form git calls below. Allows the literal 'latest'; otherwise a
+# conservative ref charset, no leading '-', no '..' path segment.
+sub validate_ref_lexical {
+    my ($ref) = @_;
+    return if $ref eq 'latest';
+    die_msg("Invalid ref '$ref': must not begin with '-'") if $ref =~ /^-/;
+    die_msg("Invalid ref '$ref': contains a '..' path segment")
+        if $ref =~ m{(?:^|/)\.\.(?:/|$)};
+    die_msg("Invalid ref '$ref': allowed characters are letters, digits, '.', '_', '/', '-'")
+        unless $ref =~ m{^[A-Za-z0-9._/-]+$};
+    return;
+}
+
+sub resolve_ref {
+    my ($clone_dir, $ref) = @_;
+
+    if ($ref eq 'latest') {
+        open my $fh, '-|', 'git', '-C', $clone_dir, 'tag', '-l', 'v*',
+                     '--sort=-version:refname'
+            or die_msg("Failed to list tags: $!");
+        my @tags = <$fh>;
+        close $fh;
+        chomp @tags;
+        die_msg("No version tags found. Use a branch name or commit SHA instead.") unless @tags;
+        my $latest = $tags[0];
+        log_msg("Resolved 'latest' to $latest");
+        return $latest;
+    }
+
+    open my $fh, '-|', 'git', '-C', $clone_dir, 'rev-parse', '--verify',
+                 '--quiet', $ref
+        or die_msg("Failed to run git rev-parse: $!");
+    my $check = <$fh>;
+    close $fh;
+    chomp $check if defined $check;
+    die_msg("Invalid ref: $ref — not found in source repo")
+        unless defined $check && length $check;
+
+    return $ref;
+}
+
+sub resolve_sha {
+    my ($clone_dir, $ref) = @_;
+    open my $fh, '-|', 'git', '-C', $clone_dir, 'rev-parse', $ref
+        or die_msg("Failed to run git rev-parse: $!");
+    my $sha = <$fh>;
+    close $fh;
+    chomp $sha if defined $sha;
+    return $sha;
+}
+
+# --- Update prelude helpers ---------------------------------------------------
+
+# acquire_update_lock — Perl flock(LOCK_EX|LOCK_NB) on .cwf/.update.lock with
+# symlink-TOCTOU protection (lstat precheck + O_NOFOLLOW). Returns the open
+# filehandle; caller MUST retain it until cmd_update returns (closing releases
+# the lock, kernel auto-releases on process exit).
+sub acquire_update_lock {
+    my ($git_root) = @_;
+    my $path = "$git_root/.cwf/.update.lock";
+    if (-l $path) {
+        die_msg("$path is a symlink; refusing to lock");
+    }
+    my $fh;
+    sysopen($fh, $path, O_RDWR | O_CREAT | O_NOFOLLOW, 0600)
+        or die_msg("cannot open $path: $!");
+    unless (flock($fh, LOCK_EX | LOCK_NB)) {
+        die_msg("another cwf-manage update is in progress (lock: $path); wait for it to finish or remove the lock if stale");
+    }
+    return $fh;
+}
+
+# validate_settings_parseable — FR12. .claude/settings.json (if present) must
+# parse as JSON before we begin an update; otherwise a downstream merge step
+# will explode after side-effects have started.
+sub validate_settings_parseable {
+    my ($git_root) = @_;
+    my $path = "$git_root/.claude/settings.json";
+    return unless -f $path;
+    open my $fh, '<:raw', $path or die_msg("cannot read $path: $!");
+    local $/;
+    my $blob = <$fh>;
+    close $fh;
+    return unless length $blob;
+    eval { JSON::PP->new->decode($blob); 1 }
+        or die_msg(".claude/settings.json is not valid JSON: $@\nFix the file (or restore from git) and re-run.");
+    return;
+}
+
+# validate_install_manifest_sha — D12. No-op when either side is absent
+# (pre-D12 install / pre-feature install). Mismatch aborts.
+sub validate_install_manifest_sha {
+    my ($git_root, $vref) = @_;
+    my $expected = $vref->{cwf_install_manifest_sha};
+    return unless defined $expected && length $expected;
+    my $path = "$git_root/.cwf/install-manifest.json";
+    return unless -f $path;
+
+    my $sha = compute_install_manifest_sha($git_root);
+    return if $sha eq $expected;
+    die_msg(".cwf/install-manifest.json content does not match .cwf/version (cwf_install_manifest_sha); the manifest may have been tampered with. Restore with 'git checkout -- .cwf/install-manifest.json' or run 'cwf-manage update' to reinstall.");
+}
+
+sub compute_install_manifest_sha {
+    my ($git_root) = @_;
+    my $path = "$git_root/.cwf/install-manifest.json";
+    return '' unless -f $path;
+    open my $fh, '<:raw', $path or return '';
+    local $/;
+    my $blob = <$fh>;
+    close $fh;
+    return sha256_hex($blob);
+}
+
+# run_apply_artefacts — invoke the helper as a subprocess; non-zero aborts.
+sub run_apply_artefacts {
+    my ($git_root, $clone_dir) = @_;
+    my $helper = "$git_root/.cwf/scripts/command-helpers/cwf-apply-artefacts";
+    my $rc = system($helper, $git_root, $clone_dir);
+    if ($rc != 0) {
+        my $code = $rc >> 8;
+        die_msg("cwf-apply-artefacts failed (exit $code); aborting before version-file update");
+    }
+    return;
+}
+
+# run_settings_merge — invoke cwf-claude-settings-merge; non-zero aborts.
+sub run_settings_merge {
+    my ($git_root) = @_;
+    my $helper = "$git_root/.cwf/scripts/command-helpers/cwf-claude-settings-merge";
+    return unless -x $helper;   # tolerated for installs that pre-date the helper
+    my $rc = system($helper);
+    if ($rc != 0) {
+        my $code = $rc >> 8;
+        die_msg("cwf-claude-settings-merge failed (exit $code); .claude/settings.json may be partially updated. Re-run 'cwf-manage update' after resolving the underlying error.");
+    }
+    return;
+}
+
+# --- Subcommands --------------------------------------------------------------
+
+sub cmd_status {
+    my ($git_root) = @_;
+    my %v = read_version_file($git_root);
+
+    log_msg("CWF Installation Status");
+    printf "  %-12s %s\n", "Version:", $v{cwf_version} // 'unknown';
+    printf "  %-12s %s\n", "Method:",  $v{cwf_method}  // 'unknown';
+    printf "  %-12s %s\n", "Ref:",     $v{cwf_ref}     // 'unknown';
+    printf "  %-12s %s\n", "SHA:",     $v{cwf_sha}     // 'unknown';
+    printf "  %-12s %s\n", "Source:",  $v{cwf_source}  // 'unknown';
+    printf "  %-12s %s\n", "Installed:", $v{cwf_installed} // 'unknown';
+    return;
+}
+
+sub cmd_list_releases {
+    my ($git_root, $show_all) = @_;
+    my %v = read_version_file($git_root);
+    my ($source, $origin) = resolve_source(\%v);
+    my $current = $v{cwf_version} // '';
+
+    log_msg("Available releases from $source (from: $origin)");
+
+    my @lines = `git ls-remote --tags "$source" 'v*' 2>/dev/null`;
+    die_msg("Failed to query remote tags from $source") if $?;
+
+    my @tags;
+    for (@lines) {
+        chomp;
+        push @tags, $1 if m{refs/tags/(v[^\^]+)$};
+    }
+    die_msg("No version tags found at $source") unless @tags;
+
+    my @sorted = reverse sort { version_cmp($a, $b) } @tags;
+
+    if ($show_all) {
+        for my $tag (@sorted) {
+            my $marker = ($tag eq $current) ? ' (installed)' : '';
+            printf "  %s%s\n", $tag, $marker;
+        }
+        return;
+    }
+
+    # Filtered default view
+    my @filtered = filter_releases($current, @sorted);
+    my %shown    = map { $_ => 1 } @filtered;
+    my @display  = sort { version_cmp($b, $a) }
+                       (@filtered, ($shown{$current} ? () : $current));
+    my $hidden   = scalar(@sorted) - scalar(@display);
+
+    for my $tag (@display) {
+        my $marker = ($tag eq $current) ? ' (installed)' : '';
+        printf "  %s%s\n", $tag, $marker;
+    }
+    if ($hidden > 0) {
+        printf "\n  Run 'cwf-manage list-releases --all' to see all %d releases.\n",
+               scalar @sorted;
+    }
+    return;
+}
+
+sub filter_releases {
+    my ($current, @tags) = @_;   # @tags already sorted descending
+    my @cc = parse_semver($current);
+    # If current version is not strict semver, show everything except current
+    return grep { $_ ne $current } @tags unless @cc;
+    my ($cm, $cmi, $cp) = @cc;
+
+    # Outer lexicals captured (and mutated per iteration) by both closures in each rule
+    my ($tm, $tmi, $tp);
+    my @rules = (
+        [ sub { $tm > $cm                                }, sub { "major-$tm"  } ],
+        [ sub { $tm == $cm && $tmi > $cmi               }, sub { "minor-$tmi" } ],
+        [ sub { $tm == $cm && $tmi == $cmi && $tp > $cp }, sub { 'same-minor' } ],
+    );
+
+    my %seen;
+    return
+        map  { $_->[1] }
+        grep { !$seen{ $_->[0] }++ }
+        map  {
+            ($tm, $tmi, $tp) = parse_semver($_);
+            my $rule = first { $_->[0]->() } @rules;
+            $rule ? [ $rule->[1]->(), $_ ] : ();
+        }
+        grep { $_ ne $current && parse_semver($_) }
+        @tags;
+}
+
+sub cmd_update {
+    my ($git_root, $ref) = @_;
+    $ref //= 'latest';
+
+    # FR9: reject a malformed ref before it reaches git or the install.bash
+    # delegation (lexical only — no side effects yet).
+    validate_ref_lexical($ref);
+
+    my %v = read_version_file($git_root);
+    my $method = $v{cwf_method} or die_msg("No cwf_method in .cwf/version");
+    my ($source, $origin) = resolve_source(\%v);
+
+    # D8: lock acquired BEFORE check_clean_tree so two concurrent updates do
+    # not both pass the clean-tree check before one blocks. $lock_fh stays in
+    # scope until cmd_update returns; closing the FH (or process exit)
+    # releases the lock.
+    my $lock_fh = acquire_update_lock($git_root);
+
+    # FR12: catch unparseable settings.json before we begin side effects.
+    validate_settings_parseable($git_root);
+
+    # D12: detect locally-tampered install-manifest.json before we trust it
+    # for baseline comparisons.
+    validate_install_manifest_sha($git_root, \%v);
+
+    check_clean_tree($git_root);
+
+    log_msg("Updating CWF (method: $method, ref: $ref)");
+
+    # Clone source to temp dir (single network clone; the subtree path has
+    # install.bash re-source from this local checkout via file://).
+    my $tmpdir = tempdir(CLEANUP => 1);
+    my $clone_dir = "$tmpdir/cwf-source";
+    log_msg("Cloning CWF source from $source (from: $origin)...");
+    system("git", "clone", "--quiet", $source, $clone_dir) == 0
+        or die_msg("Failed to clone $source");
+
+    # Resolve ref
+    my $resolved = resolve_ref($clone_dir, $ref);
+    my $sha = resolve_sha($clone_dir, $resolved);
+
+    # Checkout
+    system("git", "-C", $clone_dir, "checkout", "--quiet", $resolved) == 0
+        or die_msg("Failed to checkout $resolved");
+
+    if ($method eq 'subtree') {
+        # FR2: delegate laydown to the TARGET ref's install.bash. It performs
+        # the subtree remove-then-add (CWF_FORCE) plus skill/rule/agent
+        # symlinks, so the target version's laydown governs — breaking the
+        # chicken-and-egg and avoiding the subtree-pull squash conflict (FR3).
+        # CWF_REF is the resolved SHA so install.bash cannot re-resolve to a
+        # different commit; CWF_SOURCE points at the local clone (no 2nd
+        # network clone). system (not exec) keeps the lock scope-guard alive.
+        my $installer = "$clone_dir/scripts/install.bash";
+        -f $installer
+            or die_msg("Target ref has no scripts/install.bash; cannot delegate laydown");
+
+        my $prev_cwd = getcwd();
+        chdir($git_root) or die_msg("Cannot chdir to $git_root: $!");
+        my $rc = do {
+            local %ENV = (%ENV,
+                CWF_FORCE  => '1',
+                CWF_METHOD => $method,
+                CWF_SOURCE => "file://$clone_dir",
+                CWF_REF    => $sha,
+            );
+            system('bash', $installer);   # cwd = $git_root (install.bash uses bare git)
+        };
+        my $sys_err = $!;
+        chdir($prev_cwd) or die_msg("Cannot chdir back to $prev_cwd: $!");
+        if    ($rc == -1) { die_msg("Failed to spawn install.bash: $sys_err"); }
+        elsif ($rc & 127) { die_msg(sprintf("install.bash killed by signal %d", $rc & 127)); }
+        elsif ($rc >> 8)  { die_msg(sprintf("install.bash laydown failed (exit %d)", $rc >> 8)); }
+    } elsif ($method eq 'copy') {
+        # Copy method retains cwf-manage's own laydown (copy_tree/_escapes_src
+        # symlink-escape guard) and symlink creation. Copy-method convergence
+        # onto install.bash is deferred (see BACKLOG).
+        update_copy($git_root, $clone_dir, $resolved);
+        create_skill_symlinks($git_root);
+        create_agent_symlinks($git_root);
+    } else {
+        die_msg("Unknown install method: $method");
+    }
+
+    # D7/D9: apply non-script artefacts (.cwf-rules/, .gitignore, CLAUDE.md
+    # preamble, .cwf/rules-inject.txt, .claude/rules/ symlinks).
+    run_apply_artefacts($git_root, $clone_dir);
+
+    # D7: settle .claude/settings.json (Bash allowlist + Stop hooks).
+    run_settings_merge($git_root);
+
+    # FR5: enforce exact recorded perms over the fully-laid-down tree (run last
+    # so artefacts/symlinks are already in place). Fatal on sha mismatch.
+    apply_exact_perms_or_die($git_root);
+
+    # Authoritative version-file write (FR6): overwrites any base version file
+    # install.bash wrote on the subtree path — restoring the real cwf_source
+    # (not the transient file:// re-source) and pinning the manifest SHA once.
+    $v{cwf_version}                = $resolved;
+    $v{cwf_ref}                    = $resolved;
+    $v{cwf_sha}                    = $sha;
+    $v{cwf_installed}              = gmtime_iso();
+    $v{cwf_install_manifest_sha}   = compute_install_manifest_sha($git_root);
+    write_version_file($git_root, %v);
+
+    log_msg("Updated to $resolved ($sha)");
+    return;
+}
+
+sub cmd_rollback {
+    my ($git_root, $ref) = @_;
+    die_msg("rollback requires a ref argument (e.g. cwf-manage rollback v2.0.0)") unless $ref;
+    log_msg("Rolling back to $ref");
+    cmd_update($git_root, $ref);
+    return;
+}
+
+# --- Update helpers (copy method only; subtree delegates to install.bash) -----
+
+# _escapes_src — single gate for symlink-target safety in copy_tree.
+# Returns true if $link (the readlink value of an entry whose path is
+# $entry, walked from source root $src) is either absolute or resolves
+# outside $src after collapsing parent-dir (..) segments. Refuses
+# upstream symlinks that would write out-of-tree references into the
+# installed .cwf/.
+#
+# Note: only the symlink *target* string is canonicalised; no path on
+# disk is followed. $src is the upstream clone and trusted not to
+# embed symlinks-in-paths.
+sub _escapes_src {
+    my ($entry, $link, $src) = @_;
+    return 1 if File::Spec->file_name_is_absolute($link);
+    my $entry_dir = File::Basename::dirname($entry);
+    my $combined  = File::Spec->rel2abs($link, $entry_dir);
+    my $canon     = _collapse_dotdot($combined);
+    my $src_canon = _collapse_dotdot(File::Spec->rel2abs($src));
+    return 1 if $canon eq $src_canon;
+    return 0 if index($canon, "$src_canon/") == 0;
+    return 1;
+}
+
+# Collapse '.' and '..' segments lexically (no disk access). POSIX-only.
+sub _collapse_dotdot {
+    my ($p) = @_;
+    my $abs = $p =~ m{^/};
+    my @parts = split m{/+}, $p;
+    my @out;
+    for my $part (@parts) {
+        next if $part eq '' || $part eq '.';
+        if ($part eq '..') {
+            if (@out && $out[-1] ne '..') { pop @out; }
+            elsif (!$abs)                 { push @out, '..'; }
+            # absolute root: '..' at top is dropped
+        } else {
+            push @out, $part;
+        }
+    }
+    return $abs ? '/' . join('/', @out) : (@out ? join('/', @out) : '.');
+}
+
+sub copy_tree {
+    my ($src, $dst) = @_;
+    find(sub {
+        my $rel = $File::Find::name;
+        $rel =~ s/^\Q$src\E//;
+        my $target = "$dst$rel";
+        lstat($_);
+        if (-l _) {
+            my $link = readlink($_)
+                // die_msg("readlink failed on $_: $!");
+            # Pass the full path ($File::Find::name) rather than $_
+            # (basename): the safety calculation must not depend on
+            # File::Find's chdir-into-each-directory default.
+            die_msg("refusing escaping symlink target: $File::Find::name -> $link")
+                if _escapes_src($File::Find::name, $link, $src);
+            symlink($link, $target)
+                or die_msg("Failed to create symlink $target -> $link: $!");
+        } elsif (-d _) {
+            make_path($target) unless -d $target;
+        } else {
+            copy($_, $target)
+                or die_msg("Failed to copy $_ to $target: $!");
+        }
+    }, $src);
+    return;
+}
+
+sub update_copy {
+    my ($git_root, $clone_dir, $ref) = @_;
+
+    # Remove existing
+    rmtree("$git_root/.cwf");
+    rmtree("$git_root/.cwf-skills");
+    rmtree("$git_root/.cwf-agents");
+
+    # Copy fresh
+    copy_tree("$clone_dir/.cwf", "$git_root/.cwf");
+    log_msg("Copied .cwf/");
+
+    copy_tree("$clone_dir/.claude/skills", "$git_root/.cwf-skills");
+    log_msg("Copied .cwf-skills/");
+
+    copy_tree("$clone_dir/.claude/agents", "$git_root/.cwf-agents");
+    log_msg("Copied .cwf-agents/");
+
+    # Fix permissions
+    find(sub { chmod 0755, $_ if -f }, "$git_root/.cwf/scripts");
+    log_msg("Fixed script permissions");
+    return;
+}
+
+sub create_skill_symlinks {
+    my ($git_root) = @_;
+
+    my $skills_dir = "$git_root/.claude/skills";
+    my $staging_dir = "$git_root/.cwf-skills";
+
+    # Ensure .claude/skills/ exists
+    make_path($skills_dir) unless -d $skills_dir;
+
+    # Remove stale CWF symlinks
+    for my $link (glob("$skills_dir/cwf-*")) {
+        unlink $link if -l $link;
+    }
+
+    # Create relative symlinks
+    my $count = 0;
+    for my $skill_dir (glob("$staging_dir/cwf-*")) {
+        next unless -d $skill_dir;
+        my $name = basename($skill_dir);
+        symlink("../../.cwf-skills/$name", "$skills_dir/$name")
+            or die_msg("Failed to create symlink for $name: $!");
+        $count++;
+    }
+
+    log_msg("Created $count skill symlinks in .claude/skills/");
+    return;
+}
+
+sub create_agent_symlinks {
+    my ($git_root) = @_;
+
+    my $agents_dir  = "$git_root/.claude/agents";
+    my $staging_dir = "$git_root/.cwf-agents";
+
+    make_path($agents_dir) unless -d $agents_dir;
+
+    # Cleanup: only unlink cwf-* entries that are symlinks. Non-symlink
+    # files at cwf-* paths are caller-owned and surface as conflicts below.
+    for my $link (glob("$agents_dir/cwf-*.md")) {
+        unlink $link if -l $link;
+    }
+
+    # Build a set of names CWF will install (for collision-check below)
+    # so we can distinguish "stray cwf-* user file" (warn) from "user
+    # file colliding with a CWF agent name" (die). cwf-* is CWF's
+    # namespace; user files in it are suspicious either way.
+    my %cwf_names = map { basename($_) => 1 }
+                    grep { -f $_ } glob("$staging_dir/cwf-*.md");
+    for my $stray (glob("$agents_dir/cwf-*.md")) {
+        next if -l $stray;
+        next unless -f $stray;
+        my $bn = basename($stray);
+        # Skip colliding names — die_msg fires in the symlink loop below.
+        next if $cwf_names{$bn};
+        warn "[CWF] WARNING: $stray is a regular file in CWF's cwf-* "
+            ."agents namespace and will be ignored; rename it if it "
+            ."is yours, or remove it if it is stale.\n";
+    }
+
+    my $count = 0;
+    for my $agent_file (glob("$staging_dir/cwf-*.md")) {
+        next unless -f $agent_file;
+        my $name = basename($agent_file);
+        my $target_link = "$agents_dir/$name";
+
+        # Conflict-check per design D2: regular file at the cwf-* path
+        # blocks the install rather than being silently overwritten.
+        if (-e $target_link && !-l $target_link) {
+            die_msg("Regular file $target_link blocks CWF agent install; "
+                   ."remove it or rename your custom agent");
+        }
+
+        # Pattern-risk invariant (FR4(e)): $name is safe here because
+        # .cwf-agents/ is populated only from the trusted cloned CWF
+        # source (copy_tree / subtree pull), and the glob pattern
+        # constrains $name to the cwf-*.md form. Reuse of this pattern
+        # against a staging dir populated from any other source must
+        # re-establish that invariant before relying on it.
+        symlink("../../.cwf-agents/$name", $target_link)
+            or die_msg("Failed to create agent symlink for $name: $!");
+        $count++;
+    }
+    log_msg("Created $count agent symlinks in .claude/agents/");
+    return;
+}
+
+sub gmtime_iso {
+    my @t = gmtime();
+    return sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ",
+        $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+}
+
+# --- Help ---------------------------------------------------------------------
+
+sub cmd_validate {
+    my ($git_root) = @_;
+
+    my @all_violations = (
+        CWF::Validate::Config::validate($git_root),
+        CWF::Validate::Workflow::validate($git_root),
+        CWF::Validate::Consistency::validate($git_root),
+        CWF::Validate::Security::validate($git_root),
+        CWF::Validate::Security::validate_install_manifest($git_root),
+        CWF::Validate::PerlConventions::validate($git_root),
+        CWF::Validate::Templates::validate($git_root),
+    );
+
+    if (!@all_violations) {
+        log_msg("validate: OK");
+        return;
+    }
+
+    for my $v (@all_violations) {
+        printf "[%s] %s\n",        $v->{category}, $v->{file};
+        printf "  Field:    %s\n", $v->{field};
+        printf "  Actual:   %s\n", $v->{actual};
+        printf "  Expected: %s\n", $v->{expected};
+        printf "  Fix:      %s\n", $v->{fix};
+        print  "\n";
+    }
+
+    printf "[CWF] %d violation(s) found.\n", scalar @all_violations;
+    exit 1;
+}
+
+# Recovery hints for unfixable violations, keyed by validator field.
+# fix-security is the user-facing surface (cwf-manage validate keeps its
+# developer-oriented "update the hash" message). Hints suggest both
+# `git pull` (CWF source checkout) and `cwf-manage update` (installed
+# project) so a single message serves both audiences.
+my %FIX_SECURITY_RECOVERY = (
+    'sha256'    => "Recovery: file content has drifted from the recorded hash. Restore from upstream: 'git pull' (in a CWF source checkout) or 'cwf-manage update' (in an installed project).",
+    'existence' => "Recovery: tracked file is missing. Restore from upstream: 'git pull' (CWF source) or 'cwf-manage update' (installed project).",
+    'file'      => "Recovery: 'script-hashes.json' is missing or unparseable. Restore from upstream: 'git pull' or 'cwf-manage update'.",
+    'json'      => "Recovery: 'script-hashes.json' is missing or unparseable. Restore from upstream: 'git pull' or 'cwf-manage update'.",
+);
+
+sub _print_unfixable {
+    my ($u) = @_;
+    printf "[CWF] fix-security: UNFIXABLE — %s\n", $u->{rel};
+    printf "  Field:    %s\n", $u->{field};
+    printf "  Actual:   %s\n", $u->{actual};
+    printf "  Expected: %s\n", $u->{expected};
+    my $hint = $FIX_SECURITY_RECOVERY{$u->{field}};
+    printf "  %s\n",          $hint        if $hint;
+    printf "  Note:     %s\n", $u->{extra} if $u->{extra};
+    print  "\n";
+    return;
+}
+
+# Read+decode .cwf/security/script-hashes.json. Returns ($data, undef) on
+# success, or (undef, $err) where $err is a hashref suitable for
+# _print_unfixable. Never exits — callers decide (fix-security exits; the
+# exact-perms pass in cmd_update die_msg's).
+sub _read_hashes_data {
+    my ($git_root) = @_;
+    my $hashes_rel  = '.cwf/security/script-hashes.json';
+    my $hashes_path = "$git_root/$hashes_rel";
+
+    unless (-f $hashes_path) {
+        return (undef, {
+            rel => $hashes_rel, field => 'file',
+            actual => '(missing)', expected => 'script-hashes.json to exist',
+        });
+    }
+
+    my $json_text;
+    {
+        open my $fh, '<', $hashes_path or return (undef, {
+            rel => $hashes_rel, field => 'file',
+            actual => "(unreadable: $!)", expected => 'script-hashes.json readable',
+        });
+        local $/;
+        $json_text = <$fh>;
+        close $fh;
+    }
+
+    my $data = eval { JSON::PP::decode_json($json_text) };
+    if ($@ || !ref $data) {
+        return (undef, {
+            rel => $hashes_rel, field => 'json',
+            actual => '(parse error)', expected => 'valid JSON',
+        });
+    }
+    return ($data, undef);
+}
+
+# Apply recorded permissions from decoded $data. $mode is 'additive' (raise
+# only missing bits — the standalone fix-security behaviour) or 'exact' (set
+# the exact recorded mode, removing excess bits — least-privilege enforcement
+# after a laydown). A missing file or sha256 mismatch is always reported as
+# unfixable. Returns (\@repaired, \@unfixable); never exits.
+sub _apply_recorded_perms {
+    my ($git_root, $data, $mode) = @_;
+    my @repaired;
+    my @unfixable;
+
+    # Walk every section that looks like a file map (mirrors Validate::Security).
+    for my $section (sort keys %$data) {
+        next unless ref $data->{$section} eq 'HASH';
+        my $entries = $data->{$section};
+        my $is_file_map = 0;
+        for my $val (values %$entries) {
+            if (ref $val eq 'HASH' && exists $val->{path}) { $is_file_map = 1; last }
+        }
+        next unless $is_file_map;
+
+        for my $name (sort keys %$entries) {
+            my $entry = $entries->{$name};
+            next unless ref $entry eq 'HASH' && exists $entry->{path};
+
+            my $rel = $entry->{path};
+            my $abs = "$git_root/$rel";
+            my $expected_sha   = $entry->{sha256} // '';
+            my $expected_perms = $entry->{permissions};
+
+            unless (-e $abs) {
+                push @unfixable, {
+                    rel => $rel, field => 'existence',
+                    actual => '(missing)', expected => 'file to exist',
+                };
+                next;
+            }
+
+            # sha256 in binary mode, matching Validate::Security::_sha256.
+            my $sha = '';
+            if (open my $fh, '<:raw', $abs) {
+                local $/;
+                my $content = <$fh>;
+                close $fh;
+                $sha = Digest::SHA::sha256_hex($content);
+            }
+
+            if ($sha ne $expected_sha) {
+                push @unfixable, {
+                    rel => $rel, field => 'sha256',
+                    actual => $sha, expected => $expected_sha,
+                };
+                next;
+            }
+
+            # sha matches — safe to fix permissions if needed.
+            next unless defined $expected_perms;
+            my $actual_perms = (stat($abs))[2] & 07777;
+            my $want         = oct($expected_perms);
+
+            if ($mode eq 'exact') {
+                next if $actual_perms == $want;          # already exact
+            } else {
+                next if ($actual_perms & $want) == $want; # additive: bits present
+            }
+
+            if (chmod $want, $abs) {
+                push @repaired, {
+                    rel => $rel,
+                    from => sprintf('0%o', $actual_perms),
+                    to   => $expected_perms,
+                };
+            } else {
+                push @unfixable, {
+                    rel => $rel, field => 'permissions',
+                    actual => sprintf('0%o', $actual_perms),
+                    expected => $expected_perms,
+                    extra    => "chmod failed: $!",
+                };
+            }
+        }
+    }
+    return (\@repaired, \@unfixable);
+}
+
+sub cmd_fix_security {
+    my ($git_root) = @_;
+
+    my ($data, $err) = _read_hashes_data($git_root);
+    if ($err) { _print_unfixable($err); exit 1; }
+
+    my ($repaired, $unfixable) = _apply_recorded_perms($git_root, $data, 'additive');
+
+    for my $r (@$repaired) {
+        printf "[CWF] fix-security: chmod %s %s (was %s)\n", $r->{to}, $r->{rel}, $r->{from};
+    }
+
+    if (@$unfixable) {
+        _print_unfixable($_) for @$unfixable;
+        printf "[CWF] fix-security: repaired %d file(s); %d unfixable\n",
+            scalar @$repaired, scalar @$unfixable;
+        exit 1;
+    }
+
+    printf "[CWF] fix-security: repaired %d file(s); validate: OK\n", scalar @$repaired;
+    return;
+}
+
+# Enforce exact recorded perms after a laydown (FR5). A sha mismatch or missing
+# file here means a corrupt laydown, so it is fatal — abort before the manifest
+# pin. Called by cmd_update.
+sub apply_exact_perms_or_die {
+    my ($git_root) = @_;
+    my ($data, $err) = _read_hashes_data($git_root);
+    die_msg("exact-perms: cannot read script-hashes.json ($err->{field}); aborting")
+        if $err;
+
+    my ($repaired, $unfixable) = _apply_recorded_perms($git_root, $data, 'exact');
+    for my $r (@$repaired) {
+        printf "[CWF] update: chmod %s %s (was %s)\n", $r->{to}, $r->{rel}, $r->{from};
+    }
+    if (@$unfixable) {
+        _print_unfixable($_) for @$unfixable;
+        die_msg(sprintf(
+            "exact-perms: %d unfixable entr%s after laydown (corrupt laydown); "
+          . "aborting before version-file update",
+            scalar @$unfixable, (@$unfixable == 1 ? 'y' : 'ies')));
+    }
+    return;
+}
+
+sub cmd_help {
+    print <<'HELP';
+CWF Management Script
+
+Usage: cwf-manage <command> [args]
+
+Commands:
+  status           Show installed CWF version, method, and source
+  list-releases [--all]    List available tagged releases from the CWF remote
+  update [ref]     Update to a specific ref (default: latest tag)
+  rollback <ref>   Revert to a previous version
+  validate         Validate config and workflow files; exit non-zero on violations
+  fix-security     Repair fixable integrity violations (perms when sha256 matches);
+                   exit non-zero on tampering or missing files
+  help             Show this help message
+
+Environment:
+  CWF_SOURCE       Override CWF source repo URL for this invocation
+                   (default: cwf_source from .cwf/version)
+
+Notes:
+  update and rollback refuse to run if the working tree has uncommitted
+  changes under .cwf/ or .cwf-skills/. Stash or commit them first.
+
+Examples:
+  cwf-manage status
+  cwf-manage list-releases
+  cwf-manage update
+  cwf-manage update v2.1.0
+  cwf-manage rollback v2.0.0
+  cwf-manage validate
+HELP
+    return;
+}
+
+# --- Main ---------------------------------------------------------------------
+
+sub main {
+    my $cmd = shift @ARGV // 'help';
+    my $git_root = find_git_root();
+
+    my %dispatch = (
+        'status'        => sub { cmd_status($git_root) },
+        'list-releases' => sub { my $all = grep { $_ eq '--all' } @ARGV; cmd_list_releases($git_root, $all) },
+        'update'        => sub { cmd_update($git_root, shift @ARGV) },
+        'rollback'      => sub { cmd_rollback($git_root, shift @ARGV) },
+        'validate'      => sub { cmd_validate($git_root) },
+        'fix-security'  => sub { cmd_fix_security($git_root) },
+        'help'          => sub { cmd_help() },
+    );
+
+    if (my $handler = $dispatch{$cmd}) {
+        $handler->();
+    } else {
+        print STDERR "[CWF] ERROR: Unknown command: $cmd\n";
+        print STDERR "Run 'cwf-manage help' for available commands.\n";
+        exit 1;
+    }
+    return;
+}
+
+main() unless caller;

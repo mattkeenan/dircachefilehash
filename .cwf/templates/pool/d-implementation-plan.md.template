@@ -1,0 +1,97 @@
+# {{description}} - Implementation Plan
+**Task**: {{taskNum}} ({{taskType}})
+
+## Task Reference
+- **Task ID**: {{taskId}}
+- **Task URL**: {{taskUrl}}
+- **Parent Task**: {{parentTask}}
+- **Branch**: {{branchName}}
+- **Template Version**: 2.1
+
+## Goal
+Implement {{description}} following the approved design and requirements.
+
+## Workflow
+Patterns first → Test → Minimal impl → Refactor green → Commit message explains "why"
+
+## Files to Modify
+### Primary Changes
+- `path/to/file1.ext` - Description of changes
+- `path/to/file2.ext` - Description of changes
+
+### Supporting Changes
+- `path/to/config.ext` - Configuration updates
+- `path/to/test.ext` - Test additions
+
+## Implementation Steps
+### Step 1: Setup
+- [ ] Task setup and environment preparation
+- [ ] Review design and requirements documentation
+
+### Step 2: Core Implementation
+- [ ] Implement primary functionality
+- [ ] Add error handling
+- [ ] Add logging where appropriate
+
+### Step 3: Testing
+- [ ] Write unit tests for new functionality
+- [ ] Write integration tests
+- [ ] Run existing test suite to verify no regressions
+
+### Step 4: Documentation
+- [ ] Update code comments where necessary
+- [ ] Update user-facing documentation
+- [ ] Update API documentation if applicable
+
+### Step 5: Validation
+- [ ] Code review
+- [ ] Manual testing
+- [ ] Performance validation
+
+## Code Changes
+### Before
+```language
+// Current implementation
+function currentApproach() {
+    // existing code
+}
+```
+
+### After
+```language
+// New implementation
+function improvedApproach() {
+    // new code with improvements
+}
+```
+
+## Test Coverage
+**See e-testing-plan.md for complete test plan**
+
+## Validation Criteria
+**See e-testing-plan.md for validation criteria and test results**
+
+## Scope Completion
+**IMPORTANT**: Complete all planned implementation before marking task Finished.
+
+Deferring work creates technical debt and scope creep. Task 37 deferred documentation updates,
+marked the task complete anyway, and created Task 38 to fix the deferred work.
+
+**If you must defer work**:
+1. Get user approval with clear rationale
+2. Update success criteria to reflect descoped work
+3. Create follow-up task immediately
+4. Document deferral in Actual Results section
+
+## Status
+**Status**: Backlog
+**Next Action**: {{nextAction}}
+**Blockers**: None identified
+
+**See `.cwf/docs/workflow/workflow-steps.md#status-values` for valid status values**
+
+## Actual Results
+*To be filled upon completion*
+
+## Lessons Learned
+*To be captured during implementation*

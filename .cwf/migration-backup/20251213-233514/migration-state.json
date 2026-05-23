@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "backup_id": "20251213-233514",
+  "backup_type": "git",
+  "backup_ref": "git:migration-backup-20251213-233514",
+  "started_at": "2025-12-13T23:35:14Z",
+  "completed_at": "2025-12-13T23:35:14Z",
+  "status": "completed",
+  "tasks": [],
+  "errors": []
+}
