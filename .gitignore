@@ -40,3 +40,5 @@ tags
 *.svg.svg
 callgraph.*
 all_calls.*
+.cwf/task-stack
+.cwf/.update.lock

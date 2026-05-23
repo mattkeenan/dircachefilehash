@@ -1,0 +1,1 @@
+../../.cwf-rules/cwf-workflow-files.md

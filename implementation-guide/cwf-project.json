@@ -1,0 +1,41 @@
+{
+  "title": "Coding with Files Project Configuration",
+  "version": "v0.13.0",
+  "_version-note": "Use git describe --tags --always format for version tracking",
+  "cwf-version": "HEAD",
+  "_cwf-version-note": "Should match your project version for consistency",
+  "project": {
+    "name": "dircachefilehash",
+    "description": "Go CLI tool and library for directory scanning, file hashing, and duplicate detection with a git-compatible binary index format"
+  },
+  "source-management": {
+    "type": "github",
+    "url": "https://github.com/mattkeenan/dircachefilehash",
+    "branch-naming-convention": "{task-type}/{task-id}-{task-description}"
+  },
+  "task-management": {
+    "type": "github",
+    "url": "https://github.com/mattkeenan/dircachefilehash/issues",
+    "task-id-template": "#[::digit::]{1,}",
+    "examples": {
+      "issue": "#123",
+      "pull-request": "#456"
+    }
+  },
+  "supported-task-types": [
+    "feature",
+    "bugfix",
+    "hotfix",
+    "chore",
+    "discovery"
+  ],
+  "team": {
+    "default-assignee": "",
+    "reviewers": []
+  },
+  "templates": {
+    "task-reference-format": "standard",
+    "branch-name-max-length": 50,
+    "auto-generate-branch-suggestions": true
+  }
+}
