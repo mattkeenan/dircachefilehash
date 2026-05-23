@@ -1,35 +1,10 @@
 # Backlog
 
-Append-only list of open work. New entries go at the bottom.
+Open work for dircachefilehash. Managed with the CWF `backlog-manager` helper.
 
-Each entry follows this template:
+## Task: Phase 1b-2: Fix primitive + dcfhfix restructure
 
-```markdown
-## Entry: <title>
-
-### Priority: <High|Medium|Low>
-
-<one-line rationale>
-
-### Scope (optional)
-- bullet
-
-### Notes (optional)
-- bullet
-```
-
-Useful greps:
-
-```bash
-grep '^## Entry: ' BACKLOG.md                              # all entries
-grep '^### Priority: High' BACKLOG.md                      # all High items
-grep '^#\+ ' BACKLOG.md | grep -B 3 '^### Priority: High'  # title context
-```
-
----
-
-## Entry: Phase 1b-2: Fix primitive + dcfhfix restructure
-
+### Task-Type: feature
 ### Priority: Medium
 
 Phase 1b landed the Filter primitive and moved the find DSL behind
@@ -81,8 +56,9 @@ Scope when picked up:
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
 the remote host holds no dcfh state to repair.
 
-## Entry: dcfhfix: default to non-destructive fix-to-new-file
+## Task: dcfhfix: default to non-destructive fix-to-new-file
 
+### Task-Type: feature
 ### Priority: Medium
 
 `dcfhfix` should default to writing repairs to a *new* index file (e.g.
@@ -111,80 +87,106 @@ Scope when picked up:
 Dependency: aligns naturally with the Fix-primitive restructure above
 (non-destructive output is a property of `FixRequest` semantics).
 
-## Entry: Add comprehensive integration tests for edge cases
+## Task: Add comprehensive integration tests for edge cases
 
+### Task-Type: chore
 ### Priority: High
 
 Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
 
-## Entry: Validate atomic index replacement under failure conditions
+## Task: Validate atomic index replacement under failure conditions
 
+### Task-Type: chore
 ### Priority: High
 
 Atomicity of the temp-write + rename path needs explicit failure-injection coverage (crash mid-write, rename failure, full disk). No `os.Rename` fault-injection tests exist today.
 
-## Entry: Update API documentation with current architecture
+## Task: Update API documentation with current architecture
 
+### Task-Type: chore
 ### Priority: High
 
 `pkg/doc.go` and exported-symbol godoc pre-date the layered/pipeline architecture and the scan-index workflow; library consumers see stale guidance.
 
-## Entry: Add usage examples for library consumers
+## Task: Add usage examples for library consumers
 
+### Task-Type: chore
 ### Priority: High
 
 `pkg/` has no `example_*_test.go` files and no `examples/` directory; consumers must read source to figure out the entry points.
 
-## Entry: Implement dry-run mode for `dcfh update`
+## Task: Implement dry-run mode for `dcfh update`
 
+### Task-Type: feature
 ### Priority: Medium
 
 The global `--dry-run` flag is honoured by `snapshot` and `dupes` but `cmd/dcfh/update.go` has no dry-run plumbing. Wiring `update` to preview effects without writing would close the consistency gap.
 
-## Entry: Add progress reporting for long-running operations
+## Task: Add progress reporting for long-running operations
 
+### Task-Type: feature
 ### Priority: Medium
 
 Long scans/updates currently appear silent — no spinner, no entries-processed counter, no ETA. Progress reporting would improve UX on large trees.
 
-## Entry: Handle edge cases in ignore pattern matching
+## Task: Handle edge cases in ignore pattern matching
 
+### Task-Type: bugfix
 ### Priority: Medium
 
 `pkg/ignore_test.go` covers only basic transitions, deindex, and suppress; no negation (`!`), directory-only (trailing `/`), or symlink-target coverage. Likely fixes follow once the gaps are exercised.
 
-## Entry: Implement coloured output for better readability
+## Task: Implement coloured output for better readability
 
+### Task-Type: feature
 ### Priority: Medium
 
 Status output (modified/added/deleted) and diagnostics would benefit from terminal colour, gated on TTY detection. No `isatty`/`IsTerminal` check exists today.
 
-## Entry: Add `dcfh config validate` subcommand
+## Task: Add `dcfh config validate` subcommand
 
+### Task-Type: feature
 ### Priority: Medium
 
 `cmd/dcfh/config.go` exposes `get`/`set`/`--list` but no `validate`. The validators in `pkg/config.go` exist; surfacing them as a subcommand lets users check `.dcfh/config` without running a full operation.
 
-## Entry: Clean up stale scan temp files at startup
+## Task: Clean up stale scan temp files at startup
 
+### Task-Type: feature
 ### Priority: Low
 
 `scan-*.idx` files left behind by SIGINT or unexpected exit are not swept on startup — `pkg/recovery.go` only cleans up after a recovery run, and `pkg/filter_run.go` globs scan files only inside filter operations. A startup sweep of stale temp files is overdue.
 
-## Entry: Add metrics collection for performance monitoring
+## Task: Add metrics collection for performance monitoring
 
+### Task-Type: feature
 ### Priority: Low
 
 No prometheus/expvar/metrics hooks exist anywhere. Optional metrics (timings, throughput, lock contention) would aid both library consumers and our own benchmarking work.
 
-## Entry: Test on additional Unix variants
+## Task: Test on additional Unix variants
 
+### Task-Type: chore
 ### Priority: Low
 
 `.github/workflows/ci.yml` runs only on `ubuntu-latest`. Portability claims need exercising on at least one BSD and macOS.
 
-## Entry: Test with various Go versions
+## Task: Test with various Go versions
 
+### Task-Type: chore
 ### Priority: Low
 
 CI pins `go-version: '1.21'` with no matrix. A Go-version matrix across supported versions would catch toolchain-specific issues earlier.
+
+## Task: Fix stale 'see CHANGELOG' reference in pkg/ignore.go
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 1 retrospective (j-retrospective.md)
+
+`pkg/ignore.go:106` prints "dcfh now uses gitignore syntax — see CHANGELOG." The
+referenced gitignore-syntax note is in neither the current `CHANGELOG.md` nor the
+archived `docs/changelog-old.md` (confirmed by grep during Task 1). Pre-existing
+staleness — left untouched in Task 1 to keep that docs-conformance chore free of any
+Go change. Either repoint the message at concrete docs or drop the "see CHANGELOG"
+clause.
