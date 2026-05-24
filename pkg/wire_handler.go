@@ -433,7 +433,7 @@ func (c *remoteHashCache) Save(path string) error {
 	if !c.dirty {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // G301: .dcfh/ cache dir, non-secret
 		return err
 	}
 	data, err := json.Marshal(c.entries)
@@ -441,7 +441,7 @@ func (c *remoteHashCache) Save(path string) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // G306: .dcfh/ cache temp file, non-secret
 		return err
 	}
 	return os.Rename(tmp, path)

@@ -50,7 +50,7 @@ func sshShellRunner(uri RepoURI) shellRunner {
 		if err != nil {
 			return nil, err
 		}
-		cmd := exec.CommandContext(ctx, "ssh", argv...)
+		cmd := exec.CommandContext(ctx, "ssh", argv...) //nolint:gosec // G204: fixed "ssh" binary; argv built from a validated RepoURI (same pattern git/go-git use)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.Output()
 		if err != nil {

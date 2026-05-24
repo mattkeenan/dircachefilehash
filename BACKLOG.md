@@ -190,3 +190,27 @@ archived `docs/changelog-old.md` (confirmed by grep during Task 1). Pre-existing
 staleness — left untouched in Task 1 to keep that docs-conformance chore free of any
 Go change. Either repoint the message at concrete docs or drop the "see CHANGELOG"
 clause.
+
+## Task: Inode/device truncation makes dcfh dupes under-report on large-inode filesystems
+
+### Task-Type: bugfix
+### Priority: Very High
+### Identified in: Task 2
+
+binaryEntry stores Dev/Ino as uint32 but Linux stat provides uint64. pkg/binary_entry_scan.go:69-70 and pkg/scan.go:300 truncate via uint32(...). pkg/dupes.go:256 dedupByInode uses [2]uint32{Dev,Ino} as an authoritative identity key, so on filesystems allocating inodes above 2^32 (XFS, Btrfs, large ext4) two distinct files whose low 32 bits collide are treated as hardlinks and one is silently dropped from duplicate analysis. Unlike git (which uses ino/dev only as a racy-clean cache hint then falls back to content hash), dcfh uses the truncated key authoritatively. Fix: widen Dev/Ino to uint64 in the on-disk entry format (format version bump) or key dedup on the full 64-bit ino; then re-enable gosec G115, which was disabled during the Task 2 wiring. Found by gosec G115.
+
+## Task: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
+
+### Task-Type: chore
+### Priority: High
+### Identified in: Task 2
+
+When gosec was wired into .golangci.yml in Task 2, architectural-noise rules were disabled and these genuine-candidate findings were deferred for triage: G301/G302/G306 file and directory permission bits (17 sites), G204 subprocess with variable args (2 sites), G108 pprof endpoint (1), G114 http server without read timeout (1). Also review G304 file-path-from-variable (27 sites, disabled now) for real traversal risk beyond expected scanner behaviour. Triage each: fix genuine issues, justify-and-suppress true false positives.
+
+## Task: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 2
+
+A full golangci-lint run ./... is red (masked by the hooks --new staged mode) on three pre-existing non-gosec issues: cmd/dcfhfind/main.go:455 parseTestToken cyclop complexity 21 over 20; pkg/filter_run.go:75 resolveOneSelector cyclop complexity 21 over 20; pkg/binary_entry_scan_test.go:200 createTestEntry unparam unused parameter t. Unrelated to the Task 2 gosec work. Fix or scope these so full-tree and CI lint can be green (prerequisite for using the hooks --all mode in CI).

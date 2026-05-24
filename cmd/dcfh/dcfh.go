@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec // G108: pprof handlers only reachable via the opt-in, localhost-only DCFH_PPROF server
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -17,13 +17,13 @@ func main() {
 	if os.Getenv("DCFH_PPROF") != "" {
 		go func() {
 			log.Println("Starting pprof server on :6060")
-			log.Println(http.ListenAndServe("localhost:6060", nil))
+			log.Println(http.ListenAndServe("localhost:6060", nil)) //nolint:gosec // G114: opt-in localhost-only debug profiler, not a network endpoint
 		}()
 	}
 
 	// CPU profiling: DCFH_CPUPROFILE=path writes a CPU profile
 	if cpuprofile := os.Getenv("DCFH_CPUPROFILE"); cpuprofile != "" {
-		f, err := os.Create(cpuprofile)
+		f, err := os.Create(cpuprofile) //nolint:gosec // G703: path is the user's own DCFH_CPUPROFILE env var; no trust boundary
 		if err != nil {
 			log.Fatalf("Failed to create CPU profile: %v", err)
 		}
@@ -39,8 +39,8 @@ func main() {
 	// Memory profiling: DCFH_MEMPROFILE=path writes a heap profile on exit
 	if memprofile := os.Getenv("DCFH_MEMPROFILE"); memprofile != "" {
 		defer func() {
-			runtime.GC() // get accurate heap profile
-			f, err := os.Create(memprofile)
+			runtime.GC()                    // get accurate heap profile
+			f, err := os.Create(memprofile) //nolint:gosec // G703: path is the user's own DCFH_MEMPROFILE env var; no trust boundary
 			if err != nil {
 				log.Fatalf("Failed to create memory profile: %v", err)
 			}

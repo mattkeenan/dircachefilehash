@@ -966,7 +966,7 @@ func createBackup(indexFile string, operation string, description string, option
 	}
 
 	// Create backup directory if it doesn't exist
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/ backup dir, non-secret (index backups)
 		return fmt.Errorf("failed to create backup directory: %v", err)
 	}
 
@@ -1029,7 +1029,7 @@ func saveMetadata(metadata *BackupMetadata, path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0644) //nolint:gosec // G306: .dcfh/ index file, non-secret (metadata + hashes)
 }
 
 // loadMetadata loads backup metadata from a JSON file

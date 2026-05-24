@@ -152,7 +152,7 @@ func appendValidatedEntryToTmpIndex(tmpIndexFile string, ve *ValidatedEntry) err
 	// In a complete implementation, this would use the scan index infrastructure
 
 	// Open temp file for appending
-	file, err := os.OpenFile(tmpIndexFile, os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(tmpIndexFile, os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // G302: .dcfh/ index file, non-secret (metadata + hashes)
 	if err != nil {
 		return fmt.Errorf("failed to open temp index file: %v", err)
 	}

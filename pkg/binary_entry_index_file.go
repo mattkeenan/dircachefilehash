@@ -84,7 +84,7 @@ func (ife *BEIndexFileIOEntry) readEntryData() (*binaryEntry, error) {
 // Each write operation uses its own file handle for thread safety
 func (ife *BEIndexFileIOEntry) writeEntryData(entry *binaryEntry) error {
 	// Open file for this specific write operation
-	file, err := os.OpenFile(ife.filePath, os.O_RDWR, 0644)
+	file, err := os.OpenFile(ife.filePath, os.O_RDWR, 0644) //nolint:gosec // G302: .dcfh/ index file, non-secret (metadata + hashes)
 	if err != nil {
 		return fmt.Errorf("failed to open index file for writing %s: %w", ife.filePath, err)
 	}

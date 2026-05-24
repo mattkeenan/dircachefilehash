@@ -269,7 +269,7 @@ func CreateMetaStore(rootDir, metaDir string) *MetaStore {
 		}
 	}
 
-	if err := os.MkdirAll(ms.MetaDir, 0755); err != nil {
+	if err := os.MkdirAll(ms.MetaDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/ dir, non-secret
 		fmt.Fprintf(os.Stderr, "Warning: Failed to create .dcfh directory %s: %v\n", ms.MetaDir, err)
 		return ms
 	}

@@ -173,7 +173,7 @@ func splitForGitignore(relativePath string) []string {
 
 // CreateEmptyIgnoreFile creates an empty ignore file with helpful comments
 func (im *IgnoreManager) CreateEmptyIgnoreFile() error {
-	if err := os.MkdirAll(filepath.Dir(im.ignorePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(im.ignorePath), 0755); err != nil { //nolint:gosec // G301: .dcfh/ dir, non-secret
 		return err
 	}
 

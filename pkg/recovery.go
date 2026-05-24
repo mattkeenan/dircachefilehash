@@ -338,7 +338,7 @@ func (ms *MetaStore) createPreRecoverySnapshot(verbosity int) error {
 	recoveryDir := filepath.Join(metaDir, "recovery")
 
 	// Create recovery directory if it doesn't exist
-	if err := os.MkdirAll(recoveryDir, 0755); err != nil {
+	if err := os.MkdirAll(recoveryDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/recovery dir, non-secret
 		return fmt.Errorf("failed to create recovery directory: %w", err)
 	}
 
@@ -397,7 +397,7 @@ func (ms *MetaStore) copyFileWithMetadata(src, dst string, verbosity int) error 
 	}
 
 	// Write destination file
-	if err := os.WriteFile(dst, sourceData, srcInfo.Mode()); err != nil {
+	if err := os.WriteFile(dst, sourceData, srcInfo.Mode()); err != nil { //nolint:gosec // G703: dst = filepath.Join(dir, DirEntry.Name()); Name() is a base name — no traversal
 		return fmt.Errorf("failed to write destination file: %w", err)
 	}
 

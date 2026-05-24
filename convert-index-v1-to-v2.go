@@ -62,7 +62,7 @@ func main() {
 	fmt.Printf("Processed %d entries, %d will be marked as hashed\n", totalCount, convertedCount)
 
 	// Read the file data for binary manipulation
-	data, err := os.ReadFile(inputFile)
+	data, err := os.ReadFile(inputFile) //nolint:gosec // G703: CLI-arg path to a one-off migration utility; no trust boundary
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input file: %v\n", err)
 		os.Exit(1)
@@ -141,7 +141,7 @@ func main() {
 		}
 	}
 
-	if err := os.WriteFile(outputFile, data, 0644); err != nil {
+	if err := os.WriteFile(outputFile, data, 0644); err != nil { //nolint:gosec // G306: migration-output index file, non-secret (metadata + hashes)
 		fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
 		os.Exit(1)
 	}

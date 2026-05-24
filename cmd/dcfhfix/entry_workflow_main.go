@@ -83,7 +83,7 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 // finalizeTempIndex calculates checksum and finalizes the temp index using pkg functions
 func finalizeTempIndex(tmpIndexFile string) error {
 	// Open file for reading and writing
-	file, err := os.OpenFile(tmpIndexFile, os.O_RDWR, 0644)
+	file, err := os.OpenFile(tmpIndexFile, os.O_RDWR, 0644) //nolint:gosec // G302: .dcfh/ index file, non-secret (metadata + hashes)
 	if err != nil {
 		return fmt.Errorf("failed to open temp index file: %v", err)
 	}

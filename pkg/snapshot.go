@@ -77,7 +77,7 @@ func NewSnapshotRepository(metaDir string) *SnapshotRepository {
 // Initialise creates the snapshot repository structure
 func (sr *SnapshotRepository) Initialise() error {
 	// Create snapshots directory
-	if err := os.MkdirAll(sr.SnapshotsDir, 0755); err != nil {
+	if err := os.MkdirAll(sr.SnapshotsDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/snapshots dir, non-secret
 		return fmt.Errorf("failed to create directory %s: %w", sr.SnapshotsDir, err)
 	}
 
@@ -95,7 +95,7 @@ func (sr *SnapshotRepository) Initialise() error {
 			return fmt.Errorf("failed to marshal config: %w", err)
 		}
 
-		if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		if err := os.WriteFile(configPath, configData, 0644); err != nil { //nolint:gosec // G306: .dcfh/ config file, non-secret
 			return fmt.Errorf("failed to write config: %w", err)
 		}
 	}
@@ -114,7 +114,7 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 	snapshotID := generateSnapshotID(now)
 	snapshotDir := filepath.Join(sr.SnapshotsDir, snapshotID)
 
-	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+	if err := os.MkdirAll(snapshotDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/snapshots/<id> dir, non-secret
 		return nil, fmt.Errorf("failed to create snapshot directory: %w", err)
 	}
 
@@ -176,7 +176,7 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 	if len(tags) > 0 {
 		tagsPath := filepath.Join(snapshotDir, "tags")
 		tagsContent := strings.Join(tags, "\n") + "\n"
-		if err := os.WriteFile(tagsPath, []byte(tagsContent), 0644); err != nil {
+		if err := os.WriteFile(tagsPath, []byte(tagsContent), 0644); err != nil { //nolint:gosec // G306: .dcfh/ snapshot tags file, non-secret
 			return nil, fmt.Errorf("failed to write tags file: %w", err)
 		}
 	}
@@ -200,7 +200,7 @@ func (sr *SnapshotRepository) CreateSnapshot(repositoryRoot string, tags []strin
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	if err := os.WriteFile(metadataPath, metadataData, 0644); err != nil {
+	if err := os.WriteFile(metadataPath, metadataData, 0644); err != nil { //nolint:gosec // G306: .dcfh/ snapshot metadata file, non-secret
 		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
 
@@ -445,7 +445,7 @@ func (sr *SnapshotRepository) copyFileWithHash(src, dst string) (string, int64, 
 	}
 
 	// Write destination file
-	if err := os.WriteFile(dst, data, srcInfo.Mode()); err != nil {
+	if err := os.WriteFile(dst, data, srcInfo.Mode()); err != nil { //nolint:gosec // G703: dst = filepath.Join(dir, DirEntry.Name()); Name() is a base name — no traversal
 		return "", 0, err
 	}
 

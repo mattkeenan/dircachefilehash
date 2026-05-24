@@ -27,7 +27,7 @@ type TempIndexWriter struct {
 // NewTempIndexWriter creates a new temp index writer for the specified temp file
 func NewTempIndexWriter(ms *MetaStore, tempPath string) (*TempIndexWriter, error) {
 	// Create temp index file
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644) //nolint:gosec // G302: .dcfh/ temp index file, non-secret (metadata + hashes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp index file %s: %w", tempPath, err)
 	}

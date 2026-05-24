@@ -152,6 +152,27 @@ Examples:
 - `dcfh snapshot help` - Snapshot management operations
 - `dcfh config help` - Configuration options and examples
 
+## Security Review
+
+Two distinct, complementary mechanisms guard this repo. They are not interchangeable.
+
+### 1. Static analysis: `gosec` via golangci-lint
+
+`gosec` runs as a linter inside `.golangci.yml` (not as a standalone binary), so it fires on every `golangci-lint` invocation — including the `.githooks/pre-commit` staged (`--new`) gate. It guards new code for all rules that are not explicitly excluded.
+
+- **Rule excludes** (`linters.settings.gosec.excludes`) are architectural/intentional only: G103 (unsafe — the zero-copy/mmap design), G304 (file-path-from-variable — dcfh is a file scanner), G401/G505 (SHA-1 — git-compatible content addressing), and G115 (int-overflow conversion — **a real deferred bug**, see BACKLOG; re-enable once `Dev`/`Ino` widen to `uint64`).
+- **Test-only false positives** are scoped via an `exclusions.rules` entry `{linters: [gosec], path: _test\.go}`.
+- **Production false positives** are suppressed per-line with `//nolint:gosec // Gxxx: <rationale>`, mirroring the existing `//nolint:govet` style. Every suppression carries a rationale; perms rules (G301/G302/G306) stay **active** so new over-permissive writes are still caught — the existing `.dcfh/` perm suppressions are non-secret metadata/hash files.
+- Issue caps are lifted (`issues.max-same-issues: 0`, `max-issues-per-linter: 0`) so the security gate never silently hides a duplicate finding.
+
+Setting `gosec.excludes` activates gosec's **full** ruleset — measure findings through `golangci-lint run ./...`, never standalone `gosec`.
+
+### 2. Changeset review: CWF `cwf-security-reviewer-changeset` agent
+
+For non-trivial changes, run the CWF security-review phase against the task's changeset. The CWF implementation-exec step (`/cwf-implementation-exec`) invokes the `cwf-security-reviewer-changeset` agent automatically and records the verdict in `f-implementation-exec.md`. This is a semantic review of the diff (FR4 threat categories: injection, secrets, auth, env-var handling, prompt-injection surface) — distinct from gosec's pattern matching, and distinct from the generic `/security-review` built-in.
+
+**Apply both**: gosec is the always-on syntactic floor; the CWF changeset review is the per-task semantic check.
+
 ## Architecture
 
 ### Command Separation (v0.0.14+)

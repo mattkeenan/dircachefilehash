@@ -2,6 +2,8 @@ module github.com/mattkeenan/dircachefilehash
 
 go 1.24.3
 
+toolchain go1.26.3
+
 require (
 	github.com/google/vectorio v0.0.0-20160107201919-f555dd215279
 	github.com/mattkeenan/zerocopyskiplist v0.9.0
