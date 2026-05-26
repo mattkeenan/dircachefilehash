@@ -15,7 +15,7 @@ func timeWall(t time.Time) uint64 {
 	nsec := int64(t.Nanosecond())
 
 	// Custom format: sec(34) + nsec(30) - gives us range until year ~2429
-	wall := (uint64(sec) << 30) | uint64(nsec)
+	wall := (uint64(sec) << 30) | uint64(nsec) //nolint:gosec // G115: 1885-epoch-offset seconds, non-negative for supported range
 	return wall
 }
 
@@ -38,6 +38,6 @@ func encodeWallTime(sec int64, nsec int64) uint64 {
 	offsetSec := sec + unixTo1885
 
 	// Custom format: sec(34) + nsec(30)
-	wall := (uint64(offsetSec) << 30) | uint64(nsec)
+	wall := (uint64(offsetSec) << 30) | uint64(nsec) //nolint:gosec // G115: 1885-epoch-offset seconds, non-negative for supported range
 	return wall
 }

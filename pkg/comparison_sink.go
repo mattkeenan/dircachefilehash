@@ -205,7 +205,7 @@ func (s *diffComparisonSink) OnMatch(left, right BinaryEntryInterface) error {
 	}
 	size, _ := right.FileSize()
 	s.result.Modified = append(s.result.Modified, path)
-	s.result.ModifiedBytes += int64(size)
+	s.result.ModifiedBytes += int64(size) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
 	return nil
 }
 
@@ -239,7 +239,7 @@ func (s *diffComparisonSink) recordAdded(entry BinaryEntryInterface) error {
 	}
 	size, _ := entry.FileSize()
 	s.result.Added = append(s.result.Added, path)
-	s.result.AddedBytes += int64(size)
+	s.result.AddedBytes += int64(size) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
 	return nil
 }
 
@@ -250,7 +250,7 @@ func (s *diffComparisonSink) recordDeleted(entry BinaryEntryInterface) error {
 	}
 	size, _ := entry.FileSize()
 	s.result.Deleted = append(s.result.Deleted, path)
-	s.result.DeletedBytes += int64(size)
+	s.result.DeletedBytes += int64(size) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
 	return nil
 }
 

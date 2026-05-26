@@ -22,7 +22,7 @@ type FilterEntry interface {
 	Mode() (uint32, error)
 	UID() (uint32, error)
 	GID() (uint32, error)
-	Dev() (uint32, error)
+	Dev() (uint64, error)
 	MTimeWall() (uint64, error)
 	CTimeWall() (uint64, error)
 	HashType() (uint16, error)
@@ -101,15 +101,16 @@ func take[T any](sticky *error, get func() (T, error)) T {
 // methods don't return errors; the adapter just lifts return shapes.
 type binaryEntryAdapter struct{ e *binaryEntry }
 
-// asFilterEntry wraps be for predicate evaluation.
-func (be *binaryEntry) asFilterEntry() FilterEntry { return binaryEntryAdapter{be} }
+// asFilterEntry wraps be for predicate evaluation. It is a free function (not a
+// method) because binaryEntry is an alias for the out-of-package format.Entry.
+func asFilterEntry(be *binaryEntry) FilterEntry { return binaryEntryAdapter{be} }
 
 func (a binaryEntryAdapter) RelativePath() (string, error) { return a.e.RelativePath(), nil }
 func (a binaryEntryAdapter) FileSize() (uint64, error)     { return a.e.FileSize, nil }
 func (a binaryEntryAdapter) Mode() (uint32, error)         { return a.e.Mode, nil }
 func (a binaryEntryAdapter) UID() (uint32, error)          { return a.e.UID, nil }
 func (a binaryEntryAdapter) GID() (uint32, error)          { return a.e.GID, nil }
-func (a binaryEntryAdapter) Dev() (uint32, error)          { return a.e.Dev, nil }
+func (a binaryEntryAdapter) Dev() (uint64, error)          { return a.e.Dev, nil }
 func (a binaryEntryAdapter) MTimeWall() (uint64, error)    { return a.e.MTimeWall, nil }
 func (a binaryEntryAdapter) CTimeWall() (uint64, error)    { return a.e.CTimeWall, nil }
 func (a binaryEntryAdapter) HashType() (uint16, error)     { return a.e.HashType, nil }
@@ -247,7 +248,7 @@ func (t *SizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	size := int64(fs)
+	size := int64(fs) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
 	switch t.Mode {
 	case "+":
 		return size > t.Size, nil

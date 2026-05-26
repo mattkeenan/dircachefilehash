@@ -33,8 +33,8 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 	}
 
 	mockStat := &syscall.Stat_t{
-		Dev:  uint64(testData.Dev),
-		Ino:  uint64(testData.Ino),
+		Dev:  testData.Dev,
+		Ino:  testData.Ino,
 		Mode: testData.Mode,
 		Uid:  testData.UID,
 		Gid:  testData.GID,
@@ -209,8 +209,8 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 	}
 
 	mockStat := &syscall.Stat_t{
-		Dev:  uint64(testData.Dev),
-		Ino:  uint64(testData.Ino),
+		Dev:  testData.Dev,
+		Ino:  testData.Ino,
 		Mode: testData.Mode,
 		Uid:  testData.UID,
 		Gid:  testData.GID,

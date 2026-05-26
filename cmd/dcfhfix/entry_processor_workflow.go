@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
+	"github.com/mattkeenan/dircachefilehash/pkg/format"
 )
 
 // entryOutcome is the result the per-entry handler returns to the
@@ -33,7 +34,7 @@ func processAllEntriesWorkflow(data []byte, pathSet map[string]bool, field, valu
 	const unfixableMax = 100
 
 	for i := uint32(0); i < entryCount && offset < len(entryData); i++ {
-		outcome := processSingleEntry(entryData, &offset, int(i), pathSet, field, value, tmpIndexFile, entriesFixed, entriesDiscarded, options)
+		outcome := processSingleEntry(entryData, &offset, int(i), pathSet, field, value, tmpIndexFile, entriesFixed, entriesDiscarded, options, header.Version)
 		if outcome.fatal != nil {
 			return outcome.fatal
 		}
@@ -57,10 +58,10 @@ func processAllEntriesWorkflow(data []byte, pathSet map[string]bool, field, valu
 // advances *offset itself (via trySkipToNextEntry) and returns
 // skip/stop; on success the caller is responsible for advancing by
 // Entry.Size.
-func processSingleEntry(entryData []byte, offset *int, i int, pathSet map[string]bool, field, value, tmpIndexFile string, entriesFixed, entriesDiscarded *int, options *ParsedOptions) entryOutcome {
-	ve, err := NewValidatedEntry(entryData, i, *offset)
+func processSingleEntry(entryData []byte, offset *int, i int, pathSet map[string]bool, field, value, tmpIndexFile string, entriesFixed, entriesDiscarded *int, options *ParsedOptions, version uint32) entryOutcome {
+	ve, err := NewValidatedEntry(entryData, i, *offset, version)
 	if err != nil {
-		return handleCorruptedEntry(entryData, offset, i, err, entriesDiscarded, options)
+		return handleCorruptedEntry(entryData, offset, i, err, entriesDiscarded, options, version)
 	}
 
 	if !pathSet[ve.Path] {
@@ -76,7 +77,7 @@ func processSingleEntry(entryData []byte, offset *int, i int, pathSet map[string
 			fmt.Fprintf(os.Stderr, "Warning: entry %d still broken after CLI command, discarding: %v\n", i, cmdErr)
 		}
 		*entriesDiscarded++
-		if !trySkipToNextEntry(entryData, offset) {
+		if !trySkipToNextEntry(entryData, offset, version) {
 			return entryOutcome{stop: true}
 		}
 		return entryOutcome{skip: true}
@@ -91,7 +92,7 @@ func processSingleEntry(entryData []byte, offset *int, i int, pathSet map[string
 
 // handleCorruptedEntry wraps the attempt-to-repair / skip-or-stop
 // path for entries that failed structural validation.
-func handleCorruptedEntry(entryData []byte, offset *int, i int, origErr error, entriesDiscarded *int, options *ParsedOptions) entryOutcome {
+func handleCorruptedEntry(entryData []byte, offset *int, i int, origErr error, entriesDiscarded *int, options *ParsedOptions, version uint32) entryOutcome {
 	fixed, fixErr := attemptErrorFixAtOffsetValidated(entryData, i, *offset, origErr)
 	if fixErr == nil {
 		if !options.GetBool("quiet") {
@@ -103,14 +104,17 @@ func handleCorruptedEntry(entryData []byte, offset *int, i int, origErr error, e
 		fmt.Fprintf(os.Stderr, "Warning: entry %d unfixable, discarding: %v\n", i, origErr)
 	}
 	*entriesDiscarded++
-	if !trySkipToNextEntry(entryData, offset) {
+	if !trySkipToNextEntry(entryData, offset, version) {
 		return entryOutcome{stop: true}
 	}
 	return entryOutcome{skip: true}
 }
 
-// trySkipToNextEntry attempts to find the next entry when current one is corrupted
-func trySkipToNextEntry(data []byte, offset *int) bool {
+// trySkipToNextEntry attempts to find the next entry when current one is
+// corrupted. version selects the entry-size floor used to recognise a plausible
+// resync point: a legacy (v2/v3) file's entries are smaller than v4's, so using
+// the source version's minimum avoids over-rejecting a legitimate legacy entry.
+func trySkipToNextEntry(data []byte, offset *int, version uint32) bool {
 	// If we can read the size field, try to use it to skip
 	if *offset+4 <= len(data) {
 		entrySize := *(*uint32)(unsafe.Pointer(&data[*offset]))
@@ -128,9 +132,11 @@ func trySkipToNextEntry(data []byte, offset *int) bool {
 			break
 		}
 
-		// Check if this looks like a valid size field
+		// Check if this looks like a valid size field. The floor is the source
+		// version's minimum entry size (legacy entries are smaller than v4), so a
+		// legitimate legacy entry is not skipped past during resync.
 		size := *(*uint32)(unsafe.Pointer(&data[*offset]))
-		if size >= uint32(unsafe.Sizeof(binaryEntry{})) && size < 4096 {
+		if size >= uint32(format.MinEntrySizeForVersion(version)) && size < 4096 { //nolint:gosec // G115: struct min size (~136-144), bounded non-negative
 			// This might be a valid entry start
 			return true
 		}

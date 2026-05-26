@@ -55,9 +55,10 @@ linters:
         - G304  # file path from variable — dcfh is a file scanner by definition
         - G401  # SHA-1 — git-compatible content addressing, not a security hash
         - G505  # crypto/sha1 import — same git-compatibility rationale as G401
-        # --- Deferred: genuine bug, tracked in BACKLOG (Very High) ---
-        - G115  # int overflow on conversion — inode/device truncation bug;
-                # re-enable once Dev/Ino widen to uint64. See BACKLOG.md.
+        # G115 (int-overflow on conversion) is now ACTIVE: task 3.3 widened
+        # Dev/Ino to uint64 (format v4), fixing the inode/device truncation bug
+        # that motivated the temporary exclude. New G115 sites are triaged
+        # per-line, never blanket-excluded.
 
     cyclop:
       max-complexity: 20

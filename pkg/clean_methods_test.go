@@ -13,13 +13,13 @@ func TestCleanMethodsPrivatization(t *testing.T) {
 	// but would not be accessible from outside the package
 
 	// Initial state should be not clean
-	if header.isClean() {
+	if header.IsClean() {
 		t.Error("Header should initially be not clean")
 	}
 
 	// Set clean flag
-	header.setClean()
-	if !header.isClean() {
+	header.SetClean()
+	if !header.IsClean() {
 		t.Error("Header should be clean after setClean()")
 	}
 
@@ -29,8 +29,8 @@ func TestCleanMethodsPrivatization(t *testing.T) {
 	}
 
 	// Clear clean flag
-	header.clearClean()
-	if header.isClean() {
+	header.ClearClean()
+	if header.IsClean() {
 		t.Error("Header should not be clean after clearClean()")
 	}
 
@@ -48,7 +48,7 @@ func TestCleanMethodsWithOtherFlags(t *testing.T) {
 	header.Flags = IndexFlagSparse // Set sparse flag
 
 	// Initial state should be not clean but sparse
-	if header.isClean() {
+	if header.IsClean() {
 		t.Error("Header should initially be not clean")
 	}
 	if header.Flags&IndexFlagSparse == 0 {
@@ -56,8 +56,8 @@ func TestCleanMethodsWithOtherFlags(t *testing.T) {
 	}
 
 	// Set clean flag while preserving other flags
-	header.setClean()
-	if !header.isClean() {
+	header.SetClean()
+	if !header.IsClean() {
 		t.Error("Header should be clean after setClean()")
 	}
 	if header.Flags&IndexFlagSparse == 0 {
@@ -65,8 +65,8 @@ func TestCleanMethodsWithOtherFlags(t *testing.T) {
 	}
 
 	// Clear clean flag while preserving other flags
-	header.clearClean()
-	if header.isClean() {
+	header.ClearClean()
+	if header.IsClean() {
 		t.Error("Header should not be clean after clearClean()")
 	}
 	if header.Flags&IndexFlagSparse == 0 {
@@ -80,13 +80,13 @@ func TestCleanMethodsMultipleOperations(t *testing.T) {
 
 	// Test multiple set/clear cycles
 	for i := range 5 {
-		header.setClean()
-		if !header.isClean() {
+		header.SetClean()
+		if !header.IsClean() {
 			t.Errorf("Header should be clean after setClean() iteration %d", i)
 		}
 
-		header.clearClean()
-		if header.isClean() {
+		header.ClearClean()
+		if header.IsClean() {
 			t.Errorf("Header should not be clean after clearClean() iteration %d", i)
 		}
 	}
@@ -126,7 +126,7 @@ func TestCleanMethodsBoundaryValues(t *testing.T) {
 			var header indexHeader
 			header.Flags = tt.initialFlags
 
-			initialClean := header.isClean()
+			initialClean := header.IsClean()
 			expectedInitialClean := (tt.initialFlags & IndexFlagClean) != 0
 
 			if initialClean != expectedInitialClean {
@@ -135,14 +135,14 @@ func TestCleanMethodsBoundaryValues(t *testing.T) {
 			}
 
 			// Set clean and verify
-			header.setClean()
-			if !header.isClean() {
+			header.SetClean()
+			if !header.IsClean() {
 				t.Errorf("Should be clean after setClean() for %s", tt.description)
 			}
 
 			// Clear clean and verify
-			header.clearClean()
-			if header.isClean() {
+			header.ClearClean()
+			if header.IsClean() {
 				t.Errorf("Should not be clean after clearClean() for %s", tt.description)
 			}
 
@@ -197,7 +197,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 	go func() {
 		for range 100 {
 			mu.Lock()
-			header.setClean()
+			header.SetClean()
 			mu.Unlock()
 		}
 		done <- true
@@ -207,7 +207,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 	go func() {
 		for range 100 {
 			mu.Lock()
-			_ = header.isClean()
+			_ = header.IsClean()
 			mu.Unlock()
 		}
 		done <- true
@@ -218,7 +218,7 @@ func TestCleanMethodsBasicConcurrency(t *testing.T) {
 	<-done
 
 	// Final state should be clean (since setClean was called)
-	if !header.isClean() {
+	if !header.IsClean() {
 		t.Error("Header should be clean after concurrent operations")
 	}
 }
@@ -231,8 +231,8 @@ func TestCleanMethodsWithStatusVerbose(t *testing.T) {
 	flags := map[string]string{"v": "1"}
 
 	// Test initial state
-	header.setClean()
-	if !header.isClean() {
+	header.SetClean()
+	if !header.IsClean() {
 		t.Error("Header should be clean")
 	}
 
@@ -252,7 +252,7 @@ func TestCleanMethodsWithStatusVerbose(t *testing.T) {
 
 	// Test that we can get the clean status when needed
 	if includeCleanStatus {
-		cleanStatus := header.isClean()
+		cleanStatus := header.IsClean()
 		if !cleanStatus {
 			t.Error("Should report clean status correctly")
 		}

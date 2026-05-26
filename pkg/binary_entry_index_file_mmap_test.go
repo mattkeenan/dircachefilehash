@@ -53,8 +53,8 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 		modTime: time.Unix(1234567900, 0),
 	}
 	mockStat := &syscall.Stat_t{
-		Dev:  uint64(testData.Dev),
-		Ino:  uint64(testData.Ino),
+		Dev:  testData.Dev,
+		Ino:  testData.Ino,
 		Mode: testData.Mode,
 		Uid:  testData.UID,
 		Gid:  testData.GID,

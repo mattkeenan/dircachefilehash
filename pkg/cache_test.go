@@ -198,9 +198,10 @@ func TestCacheSystem(t *testing.T) {
 }
 
 func TestCachePortability(t *testing.T) {
-	// Test that struct size calculation is consistent
+	// Test that struct size calculation is consistent.
+	// v4 (task 3.3) widened Dev/Ino from uint32 to uint64: +8 bytes, 136 -> 144.
 	var be binaryEntry
-	structSize := uintptr(136) // Expected size from structlayout
+	structSize := uintptr(144) // Expected v4 size from structlayout
 	actualSize := unsafe.Sizeof(be)
 
 	if actualSize != structSize {

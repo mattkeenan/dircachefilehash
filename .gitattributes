@@ -1,0 +1,7 @@
+# dcfh binary index files (incl. committed test-fixture goldens under
+# pkg/format/testdata/) must never be EOL- or encoding-normalised: they are
+# byte-exact on-disk images whose content (header checksum, encoded mtimes,
+# entry layout) the tests read verbatim. `binary` = -text -diff, so a checkout
+# reproduces them byte-for-byte regardless of platform or a contributor's
+# `* text=auto` global config.
+*.idx binary

@@ -101,7 +101,7 @@ func probeDevice(samplePath string) bool {
 	_ = os.Remove(scratch.Name())
 	defer scratch.Close()
 
-	return ioctlProbeRecognised(int(src.Fd()), int(scratch.Fd()))
+	return ioctlProbeRecognised(int(src.Fd()), int(scratch.Fd())) //nolint:gosec // G115: file descriptors (uintptr) to int, bounded on 64-bit
 }
 
 // ioctlProbeRecognised reports whether a zero-length FIDEDUPERANGE
@@ -135,7 +135,7 @@ func ProbeReflinkFS(dir string) bool {
 	}
 	defer os.Remove(b.Name())
 	defer b.Close()
-	return ioctlProbeRecognised(int(a.Fd()), int(b.Fd()))
+	return ioctlProbeRecognised(int(a.Fd()), int(b.Fd())) //nolint:gosec // G115: file descriptors (uintptr) to int, bounded on 64-bit
 }
 
 // run is the linux implementation backing fsdedupe.Run.
@@ -285,7 +285,7 @@ func statAndFilter(files []string, repoRoot string) ([]fileInfo, []FileResult) {
 			rel:  rel,
 			abs:  abs,
 			dev:  sys.Dev,
-			size: uint64(st.Size()),
+			size: uint64(st.Size()), //nolint:gosec // G115: file size, non-negative
 			mode: st.Mode(),
 		})
 	}
@@ -323,7 +323,7 @@ func dedupeSubgroup(ctx context.Context, src fileInfo, targets []fileInfo, maxDe
 	// Re-stat the source to verify size hasn't drifted since the
 	// index observation. If it has, we have no plausible donor range.
 	if srcInfo, err := srcFile.Stat(); err == nil {
-		if uint64(srcInfo.Size()) != src.size {
+		if uint64(srcInfo.Size()) != src.size { //nolint:gosec // G115: file size, non-negative
 			reason := ReasonSizeChanged
 			for _, t := range targets {
 				results = append(results, FileResult{
@@ -395,7 +395,7 @@ func dedupeWave(ctx context.Context, srcFile *os.File, srcSize uint64, wave []fi
 			})
 			continue
 		}
-		if uint64(st.Size()) != t.size {
+		if uint64(st.Size()) != t.size { //nolint:gosec // G115: file size, non-negative
 			_ = f.Close()
 			results = append(results, FileResult{
 				Path: t.rel, Outcome: OutcomeSkipped,
@@ -405,14 +405,14 @@ func dedupeWave(ctx context.Context, srcFile *os.File, srcSize uint64, wave []fi
 		}
 		opened = append(opened, f)
 		active = append(active, activeTarget{
-			fd:    int(f.Fd()),
+			fd:    int(f.Fd()), //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 			info:  t,
 			alive: true,
 		})
 	}
 
 	if len(active) > 0 {
-		runDedupeLoop(ctx, int(srcFile.Fd()), srcSize, active)
+		runDedupeLoop(ctx, int(srcFile.Fd()), srcSize, active) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	}
 
 	var reclaimed uint64

@@ -24,8 +24,8 @@ type TestEntryData struct {
 	Size         uint32
 	CTimeWall    uint64
 	MTimeWall    uint64
-	Dev          uint32
-	Ino          uint32
+	Dev          uint64
+	Ino          uint64
 	Mode         uint32
 	UID          uint32
 	GID          uint32

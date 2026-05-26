@@ -41,19 +41,19 @@ func TestIndexHeader_CleanMethods(t *testing.T) {
 	var header indexHeader
 
 	// Test initial state (not clean)
-	if header.isClean() {
+	if header.IsClean() {
 		t.Error("Expected header to be initially not clean")
 	}
 
 	// Test setClean
-	header.setClean()
-	if !header.isClean() {
+	header.SetClean()
+	if !header.IsClean() {
 		t.Error("Expected header to be clean after setClean()")
 	}
 
 	// Test clearClean
-	header.clearClean()
-	if header.isClean() {
+	header.ClearClean()
+	if header.IsClean() {
 		t.Error("Expected header to be not clean after clearClean()")
 	}
 }

@@ -130,7 +130,7 @@ func TestBinaryEntryHashCoordination(t *testing.T) {
 // TestBinaryEntryBaseHashCoordination tests the default implementation in BinaryEntryBase
 func TestBinaryEntryBaseHashCoordination(t *testing.T) {
 	// Create a BinaryEntryBase directly to test the default implementations
-	base := NewBinaryEntryBase(BEIndexFileIO)
+	base := NewBinaryEntryBase(BESkiplist)
 
 	t.Run("InitialState", func(t *testing.T) {
 		requested, err := base.IsHashRequested()

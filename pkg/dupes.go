@@ -139,7 +139,7 @@ func entryKeeper(filter DupeFilter, pathExclusive bool) func(*binaryEntry) bool 
 			return false
 		}
 		if hasPred {
-			ok, err := filter.Predicate.Evaluate(entry.asFilterEntry(), ctx)
+			ok, err := filter.Predicate.Evaluate(asFilterEntry(entry), ctx)
 			if err != nil || !ok {
 				return false
 			}
@@ -250,10 +250,10 @@ func dedupByInode(entries []*binaryEntry) []*binaryEntry {
 	if len(entries) < 2 {
 		return entries
 	}
-	seen := make(map[[2]uint32]struct{}, len(entries))
+	seen := make(map[[2]uint64]struct{}, len(entries))
 	out := entries[:0]
 	for _, e := range entries {
-		key := [2]uint32{e.Dev, e.Ino}
+		key := [2]uint64{e.Dev, e.Ino}
 		if _, dup := seen[key]; dup {
 			continue
 		}

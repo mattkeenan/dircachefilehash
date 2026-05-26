@@ -17,7 +17,7 @@ type EntryInfo struct {
 	Mode      uint32
 	UID       uint32
 	GID       uint32
-	Dev       uint32
+	Dev       uint64
 	MTimeWall uint64
 	CTimeWall uint64
 	HashStr   string
@@ -38,7 +38,7 @@ func (a entryInfoAdapter) FileSize() (uint64, error)     { return a.e.FileSize, 
 func (a entryInfoAdapter) Mode() (uint32, error)         { return a.e.Mode, nil }
 func (a entryInfoAdapter) UID() (uint32, error)          { return a.e.UID, nil }
 func (a entryInfoAdapter) GID() (uint32, error)          { return a.e.GID, nil }
-func (a entryInfoAdapter) Dev() (uint32, error)          { return a.e.Dev, nil }
+func (a entryInfoAdapter) Dev() (uint64, error)          { return a.e.Dev, nil }
 func (a entryInfoAdapter) MTimeWall() (uint64, error)    { return a.e.MTimeWall, nil }
 func (a entryInfoAdapter) CTimeWall() (uint64, error)    { return a.e.CTimeWall, nil }
 func (a entryInfoAdapter) HashType() (uint16, error)     { return a.e.HashType, nil }

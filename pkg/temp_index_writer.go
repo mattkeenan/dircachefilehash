@@ -76,7 +76,7 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 		// CRITICAL: Add each entry to checksum BEFORE writing to file
 		for _, iovec := range readyIoVecs {
 			// Convert IoVec to []byte for checksum calculation
-			entryBytes := unsafe.Slice((*byte)(unsafe.Pointer(iovec.Base)), int(iovec.Len))
+			entryBytes := unsafe.Slice((*byte)(unsafe.Pointer(iovec.Base)), int(iovec.Len)) //nolint:gosec // G115: iovec length = entry size, bounded on 64-bit
 			tiw.checksumWriter.Write(entryBytes)
 		}
 
@@ -85,7 +85,7 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 		}
 
 		// Update entry count
-		tiw.entryCount += uint32(len(readyIoVecs))
+		tiw.entryCount += uint32(len(readyIoVecs)) //nolint:gosec // G115: batch entry count, bounded by entries written
 	}
 
 	return nil
@@ -96,7 +96,7 @@ func (tiw *TempIndexWriter) WriteIoVecBatch(readyIoVecs []syscall.Iovec) error {
 func (tiw *TempIndexWriter) writePlaceholderHeader() error {
 	// Create placeholder header (will be rewritten in Close() with correct count/checksum)
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.ms.signature, tiw.ms.version, 0, 0, tiw.ms.GetCurrentHashType())
+	header.SetHeaderForWritableIndex(tiw.ms.signature, 0, 0, tiw.ms.GetCurrentHashType())
 
 	// Create header IoVec
 	headerIovec := syscall.Iovec{
@@ -126,7 +126,7 @@ func (tiw *TempIndexWriter) writeEntriesWithVectorIO(entryIovecs []syscall.Iovec
 	// Calculate expected total size for verification
 	expectedTotal := 0
 	for _, iovec := range entryIovecs {
-		expectedTotal += int(iovec.Len)
+		expectedTotal += int(iovec.Len) //nolint:gosec // G115: iovec length = entry size, bounded on 64-bit
 	}
 
 	totalWritten := 0
@@ -173,10 +173,10 @@ func (tiw *TempIndexWriter) Close() error {
 
 	// Create final header with correct entry count
 	header := indexHeader{}
-	header.SetHeaderForWritableIndex(tiw.ms.signature, tiw.ms.version, tiw.entryCount, 0, tiw.ms.GetCurrentHashType())
+	header.SetHeaderForWritableIndex(tiw.ms.signature, tiw.entryCount, 0, tiw.ms.GetCurrentHashType())
 
 	// Mark header as clean
-	header.setClean()
+	header.SetClean()
 
 	// Add header fields (excluding checksum) to running checksum
 	tiw.addHeaderToChecksum(&header)
@@ -258,7 +258,7 @@ func (tiw *TempIndexWriter) WriteSerialised(entries [][]byte) error {
 		return fmt.Errorf("failed to write serialised entries: %w", err)
 	}
 
-	tiw.entryCount += uint32(len(entries))
+	tiw.entryCount += uint32(len(entries)) //nolint:gosec // G115: entry count, bounded by entries written
 	return nil
 }
 

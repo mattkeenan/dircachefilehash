@@ -152,7 +152,7 @@ func (ms *MetaStore) Stats() (int, int64, error) {
 
 	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
 		if !entry.IsDeleted() {
-			totalSize += int64(entry.FileSize)
+			totalSize += int64(entry.FileSize) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
 			count++
 		}
 		return true // Continue iteration
@@ -185,7 +185,7 @@ func (ms *MetaStore) IndexTimestamp() (time.Time, bool) {
 	if header.Version < TimestampMinVersion || header.Timestamp == 0 {
 		return time.Time{}, false
 	}
-	return time.Unix(int64(header.Timestamp), 0).UTC(), true
+	return time.Unix(int64(header.Timestamp), 0).UTC(), true //nolint:gosec // G115: Unix seconds, within int64 range
 }
 
 // ResolveMetaDir determines the metadata directory path.

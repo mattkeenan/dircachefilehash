@@ -36,8 +36,8 @@ type BinaryEntryInterface interface {
 	Size() (uint32, error)
 	CTimeWall() (uint64, error)
 	MTimeWall() (uint64, error)
-	Dev() (uint32, error)
-	Ino() (uint32, error)
+	Dev() (uint64, error)
+	Ino() (uint64, error)
 	Mode() (uint32, error)
 	UID() (uint32, error)
 	GID() (uint32, error)
@@ -88,9 +88,6 @@ const (
 	// BESkiplist - mmap-backed entries in skiplist
 	BESkiplist BinaryEntryImplementationType = iota
 
-	// BEIndexFileIO - standard file I/O access
-	BEIndexFileIO
-
 	// BEIndexFileMmap - mmap with iterative skiplist building
 	BEIndexFileMmap
 
@@ -103,8 +100,6 @@ func (t BinaryEntryImplementationType) String() string {
 	switch t {
 	case BESkiplist:
 		return "BESkiplist"
-	case BEIndexFileIO:
-		return "BEIndexFileIO"
 	case BEIndexFileMmap:
 		return "BEIndexFileMmap"
 	case BEScan:

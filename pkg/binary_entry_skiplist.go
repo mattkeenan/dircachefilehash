@@ -101,7 +101,7 @@ func (sle *BESkiplistEntry) MTimeWall() (uint64, error) {
 }
 
 // Dev returns the device ID
-func (sle *BESkiplistEntry) Dev() (uint32, error) {
+func (sle *BESkiplistEntry) Dev() (uint64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
 
@@ -114,7 +114,7 @@ func (sle *BESkiplistEntry) Dev() (uint32, error) {
 }
 
 // Ino returns the inode number
-func (sle *BESkiplistEntry) Ino() (uint32, error) {
+func (sle *BESkiplistEntry) Ino() (uint64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
 

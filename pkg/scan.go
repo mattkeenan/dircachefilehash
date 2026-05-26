@@ -259,7 +259,7 @@ func (e *scanFilterEntry) FileSize() (uint64, error) {
 	if e.info == nil {
 		return 0, errScanFilterUnavailable
 	}
-	return uint64(e.info.Size()), nil
+	return uint64(e.info.Size()), nil //nolint:gosec // G115: file size, non-negative
 }
 
 func (e *scanFilterEntry) Mode() (uint32, error) {
@@ -292,12 +292,12 @@ func (e *scanFilterEntry) GID() (uint32, error) {
 	return sys.Gid, nil
 }
 
-func (e *scanFilterEntry) Dev() (uint32, error) {
+func (e *scanFilterEntry) Dev() (uint64, error) {
 	sys, ok := e.statSys()
 	if !ok {
 		return 0, errScanFilterUnavailable
 	}
-	return uint32(sys.Dev), nil
+	return sys.Dev, nil
 }
 
 func (e *scanFilterEntry) CTimeWall() (uint64, error) {

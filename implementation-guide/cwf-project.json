@@ -39,7 +39,7 @@
   "title" : "Coding with Files Project Configuration",
   "version" : "v0.13.0",
   "versioning" : {
-    "last_released" : "v0.13.2",
+    "last_released" : "v0.13.3",
     "major_minor" : "v0.13"
   },
   "wf_step_config" : {

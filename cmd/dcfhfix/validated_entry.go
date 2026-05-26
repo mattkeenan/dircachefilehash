@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
+	"github.com/mattkeenan/dircachefilehash/pkg/format"
 )
 
 // ValidatedEntry holds a validated binaryEntry along with its extracted path
@@ -13,10 +14,13 @@ type ValidatedEntry struct {
 	Path  string
 }
 
-// NewValidatedEntry creates a ValidatedEntry from safe accessor validation
-func NewValidatedEntry(data []byte, entryIdx int, offset int) (*ValidatedEntry, error) {
+// NewValidatedEntry creates a ValidatedEntry from safe accessor validation.
+// version selects the on-disk field layout (v4 vs legacy v2/v3) — pass the
+// source header's version so a legacy index is read at its real field offsets
+// and its Dev/Ino are widened, not misread.
+func NewValidatedEntry(data []byte, entryIdx int, offset int, version uint32) (*ValidatedEntry, error) {
 	// First create safe accessor to validate the entry structure
-	accessor, err := NewSafeEntryAccessor(data, entryIdx, offset)
+	accessor, err := format.NewSafeEntry(data, entryIdx, offset, version)
 	if err != nil {
 		return nil, err
 	}

@@ -21,7 +21,7 @@ var debugActive bool
 
 // SetVerboseLevel sets the global verbose level
 func SetVerboseLevel(level int) {
-	globalVerboseLevel.Store(int32(level))
+	globalVerboseLevel.Store(int32(level)) //nolint:gosec // G115: verbosity level, small bounded value
 }
 
 // GetVerboseLevel returns the current verbose level

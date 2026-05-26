@@ -254,7 +254,7 @@ func printGroupOutcome(g fsdedupe.GroupResult) {
 		if flagDryRun {
 			verb = "planned"
 		}
-		line += fmt.Sprintf(", %s %s", formatFileSize(int64(g.BytesReclaimed)), verb)
+		line += fmt.Sprintf(", %s %s", formatFileSize(int64(g.BytesReclaimed)), verb) //nolint:gosec // G115: byte total, bounded by storage size (<< int64 max)
 	}
 	if g.Reason != "" {
 		line += fmt.Sprintf(" (%s)", g.Reason)
@@ -282,10 +282,10 @@ func printDedupeFooter(r *fsdedupe.Result) {
 	}
 	if flagDryRun {
 		fmt.Printf("total planned: %s across %d groups\n",
-			formatFileSize(int64(r.TotalPlanned)), len(r.Groups))
+			formatFileSize(int64(r.TotalPlanned)), len(r.Groups)) //nolint:gosec // G115: byte total, bounded by storage size (<< int64 max)
 	} else {
 		fmt.Printf("total reclaimed: %s across %d groups\n",
-			formatFileSize(int64(r.TotalReclaimed)), len(r.Groups))
+			formatFileSize(int64(r.TotalReclaimed)), len(r.Groups)) //nolint:gosec // G115: byte total, bounded by storage size (<< int64 max)
 	}
 }
 

@@ -3,6 +3,7 @@ package dircachefilehash
 import (
 	"strings"
 
+	"github.com/mattkeenan/dircachefilehash/pkg/format"
 	zcsl "github.com/mattkeenan/zerocopyskiplist"
 )
 
@@ -52,78 +53,50 @@ const (
 	TempIndex  = "temp-%d-%d.idx"
 )
 
-// Header and file format constants
-//
-// See indexHeader struct in index.go for the full on-disk layout diagram.
-// Sizes account for explicit alignment padding fields (_Pad0, _Pad1).
+// On-disk format constants are owned by pkg/format. Re-exported here so the
+// core package and its existing call sites refer to a single source of truth.
 const (
-	// V2HeaderSize is 88 bytes — this is technically a bug: the full v2 struct
-	// is 96 bytes (including tail padding), so entry data starts 8 bytes inside
-	// the Checksum[60:64] + struct padding region. This works because SHA-1 (20 bytes)
-	// and SHA-256 (32 bytes) never use Checksum[60:]. Shipped in v2, now frozen.
-	V2HeaderSize        = 88  // see comment above
-	HeaderSize          = 104 // v2 fields + checksum(4 remaining) + pad(4) + timestamp(8)
-	ChecksumSize        = 64  // Maximum checksum size (512 bits)
-	CurrentIndexVersion = 3   // Current index file format version
-	MinIndexVersion     = 2   // Minimum supported index version
-	TimestampMinVersion = 3   // First version with Timestamp field in header
+	V2HeaderSize        = format.V2HeaderSize
+	HeaderSize          = format.HeaderSize
+	ChecksumSize        = format.ChecksumSize
+	CurrentIndexVersion = format.CurrentIndexVersion
+	MinIndexVersion     = format.MinIndexVersion
+	TimestampMinVersion = format.TimestampMinVersion
 )
 
-// Byte order magic for file format validation
-const ByteOrderMagic uint64 = 0x0102030405060708
+// ByteOrderMagic re-exports the format byte-order detection magic.
+const ByteOrderMagic = format.ByteOrderMagic
 
-// Hash type constants
+// Hash type constants (re-exported from pkg/format).
 const (
-	HashTypeSHA1   uint16 = 1 // SHA-1 (20 bytes)
-	HashTypeSHA256 uint16 = 2 // SHA-256 (32 bytes)
-	HashTypeSHA512 uint16 = 3 // SHA-512 (64 bytes)
+	HashTypeSHA1   = format.HashTypeSHA1
+	HashTypeSHA256 = format.HashTypeSHA256
+	HashTypeSHA512 = format.HashTypeSHA512
 )
 
-// HashTypeName returns the human-readable name for a hash type
-func HashTypeName(hashType uint16) string {
-	switch hashType {
-	case HashTypeSHA1:
-		return "sha1"
-	case HashTypeSHA256:
-		return "sha256"
-	case HashTypeSHA512:
-		return "sha512"
-	default:
-		return "unknown"
-	}
-}
+// HashTypeName returns the human-readable name for a hash type.
+func HashTypeName(hashType uint16) string { return format.HashTypeName(hashType) }
 
-// HashTypeFromName returns the hash type constant from a name (case-insensitive)
-func HashTypeFromName(name string) (uint16, bool) {
-	switch strings.ToLower(name) {
-	case "sha1":
-		return HashTypeSHA1, true
-	case "sha256":
-		return HashTypeSHA256, true
-	case "sha512":
-		return HashTypeSHA512, true
-	default:
-		return 0, false
-	}
-}
+// HashTypeFromName returns the hash type constant from a name (case-insensitive).
+func HashTypeFromName(name string) (uint16, bool) { return format.HashTypeFromName(name) }
 
-// Hash size constants
+// Hash size constants (re-exported from pkg/format).
 const (
-	HashSizeSHA1   = 20 // SHA-1 hash size in bytes
-	HashSizeSHA256 = 32 // SHA-256 hash size in bytes
-	HashSizeSHA512 = 64 // SHA-512 hash size in bytes
+	HashSizeSHA1   = format.HashSizeSHA1
+	HashSizeSHA256 = format.HashSizeSHA256
+	HashSizeSHA512 = format.HashSizeSHA512
 )
 
-// Index header flags
+// Index header flags (re-exported from pkg/format).
 const (
-	IndexFlagSparse uint16 = 1 << 0 // Sparse index flag
-	IndexFlagClean  uint16 = 1 << 1 // Index file is in clean/complete state
+	IndexFlagSparse = format.IndexFlagSparse
+	IndexFlagClean  = format.IndexFlagClean
 )
 
-// Entry flags
+// Entry flags (re-exported from pkg/format).
 const (
-	EntryFlagDeleted uint16 = 1 << 0 // Entry marked as deleted
-	EntryFlagHashed  uint16 = 1 << 1 // Entry has been hashed
+	EntryFlagDeleted = format.EntryFlagDeleted
+	EntryFlagHashed  = format.EntryFlagHashed
 )
 
 // Import merge strategies from zerocopyskiplist

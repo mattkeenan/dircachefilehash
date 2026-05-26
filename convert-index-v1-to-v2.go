@@ -225,7 +225,7 @@ func updateEntryHashedFlags(data []byte, headerSize int, entries []*dircachefile
 			if flagsPos+2 <= len(data) {
 				currentFlags := uint16(data[flagsPos]) | uint16(data[flagsPos+1])<<8
 				newFlags := currentFlags | EntryFlagHashed
-				data[flagsPos] = byte(newFlags)
+				data[flagsPos] = byte(newFlags) //nolint:gosec // G115: low byte of a 16-bit flags field; high byte written on the next line
 				data[flagsPos+1] = byte(newFlags >> 8)
 				updatedCount++
 			}

@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
+	"github.com/mattkeenan/dircachefilehash/pkg/format"
 )
 
 // processEntriesWithWorkflow implements the complete safe workflow
@@ -67,13 +68,17 @@ func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
 	}
 	defer func() { _ = file.Close() }()
 
-	// Determine header size from version in the original data
-	header := (*indexHeader)(unsafe.Pointer(&originalData[0]))
-	hdrSize := dcfh.HeaderSizeForVersion(header.Version)
-
-	// Copy the header from the original file
-	_, err = file.Write(originalData[:hdrSize])
-	if err != nil {
+	// The entries appended to the temp index are serialised in the CURRENT (v4)
+	// layout (read-old / write-new). The header must therefore be v4 too: copying
+	// a legacy source header verbatim would leave the file claiming e.g. v3 while
+	// holding v4-shaped (+8/entry) entries — an internally inconsistent, corrupt
+	// index. Stamp a fresh v4 header, preserving the source signature, base flags
+	// and checksum type; EntryCount and checksum are fixed up in finalizeTempIndex.
+	srcHeader := (*indexHeader)(unsafe.Pointer(&originalData[0]))
+	var v4Header indexHeader
+	v4Header.SetHeaderForWritableIndex(srcHeader.Signature, 0, srcHeader.Flags, srcHeader.ChecksumType)
+	headerBytes := (*[format.HeaderSize]byte)(unsafe.Pointer(&v4Header))[:]
+	if _, err = file.Write(headerBytes); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
 

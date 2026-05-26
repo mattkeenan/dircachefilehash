@@ -46,14 +46,6 @@ func TestBinaryEntryImplementationsHashCoordination(t *testing.T) {
 		testHashCoordinationMethods(t, skipEntry, "BESkiplistEntry")
 	})
 
-	t.Run("BEIndexFileIOEntry", func(t *testing.T) {
-		// Create a BEIndexFileIOEntry with fake file path
-		ioEntry := NewBEIndexFileIOEntry("/fake/path", 0, 100, "test")
-
-		// Test hash coordination methods (they should work even if the file doesn't exist)
-		testHashCoordinationMethods(t, ioEntry, "BEIndexFileIOEntry")
-	})
-
 	t.Run("BEIndexFileMmapEntry", func(t *testing.T) {
 		// Create a mock binaryEntryRef for testing
 		mockRef := binaryEntryRef{

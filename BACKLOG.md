@@ -14,7 +14,7 @@ and the dcfhfix migration were deferred.
 Why deferred: dcfhfix is analogous to `fsck`. The rest of dcfh trusts the
 on-disk format — parse errors are fatal — whereas dcfhfix explicitly assumes
 an index may be corrupt and must still make forward progress (bounds-checked
-field reads via `SafeEntryAccessor`, entry-by-entry validation via
+field reads via `pkg/format.SafeEntry`, entry-by-entry validation via
 `ValidatedEntry`, backup-stack rollback). Reshaping that around a batch-mode
 `FixRequest{commands}` primitive is a different workflow from the Diff/
 Apply/Filter path and warrants its own design pass.
@@ -31,9 +31,10 @@ Scope when picked up:
   `FixResult{RepairsApplied, EntriesDiscarded, BackupID}` as batch-mode
   encodings of the current interactive subcommands (header show/edit,
   entry show/edit/append/remove/resort, fixes list/pop/discard/clear).
-- Move the fsck-shape helpers (`SafeEntryAccessor`, `ValidatedEntry`,
+- Move the fsck-shape helpers (`ValidatedEntry`,
   `processEntriesWithWorkflow`, backup stack) from cmd/dcfhfix into
-  pkg/ so the Repo implementation can drive them.
+  pkg/ so the Repo implementation can drive them. (The bounds-checked
+  accessor is already done — Task 3.1 moved it to `pkg/format.SafeEntry`.)
 - Add `Repo.Fix` to the interface; `localRepo.Fix` delegates to the
   moved helpers. Interactive dcfhfix subcommands translate CLI input
   into one or more `FixRequest` batches.
@@ -191,14 +192,6 @@ staleness — left untouched in Task 1 to keep that docs-conformance chore free 
 Go change. Either repoint the message at concrete docs or drop the "see CHANGELOG"
 clause.
 
-## Task: Inode/device truncation makes dcfh dupes under-report on large-inode filesystems
-
-### Task-Type: bugfix
-### Priority: Very High
-### Identified in: Task 2
-
-binaryEntry stores Dev/Ino as uint32 but Linux stat provides uint64. pkg/binary_entry_scan.go:69-70 and pkg/scan.go:300 truncate via uint32(...). pkg/dupes.go:256 dedupByInode uses [2]uint32{Dev,Ino} as an authoritative identity key, so on filesystems allocating inodes above 2^32 (XFS, Btrfs, large ext4) two distinct files whose low 32 bits collide are treated as hardlinks and one is silently dropped from duplicate analysis. Unlike git (which uses ino/dev only as a racy-clean cache hint then falls back to content hash), dcfh uses the truncated key authoritatively. Fix: widen Dev/Ino to uint64 in the on-disk entry format (format version bump) or key dedup on the full 64-bit ino; then re-enable gosec G115, which was disabled during the Task 2 wiring. Found by gosec G115.
-
 ## Task: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
 
 ### Task-Type: chore
@@ -214,3 +207,84 @@ When gosec was wired into .golangci.yml in Task 2, architectural-noise rules wer
 ### Identified in: Task 2
 
 A full golangci-lint run ./... is red (masked by the hooks --new staged mode) on three pre-existing non-gosec issues: cmd/dcfhfind/main.go:455 parseTestToken cyclop complexity 21 over 20; pkg/filter_run.go:75 resolveOneSelector cyclop complexity 21 over 20; pkg/binary_entry_scan_test.go:200 createTestEntry unparam unused parameter t. Unrelated to the Task 2 gosec work. Fix or scope these so full-tree and CI lint can be green (prerequisite for using the hooks --all mode in CI).
+
+## Task: Upgrade CwF v1.1.155 to v1.1.163
+
+### Task-Type: chore
+### Priority: Medium
+### Identified in: Task 3.3
+
+The installed CwF tooling is v1.1.155 (`.cwf/version`), pinned via the
+subtree method from `file:///home/matt/repo/coding-with-files`. v1.1.163
+fixes a bug in the `security-review-changeset` helper: under v1.1.155 it
+resolves an empty changeset when the working tree carries
+uncommitted/unstaged changes, so the exec-phase security review silently
+has nothing to review. Several smaller helper fixes also land between
+.155 and .163.
+
+Impact observed: during Task 3.3 the f-phase security review returned an
+empty changeset and was worked around manually (stage the diff, feed it to
+the `cwf-security-reviewer-changeset` agent by hand). The g-phase recorded
+"no findings: empty changeset" for the same reason.
+
+Scope when picked up:
+- Re-run the CwF subtree update to v1.1.163 from the source repo (subtree
+  method; see `.cwf/version` `cwf_source` / `cwf_method`).
+- Update `.cwf/version` (`cwf_version`, `cwf_sha`, `cwf_installed`).
+- Refresh `.cwf/security/script-hashes.json` for any changed helper/script
+  files in the same commit (hash-update convention).
+- Verify `security-review-changeset` resolves a non-empty changeset against
+  an uncommitted working tree (the bug this upgrade fixes).
+- Run `cwf-manage validate` after the bump.
+
+Sequencing: do this after the current Task 3 line of work lands. Upgrading
+mid-task swaps the workflow tooling in use (including the retrospective and
+security-review helpers).
+
+## Task: Move FileSize/ByteSize to int64 in v4 + core (subtask 3.4)
+
+### Task-Type: chore
+### Priority: Medium
+### Identified in: Task 3.3 retrospective
+
+Move `FileSize`/`ByteSize` from `uint64` to `int64` in the v4 entry layout
+**and** in the core code, to match `off_t`-style signed sizing and remove
+the uint64-vs-signed friction that drives several gosec G115 suppressions
+added in Task 3.3.
+
+Why: `os.FileInfo.Size()` returns `int64`; every bridge to the unsigned
+on-disk `ByteSize` is a gosec-flagged conversion. Making the core type
+`int64` lets the signed↔unsigned conversion be **ring-fenced inside the
+v2/v3 transcoder** (where legacy bytes are read), retiring ~6 of the 55
+G115 suppressions Task 3.3 added.
+
+Scope when picked up (promote to subtask 3.4 via `/cwf-new-subtask 3 3.4`):
+- Change `ByteSize`/`FileSize` to `int64` in `pkg/format` and propagate
+  through accessors, consumers, and the writer.
+- On-disk-compatible: v4 already allocates 8 bytes for FileSize; this is a
+  signedness reinterpretation, NOT a format bump (`CurrentIndexVersion`
+  stays 4).
+- Ring-fence the uint32→int64 widen in the v2/v3 transcoder
+  (`transcode.go`) so legacy reads stay correct.
+- Remove the now-unnecessary G115 suppressions on the FileSize/ByteSize
+  bridges; confirm `golangci-lint run ./...` stays clean.
+
+Identified in: Task 3.3 retrospective (j-retrospective.md).
+
+## Task: Remove stale tracked root debris cache.idx and cache-2.idx
+
+### Task-Type: chore
+### Priority: Low
+### Status: Follow-up from Task 3
+### Identified in: Task 3 retrospective (j-retrospective.md)
+
+Two stale index files are tracked at the repository root: `./cache.idx` and `./cache-2.idx`
+(13 MB each, dated 2025-07). They are an unloadable legacy `cache.idx` and a `convert-index-v1-to-v2`
+conversion-tool artefact — both superseded by the byte-exact goldens under `pkg/format/testdata/`.
+They are not referenced by any test or tool and bloat every checkout.
+
+Scope: `git rm cache.idx cache-2.idx` and confirm no code path references them (grep), then verify the
+full suite still passes.
+
+Identified in: Task 3 retrospective (j-retrospective.md); first flagged in subtask 3.3's e-testing-plan
+robustness review and deferred.

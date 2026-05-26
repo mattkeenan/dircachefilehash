@@ -12,54 +12,25 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
+	"github.com/mattkeenan/dircachefilehash/pkg/format"
 	"golang.org/x/sys/unix"
 )
 
-// indexHeader represents the file header in host byte order (cast directly to mmap'd memory).
-//
-// On-disk layout (64-bit little-endian):
-//
-//	Offset  Size  Field
-//	0       4     Signature      "dcfh"
-//	4       4     _Pad0          alignment padding for ByteOrder
-//	8       8     ByteOrder      0x0102030405060708
-//	16      4     Version        2 or 3
-//	20      4     EntryCount
-//	24      2     Flags
-//	26      2     ChecksumType
-//	28      64    Checksum       SHA-1/256/512 (v2 entry data starts at offset 88, inside unused tail)
-//	92      4     _Pad1          alignment padding for Timestamp (v3 only)
-//	96      8     Timestamp      Unix seconds (v3 only, not covered by checksum)
-//	---     ---   ---
-//	v2 total: 88 bytes used (entries start here; overlaps Checksum[60:64] + _Pad1)
-//	v3 total: 104 bytes
-type indexHeader struct {
-	Signature    [4]byte  // offset 0:   "dcfh" signature
-	_Pad0        [4]byte  // offset 4:   alignment padding for ByteOrder
-	ByteOrder    uint64   // offset 8:   byte order detection magic - MUST be checked before other fields
-	Version      uint32   // offset 16:  index version (host order)
-	EntryCount   uint32   // offset 20:  number of entries (host order)
-	Flags        uint16   // offset 24:  index flags (host order)
-	ChecksumType uint16   // offset 26:  checksum algorithm type
-	Checksum     [64]byte // offset 28:  checksum of header+entries (up to 512-bit)
-	_Pad1        [4]byte  // offset 92:  alignment padding for Timestamp
-	Timestamp    uint64   // offset 96:  unix timestamp of last write (v3+, not covered by checksum)
-}
+// indexHeader is the canonical on-disk header. Its definition and methods now
+// live in pkg/format (the single owner of the on-disk layout); this alias keeps
+// existing core references and method calls working unchanged.
+type indexHeader = format.Header
 
-// headerSizeForVersion returns the header size for a given index version.
+// headerSizeForVersion forwards to pkg/format, the owner of layout sizing.
 func headerSizeForVersion(version uint32) int {
-	if version <= 2 {
-		return V2HeaderSize
-	}
-	return HeaderSize
+	return format.HeaderSizeForVersion(version)
 }
 
-// HeaderSizeForVersion returns the header size for a given index version (exported for dcfhfix).
+// HeaderSizeForVersion forwards to pkg/format (exported for dcfhfix).
 func HeaderSizeForVersion(version uint32) int {
-	return headerSizeForVersion(version)
+	return format.HeaderSizeForVersion(version)
 }
 
 // mmapIndex represents a memory-mapped index file
@@ -77,6 +48,7 @@ type mmapIndexFile struct {
 	Type       string       // Index type: "main", "cache", "scan"
 	FilePath   string       // File path for debugging/cleanup
 	headerSize int          // Version-dependent header size (V2HeaderSize or HeaderSize)
+	heapBacked bool         // Data is a GC'd transcode buffer (legacy load), not an mmap — never munmap it
 	mutex      sync.RWMutex // Protects Data/Size during mremap operations
 	refCount   int32        // Atomic reference counter for safe cleanup
 }
@@ -86,12 +58,17 @@ func (mif *mmapIndexFile) Cleanup() error {
 	mif.mutex.Lock()
 	defer mif.mutex.Unlock()
 
-	if mif.Data != nil {
+	// heapBacked Data is a Go-allocated transcode image (legacy v2/v3 load), not
+	// a mapping — calling munmap on it is undefined behaviour. The marker, not a
+	// nil fd, is the discriminator: read-only main/cache indices also have File==nil.
+	if mif.Data != nil && !mif.heapBacked {
 		if err := unix.Munmap(mif.Data); err != nil {
 			return fmt.Errorf("failed to unmap %s index: %w", mif.Type, err)
 		}
-		mif.Data = nil
 	}
+	// Drop the reference for both cases: an mmap is now unmapped, and a heap
+	// image is released so the GC can reclaim it.
+	mif.Data = nil
 
 	if mif.File != nil {
 		if err := mif.File.Close(); err != nil {
@@ -131,36 +108,8 @@ func (mi *mmapIndex) Header() *indexHeader {
 	return (*indexHeader)(unsafe.Pointer(&mi.data[0]))
 }
 
-// ValidateSignature checks if the signature matches expected value
-func (ih *indexHeader) ValidateSignature(expected [4]byte) error {
-	if ih.Signature != expected {
-		return fmt.Errorf("invalid signature: got %q, expected %q",
-			string(ih.Signature[:]), string(expected[:]))
-	}
-	return nil
-}
-
-// ValidateVersion checks if the version is supported.
-// Pass expected=0 to accept any version (used by read-only tools like dcfhfind).
-// Otherwise accepts versions in range [MinIndexVersion, expected].
-func (ih *indexHeader) ValidateVersion(expected uint32) error {
-	if expected == 0 {
-		return nil
-	}
-	if ih.Version < MinIndexVersion || ih.Version > expected {
-		return fmt.Errorf("unsupported version: got %d, expected %d-%d", ih.Version, MinIndexVersion, expected)
-	}
-	return nil
-}
-
-// ValidateByteOrder checks if the byte order matches the host machine
-func (ih *indexHeader) ValidateByteOrder() error {
-	if ih.ByteOrder != ByteOrderMagic {
-		return fmt.Errorf("byte order mismatch: index file byte order 0x%016x does not match host byte order 0x%016x",
-			ih.ByteOrder, ByteOrderMagic)
-	}
-	return nil
-}
+// Header validation methods (ValidateSignature, ValidateVersion, ValidateByteOrder)
+// now live in pkg/format on the Header type; callers reach them via the indexHeader alias.
 
 // ValidateIndexHeader validates an index file header and returns a copy of the header struct
 // This is a shared utility function that can be used across the codebase for header validation
@@ -194,7 +143,7 @@ func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expe
 	}
 
 	// Memory map the header for reading
-	data, err := unix.Mmap(int(file.Fd()), 0, mmapSize, unix.PROT_READ, unix.MAP_PRIVATE)
+	data, err := unix.Mmap(int(file.Fd()), 0, mmapSize, unix.PROT_READ, unix.MAP_PRIVATE) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap file header: %w", err)
 	}
@@ -273,24 +222,8 @@ func validateHeaderChecksum(file *os.File, header *indexHeader, fileSize int64) 
 	return nil
 }
 
-// SetHeader initialises the header fields in mmap'd memory
-func (ih *indexHeader) SetHeader(signature [4]byte, version uint32, entryCount uint32, flags uint16, checksumType uint16) {
-	ih.Signature = signature
-	ih.ByteOrder = ByteOrderMagic
-	ih.Version = version
-	ih.EntryCount = entryCount
-	ih.Flags = flags
-	ih.ChecksumType = checksumType
-	ih.Timestamp = uint64(time.Now().Unix())
-}
-
-// SetHeaderForWritableIndex initialises the header for write operations (scan/temp indices)
-// Automatically clears the Clean flag since we're opening for write
-func (ih *indexHeader) SetHeaderForWritableIndex(signature [4]byte, version uint32, entryCount uint32, baseFlags uint16, checksumType uint16) {
-	// For writable indices, ensure Clean flag is cleared (not clean during write operations)
-	flags := baseFlags &^ IndexFlagClean
-	ih.SetHeader(signature, version, entryCount, flags, checksumType)
-}
+// Header initialisation methods (SetHeader, SetHeaderForWritableIndex) now live
+// in pkg/format on the Header type; callers reach them via the indexHeader alias.
 
 // calculateAndStoreHeaderChecksum calculates checksum and stores it in header
 func (ms *MetaStore) calculateAndStoreHeaderChecksum(header *indexHeader, entryData []byte, entrySize int) {
@@ -314,20 +247,8 @@ func (ms *MetaStore) calculateAndStoreHeaderChecksum(header *indexHeader, entryD
 	copy(header.Checksum[:], checksumBytes)
 }
 
-// isClean returns true if this index file is in a clean/complete state
-func (ih *indexHeader) isClean() bool {
-	return ih.Flags&IndexFlagClean != 0
-}
-
-// setClean marks this index file as clean/complete (final operation)
-func (ih *indexHeader) setClean() {
-	ih.Flags |= IndexFlagClean
-}
-
-// clearClean marks this index file as unclean/incomplete
-func (ih *indexHeader) clearClean() {
-	ih.Flags &^= IndexFlagClean
-}
+// Clean-bit methods (IsClean, SetClean, ClearClean) now live in pkg/format on
+// the Header type; callers reach them via the indexHeader alias.
 
 // EntryProcessor defines a callback function for processing entries during index loading
 // Parameters: entry (the binaryEntry), entryIndex (0-based), filePath (source file)
@@ -354,6 +275,35 @@ func (ms *MetaStore) loadIndexFromFileWithProcessor(filePath string, processor E
 	return ms.collectEntryRefs(indexFile, header, filePath, processor)
 }
 
+// checkEntryRegionAccess gates access to an index's entry region for a header
+// that has already passed the signature/byte-order/version-validate triple. It
+// is the single owner of the "is this entry region safe to materialise" decision
+// for every mmap entry-walk loader:
+//   - version dispatch: an unsupported version is rejected via the format
+//     resolver (the only real version gate for the dcfhfind validation path,
+//     where ValidateVersion is a no-op for any on-disk version);
+//   - header-size bounds: a v3 header on an 88..103-byte file passes the
+//     V2HeaderSize size gate but would over-read when the caller slices the
+//     entry region — fail closed first (NFR5: never panic on a truncated index).
+//
+// It returns the DecodeStrategy for the version so the caller knows whether the
+// entry region can be cast in place (DecodeZeroCopy, current layout) or must be
+// transcoded into a v4 heap image first (DecodeHeap, legacy v2/v3 layout).
+//
+// The error is fully formed before return, so a caller may munmap the backing
+// data immediately afterwards without a use-after-free in the message.
+func checkEntryRegionAccess(header *indexHeader, fileSize int64) (format.DecodeStrategy, error) {
+	strategy, err := format.StrategyForVersion(header.Version)
+	if err != nil {
+		return format.DecodeReject, err
+	}
+	if hdrSize := headerSizeForVersion(header.Version); int64(hdrSize) > fileSize {
+		return format.DecodeReject, fmt.Errorf("file too small for v%d header: %d bytes < %d",
+			header.Version, fileSize, hdrSize)
+	}
+	return strategy, nil
+}
+
 // openAndValidateIndex opens the file, mmaps it, and runs the fixed
 // header checks (signature, byte order, version, clean-flag checksum).
 // On error it cleans up the fd/mmap; on success the caller owns the
@@ -372,7 +322,7 @@ func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *ind
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
-	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	if err != nil {
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("failed to mmap file: %w", err)
@@ -391,6 +341,43 @@ func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *ind
 		}
 	}
 
+	// Gate version dispatch + header-size bounds before collectEntryRefs slices
+	// the entry region. This is where the dcfhfind validation path (version:0)
+	// gets its only real version gate.
+	strategy, err := checkEntryRegionAccess(header, stat.Size())
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+
+	// Verify the checksum on the ORIGINAL on-disk bytes (before any transcode),
+	// so a legacy file's integrity is checked against what it actually stored.
+	if (header.Flags & IndexFlagClean) == 0 {
+		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
+	} else if err := ms.verifyHeaderChecksum(data, header); err != nil {
+		return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
+	}
+
+	// Legacy (v2/v3) layout diverges from v4: transcode the whole image into a v4
+	// heap buffer and back the index with that, rather than casting old bytes as
+	// a v4 Entry. The original mapping is released; the heap image is GC-managed.
+	if strategy == format.DecodeHeap {
+		image, terr := format.TranscodeLegacyIndex(data)
+		cleanup() // release the original mmap + fd; image is an independent copy
+		if terr != nil {
+			return nil, nil, fmt.Errorf("legacy index transcode failed: %w", terr)
+		}
+		indexFile := &mmapIndexFile{
+			Data:       image,
+			Size:       len(image),
+			Type:       "loaded",
+			FilePath:   filePath,
+			headerSize: HeaderSize, // image is always a v4 header
+			heapBacked: true,
+		}
+		return indexFile, (*indexHeader)(unsafe.Pointer(&image[0])), nil
+	}
+
 	indexFile := &mmapIndexFile{
 		File:       file,
 		Data:       data,
@@ -399,12 +386,6 @@ func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *ind
 		FilePath:   filePath,
 		headerSize: headerSizeForVersion(header.Version),
 	}
-
-	if (header.Flags & IndexFlagClean) == 0 {
-		VerboseLog(2, "Skipping header checksum validation for unclean file: %s", filePath)
-	} else if err := ms.verifyHeaderChecksum(data, header); err != nil {
-		return nil, nil, fmt.Errorf("checksum verification failed: %w", err)
-	}
 	return indexFile, header, nil
 }
 
@@ -412,6 +393,9 @@ func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *ind
 // invoking the user's processor. Returns refs for entries the
 // processor accepted.
 func (ms *MetaStore) collectEntryRefs(indexFile *mmapIndexFile, header *indexHeader, filePath string, processor EntryProcessor) ([]binaryEntryRef, error) {
+	// Precondition: openAndValidateIndex (this function's only caller) has already
+	// run checkEntryRegionAccess, gating version dispatch and header-size bounds,
+	// so the entry-region slice below is safe to take.
 	entryData := indexFile.Data[indexFile.headerSize:]
 	var refs []binaryEntryRef
 	offset := 0
@@ -639,7 +623,7 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) (*Index, err
 		return nil, fmt.Errorf("file too small: %d bytes", stat.Size())
 	}
 
-	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	data, err := unix.Mmap(int(file.Fd()), 0, int(stat.Size()), unix.PROT_READ, unix.MAP_PRIVATE) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	if err != nil {
 		_ = file.Close()
 		return nil, fmt.Errorf("failed to mmap file: %w", err)
@@ -691,58 +675,98 @@ func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) (*Index, err
 		}
 	}
 
-	// Parse entries
+	// Gate version dispatch + header-size bounds before slicing the entry region.
+	// (ValidateVersion(ms.version) above already rejects out-of-range versions on
+	// this path; the shared helper keeps the version→materialisation decision
+	// single-owned and adds the header-size bounds check ValidateVersion lacks.)
+	strategy, err := checkEntryRegionAccess(header, stat.Size())
+	if err != nil {
+		indexFile.DecRef()
+		return nil, err
+	}
+
+	// Legacy (v2/v3) layout diverges from v4: transcode the whole image into a v4
+	// heap buffer, release the original mapping, and back the index with the heap
+	// image. The transcode reads the original bytes before DecRef unmaps them.
+	if strategy == format.DecodeHeap {
+		image, terr := format.TranscodeLegacyIndex(data)
+		indexFile.DecRef() // release the original mmap + fd
+		if terr != nil {
+			return nil, fmt.Errorf("legacy index transcode failed: %w", terr)
+		}
+		heapFile := &mmapIndexFile{
+			Data:       image,
+			Size:       len(image),
+			Type:       "loaded",
+			FilePath:   filePath,
+			headerSize: HeaderSize, // image is always a v4 header
+			heapBacked: true,
+			refCount:   1,
+		}
+		heapHeader := (*indexHeader)(unsafe.Pointer(&image[0]))
+		refs, perr := ms.parseTrackedEntries(heapFile, heapHeader, image[HeaderSize:])
+		if perr != nil {
+			heapFile.DecRef()
+			return nil, perr
+		}
+		return &Index{File: heapFile, Refs: refs}, nil
+	}
+
+	// Parse the entry region. The helper does not own indexFile; on error we
+	// release the construction ref here.
+	refs, err := ms.parseTrackedEntries(indexFile, header, data[hdrSize:])
+	if err != nil {
+		indexFile.DecRef()
+		return nil, err
+	}
+
+	return &Index{File: indexFile, Refs: refs}, nil
+}
+
+// parseTrackedEntries walks the entry region of a tracking-loaded index and
+// returns one binaryEntryRef per entry. It does not own indexFile (the caller
+// holds the construction ref and releases it on error), keeping the cleanup
+// contract in loadIndexFromFileWithTracking rather than spread across the loop.
+func (ms *MetaStore) parseTrackedEntries(indexFile *mmapIndexFile, header *indexHeader, entryData []byte) ([]binaryEntryRef, error) {
 	var refs []binaryEntryRef
 	offset := 0
-	entryData := data[hdrSize:]
-
 	for i := uint32(0); i < header.EntryCount; i++ {
 		if offset >= len(entryData) {
-			indexFile.DecRef()
 			return nil, fmt.Errorf("unexpected end of data at entry %d", i)
 		}
 
 		entry := (*binaryEntry)(unsafe.Pointer(&entryData[offset]))
 
 		if err := ms.validateEntryChaining(entry, offset, entryData, int(i)); err != nil {
-			indexFile.DecRef()
 			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
 
 		if IsDebugEnabled("extravalidation") {
 			if err := entry.ValidateEntry(); err != nil {
-				indexFile.DecRef()
 				return nil, fmt.Errorf("entry %d extra validation failed: %w", i, err)
 			}
 		}
 
-		ref := createBinaryEntryRef(entry, indexFile)
-		refs = append(refs, ref)
+		refs = append(refs, createBinaryEntryRef(entry, indexFile))
 
 		nextOffset := offset + int(entry.Size)
-
 		if nextOffset <= offset {
-			indexFile.DecRef()
 			return nil, fmt.Errorf("entry %d has invalid size %d (would not advance)", i, entry.Size)
 		}
 
-		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 {
-			if nextOffset >= len(entryData) {
-				indexFile.DecRef()
-				return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
-					i, entry.Size, offset, nextOffset, len(entryData))
-			}
+		if IsDebugEnabled("indexchaining") && i < header.EntryCount-1 && nextOffset >= len(entryData) {
+			return nil, fmt.Errorf("entry %d size %d would exceed data bounds (offset %d + size = %d, max %d)",
+				i, entry.Size, offset, nextOffset, len(entryData))
 		}
 
 		offset = nextOffset
 	}
 
 	if offset != len(entryData) {
-		indexFile.DecRef()
 		return nil, fmt.Errorf("data size mismatch: consumed %d bytes, expected %d bytes", offset, len(entryData))
 	}
 
-	return &Index{File: indexFile, Refs: refs}, nil
+	return refs, nil
 }
 
 // verifyHeaderChecksum verifies the checksum stored in the header
@@ -843,7 +867,7 @@ func (ms *MetaStore) createEmptyIndex() error {
 		return fmt.Errorf("failed to truncate file: %w", err)
 	}
 
-	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	data, err := unix.Mmap(int(file.Fd()), 0, totalSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	if err != nil {
 		return fmt.Errorf("failed to mmap file: %w", err)
 	}
@@ -854,9 +878,11 @@ func (ms *MetaStore) createEmptyIndex() error {
 		data[i] = 0
 	}
 
-	// Write header directly to mmap'd memory (zero-copy)
+	// Write header directly to mmap'd memory (zero-copy). The write version is
+	// owned by SetHeaderForWritableIndex (CurrentIndexVersion); baseFlags=0 and
+	// 0 &^ Clean == 0, so this is behaviour-equal to the prior SetHeader call.
 	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-	header.SetHeader(ms.signature, ms.version, 0, 0, ms.GetCurrentHashType()) // No flags for empty index
+	header.SetHeaderForWritableIndex(ms.signature, 0, 0, ms.GetCurrentHashType()) // No flags for empty index
 
 	// Calculate and store checksum (no entries for empty index)
 	ms.calculateAndStoreHeaderChecksum(header, nil, 0)
@@ -882,7 +908,7 @@ func getSystemIOVMax() int {
 		return fallbackIOVMax
 	}
 
-	iovMax := int(r1)
+	iovMax := int(r1) //nolint:gosec // G115: IOV_MAX syscall result, small positive
 
 	// Validate the result is reasonable, fall back if not
 	if iovMax <= 0 || iovMax > 1<<20 { // Sanity check: between 1 and 1M

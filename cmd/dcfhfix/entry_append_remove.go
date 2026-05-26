@@ -17,8 +17,8 @@ type EntryJSON struct {
 	Mode          uint32  `json:"mode"`
 	UID           uint32  `json:"uid"`
 	GID           uint32  `json:"gid"`
-	Dev           uint32  `json:"dev"`
-	Ino           *uint32 `json:"ino,omitempty"`
+	Dev           uint64  `json:"dev"`
+	Ino           *uint64 `json:"ino,omitempty"`
 	MTime         string  `json:"mtime"`
 	CTime         string  `json:"ctime"`
 	Hash          string  `json:"hash"`
@@ -210,7 +210,7 @@ func processAllEntriesForAppend(data []byte, tmpIndexFile string, entriesDiscard
 
 	for i := uint32(0); i < entryCount && offset < len(entryData); i++ {
 		// Try to get a validated entry from this offset
-		validatedEntry, err := NewValidatedEntry(entryData, int(i), offset)
+		validatedEntry, err := NewValidatedEntry(entryData, int(i), offset, header.Version)
 		if err != nil {
 			// Entry is corrupted - discard with warning
 			if !options.GetBool("quiet") {
@@ -224,7 +224,7 @@ func processAllEntriesForAppend(data []byte, tmpIndexFile string, entriesDiscard
 			}
 
 			// Try to skip to next entry
-			if !trySkipToNextEntry(entryData, &offset) {
+			if !trySkipToNextEntry(entryData, &offset, header.Version) {
 				break
 			}
 			continue
@@ -257,7 +257,7 @@ func processAllEntriesForRemoval(data []byte, pathSet map[string]bool, tmpIndexF
 
 	for i := uint32(0); i < entryCount && offset < len(entryData); i++ {
 		// Try to get a validated entry from this offset
-		validatedEntry, err := NewValidatedEntry(entryData, int(i), offset)
+		validatedEntry, err := NewValidatedEntry(entryData, int(i), offset, header.Version)
 		if err != nil {
 			// Entry is corrupted - discard with warning
 			if !options.GetBool("quiet") {
@@ -271,7 +271,7 @@ func processAllEntriesForRemoval(data []byte, pathSet map[string]bool, tmpIndexF
 			}
 
 			// Try to skip to next entry
-			if !trySkipToNextEntry(entryData, &offset) {
+			if !trySkipToNextEntry(entryData, &offset, header.Version) {
 				break
 			}
 			continue

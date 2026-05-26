@@ -19,17 +19,6 @@ import (
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
-// indexHeader represents the index file header structure
-type indexHeader struct {
-	Signature    [4]byte  // "dcfh" signature
-	ByteOrder    uint64   // Byte order detection magic (0x0102030405060708)
-	Version      uint32   // Index version (host order)
-	EntryCount   uint32   // Number of entries (host order)
-	Flags        uint16   // Index flags (host order)
-	ChecksumType uint16   // Checksum algorithm type
-	Checksum     [64]byte // Checksum of header+entries
-}
-
 func main() {
 	// Define global options using the same pattern as dcfh
 	options := NewParsedOptions()
@@ -504,7 +493,7 @@ func openIndexFile(filePath string) (*indexFileAccess, error) {
 	}
 
 	// Memory map the file
-	data, err := syscall.Mmap(int(file.Fd()), 0, int(stat.Size()), syscall.PROT_READ, syscall.MAP_PRIVATE)
+	data, err := syscall.Mmap(int(file.Fd()), 0, int(stat.Size()), syscall.PROT_READ, syscall.MAP_PRIVATE) //nolint:gosec // G115: file descriptor (uintptr) to int, bounded on 64-bit
 	if err != nil {
 		_ = file.Close()
 		return nil, fmt.Errorf("failed to mmap file: %v", err)

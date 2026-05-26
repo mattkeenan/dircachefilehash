@@ -105,7 +105,7 @@ func (ime *BEIndexFileMmapEntry) MTimeWall() (uint64, error) {
 }
 
 // Dev returns the device ID
-func (ime *BEIndexFileMmapEntry) Dev() (uint32, error) {
+func (ime *BEIndexFileMmapEntry) Dev() (uint64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
 
@@ -118,7 +118,7 @@ func (ime *BEIndexFileMmapEntry) Dev() (uint32, error) {
 }
 
 // Ino returns the inode number
-func (ime *BEIndexFileMmapEntry) Ino() (uint32, error) {
+func (ime *BEIndexFileMmapEntry) Ino() (uint64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
 

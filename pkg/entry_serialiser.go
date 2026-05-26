@@ -134,7 +134,7 @@ func serialiseFromInterface(entry BinaryEntryInterface) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	be.EntryFlags = uint16(flags)
+	be.EntryFlags = uint16(flags) //nolint:gosec // G115: entry flag bitset, only low bits defined (fits uint16)
 
 	relPath, err := entry.RelativePath()
 	if err != nil {

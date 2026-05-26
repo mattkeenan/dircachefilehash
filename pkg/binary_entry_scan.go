@@ -58,7 +58,7 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	entry := (*binaryEntry)(unsafe.Pointer(&binaryData[0]))
 
 	// Fill in metadata from file system scan
-	entry.Size = uint32(totalSize)
+	entry.Size = uint32(totalSize) //nolint:gosec // G115: totalSize = BESizeFromPathLen(path); bounded by path length, far below uint32 max
 
 	// Debug: Verify size was set correctly
 	if IsDebugEnabled("write") {
@@ -66,13 +66,13 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	}
 	entry.CTimeWall = encodeWallTime(statInfo.Ctim.Sec, statInfo.Ctim.Nsec)
 	entry.MTimeWall = encodeWallTime(statInfo.Mtim.Sec, statInfo.Mtim.Nsec)
-	entry.Dev = uint32(statInfo.Dev)
-	entry.Ino = uint32(statInfo.Ino)
+	entry.Dev = statInfo.Dev
+	entry.Ino = statInfo.Ino
 	entry.Mode = uint32(fileInfo.Mode())
 	entry.UID = statInfo.Uid
 	entry.GID = statInfo.Gid
-	entry.FileSize = uint64(fileInfo.Size())
-	entry.HashType = 0 // No hash type initially (lazy hashing)
+	entry.FileSize = uint64(fileInfo.Size()) //nolint:gosec // G115: file size, non-negative
+	entry.HashType = 0                       // No hash type initially (lazy hashing)
 	// entry.Hash remains zero-valued (no hash initially)
 	entry.EntryFlags = 0 // Not deleted initially
 
@@ -153,7 +153,7 @@ func (sbe *BEScanEntry) MTimeWall() (uint64, error) {
 }
 
 // Dev returns the device ID
-func (sbe *BEScanEntry) Dev() (uint32, error) {
+func (sbe *BEScanEntry) Dev() (uint64, error) {
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
@@ -163,7 +163,7 @@ func (sbe *BEScanEntry) Dev() (uint32, error) {
 }
 
 // Ino returns the inode number
-func (sbe *BEScanEntry) Ino() (uint32, error) {
+func (sbe *BEScanEntry) Ino() (uint64, error) {
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
