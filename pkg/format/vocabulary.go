@@ -28,7 +28,7 @@ type (
 	UserID     = uint32 // st_uid
 	GroupID    = uint32 // st_gid
 	WallTime   = uint64 // encoded wall-clock (see time_encoding.go in core)
-	ByteSize   = uint64 // file size in bytes
+	ByteSize   = int64  // file size in bytes (off_t-style signed; os.FileInfo.Size())
 	RecordSize = uint32 // an entry's own total on-disk size (incl. padding)
 	FlagBits   = uint16 // entry/index flag bitset
 	HashKind   = uint16 // hash algorithm identifier (HashTypeSHA1/256/512)

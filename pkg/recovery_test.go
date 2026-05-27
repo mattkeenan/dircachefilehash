@@ -112,11 +112,13 @@ func TestRecoveryValidationProcessor(t *testing.T) {
 	})
 
 	t.Run("ExcessiveFileSize", func(t *testing.T) {
-		// Create a copy with excessive file size
+		// Create a copy with excessive file size. (1<<62)+1 is just above the
+		// MaxFileSize ceiling (1<<62) and still fits a signed int64 — 1<<63
+		// would overflow int64 now that FileSize is signed.
 		largeSizeData := make([]byte, totalSize)
 		copy(largeSizeData, data)
 		largeSizeEntry := (*binaryEntry)(unsafe.Pointer(&largeSizeData[0]))
-		largeSizeEntry.FileSize = 1 << 63 // Very large size
+		largeSizeEntry.FileSize = (1 << 62) + 1 // Just over the 4-exabyte ceiling
 
 		shouldInclude, err := processor(largeSizeEntry, 0, "test.txt")
 		if err != nil {
@@ -124,6 +126,24 @@ func TestRecoveryValidationProcessor(t *testing.T) {
 		}
 		if shouldInclude {
 			t.Error("Entry with excessive file size should not be included")
+		}
+	})
+
+	t.Run("NegativeFileSize", func(t *testing.T) {
+		// A corrupt or over-2^63 legacy size reinterprets as a negative int64
+		// after the signedness flip; the validator must reject it fail-closed
+		// (SC3 corruption floor), not silently propagate it.
+		negSizeData := make([]byte, totalSize)
+		copy(negSizeData, data)
+		negSizeEntry := (*binaryEntry)(unsafe.Pointer(&negSizeData[0]))
+		negSizeEntry.FileSize = -1 // Negative = corrupt
+
+		shouldInclude, err := processor(negSizeEntry, 0, "test.txt")
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if shouldInclude {
+			t.Error("Entry with negative file size should not be included")
 		}
 	})
 }

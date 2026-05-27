@@ -26,8 +26,8 @@ import (
 // v1: they need the EntryInfo materialiser path and are dcfhfind-only.
 type FilterOptions struct {
 	// Inclusive size bounds.
-	MinSize *uint64 `json:"min_size,omitempty"`
-	MaxSize *uint64 `json:"max_size,omitempty"`
+	MinSize *int64 `json:"min_size,omitempty"`
+	MaxSize *int64 `json:"max_size,omitempty"`
 
 	// find-style strict size predicates: each "+N" / "-N" / "=N" with
 	// optional binary suffix K/M/G/T/c/w/b.
@@ -451,12 +451,12 @@ func parseSizeTestSpec(s string) (*SizeTest, error) {
 // ParseSizeBound parses N[K|M|G|T] into bytes (binary units). Unlike
 // parseSizeTestSpec the surface is intentionally narrower — no signs, no
 // floats — so --min-size/--max-size have one unambiguous meaning.
-func ParseSizeBound(s string) (uint64, error) {
+func ParseSizeBound(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("size bound is empty")
 	}
 	digits := s
-	mult := uint64(1)
+	mult := int64(1)
 	switch last := s[len(s)-1]; last {
 	case 'K', 'k':
 		digits, mult = s[:len(s)-1], 1024
@@ -474,12 +474,18 @@ func ParseSizeBound(s string) (uint64, error) {
 	if digits == "" {
 		return 0, fmt.Errorf("size bound %q has no digits", s)
 	}
-	n, err := strconv.ParseUint(digits, 10, 64)
+	// Reject a leading sign: the surface is unsigned-magnitude by contract
+	// (see doc comment). strconv.ParseInt would otherwise accept "+1"/"-1",
+	// which strconv.ParseUint rejected before the int64 flip.
+	if digits[0] == '+' || digits[0] == '-' {
+		return 0, fmt.Errorf("size bound %q must not have a sign", s)
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid size %q: %w", s, err)
 	}
-	if mult > 1 && n > math.MaxUint64/mult {
-		return 0, fmt.Errorf("size %q overflows uint64", s)
+	if mult > 1 && n > math.MaxInt64/mult {
+		return 0, fmt.Errorf("size %q overflows int64", s)
 	}
 	return n * mult, nil
 }
@@ -641,8 +647,8 @@ func ResolveDates(start, end, tz string) (startT, endT time.Time, err error) {
 // SizeBoundString renders u as a human-readable size with binary suffix,
 // matching the syntax accepted by ParseSizeBound. Used by error messages
 // and the FilterOptions String form below.
-func SizeBoundString(u uint64) string {
-	const k = uint64(1024)
+func SizeBoundString(u int64) string {
+	const k = int64(1024)
 	switch {
 	case u >= k*k*k*k && u%(k*k*k*k) == 0:
 		return fmt.Sprintf("%dT", u/(k*k*k*k))
@@ -653,7 +659,7 @@ func SizeBoundString(u uint64) string {
 	case u >= k && u%k == 0:
 		return fmt.Sprintf("%dK", u/k)
 	default:
-		return strconv.FormatUint(u, 10)
+		return strconv.FormatInt(u, 10)
 	}
 }
 

@@ -259,7 +259,7 @@ func setupDupesRepoSized(t *testing.T, files map[string]sizedFile, extraLinks ..
 	return ms
 }
 
-func u64(v uint64) *uint64 { return &v }
+func u64(v int64) *int64 { return &v }
 
 // mustFilter is a test helper: build a FilterExpr from FilterOptions or
 // fail loudly. Lets DupeFilter literals stay compact in the size/date

@@ -14,7 +14,7 @@ const goldenV3 = "format/testdata/v3.idx"
 // content field decodes correctly, via BOTH entry-walk loaders.
 func TestLegacyLoad_V3_RoutesThroughHeapTranscode(t *testing.T) {
 	wantPaths := []string{"file1.txt", "file2.txt", "sub/file3.txt"}
-	wantSizes := []uint64{6, 5, 6}
+	wantSizes := []int64{6, 5, 6}
 
 	t.Run("tracking_loader", func(t *testing.T) {
 		idx, err := trackingMetaStore().loadIndexFromFileWithTracking(goldenV3)

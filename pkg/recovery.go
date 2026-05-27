@@ -71,7 +71,7 @@ type ValidationConfig struct {
 	Verbosity          int
 	ContinueOnError    bool
 	MaxPathLength      int
-	MaxFileSize        uint64
+	MaxFileSize        int64
 	MinYear            int
 	MaxYearOffset      int    // Years from now
 	RootDir            string // Root directory for file path resolution
@@ -236,6 +236,20 @@ func validateEntryStructure(entry *binaryEntry, entryIndex uint32) error {
 }
 
 // validateEntryLogical performs data reasonableness validation (recovery-style)
+// validateFileSizeBounds rejects a corrupt on-disk file size: negative (a
+// corrupt or over-2^63 legacy field reinterpreted as signed int64 after the
+// FileSize signedness flip) or above the configured ceiling. Fail-closed,
+// mirroring the pre-1885 wall-time underflow guard (SC3).
+func validateFileSizeBounds(fileSize, maxFileSize int64) error {
+	if fileSize < 0 {
+		return fmt.Errorf("file size %d is negative (corrupt)", fileSize)
+	}
+	if fileSize > maxFileSize {
+		return fmt.Errorf("file size %d exceeds maximum %d", fileSize, maxFileSize)
+	}
+	return nil
+}
+
 func validateEntryLogical(entry *binaryEntry, config ValidationConfig) error {
 	// Basic nil check
 	if entry == nil {
@@ -252,9 +266,9 @@ func validateEntryLogical(entry *binaryEntry, config ValidationConfig) error {
 		return fmt.Errorf("path length %d exceeds maximum %d", len(path), config.MaxPathLength)
 	}
 
-	// File size validation
-	if entry.FileSize > config.MaxFileSize {
-		return fmt.Errorf("file size %d exceeds maximum %d", entry.FileSize, config.MaxFileSize)
+	// File size validation (negative = corrupt; over-ceiling = unreasonable).
+	if err := validateFileSizeBounds(entry.FileSize, config.MaxFileSize); err != nil {
+		return err
 	}
 
 	// Hash validation

@@ -29,7 +29,7 @@ type TestEntryData struct {
 	Mode         uint32
 	UID          uint32
 	GID          uint32
-	FileSize     uint64
+	FileSize     int64
 
 	// Hash data
 	HashType uint16

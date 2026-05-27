@@ -79,7 +79,7 @@ func TestNormaliseDupePaths(t *testing.T) {
 // MinSizeTest leaf (size and time predicates AND together at the top of
 // the BuildFilter output, so a left-first descent suffices for these
 // tests). Used by the FS-dedupe injection assertions below.
-func extractMinSize(pred dcfh.FilterExpr) *uint64 {
+func extractMinSize(pred dcfh.FilterExpr) *int64 {
 	switch p := pred.(type) {
 	case nil:
 		return nil
@@ -127,7 +127,7 @@ func TestBuildDupeFilter_FSDedupeRespectsUserMinSize(t *testing.T) {
 	// Simulate `--fs-dedupe --min-size 8K`. A user who explicitly
 	// sets --min-size wins over the dedupe default — buildDupeFilter
 	// must NOT inject the 4096 floor.
-	user := uint64(8192)
+	user := int64(8192)
 	prints := []dcfh.FilterOptions{{MinSize: &user}}
 	f, err := buildDupeFilter(dupesState(true, false), prints, nil, nil, false)
 	if err != nil {

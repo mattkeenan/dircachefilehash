@@ -94,7 +94,7 @@ func TestScanFilterEntryUnavailableData(t *testing.T) {
 		t.Errorf("hash predicate at scan-time must not match (data unavailable)")
 	}
 
-	min := uint64(1024)
+	min := int64(1024)
 	sizeExpr, err := BuildScanIgnore([]FilterOptions{{MinSize: &min}})
 	if err != nil {
 		t.Fatalf("BuildScanIgnore: %v", err)

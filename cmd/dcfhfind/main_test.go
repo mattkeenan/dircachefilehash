@@ -12,7 +12,7 @@ import (
 )
 
 // Test helper to create mock entry
-func createMockEntry(path string, size uint64, deleted bool) *dircachefilehash.EntryInfo {
+func createMockEntry(path string, size int64, deleted bool) *dircachefilehash.EntryInfo {
 	return &dircachefilehash.EntryInfo{
 		Path:      path,
 		IsDeleted: deleted,

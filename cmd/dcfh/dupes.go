@@ -26,7 +26,7 @@ const (
 	// dedupeDefaultMinSize: with --fs-dedupe set, filter out files
 	// smaller than one block since dedup can reclaim nothing — they
 	// already occupy a single (minimum) extent.
-	dedupeDefaultMinSize uint64 = 4096
+	dedupeDefaultMinSize int64 = 4096
 )
 
 var dupesCmd = &cobra.Command{

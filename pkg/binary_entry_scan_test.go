@@ -27,7 +27,7 @@ func createBEScan(t *testing.T, testData *TestEntryData) BinaryEntryInterface {
 
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
-		size:    int64(testData.FileSize),
+		size:    testData.FileSize,
 		mode:    os.FileMode(testData.Mode),
 		modTime: time.Unix(1234567900, 0),
 	}
@@ -203,7 +203,7 @@ func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
 
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
-		size:    int64(testData.FileSize),
+		size:    testData.FileSize,
 		mode:    os.FileMode(testData.Mode),
 		modTime: time.Unix(1234567900, 0),
 	}

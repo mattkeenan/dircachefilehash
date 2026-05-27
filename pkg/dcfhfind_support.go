@@ -13,7 +13,7 @@ import (
 type EntryInfo struct {
 	Path      string
 	IsDeleted bool
-	FileSize  uint64
+	FileSize  int64
 	Mode      uint32
 	UID       uint32
 	GID       uint32
@@ -34,7 +34,7 @@ type entryInfoAdapter struct{ e *EntryInfo }
 func (e *EntryInfo) AsFilterEntry() FilterEntry { return entryInfoAdapter{e} }
 
 func (a entryInfoAdapter) RelativePath() (string, error) { return a.e.Path, nil }
-func (a entryInfoAdapter) FileSize() (uint64, error)     { return a.e.FileSize, nil }
+func (a entryInfoAdapter) FileSize() (int64, error)      { return a.e.FileSize, nil }
 func (a entryInfoAdapter) Mode() (uint32, error)         { return a.e.Mode, nil }
 func (a entryInfoAdapter) UID() (uint32, error)          { return a.e.UID, nil }
 func (a entryInfoAdapter) GID() (uint32, error)          { return a.e.GID, nil }
@@ -247,8 +247,9 @@ func ValidateEntryInfo(entry *EntryInfo, repoPath string) (bool, error) {
 		}
 	}
 
-	// Validate file size is reasonable (less than 4 exabytes)
-	if entry.FileSize > (1 << 62) {
+	// Validate file size is reasonable: non-negative (a negative size is a
+	// corrupt/over-2^63 legacy field reinterpreted as signed) and below 4 exabytes.
+	if entry.FileSize < 0 || entry.FileSize > (1<<62) {
 		return false, nil
 	}
 
@@ -298,8 +299,9 @@ func DetectEntryCorruption(entry *EntryInfo) (bool, []string) {
 		issues = append(issues, fmt.Sprintf("invalid hash type: %d", entry.HashType))
 	}
 
-	// Check for unreasonable file size (>4 exabytes)
-	if entry.FileSize > (1 << 62) {
+	// Check for unreasonable file size: negative (corrupt/over-2^63 legacy field
+	// read back as signed) or >4 exabytes.
+	if entry.FileSize < 0 || entry.FileSize > (1<<62) {
 		issues = append(issues, fmt.Sprintf("unreasonable file size: %d bytes", entry.FileSize))
 	}
 

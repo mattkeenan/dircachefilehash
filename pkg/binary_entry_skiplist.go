@@ -166,7 +166,7 @@ func (sle *BESkiplistEntry) GID() (uint32, error) {
 }
 
 // FileSize returns the file size in bytes
-func (sle *BESkiplistEntry) FileSize() (uint64, error) {
+func (sle *BESkiplistEntry) FileSize() (int64, error) {
 	sle.RLock()
 	defer sle.RUnlock()
 

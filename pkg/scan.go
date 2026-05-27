@@ -255,11 +255,11 @@ func (e *scanFilterEntry) IsDeleted() (bool, error)      { return false, nil }
 func (e *scanFilterEntry) HashType() (uint16, error)     { return 0, errScanFilterUnavailable }
 func (e *scanFilterEntry) HashString() (string, error)   { return "", errScanFilterUnavailable }
 
-func (e *scanFilterEntry) FileSize() (uint64, error) {
+func (e *scanFilterEntry) FileSize() (int64, error) {
 	if e.info == nil {
 		return 0, errScanFilterUnavailable
 	}
-	return uint64(e.info.Size()), nil //nolint:gosec // G115: file size, non-negative
+	return e.info.Size(), nil
 }
 
 func (e *scanFilterEntry) Mode() (uint32, error) {

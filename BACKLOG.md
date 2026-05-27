@@ -241,36 +241,6 @@ Sequencing: do this after the current Task 3 line of work lands. Upgrading
 mid-task swaps the workflow tooling in use (including the retrospective and
 security-review helpers).
 
-## Task: Move FileSize/ByteSize to int64 in v4 + core (subtask 3.4)
-
-### Task-Type: chore
-### Priority: Medium
-### Identified in: Task 3.3 retrospective
-
-Move `FileSize`/`ByteSize` from `uint64` to `int64` in the v4 entry layout
-**and** in the core code, to match `off_t`-style signed sizing and remove
-the uint64-vs-signed friction that drives several gosec G115 suppressions
-added in Task 3.3.
-
-Why: `os.FileInfo.Size()` returns `int64`; every bridge to the unsigned
-on-disk `ByteSize` is a gosec-flagged conversion. Making the core type
-`int64` lets the signed↔unsigned conversion be **ring-fenced inside the
-v2/v3 transcoder** (where legacy bytes are read), retiring ~6 of the 55
-G115 suppressions Task 3.3 added.
-
-Scope when picked up (promote to subtask 3.4 via `/cwf-new-subtask 3 3.4`):
-- Change `ByteSize`/`FileSize` to `int64` in `pkg/format` and propagate
-  through accessors, consumers, and the writer.
-- On-disk-compatible: v4 already allocates 8 bytes for FileSize; this is a
-  signedness reinterpretation, NOT a format bump (`CurrentIndexVersion`
-  stays 4).
-- Ring-fence the uint32→int64 widen in the v2/v3 transcoder
-  (`transcode.go`) so legacy reads stay correct.
-- Remove the now-unnecessary G115 suppressions on the FileSize/ByteSize
-  bridges; confirm `golangci-lint run ./...` stays clean.
-
-Identified in: Task 3.3 retrospective (j-retrospective.md).
-
 ## Task: Remove stale tracked root debris cache.idx and cache-2.idx
 
 ### Task-Type: chore

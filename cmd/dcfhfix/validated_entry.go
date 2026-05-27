@@ -149,7 +149,7 @@ func (ve *ValidatedEntry) ApplyFieldFix(field, value string) (*ValidatedEntry, e
 		}
 		fixed.GID = val
 	case "file_size":
-		val, err := parseUint64(value)
+		val, err := parseInt64(value)
 		if err != nil {
 			return nil, err
 		}

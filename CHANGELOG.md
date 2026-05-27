@@ -4,6 +4,25 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 4: Move FileSize/ByteSize to int64 in v4 and core
+
+### Status: Complete (completed 2026-05-27, ~0.5 day — within the 0.5–1 day estimate)
+
+### Impact: `os.FileInfo.Size()` is `int64`, but the on-disk `ByteSize` was `uint64`, so every bridge between them was a gosec-G115-flagged signed↔unsigned conversion. Task 3.3 had annotated 7 of these on the `FileSize`/`.Size()` path. This task reinterprets the on-disk size field as signed `int64` throughout `pkg/format` and core, retiring those 7 suppressions **by removing the conversions** rather than re-suppressing. It is a signedness reinterpretation of an already-8-byte field — **not** a format bump: `CurrentIndexVersion` stays 4 and v4 indices round-trip byte-identical.
+
+### Changes
+- **`pkg/format/vocabulary.go`**: `ByteSize` alias `uint64`→`int64` (the single load-bearing edit). The `Entry`/v2/v3/v4 struct fields, codec `Get/SetFileSize`, and `transcode.go` follow transparently via the alias.
+- **Interfaces + 7 implementors** retyped to `int64`: `BinaryEntryInterface.FileSize`, `FilterEntry.FileSize`, and their `binaryEntryAdapter`/`entryInfoAdapter`/`scanFilterEntry`/`BEScanEntry`/`BESkiplistEntry`/`BEIndexFileMmapEntry`/`mockBinaryEntry` implementations. `needsHash` compares FileSize inline as `int64` (pulled out of the `uint64`-typed field slice) to avoid re-introducing a conversion.
+- **Signed size-threshold plumbing**: `ParseSizeBound`→`int64` (with an explicit leading-sign guard preserving the unsigned-magnitude grammar `ParseUint` enforced), `SizeBoundString`, `FilterOptions.MinSize/MaxSize`, `MinSizeTest.Min`, `MaxSizeTest.Max`, `FindOptions.ExactSize`, `dedupeDefaultMinSize`. `EntryInfo`/`EntryJSON` `FileSize`, `ValidationConfig.MaxFileSize`, and the dcfhfix repair parse (`parseInt64`) all signed end-to-end.
+- **Corruption floor (SC3)**: a negative `FileSize` (the only value the signed reinterpret can newly produce, from a corrupt/≥2⁶³ legacy field) is rejected fail-closed by `validateFileSizeBounds` (recovery.go) and the dcfhfind corruption checks — mirroring the pre-1885 wall-time underflow guard.
+- **7 size G115 suppressions retired** (binary_entry_scan:74, scan:262, filter SizeTest, comparison_sink ×3, metastore) by deleting the cast. `golangci-lint run ./...` reports **0 G115** whole-tree; the `--new` staged gate is clean.
+
+### Notable
+- All four success criteria verified (g-testing-exec.md): SC1 v4 byte-identical + large-positive round-trip, SC2 0 G115 whole-tree + `--new` clean + the 7 lines suppression-free, SC3 legacy decode unchanged + negative-size fail-closed, SC4 full suite + race green. 0 escaped defects.
+- `fsdedupe` byte totals (`BytesReclaimed`/…, `fileTarget.size`) and the dupes.go formatting casts are a **distinct `uint64` type** with its own JSON contract — deliberately out of scope (3 suppressions retained there), recorded not deferred.
+- The four-reviewer implementation-plan pass converted a "looks like one line" change into a correctly-counted 27-file compiler-driven ripple before exec; the two in-flight additions (`ParseSizeBound` sign guard, `validateFileSizeBounds` cyclop extraction) were second-order interactions only the build/lint gate surfaces.
+- Closes the **Medium** BACKLOG item "Move FileSize/ByteSize to int64 in v4 + core" (carried the stale "subtask 3.4" naming; landed as top-level Task 4).
+
 ## Task 3: Fix inode/device truncation and re-enable gosec G115
 
 ### Status: Complete (parent task; completed 2026-05-26 — ~4 calendar days across 3 subtasks vs a ~1.5–2 week single-task estimate)

@@ -13,7 +13,7 @@ import (
 type EntryJSON struct {
 	Path          string  `json:"path"`
 	FlagIsDeleted bool    `json:"flag_is_deleted"`
-	FileSize      uint64  `json:"file_size"`
+	FileSize      int64   `json:"file_size"`
 	Mode          uint32  `json:"mode"`
 	UID           uint32  `json:"uid"`
 	GID           uint32  `json:"gid"`

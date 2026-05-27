@@ -145,6 +145,25 @@ func TestRoundTrip_V4_ByteIdentical(t *testing.T) {
 	}
 }
 
+// TC-2 (SC1): a large positive FileSize near the supported ceiling round-trips
+// through the codec exactly — no truncation, no sign flip — confirming the
+// uint64->int64 reinterpretation preserves every positive value the field can
+// legitimately hold. 0x0FFFFFFFFFFFFFFF is well under MaxFileSize (1<<62).
+func TestRoundTrip_V4_LargePositiveFileSize(t *testing.T) {
+	const want ByteSize = 0x0FFFFFFFFFFFFFFF
+	idx := layIndex(CurrentIndexVersion, layEntry("big/file.bin", 0x1, 0x2))
+	offset := HeaderSizeForVersion(CurrentIndexVersion)
+
+	se, err := NewSafeEntry(idx, 0, offset, CurrentIndexVersion)
+	if err != nil {
+		t.Fatalf("NewSafeEntry: %v", err)
+	}
+	mustSet(t, se.SetFileSize(want))
+	if got, err := se.GetFileSize(); err != nil || got != want {
+		t.Fatalf("GetFileSize after SetFileSize(%#x) = %#x, %v; want %#x", want, got, err, want)
+	}
+}
+
 // Parse-offset / header-size check (NOT a round-trip — v2 is never written).
 // Legacy (v2) entry data sits at V2HeaderSize (88), v3+ at HeaderSize (104).
 // Reading a v2 index with the legacy layout at offset 88 decodes; at the stray

@@ -152,7 +152,7 @@ func (ms *MetaStore) Stats() (int, int64, error) {
 
 	skiplist.ForEach(func(entry *binaryEntry, context string) bool {
 		if !entry.IsDeleted() {
-			totalSize += int64(entry.FileSize) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
+			totalSize += entry.FileSize
 			count++
 		}
 		return true // Continue iteration

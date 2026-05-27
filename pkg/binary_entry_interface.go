@@ -41,7 +41,7 @@ type BinaryEntryInterface interface {
 	Mode() (uint32, error)
 	UID() (uint32, error)
 	GID() (uint32, error)
-	FileSize() (uint64, error)
+	FileSize() (int64, error)
 	HashType() (uint16, error)
 	Hash() ([20]byte, error)
 	EntryFlags() (uint32, error)
@@ -263,8 +263,20 @@ func needsHash(existingEntry, scannedEntry BinaryEntryInterface) bool {
 		return true
 	}
 
+	// FileSize is int64 (signed, off_t-style); compare it directly rather than
+	// folding it into the uint64-typed slice below — an int64->uint64 round-trip
+	// would re-introduce the very G115 conversion this task removes. The loop is
+	// equality-only, so an inline check is equivalent.
+	ef, err := existingEntry.FileSize()
+	if err != nil {
+		return true
+	}
+	sf, err := scannedEntry.FileSize()
+	if err != nil || ef != sf {
+		return true
+	}
+
 	fields := []func(BinaryEntryInterface) (uint64, error){
-		func(e BinaryEntryInterface) (uint64, error) { return e.FileSize() },
 		func(e BinaryEntryInterface) (uint64, error) { v, err := e.UID(); return uint64(v), err },
 		func(e BinaryEntryInterface) (uint64, error) { v, err := e.GID(); return uint64(v), err },
 		func(e BinaryEntryInterface) (uint64, error) { v, err := e.Mode(); return uint64(v), err },

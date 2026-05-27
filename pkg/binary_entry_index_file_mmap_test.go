@@ -48,7 +48,7 @@ func createBEIndexFileMmap(t *testing.T, testData *TestEntryData) BinaryEntryInt
 
 	mockInfo := &mockFileInfo{
 		name:    "test_file.txt",
-		size:    int64(testData.FileSize),
+		size:    testData.FileSize,
 		mode:    os.FileMode(testData.Mode),
 		modTime: time.Unix(1234567900, 0),
 	}

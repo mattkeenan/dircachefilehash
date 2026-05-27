@@ -170,7 +170,7 @@ func (ime *BEIndexFileMmapEntry) GID() (uint32, error) {
 }
 
 // FileSize returns the file size in bytes
-func (ime *BEIndexFileMmapEntry) FileSize() (uint64, error) {
+func (ime *BEIndexFileMmapEntry) FileSize() (int64, error) {
 	ime.RLock()
 	defer ime.RUnlock()
 

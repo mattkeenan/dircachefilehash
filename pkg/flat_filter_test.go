@@ -9,9 +9,9 @@ import (
 func TestMinMaxSizeTest(t *testing.T) {
 	cases := []struct {
 		name string
-		size uint64
-		min  uint64
-		max  uint64
+		size int64
+		min  int64
+		max  int64
 		ok   bool
 		test FilterExpr
 	}{
@@ -82,7 +82,7 @@ func TestBuildFilterEmpty(t *testing.T) {
 }
 
 func TestBuildFilterAndAcrossKinds(t *testing.T) {
-	min := uint64(1024)
+	min := int64(1024)
 	expr, err := BuildFilter(FilterOptions{
 		MinSize: &min,
 		Names:   []string{"*.go"},
@@ -135,8 +135,8 @@ func TestBuildFilterOrWithinKind(t *testing.T) {
 }
 
 func TestBuildFilterMinExceedsMax(t *testing.T) {
-	min := uint64(2048)
-	max := uint64(1024)
+	min := int64(2048)
+	max := int64(1024)
 	_, err := BuildFilter(FilterOptions{MinSize: &min, MaxSize: &max})
 	if err == nil {
 		t.Fatal("expected error when min > max")
@@ -215,7 +215,7 @@ func TestParseSizeTestSpec(t *testing.T) {
 
 func TestSizeBoundString(t *testing.T) {
 	cases := []struct {
-		in   uint64
+		in   int64
 		want string
 	}{
 		{0, "0"},
@@ -236,7 +236,7 @@ func TestSizeBoundString(t *testing.T) {
 func TestParseSizeBound(t *testing.T) {
 	tests := []struct {
 		in      string
-		want    uint64
+		want    int64
 		wantErr bool
 	}{
 		{in: "0", want: 0},
@@ -404,7 +404,7 @@ func TestResolveDates(t *testing.T) {
 }
 
 func TestBuildPrintIgnoreTree(t *testing.T) {
-	eval := func(t *testing.T, expr FilterExpr, path string, size uint64) bool {
+	eval := func(t *testing.T, expr FilterExpr, path string, size int64) bool {
 		t.Helper()
 		if expr == nil {
 			return true // identity
@@ -473,7 +473,7 @@ func TestBuildPrintIgnoreTree(t *testing.T) {
 	})
 
 	t.Run("multi-print: AND across segments", func(t *testing.T) {
-		min := uint64(1024)
+		min := int64(1024)
 		expr, err := BuildPrintIgnoreTree(
 			[]FilterOptions{
 				{Names: []string{"*.go"}},
@@ -537,8 +537,8 @@ func TestBuildPrintIgnoreTree(t *testing.T) {
 	})
 
 	t.Run("bad flag inside a print segment is tagged with kind+index", func(t *testing.T) {
-		min := uint64(2048)
-		max := uint64(1024)
+		min := int64(2048)
+		max := int64(1024)
 		_, err := BuildPrintIgnoreTree(
 			[]FilterOptions{{}, {MinSize: &min, MaxSize: &max}},
 			nil,

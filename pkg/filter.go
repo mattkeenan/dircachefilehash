@@ -18,7 +18,7 @@ import (
 // one-pointer wrappers, no heap traffic.
 type FilterEntry interface {
 	RelativePath() (string, error)
-	FileSize() (uint64, error)
+	FileSize() (int64, error)
 	Mode() (uint32, error)
 	UID() (uint32, error)
 	GID() (uint32, error)
@@ -106,7 +106,7 @@ type binaryEntryAdapter struct{ e *binaryEntry }
 func asFilterEntry(be *binaryEntry) FilterEntry { return binaryEntryAdapter{be} }
 
 func (a binaryEntryAdapter) RelativePath() (string, error) { return a.e.RelativePath(), nil }
-func (a binaryEntryAdapter) FileSize() (uint64, error)     { return a.e.FileSize, nil }
+func (a binaryEntryAdapter) FileSize() (int64, error)      { return a.e.FileSize, nil }
 func (a binaryEntryAdapter) Mode() (uint32, error)         { return a.e.Mode, nil }
 func (a binaryEntryAdapter) UID() (uint32, error)          { return a.e.UID, nil }
 func (a binaryEntryAdapter) GID() (uint32, error)          { return a.e.GID, nil }
@@ -248,14 +248,16 @@ func (t *SizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	size := int64(fs) //nolint:gosec // G115: file size, bounded by storage size (<< int64 max)
+	// fs is a validated non-negative size (os.FileInfo.Size() or a legacy
+	// uint64 < 2^63; the recovery validator rejects negatives upstream), so the
+	// signed comparison below carries no sign-flip hazard. SizeTest.Size is int64.
 	switch t.Mode {
 	case "+":
-		return size > t.Size, nil
+		return fs > t.Size, nil
 	case "-":
-		return size < t.Size, nil
+		return fs < t.Size, nil
 	case "=":
-		return size == t.Size, nil
+		return fs == t.Size, nil
 	default:
 		return false, fmt.Errorf("invalid size mode: %s", t.Mode)
 	}
@@ -269,7 +271,7 @@ func (t *SizeTest) String() string {
 // Companion to SizeTest — the latter is strict find-style (>, <, =), this
 // is the inclusive form used by the flat --min-size flag.
 type MinSizeTest struct {
-	Min uint64
+	Min int64
 }
 
 func (t *MinSizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
@@ -277,6 +279,7 @@ func (t *MinSizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error
 	if err != nil {
 		return false, err
 	}
+	// fs is a validated non-negative size (see SizeTest.Evaluate).
 	return fs >= t.Min, nil
 }
 
@@ -284,7 +287,7 @@ func (t *MinSizeTest) String() string { return fmt.Sprintf("--min-size %d", t.Mi
 
 // MaxSizeTest matches files with FileSize <= Max (inclusive).
 type MaxSizeTest struct {
-	Max uint64
+	Max int64
 }
 
 func (t *MaxSizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error) {
@@ -292,6 +295,7 @@ func (t *MaxSizeTest) Evaluate(entry FilterEntry, _ *FilterContext) (bool, error
 	if err != nil {
 		return false, err
 	}
+	// fs is a validated non-negative size (see SizeTest.Evaluate).
 	return fs <= t.Max, nil
 }
 

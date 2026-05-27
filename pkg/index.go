@@ -508,12 +508,12 @@ func VerboseEntryProcessor() EntryProcessor {
 
 // SearchEntryProcessor returns a processor that searches for matching entries
 type SearchOptions struct {
-	Pattern     string  // Filename pattern (glob)
-	PathPrefix  string  // Path prefix filter
-	HashPrefix  string  // Hash prefix filter
-	ExactSize   *uint64 // Exact file size filter
-	ShowDeleted bool    // Show only deleted entries
-	SearchCount *int    // Pointer to counter for matches
+	Pattern     string // Filename pattern (glob)
+	PathPrefix  string // Path prefix filter
+	HashPrefix  string // Hash prefix filter
+	ExactSize   *int64 // Exact file size filter
+	ShowDeleted bool   // Show only deleted entries
+	SearchCount *int   // Pointer to counter for matches
 }
 
 func SearchEntryProcessor(opts SearchOptions) EntryProcessor {

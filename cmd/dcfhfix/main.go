@@ -712,7 +712,7 @@ var entryFieldValidators = map[string]func(value string) error{
 	"uid":             func(v string) error { _, err := parseUint32(v); return errWrap("uid", err) },
 	"gid":             func(v string) error { _, err := parseUint32(v); return errWrap("gid", err) },
 	"mode":            func(v string) error { _, err := parseUint32(v); return errWrap("mode", err) },
-	"file_size":       func(v string) error { _, err := parseUint64(v); return errWrap("file_size", err) },
+	"file_size":       func(v string) error { _, err := parseInt64(v); return errWrap("file_size", err) },
 	"hash_type":       func(v string) error { _, err := parseUint16(v); return errWrap("hash_type", err) },
 	"hash":            func(v string) error { _, err := parseHashValue(v); return errWrap("hash", err) },
 	"flag_is_deleted": func(v string) error { _, err := parseBoolValue(v); return errWrap("flag_is_deleted", err) },
@@ -1282,20 +1282,22 @@ func parseUint32(value string) (uint32, error) {
 	return uint32(val), err
 }
 
-// parseUint64 parses a string value as uint64 with support for hex/octal/decimal
-func parseUint64(value string) (uint64, error) {
+// parseInt64 parses a string value as int64 with support for hex/octal/decimal.
+// Used for file_size, which is a signed int64 (off_t-style) on disk; parsing
+// signed end-to-end avoids a uint64->int64 narrowing conversion.
+func parseInt64(value string) (int64, error) {
 	// Handle hex values (with or without 0x prefix)
 	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
-		val, err := strconv.ParseUint(value[2:], 16, 64)
+		val, err := strconv.ParseInt(value[2:], 16, 64)
 		return val, err
 	}
 	// Handle octal values (with 0 prefix)
 	if strings.HasPrefix(value, "0") && len(value) > 1 {
-		val, err := strconv.ParseUint(value, 8, 64)
+		val, err := strconv.ParseInt(value, 8, 64)
 		return val, err
 	}
 	// Handle decimal values
-	val, err := strconv.ParseUint(value, 10, 64)
+	val, err := strconv.ParseInt(value, 10, 64)
 	return val, err
 }
 

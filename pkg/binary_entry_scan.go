@@ -71,8 +71,8 @@ func NewBEScanEntry(relPath string, fileInfo os.FileInfo, statInfo *syscall.Stat
 	entry.Mode = uint32(fileInfo.Mode())
 	entry.UID = statInfo.Uid
 	entry.GID = statInfo.Gid
-	entry.FileSize = uint64(fileInfo.Size()) //nolint:gosec // G115: file size, non-negative
-	entry.HashType = 0                       // No hash type initially (lazy hashing)
+	entry.FileSize = fileInfo.Size()
+	entry.HashType = 0 // No hash type initially (lazy hashing)
 	// entry.Hash remains zero-valued (no hash initially)
 	entry.EntryFlags = 0 // Not deleted initially
 
@@ -203,7 +203,7 @@ func (sbe *BEScanEntry) GID() (uint32, error) {
 }
 
 // FileSize returns the file size in bytes
-func (sbe *BEScanEntry) FileSize() (uint64, error) {
+func (sbe *BEScanEntry) FileSize() (int64, error) {
 	entry, err := sbe.getBinaryEntry()
 	if err != nil {
 		return 0, err
