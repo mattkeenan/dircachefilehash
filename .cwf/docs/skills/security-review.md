@@ -29,7 +29,7 @@ The helper resolves its diff anchor in two steps. The success path: read the rec
 
 The helper's classification rules over the resulting changed-files list are:
 
-1. **CWF-internal coverage (unconditional include)**: paths under `.cwf/scripts/`, `.cwf/lib/`, `.cwf/docs/skills/`, `.cwf/templates/`, `.claude/scripts/`, `.claude/skills/`, `.claude/hooks/`, `.claude/rules/`, plus the exact files `.claude/settings.json`, `.claude/settings.local.json`, `implementation-guide/cwf-project.json`. Reviewed regardless of file type — markdown skills/rules carry instructions interpreted by Claude.
+1. **CWF-internal coverage (unconditional include)**: paths under `.cwf/scripts/`, `.cwf/lib/`, `.cwf/docs/skills/`, `.cwf/templates/`, `.claude/scripts/`, `.claude/skills/`, `.claude/agents/`, `.claude/hooks/`, `.claude/rules/`, plus the exact files `.claude/settings.json`, `.claude/settings.local.json`, `implementation-guide/cwf-project.json`. Reviewed regardless of file type — markdown skills/rules carry instructions interpreted by Claude.
 2. **Shebang sniff (conditional include)**: any path *outside* (1) is included only if its first line begins with `#!` and the interpreter basename matches the anchored regex `^(?:perl|bash|sh|ksh|zsh|fish|python\d?|ruby|node|deno|php|lua|pwsh|powershell)$`. Symlinks and non-regular files (FIFOs, sockets, devices) are skipped to avoid following arbitrary targets and to defend against DoS-shaped diff entries.
 3. **Default exclude**: anything else.
 
@@ -43,6 +43,14 @@ The helper's classification rules over the resulting changed-files list are:
 - UTF-8 BOM-prefixed shebangs (vanishingly rare on POSIX) are missed.
 
 If a user rebases their task branch onto a newer trunk mid-task, the recorded baseline names the old fork point and the diff over-includes trunk drift. Mid-task rebase is not a CWF workflow (tasks land via squash + `git branch -f`); accepting this trade-off keeps the design simple.
+
+### Production-weighted review cap
+
+The full changeset is always emitted to the subagent. Independently, both exec SKILLs pass `--max-lines=500` so the helper enforces a review cap on a **production-weighted** line count rather than the raw diff. The production count is the sum of added+deleted lines (`git diff --numstat`) over the included files, **minus** any path matching a `security.review.test-paths` glob. Those patterns are gitignore/git pathspec globs declared in `cwf-project.json`; git's own `:(glob,exclude)` engine does the matching — the helper performs no path classification of its own and the count excludes diff context/hunk-header lines by construction.
+
+Contract: when the production count exceeds the cap the helper exits `2` (the full diff has already been printed to stdout, so a manual reviewer can still see it); the exec SKILL records `**State**: error` with the helper's `cap exceeded:` reason and does not invoke the subagent. Exit `1` (any construction failure, including a malformed `test-paths` pattern git rejects) is likewise surfaced as `error` — never silently read as an empty "no findings" changeset.
+
+Fail-safe direction and limitation: `security.review.test-paths` defaults unset, so with no configuration there is no discount and the cap measures raw production lines (no regression for any repo). Any layout that is unconfigured or unmatched counts as *production* — the cap fires earlier, never later. Directory-based test layouts (e.g. `t/**`, `tests/**`) are covered cleanly; co-located suffix conventions (`**/*_test.go`, `**/*.spec.ts`) are expressible as globs but not exhaustively pursued. An uncovered test file is a *coverage* gap (counts as production), never an *unsafe* one. The helper (`.cwf/scripts/command-helpers/security-review-changeset`) is the source of truth for this count.
 
 ## Threat categories
 
@@ -122,7 +130,7 @@ The plan-review.md criteria-lookup table gains a `Security` column. Each cell is
 ## Exec-phase prompt template
 
 Invoke the `cwf-security-reviewer-changeset` agent. The agent body
-holds the full review instructions and the sentinel-line contract;
+holds the full review instructions and the verdict-block contract;
 the SKILL-side prompt only needs to pass `{phase}` and `{changeset}`.
 
 Substitute `{changeset}` (the `git diff` output produced per
@@ -140,12 +148,43 @@ Inputs:
 Follow the procedure in your agent definition.
 ```
 
-The exec SKILL classifies the response per the three-tier rule:
+### Verdict container
 
-1. **Primary**: first non-blank line begins with `findings:` / `no findings` / `error:` → use that classification.
-2. **Fallback**: if primary fails, scan body for a numbered list (`^\s*\d+[.)]\s`) or the literal phrase `actionable finding` → classify as `findings`.
-3. **Conservative default**: if neither matches, classify as `error`. Never silently classify as `no findings` — that masks malformed-output failures.
+The subagent reasons in prose, then ends its response with a single
+fenced `cwf-review` block carrying the machine verdict:
 
-A tool-level failure (Agent call error, timeout, allowlist violation) is also classified `error` regardless of body.
+````
+```cwf-review
+state: <no findings|findings|error>
+summary: <optional one-line note>
+```
+````
 
-The SKILL records the verbatim subagent output under `## Security Review` in the wf step file, with a `**State**: findings|no findings|error` line above the verbatim block.
+The block is position-independent — prose precedes it freely; only the
+block is parsed for the verdict, so the model is no longer required to
+lead with a sentinel.
+
+### Classification (deterministic, single source of truth)
+
+The exec SKILL does **not** apply a prose rule. It writes the verbatim
+subagent output to a file and pipes it through the deterministic helper:
+
+```
+.cwf/scripts/command-helpers/security-review-classify < <subagent-output-file>
+```
+
+The helper prints exactly one canonical token (`no findings` |
+`findings` | `error`) on stdout per the parse rule it owns: exactly one
+valid `cwf-review` block → that state; zero or more than one valid block
+→ `error`. Both exec SKILLs and the SubagentStop guard hook
+(`.cwf/scripts/hooks/subagentstop-security-verdict-guard`) call the same
+helper, so there is no classifier drift.
+
+`error` is the conservative default — an absent, malformed, duplicated,
+or non-token verdict surfaces as `error`, never silently downgraded to
+`no findings`. A tool-level failure (Agent call error, timeout,
+allowlist violation) is likewise recorded as `error`.
+
+The SKILL records the verbatim subagent output under `## Security
+Review` in the wf step file, with a `**State**: findings|no
+findings|error` line (the helper's token) above the verbatim block.

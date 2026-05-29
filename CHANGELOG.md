@@ -4,6 +4,32 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 5: Upgrade CWF to v1.1.169
+
+### Status: Complete (completed 2026-05-29, ~1 day across 2 sessions vs <0.5 day estimate — ~2× variance attributable entirely to the v1.1.163 packaging defect)
+
+### Impact: Operational chore — upgrades the installed CWF subtree from v1.1.155 to v1.1.169 (SHA `473baea2dd1d77bac9f100a1036f091eeccd0a4b`, the annotated-tag object SHA). Retires the **Medium**-priority BACKLOG item "Upgrade CwF v1.1.155 to v1.1.163" — repointed forward to v1.1.169 mid-task because the original target carried a packaging defect (upstream T167) that aborted `cwf-apply-artefacts` under non-TTY on every consumer. The pivot resolved that blocker by construction (T167 dropped the offending `rules-inject` manifest artefact entirely) and picked up T164/T165/T166/T168 as side benefits. Branch tip: 9 install.bash auto squash commits + 1 post-laydown metadata commit + 6 phase checkpoints. `cwf-manage validate: OK` on completion; all 6/6 success-path TCs pass.
+
+### Changes
+- **`.cwf/`, `.cwf-skills/`, `.cwf-rules/`, `.cwf-agents/`**: replaced wholesale at v1.1.169 via `cwf-manage update v1.1.169` (subtree path; the v1.1.155 wrapper delegates laydown to the target ref's `scripts/install.bash`). 9 auto-generated squash commits, no manual edits.
+- **`.cwf/version`**: rewritten with `cwf_version=v1.1.169`, `cwf_ref=v1.1.169` (flipped from `HEAD`), `cwf_sha=473baea2…`, plus new field `cwf_install_manifest_sha=e1926a2f…` (added in v1.1.169 as part of T167's INV-1/INV-2 plumbing).
+- **`.claude/settings.json`**: settings-merge added 1 `SubagentStop` hook entry (matcher `cwf-security-reviewer-changeset`, command `.cwf/scripts/hooks/subagentstop-security-verdict-guard`, timeout 5; T162 contract) plus 3 allowlist entries for new helper scripts. Existing `Stop` hook intact.
+- **No project source code touched.**
+
+### Notable
+- **The v1.1.163 attempt failed at `cwf-apply-artefacts`** because that version's manifest's `rules-inject` source pointed at an empty placeholder file (`.cwf/templates/install/rules-inject.txt`, SHA `e3b0c442…`) while the subtree shipped `.cwf/rules-inject.txt` populated (331 bytes). `apply_replace` saw on-disk ≠ baseline ≠ new and aborted on the 3-way conflict under no-TTY. Upstream Task 167 (in v1.1.167) acknowledged this as a packaging defect and dropped the artefact entry entirely (subtree becomes the sole distribution mechanism). We pivoted forward to v1.1.169 rather than working around with `CWF_UPGRADE_RESOLVE=keep`.
+- **Recovery from the half-applied v1.1.163 state was non-destructive.** Soft-reset + targeted `git checkout -- .cwf .cwf-skills .cwf-rules .cwf-agents .claude` + `git checkout -- .cwf/version` + drop 3 orphan untracked helper files. No `git reset --hard` (the user had explicitly denied that). The pattern is now codified in d-plan Step 2 as the documented escape hatch for any future laydown abort.
+- **T166's subtask-aware fix delivered observable consumer-side value.** Same branch state under v1.1.155 had `task-context-inference` returning `inconclusive, uncorrelated, task_nums: 2,5`. Under v1.1.169 it returns `conclusive, correlated, task_num: 5, workflow_step: f-implementation-exec`. First in-band confirmation of T166 in this consumer.
+- **Plan-prediction correction**: `cwf_sha` is the **annotated-tag object** SHA from `git rev-parse v1.1.169` (= `473baea2…`), not the dereferenced commit from `git rev-list -n1` (= `0764380…`). The v1.1.163 attempt's TC-1 had this inverted; the v1.1.169 plan corrected and observed it.
+- **Plan-review subagents found real gaps.** 4-parallel reviewers (improvements/misalignment/robustness/security) against the d-plan caught 8 substantive issues: precondition HEAD gate, deterministic half-applied probe, per-invocation (not per-artefact) `CWF_UPGRADE_RESOLVE` semantics, `git clean -fdx --dry-run` in revert path, hook-helper executable check, smoke-test pass/fail rubric, named-path staging in commit, and the manifest/hashes-ride-the-subtree-commit clarification. None fired on the clean v1.1.169 run — they're insurance for future consumer upgrades.
+- **Security-review state recorded as `error: cap exceeded`** in both f-exec and g-exec. The helper reports `reviewed 19 files, 2252 lines (1632 production), anchor=07366ad`. Anchor at the task baseline includes the entire v1.1.169 laydown as production. The actually-new-in-this-task surface (settings.json hook entries, .cwf/version, workflow MD) is small and surfaced inline. Filed BACKLOG follow-up: configure `security.review.test-paths` to exclude upstream-shipped CWF directories so future upgrades don't trip the cap by construction.
+
+### Retired Backlog Items
+
+#### Upgrade CwF v1.1.155 to v1.1.163
+
+The installed CwF tooling was v1.1.155, pinned via the subtree method from `file:///home/matt/repo/coding-with-files`. The original BACKLOG item targeted v1.1.163 to pick up a `security-review-changeset` empty-changeset fix observed during Task 3.3's f-phase. Landed as v1.1.169 instead — the v1.1.163 target carried an unrelated `rules-inject` packaging defect (upstream T167) that aborted `cwf-apply-artefacts` under non-TTY. Pivoting to v1.1.169 resolved that defect by construction and also picked up: T164 (hierarchy-aware validation), T165 (template-reference linter), T166 (subtask-aware context inference — *observably broken* on this branch under v1.1.155, *fixed* under v1.1.169), and T168 (production-weighted security-review cap). Verified end-to-end: `cwf-manage status` reports v1.1.169 with `cwf_sha=473baea2…`; `cwf-manage validate` exit 0; all 6/6 success-path TCs PASS.
+
 ## Task 4: Move FileSize/ByteSize to int64 in v4 and core
 
 ### Status: Complete (completed 2026-05-27, ~0.5 day — within the 0.5–1 day estimate)

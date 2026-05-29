@@ -208,38 +208,23 @@ When gosec was wired into .golangci.yml in Task 2, architectural-noise rules wer
 
 A full golangci-lint run ./... is red (masked by the hooks --new staged mode) on three pre-existing non-gosec issues: cmd/dcfhfind/main.go:455 parseTestToken cyclop complexity 21 over 20; pkg/filter_run.go:75 resolveOneSelector cyclop complexity 21 over 20; pkg/binary_entry_scan_test.go:200 createTestEntry unparam unused parameter t. Unrelated to the Task 2 gosec work. Fix or scope these so full-tree and CI lint can be green (prerequisite for using the hooks --all mode in CI).
 
-## Task: Upgrade CwF v1.1.155 to v1.1.163
+## Task: Configure security.review.test-paths to exclude upstream-shipped CWF directories
 
 ### Task-Type: chore
-### Priority: Medium
-### Identified in: Task 3.3
+### Priority: Low
+### Status: Follow-up from Task 5
+### Identified in: Task 5 retrospective (j-retrospective.md)
 
-The installed CwF tooling is v1.1.155 (`.cwf/version`), pinned via the
-subtree method from `file:///home/matt/repo/coding-with-files`. v1.1.163
-fixes a bug in the `security-review-changeset` helper: under v1.1.155 it
-resolves an empty changeset when the working tree carries
-uncommitted/unstaged changes, so the exec-phase security review silently
-has nothing to review. Several smaller helper fixes also land between
-.155 and .163.
-
-Impact observed: during Task 3.3 the f-phase security review returned an
-empty changeset and was worked around manually (stage the diff, feed it to
-the `cwf-security-reviewer-changeset` agent by hand). The g-phase recorded
-"no findings: empty changeset" for the same reason.
+The exec-phase security-review changeset helper (T168 in CWF v1.1.168) caps the review at 500 production-weighted lines, where "production" means added+deleted lines outside any `security.review.test-paths` glob in `cwf-project.json`. This repo currently declares no `test-paths` patterns, so every line counts as production — including upstream-shipped CWF content laid down by `cwf-manage update`. Task 5's f-exec and g-exec both recorded `error: cap exceeded: 1632 production lines > 500` for this reason, even though the actually-new-in-task surface was tiny (settings.json hook entries + .cwf/version + workflow MD).
 
 Scope when picked up:
-- Re-run the CwF subtree update to v1.1.163 from the source repo (subtree
-  method; see `.cwf/version` `cwf_source` / `cwf_method`).
-- Update `.cwf/version` (`cwf_version`, `cwf_sha`, `cwf_installed`).
-- Refresh `.cwf/security/script-hashes.json` for any changed helper/script
-  files in the same commit (hash-update convention).
-- Verify `security-review-changeset` resolves a non-empty changeset against
-  an uncommitted working tree (the bug this upgrade fixes).
-- Run `cwf-manage validate` after the bump.
+- Add `security.review.test-paths` to `implementation-guide/cwf-project.json` covering upstream-shipped CWF directories (candidate patterns: `.cwf/**`, `.cwf-skills/**`, `.cwf-rules/**`, `.cwf-agents/**`, `.claude/skills/**`, `.claude/agents/**`).
+- Verify the cap measures only consumer-authored code by re-running `security-review-changeset --max-lines=500` against a CWF-upgrade-shaped changeset.
+- Document the conscious decision that consumer overrides under `.claude/` (if any) are reviewed only when they sit *outside* these prefixes.
 
-Sequencing: do this after the current Task 3 line of work lands. Upgrading
-mid-task swaps the workflow tooling in use (including the retrospective and
-security-review helpers).
+Rationale: the cap is a useful gate for consumer-authored code, but tripping it on upstream-vetted laydown content is noise that masks signal. The fix is configuration, not code.
+
+Identified in: Task 5 retrospective.
 
 ## Task: Remove stale tracked root debris cache.idx and cache-2.idx
 

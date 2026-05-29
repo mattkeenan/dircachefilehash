@@ -29,6 +29,18 @@
           }
         ]
       }
+    ],
+    "SubagentStop" : [
+      {
+        "hooks" : [
+          {
+            "command" : ".cwf/scripts/hooks/subagentstop-security-verdict-guard",
+            "timeout" : 5,
+            "type" : "command"
+          }
+        ],
+        "matcher" : "cwf-security-reviewer-changeset"
+      }
     ]
   },
   "permissions" : {
@@ -78,7 +90,10 @@
       "Bash(.cwf/scripts/command-helpers/task-workflow:*)",
       "Bash(.cwf/scripts/command-helpers/template-copier-v2.0:*)",
       "Bash(.cwf/scripts/command-helpers/template-copier-v2.1:*)",
-      "Bash(.cwf/scripts/command-helpers/workflow-manager:*)"
+      "Bash(.cwf/scripts/command-helpers/workflow-manager:*)",
+      "Bash(.cwf/scripts/command-helpers/cwf-check-tree-symlinks:*)",
+      "Bash(.cwf/scripts/command-helpers/security-review-classify:*)",
+      "Bash(.cwf/scripts/hooks/subagentstop-security-verdict-guard)"
     ],
     "deny" : []
   }

@@ -24,19 +24,14 @@
     "cwf-security-reviewer-changeset" : {
       "path" : ".claude/agents/cwf-security-reviewer-changeset.md",
       "permissions" : "0444",
-      "sha256" : "c7033a74da495e7ef7b401f0b88ab6b8d8e53cfb69acb1a924c463bb182095e5"
+      "sha256" : "7c59992a807fd5e293ddb2fec2af28654054a77d615ed42dc18380bbd3c315ed"
     }
   },
   "data" : {
     "install-manifest" : {
       "path" : ".cwf/install-manifest.json",
       "permissions" : "0444",
-      "sha256" : "1da39a42f287e3d12facd51d76ea647aad165d6eea6a25dca325aff1c5e27a16"
-    },
-    "rules-inject-template" : {
-      "path" : ".cwf/templates/install/rules-inject.txt",
-      "permissions" : "0444",
-      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256" : "e1926a2f6fc5982c6a614e581546978185f6b175f8c43e7c5284328638855cac"
     },
     "claude-md-preamble-template" : {
       "path" : ".cwf/templates/install/claude-md-preamble.md",
@@ -81,7 +76,7 @@
     },
     "CWF::TaskContextInference" : {
       "path" : ".cwf/lib/CWF/TaskContextInference.pm",
-      "sha256" : "085c603632654ca818f527abfa63d4f666caa56ac7b18112b56f4a024e0981ca"
+      "sha256" : "aa2cdc7df9173a9af0f29ae258c0b69710008463f4bdf193b25affb629e29fd4"
     },
     "CWF::TaskPath" : {
       "path" : ".cwf/lib/CWF/TaskPath.pm",
@@ -101,7 +96,7 @@
     },
     "CWF::Validate::Consistency" : {
       "path" : ".cwf/lib/CWF/Validate/Consistency.pm",
-      "sha256" : "d2849f8b06f1107f2dc38071e6695252a71a77b3546525fae4c6a15281eb0d92"
+      "sha256" : "d772d571b1949210792c0efa34b95ff507355b52d030bdc660d3df457a3f95dd"
     },
     "CWF::Validate::PerlConventions" : {
       "path" : ".cwf/lib/CWF/Validate/PerlConventions.pm",
@@ -109,7 +104,11 @@
     },
     "CWF::Validate::Security" : {
       "path" : ".cwf/lib/CWF/Validate/Security.pm",
-      "sha256" : "7c93e0fd686aeff971b159460d8a16459f2ac1d0ce02cfbc7033901597fe6d9b"
+      "sha256" : "b8e74cd7072f68c412eb42015dbaba238dea5e4ab224440560207e69081b7b68"
+    },
+    "CWF::Validate::TemplateRefs" : {
+      "path" : ".cwf/lib/CWF/Validate/TemplateRefs.pm",
+      "sha256" : "aa0e373f79c0fb75d77613912836eb318015a8a58e25e54005fede1282cfd49b"
     },
     "CWF::Validate::Templates" : {
       "path" : ".cwf/lib/CWF/Validate/Templates.pm",
@@ -125,7 +124,7 @@
     },
     "CWF::Versioning" : {
       "path" : ".cwf/lib/CWF/Versioning.pm",
-      "sha256" : "57c7b1d39d855927b72b7b7d96a1dd156996e0318e23fc05c9639c27c951c9be"
+      "sha256" : "dcd5b4fe10d8ec9e91a66fd056b26c5d3469e3ffb3f469ab1e520ee7fa1f97ce"
     },
     "CWF::WorkflowFiles" : {
       "path" : ".cwf/lib/CWF/WorkflowFiles.pm",
@@ -137,7 +136,7 @@
     },
     "CWF::WorkflowFiles::V21" : {
       "path" : ".cwf/lib/CWF/WorkflowFiles/V21.pm",
-      "sha256" : "8832272bdb51fd91b14af3bebeec02c8bdb1d457acfb2d411f524cf8ad9c13ec"
+      "sha256" : "636deb61d736c17514180fad8f44ce345345e5fa49cfbd3ee51030ef3752d6af"
     }
   },
   "scripts" : {
@@ -184,7 +183,12 @@
     "cwf-apply-artefacts" : {
       "path" : ".cwf/scripts/command-helpers/cwf-apply-artefacts",
       "permissions" : "0500",
-      "sha256" : "b82a77af2a105d9d880346a09563cde132d3bdb87f68099a65b495180199fed4"
+      "sha256" : "d72b4b98f4d862a0c879cb64a9341ace2c4bc77b2bd22efad6970fcc87bc7a93"
+    },
+    "cwf-check-tree-symlinks" : {
+      "path" : ".cwf/scripts/command-helpers/cwf-check-tree-symlinks",
+      "permissions" : "0500",
+      "sha256" : "7cb443c664a0bfe3a063bb7b8b6ef78ec059f5fdbcb2d0e20d8c3e929ea46d29"
     },
     "cwf-checkpoint-commit" : {
       "path" : ".cwf/scripts/command-helpers/cwf-checkpoint-commit",
@@ -199,12 +203,12 @@
     "cwf-claude-settings-merge" : {
       "path" : ".cwf/scripts/command-helpers/cwf-claude-settings-merge",
       "permissions" : "0500",
-      "sha256" : "11b6f4aae5a9d6c6da35b3abf3d177d3248127ea3663f62e7fc256c50ef030fa"
+      "sha256" : "5e4efc8b44bf95839edb940471310c0ce304962f93735159f1be09aa6091835f"
     },
     "cwf-manage" : {
       "path" : ".cwf/scripts/cwf-manage",
       "permissions" : "0700",
-      "sha256" : "1311378e5b14173f1ffb436a10ea78c11fcdbcdb0cfb3f2611595211c7840777"
+      "sha256" : "751f0283adcc3279f12fcf1e111977093bec2ea6880abc3303d9ba16d12ff109"
     },
     "cwf-set-status" : {
       "path" : ".cwf/scripts/command-helpers/cwf-set-status",
@@ -214,17 +218,17 @@
     "cwf-version-bump" : {
       "path" : ".cwf/scripts/command-helpers/cwf-version-bump",
       "permissions" : "0500",
-      "sha256" : "f35fc075109274520d097f8a5ace2379957e760d92201e6f4b0bbfcf173ccfc4"
+      "sha256" : "6bc5c797c5701b1a0460e5234440ccc8bb0d270a7cc9e29fd7bdf4fa108fc8a1"
     },
     "cwf-version-next" : {
       "path" : ".cwf/scripts/command-helpers/cwf-version-next",
       "permissions" : "0500",
-      "sha256" : "3f4af2de8696889aabcf7c54c37b94534f3f29a35cbf3c0b1760041bf521fe63"
+      "sha256" : "5c74879cdb402c4cf093737e0c50da18c9082bb41d432b9b3b6dcfc9e1b5d529"
     },
     "cwf-version-tag" : {
       "path" : ".cwf/scripts/command-helpers/cwf-version-tag",
       "permissions" : "0500",
-      "sha256" : "89e9ff6b456055e1562fdf02e13e20b6aa5fda4f48a7db594602c96388ad13bb"
+      "sha256" : "40f3ddfa0450a2ad3aafb8bf76f6ae7c3eec1ac95593c5591e25f56dcc7d09f9"
     },
     "migrate-v1-to-v2.sh" : {
       "path" : ".cwf/scripts/migrate-v1-to-v2.sh",
@@ -261,6 +265,11 @@
       "permissions" : "0500",
       "sha256" : "510d1bf9c698d16cfa1245aa67bff9d755f8d834cc2b9d3fd1afbc8c5e563e14"
     },
+    "subagentstop-security-verdict-guard" : {
+      "path" : ".cwf/scripts/hooks/subagentstop-security-verdict-guard",
+      "permissions" : "0500",
+      "sha256" : "68066f337c417e91167db283c919951dc5dccd76207deb50b783f0e71dc6ef0a"
+    },
     "task-context-inference" : {
       "path" : ".cwf/scripts/command-helpers/task-context-inference",
       "permissions" : "0500",
@@ -294,7 +303,12 @@
     "security-review-changeset" : {
       "path" : ".cwf/scripts/command-helpers/security-review-changeset",
       "permissions" : "0500",
-      "sha256" : "6944c8f185423def1a580fb3e69204bc1acce8544a6f1b8484890bb0994222ce"
+      "sha256" : "064df660f0ea7d6f7300ca11a304c75065c0e619f5def968864e912ba6d0222b"
+    },
+    "security-review-classify" : {
+      "path" : ".cwf/scripts/command-helpers/security-review-classify",
+      "permissions" : "0500",
+      "sha256" : "e5a60675951e6c09b41843bf170b6de3f181d6642e7cb504352f3793f7798053"
     },
     "template-copier-v2.1" : {
       "path" : ".cwf/scripts/command-helpers/template-copier-v2.1",
