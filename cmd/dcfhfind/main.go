@@ -466,8 +466,31 @@ func (p *ExpressionParser) parseTestToken(token string) (Expression, bool, error
 	}
 
 	// Inclusive size and absolute-date predicates need access to parser
-	// state (zone for date parsing) or a different constructor shape
-	// than argTestTable supports, so they're inlined here.
+	// state (zone for date parsing) or a different constructor shape than
+	// argTestTable supports, so they're handled in parseStatefulArgTest.
+	if expr, handled, err := p.parseStatefulArgTest(token); handled {
+		return expr, true, err
+	}
+
+	spec, ok := argTestTable[token]
+	if !ok {
+		return nil, false, nil
+	}
+	arg, err := p.requireArg(token, spec.what)
+	if err != nil {
+		return nil, true, err
+	}
+	expr, err := spec.build(arg)
+	return expr, true, err
+}
+
+// parseStatefulArgTest handles the size- and date-bound tests that need parser
+// state (the --tz zone for date parsing) or a constructor shape argTestTable
+// can't express. It returns handled=true for any token it owns — including on
+// error, so a malformed bound surfaces its error rather than falling through to
+// the argTestTable lookup. Extracted from parseTestToken to keep that function's
+// cyclomatic complexity within the lint threshold.
+func (p *ExpressionParser) parseStatefulArgTest(token string) (Expression, bool, error) {
 	switch token {
 	case "--min-size":
 		arg, err := p.requireArg(token, "a size bound (N[K|M|G|T])")
@@ -518,17 +541,7 @@ func (p *ExpressionParser) parseTestToken(token string) (Expression, bool, error
 		}
 		return &dircachefilehash.MTimeRangeTest{End: t}, true, nil
 	}
-
-	spec, ok := argTestTable[token]
-	if !ok {
-		return nil, false, nil
-	}
-	arg, err := p.requireArg(token, spec.what)
-	if err != nil {
-		return nil, true, err
-	}
-	expr, err := spec.build(arg)
-	return expr, true, err
+	return nil, false, nil
 }
 
 // argTestSpec is the per-flag data for a test that takes one

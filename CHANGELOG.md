@@ -4,6 +4,29 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 7: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
+
+### Status: Complete (completed 2026-05-31, < 0.5 day, on estimate)
+
+### Impact: Makes `golangci-lint run ./...` green across the whole tree — 0 issues, down from 3. These three findings were masked by the `.githooks/pre-commit` `--new` staged mode and only surfaced on a full-tree run, blocking any future `--all` CI lint gate. All fixes are behaviour-preserving; on-disk index format and CLI output are byte-identical. Branch: 3 planning checkpoints (a/d/e) + f-exec (`77af72c`) + g-exec (`4e25ada`) + j-retro.
+
+### Changes
+- **`pkg/filter_run.go`**: extracted the `case "scan":` body of `resolveOneSelector` into a new unexported `resolveScanSelector(metaDir)` helper. The recursive `case "all":` inherits it unchanged. cyclop 21 → within threshold; pure code movement.
+- **`cmd/dcfhfind/main.go`**: extracted the four state-dependent cases (`--min-size`/`--max-size`/`--start-date`/`--end-date`) of `parseTestToken` into `(p *ExpressionParser) parseStatefulArgTest`. `parseTestToken` delegates and returns early when `handled`. cyclop 21 → within threshold.
+- **`pkg/binary_entry_scan_test.go`**: removed the unused `t *testing.T` parameter from `(*scanTestHelper).createTestEntry` (unparam) and updated its 4 call sites. The two sibling `createTestEntry` methods (`skiplistTestHelper`, `indexFileMmapTestHelper`) legitimately use `t` and were left untouched.
+- **`cmd/dcfhfind/expressions_test.go`**: added `TestParseStatefulArgTest` (7 sub-cases) covering the four stateful tokens and pinning the `handled=true`-on-error invariant — closing the only coverage gap the refactor touched.
+
+### Notable
+- **The `handled=true`-on-error invariant.** Each moved case returns `handled=true` even on its error paths, so a malformed `--min-size`/`--start-date` surfaces its error rather than falling through to the `argTestTable` lookup. Preserved verbatim and now guarded by TC-4.
+- **Name-collision caveat (flagged by plan review).** Three distinct `createTestEntry` methods share the name across receivers; only `scanTestHelper`'s `t` is unused. A blanket find-replace would have broken ~9 unrelated call sites — the per-receiver scope avoided it.
+- **Security review: empty changeset.** Go-source-only change; the CWF changeset reviewer scopes to CWF-internal/shebang-script files, so Go is covered by the always-on gosec floor (`golangci-lint run ./...` = 0 issues), not the semantic changeset pass.
+
+### Retired Backlog Items
+
+#### Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
+
+Identified in Task 2 (Low priority) when gosec was wired into `.golangci.yml`, and explicitly carved out of Task 6's gosec scope. The three non-gosec findings — `parseTestToken`/`resolveOneSelector` cyclop overruns and the `createTestEntry` unparam — are now fixed via behaviour-preserving extract-method refactors plus an unused-parameter removal. `golangci-lint run ./...` is green tree-wide, unblocking a future hooks `--all` CI lint mode.
+
 ## Task 6: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
 
 ### Status: Complete (completed 2026-05-31, ~1 day within the 0.5–1 day estimate)

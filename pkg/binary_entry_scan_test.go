@@ -76,7 +76,7 @@ func TestBEScanSpecific(t *testing.T) {
 // testBEScanEphemeralBehavior tests ephemeral entry behavior
 func testBEScanEphemeralBehavior(t *testing.T) {
 	helper := &scanTestHelper{}
-	entry, cleanup := helper.createTestEntry(t)
+	entry, cleanup := helper.createTestEntry()
 	defer cleanup()
 
 	// Initially should be valid
@@ -102,7 +102,7 @@ func testBEScanEphemeralBehavior(t *testing.T) {
 // testBEScanHashWorkerUpdates tests hash worker update functionality
 func testBEScanHashWorkerUpdates(t *testing.T) {
 	helper := &scanTestHelper{}
-	entry, cleanup := helper.createTestEntry(t)
+	entry, cleanup := helper.createTestEntry()
 	defer cleanup()
 
 	// Test hash update (simulating hash worker — 20-byte hash matches SHA1 type)
@@ -130,7 +130,7 @@ func testBEScanHashWorkerUpdates(t *testing.T) {
 // testBEScanConcurrentMremapSafety tests concurrent access during potential mremap
 func testBEScanConcurrentMremapSafety(t *testing.T) {
 	helper := &scanTestHelper{}
-	entry, cleanup := helper.createTestEntry(t)
+	entry, cleanup := helper.createTestEntry()
 	defer cleanup()
 
 	// This test verifies that our locking prevents races during mremap
@@ -197,7 +197,7 @@ type scanTestHelper struct{}
 
 // createTestEntry creates a heap-allocated BEScanEntry for testing.
 // The cleanup function is a no-op kept for caller compatibility.
-func (h *scanTestHelper) createTestEntry(t *testing.T) (*BEScanEntry, func()) {
+func (h *scanTestHelper) createTestEntry() (*BEScanEntry, func()) {
 	testData := CreateTestData()
 	testData.Size = uint32(BESizeFromPathLen(len(testData.RelativePath)))
 
@@ -226,7 +226,7 @@ func BenchmarkBEScan(b *testing.B) {
 	helper := &scanTestHelper{}
 
 	createFn := func() BinaryEntryInterface {
-		entry, _ := helper.createTestEntry(&testing.T{})
+		entry, _ := helper.createTestEntry()
 		return entry
 	}
 

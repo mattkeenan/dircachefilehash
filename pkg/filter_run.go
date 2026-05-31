@@ -72,6 +72,28 @@ func ParseIndexRef(metaDir, sel string) (IndexRef, error) {
 	return refs[0], nil
 }
 
+// resolveScanSelector expands the "scan" selector into one IndexRef per
+// scan-*.idx file found under metaDir. Extracted from resolveOneSelector to
+// keep that dispatcher's cyclomatic complexity within the lint threshold.
+func resolveScanSelector(metaDir string) ([]IndexRef, error) {
+	matches, err := filepath.Glob(filepath.Join(metaDir, "scan-*.idx"))
+	if err != nil {
+		return nil, fmt.Errorf("error finding scan files: %w", err)
+	}
+	var refs []IndexRef
+	for _, m := range matches {
+		base := filepath.Base(m)
+		if strings.HasPrefix(base, "scan-") && strings.HasSuffix(base, ".idx") {
+			refs = append(refs, IndexRef{
+				Path:   m,
+				Type:   RefTypeScan,
+				ScanID: base[5 : len(base)-4],
+			})
+		}
+	}
+	return refs, nil
+}
+
 func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 	switch sel {
 	case "main":
@@ -79,22 +101,7 @@ func resolveOneSelector(metaDir, sel string) ([]IndexRef, error) {
 	case "cache":
 		return []IndexRef{{Path: filepath.Join(metaDir, CacheIndex), Type: RefTypeCache}}, nil
 	case "scan":
-		matches, err := filepath.Glob(filepath.Join(metaDir, "scan-*.idx"))
-		if err != nil {
-			return nil, fmt.Errorf("error finding scan files: %w", err)
-		}
-		var refs []IndexRef
-		for _, m := range matches {
-			base := filepath.Base(m)
-			if strings.HasPrefix(base, "scan-") && strings.HasSuffix(base, ".idx") {
-				refs = append(refs, IndexRef{
-					Path:   m,
-					Type:   RefTypeScan,
-					ScanID: base[5 : len(base)-4],
-				})
-			}
-		}
-		return refs, nil
+		return resolveScanSelector(metaDir)
 	case "all":
 		var refs []IndexRef
 		for _, s := range []string{"main", "cache", "scan"} {

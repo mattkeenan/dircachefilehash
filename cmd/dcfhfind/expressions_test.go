@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
@@ -368,6 +369,60 @@ func TestExpressionStrings(t *testing.T) {
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("Expression.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseStatefulArgTest covers the size- and date-bound tokens routed
+// through parseStatefulArgTest (--min-size/--max-size/--start-date/--end-date).
+// These four tokens have no other direct unit coverage, and the test pins the
+// key invariant that a malformed or missing argument returns an error with
+// handled=true rather than falling through to the argTestTable lookup.
+func TestParseStatefulArgTest(t *testing.T) {
+	tests := []struct {
+		name     string
+		token    string
+		arg      string // empty means no argument token supplied
+		wantType string // "" when an error is expected
+		wantErr  bool
+	}{
+		{name: "min-size valid", token: "--min-size", arg: "1M", wantType: "*dircachefilehash.MinSizeTest"},
+		{name: "max-size valid", token: "--max-size", arg: "1M", wantType: "*dircachefilehash.MaxSizeTest"},
+		{name: "start-date valid", token: "--start-date", arg: "2024", wantType: "*dircachefilehash.MTimeRangeTest"},
+		{name: "end-date valid", token: "--end-date", arg: "2024", wantType: "*dircachefilehash.MTimeRangeTest"},
+		{name: "min-size malformed", token: "--min-size", arg: "notasize", wantErr: true},
+		{name: "start-date malformed", token: "--start-date", arg: "notadate", wantErr: true},
+		{name: "min-size missing arg", token: "--min-size", arg: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens := []string{tt.token}
+			if tt.arg != "" {
+				tokens = append(tokens, tt.arg)
+			}
+			// pos points past the flag at its argument, matching how the
+			// real parser calls parseTestToken (flag already consumed).
+			p := &ExpressionParser{tokens: tokens, pos: 1, globalArgs: map[string]string{}}
+
+			expr, handled, err := p.parseTestToken(tt.token)
+			if !handled {
+				t.Fatalf("parseTestToken(%q) handled = false, want true (must not fall through to argTestTable)", tt.token)
+			}
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parseTestToken(%q, %q) expected error, got nil", tt.token, tt.arg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("parseTestToken(%q, %q) unexpected error: %v", tt.token, tt.arg, err)
+			}
+			if got := fmt.Sprintf("%T", expr); got != tt.wantType {
+				t.Errorf("parseTestToken(%q, %q) type = %s, want %s", tt.token, tt.arg, got, tt.wantType)
 			}
 		})
 	}

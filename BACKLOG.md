@@ -192,14 +192,6 @@ staleness — left untouched in Task 1 to keep that docs-conformance chore free 
 Go change. Either repoint the message at concrete docs or drop the "see CHANGELOG"
 clause.
 
-## Task: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
-
-### Task-Type: chore
-### Priority: Low
-### Identified in: Task 2
-
-A full golangci-lint run ./... is red (masked by the hooks --new staged mode) on three pre-existing non-gosec issues: cmd/dcfhfind/main.go:455 parseTestToken cyclop complexity 21 over 20; pkg/filter_run.go:75 resolveOneSelector cyclop complexity 21 over 20; pkg/binary_entry_scan_test.go:200 createTestEntry unparam unused parameter t. Unrelated to the Task 2 gosec work. Fix or scope these so full-tree and CI lint can be green (prerequisite for using the hooks --all mode in CI).
-
 ## Task: Configure security.review.test-paths to exclude upstream-shipped CWF directories
 
 ### Task-Type: chore
