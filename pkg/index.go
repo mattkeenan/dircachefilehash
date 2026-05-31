@@ -119,7 +119,7 @@ func ValidateIndexHeader(indexPath string, validateVersion bool, expectedVersion
 
 // ValidateIndexHeaderWithOptions validates index header with configurable checksum validation
 func ValidateIndexHeaderWithOptions(indexPath string, validateVersion bool, expectedVersion uint32, validateChecksum bool) (*indexHeader, error) {
-	file, err := os.Open(indexPath)
+	file, err := os.Open(indexPath) //nolint:gosec // G304: opens the repository own .dcfh index file; path derived from repo discovery, not external input
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func checkEntryRegionAccess(header *indexHeader, fileSize int64) (format.DecodeS
 // On error it cleans up the fd/mmap; on success the caller owns the
 // returned indexFile and must close+munmap it when done.
 func (ms *MetaStore) openAndValidateIndex(filePath string) (*mmapIndexFile, *indexHeader, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: opens the repository own .dcfh index file; path derived from repo discovery, not external input
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
 	}
@@ -607,7 +607,7 @@ func CompositeEntryProcessor(processors ...EntryProcessor) EntryProcessor {
 // idx.File.DecRef when finished. Stat is left zero — the memo fills it
 // from its own os.Stat after this call returns.
 func (ms *MetaStore) loadIndexFromFileWithTracking(filePath string) (*Index, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: opens the repository own .dcfh index file; path derived from repo discovery, not external input
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file %s: %w", filePath, err)
 	}

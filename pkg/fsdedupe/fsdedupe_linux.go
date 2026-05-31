@@ -87,7 +87,7 @@ func (c *supportCache) check(dev uint64, samplePath string, logf func(string, ..
 // scratch file is unlinked immediately (still open via the fd), so
 // cleanup needs no deferred rm.
 func probeDevice(samplePath string) bool {
-	src, err := os.OpenFile(samplePath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	src, err := os.OpenFile(samplePath, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // G304: opens a candidate from the user-owned scan results; O_NOFOLLOW blocks symlink swap; user-controlled path
 	if err != nil {
 		return false
 	}

@@ -14,7 +14,7 @@ import (
 // Returns (entriesFixed, entriesDiscarded, error)
 func processEntriesWithWorkflow(indexFile string, pathSet map[string]bool, field, value string, options *ParsedOptions) (int, int, error) {
 	// Load raw index data for safe processing
-	data, err := os.ReadFile(indexFile)
+	data, err := os.ReadFile(indexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}
@@ -62,7 +62,7 @@ func processEntriesWithWorkflow(indexFile string, pathSet map[string]bool, field
 
 // createTempIndexWithHeader creates a temp index file with the proper header
 func createTempIndexWithHeader(originalData []byte, tmpIndexFile string) error {
-	file, err := os.Create(tmpIndexFile)
+	file, err := os.Create(tmpIndexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)
 	}

@@ -4,6 +4,30 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 6: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
+
+### Status: Complete (completed 2026-05-31, ~1 day within the 0.5–1 day estimate)
+
+### Impact: Closes out the gosec security gate. The backlog premise (written at Task 2) was largely stale — perms (G301/G302/G306), subprocess (G204), pprof (G108) and http (G114) had all been handled per-line in Tasks 3–5; only **G304** (file-path-from-variable) remained a blanket exclude. This task audits every gosec exclude and per-line suppression against empirical ground truth, converts the G304 blanket exclude to **23 per-line, trust-classified `//nolint:gosec // G304` suppressions**, and corrects mislabelled comments — leaving `golangci-lint run ./...` gosec-clean with no untriaged debt. No project runtime behaviour changes (comment/config/doc only; on-disk index format and CLI output byte-identical). Branch: 5 planning checkpoints + f-exec (`90ff0f2`) + g-exec (`60e79d4`) + j-retro.
+
+### Changes
+- **`.golangci.yml`**: removed `G304` from `gosec.excludes` (now G103/G401/G505 only); added an inline note documenting the conversion. G115 already active (Task 3.3); perms rules already active (Tasks 3–5).
+- **21 G304 per-line suppressions** added at the previously blanket-excluded sites: `cmd/dcfhfix/{entry_append_remove,entry_workflow_main,main}.go` (CLI-arg index paths), `pkg/index.go` (own `.dcfh` index opens), `pkg/recovery.go`/`pkg/snapshot.go` (`.dcfh`-internal reads), `pkg/fsdedupe/fsdedupe_linux.go` (scan candidate, `O_NOFOLLOW`), `pkg/hash.go:82/186` (generic hasher — the one untrusted-reachable open, suppression **cites** the `resolveRel`→`hasPathPrefix` wire guard), `pkg/wire_handler.go:398` (operator cache path).
+- **2 comment corrections** `G703`→`G304`: `cmd/dcfh/dcfh.go:26,43` (`os.Create` of `DCFH_CPUPROFILE`/`DCFH_MEMPROFILE` env vars) — these emit G304, not G703.
+- **CLAUDE.md** Security Review section: removed the stale "G115 is a real deferred bug" wording; recorded the final exclude set (G103/G401/G505), the G304 conversion, and a G703 note.
+
+### Notable
+- **Empirical method overturned the plan's central FR4 assumption.** Phases a–e assumed `G703` was *not* a gosec rule and that the `os.WriteFile(dst,…,Mode())` sites would emit **G306**. The scratch ground-truth run proved **G703 is a real gosec rule** in v2.11.2 ("Path traversal via taint analysis"): `pkg/recovery.go:414` and `pkg/snapshot.go:448` already cite the **correct** rule → **accept** (the base-name `dst` origin was verified, not rubber-stamped). The genuinely mislabelled comments were the *other* pair (the env-var `os.Create` sites). Design Decision 1 ("trust the tool, not the comment text") is exactly why this surfaced.
+- **G304 policy = CONVERT.** Decision 4 forces conversion when any *untrusted live* G304 site exists. `pkg/hash.go:82/186` is reachable from wire-supplied `req.Paths` via `RemoteHandler.hashOne`; its per-line suppression cites the existing `resolveRel`/`hasPathPrefix` escape guard rather than letting a blanket exclude silence a trust-boundary site. No code `fix` was needed — the guard already existed.
+- **G304 live-site count was 21, not the backlog's "27"** (a stale Task-2 figure).
+- **Process incident, fully recovered.** A `cd` into the disposable scratch worktree left the shell CWD there, so subsequent `cd "$(git rev-parse --show-toplevel)"` resolved to the *worktree* root: the implementation edits, lint, and tests all ran in the worktree and were deleted with it. The work survived as a dangling `git stash` commit (`a49e33b`, "task6-verify") taken during verification, recovered via `git fsck --unreachable`, re-applied to the main tree, and re-verified from scratch (gosec-clean, `go build`, full `go test -race` green). The committed changeset is provably identical to what passed verification.
+
+### Retired Backlog Items
+
+#### Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
+
+Identified in Task 2 when gosec was wired into `.golangci.yml`. The deferred rules were triaged across the intervening tasks (perms/subprocess/pprof/http handled per-line in Tasks 3–5; G115 re-enabled in Task 3.3); this task closed the remaining work — the G304 blanket exclude — by converting it to 23 trust-classified per-line suppressions and reconciling all suppression-comment rule IDs against gosec's actual emission. Gate verified gosec-clean. (The separate Low-priority "cyclop/unparam full-tree lint" backlog item is explicitly **not** part of gosec scope and remains open.)
+
 ## Task 5: Upgrade CWF to v1.1.169
 
 ### Status: Complete (completed 2026-05-29, ~1 day across 2 sessions vs <0.5 day estimate — ~2× variance attributable entirely to the v1.1.163 packaging defect)

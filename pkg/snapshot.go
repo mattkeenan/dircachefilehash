@@ -429,7 +429,7 @@ func (sr *SnapshotRepository) findFilesToSnapshot() ([]string, error) {
 
 func (sr *SnapshotRepository) copyFileWithHash(src, dst string) (string, int64, error) {
 	// Read source file
-	data, err := os.ReadFile(src)
+	data, err := os.ReadFile(src) //nolint:gosec // G304: reads a .dcfh-internal snapshot file; tool-managed path under MetaDir
 	if err != nil {
 		return "", 0, err
 	}
@@ -509,7 +509,7 @@ func (sr *SnapshotRepository) analyzeSnapshotContent(snapshotDir string, summary
 }
 
 func (sr *SnapshotRepository) loadSnapshotMetadata(metadataPath string) (*SnapshotMetadata, error) {
-	data, err := os.ReadFile(metadataPath)
+	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: reads a .dcfh-internal snapshot file; tool-managed path under MetaDir
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +522,7 @@ func (sr *SnapshotRepository) loadSnapshotMetadata(metadataPath string) (*Snapsh
 	// Load tags from tags file if it exists
 	snapshotDir := filepath.Dir(metadataPath)
 	tagsPath := filepath.Join(snapshotDir, "tags")
-	if tagsData, err := os.ReadFile(tagsPath); err == nil {
+	if tagsData, err := os.ReadFile(tagsPath); err == nil { //nolint:gosec // G304: reads a .dcfh-internal snapshot file; tool-managed path under MetaDir
 		tagsContent := strings.TrimSpace(string(tagsData))
 		if tagsContent != "" {
 			metadata.Tags = strings.Split(tagsContent, "\n")

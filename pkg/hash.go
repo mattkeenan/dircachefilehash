@@ -79,7 +79,7 @@ func HashFile(filePath string, algorithm *HashAlgorithm) ([]byte, error) {
 		}
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: generic content hasher; the sole untrusted caller (wire RemoteHandler.hashOne) is gated by resolveRel->hasPathPrefix (pkg/wire_handler.go:231) which rejects paths escaping the audit root; all other callers pass user-controlled scan paths
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
@@ -183,7 +183,7 @@ func HashFileInterruptible(ctx context.Context, filePath string, algorithm *Hash
 		}
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: generic content hasher; the sole untrusted caller (wire RemoteHandler.hashOne) is gated by resolveRel->hasPathPrefix (pkg/wire_handler.go:231) which rejects paths escaping the audit root; all other callers pass user-controlled scan paths
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}

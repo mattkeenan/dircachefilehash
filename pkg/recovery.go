@@ -405,7 +405,7 @@ func (ms *MetaStore) copyFileWithMetadata(src, dst string, verbosity int) error 
 	}
 
 	// Read source file
-	sourceData, err := os.ReadFile(src)
+	sourceData, err := os.ReadFile(src) //nolint:gosec // G304: reads a .dcfh-internal index/backup during recovery; tool-managed path
 	if err != nil {
 		return fmt.Errorf("failed to read source file: %w", err)
 	}

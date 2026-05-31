@@ -192,14 +192,6 @@ staleness — left untouched in Task 1 to keep that docs-conformance chore free 
 Go change. Either repoint the message at concrete docs or drop the "see CHANGELOG"
 clause.
 
-## Task: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
-
-### Task-Type: chore
-### Priority: High
-### Identified in: Task 2
-
-When gosec was wired into .golangci.yml in Task 2, architectural-noise rules were disabled and these genuine-candidate findings were deferred for triage: G301/G302/G306 file and directory permission bits (17 sites), G204 subprocess with variable args (2 sites), G108 pprof endpoint (1), G114 http server without read timeout (1). Also review G304 file-path-from-variable (27 sites, disabled now) for real traversal risk beyond expected scanner behaviour. Triage each: fix genuine issues, justify-and-suppress true false positives.
-
 ## Task: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
 
 ### Task-Type: chore

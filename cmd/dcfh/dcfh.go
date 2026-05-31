@@ -23,7 +23,7 @@ func main() {
 
 	// CPU profiling: DCFH_CPUPROFILE=path writes a CPU profile
 	if cpuprofile := os.Getenv("DCFH_CPUPROFILE"); cpuprofile != "" {
-		f, err := os.Create(cpuprofile) //nolint:gosec // G703: path is the user's own DCFH_CPUPROFILE env var; no trust boundary
+		f, err := os.Create(cpuprofile) //nolint:gosec // G304: path is the user-owned DCFH_CPUPROFILE env var; no trust boundary
 		if err != nil {
 			log.Fatalf("Failed to create CPU profile: %v", err)
 		}
@@ -40,7 +40,7 @@ func main() {
 	if memprofile := os.Getenv("DCFH_MEMPROFILE"); memprofile != "" {
 		defer func() {
 			runtime.GC()                    // get accurate heap profile
-			f, err := os.Create(memprofile) //nolint:gosec // G703: path is the user's own DCFH_MEMPROFILE env var; no trust boundary
+			f, err := os.Create(memprofile) //nolint:gosec // G304: path is the user-owned DCFH_MEMPROFILE env var; no trust boundary
 			if err != nil {
 				log.Fatalf("Failed to create memory profile: %v", err)
 			}

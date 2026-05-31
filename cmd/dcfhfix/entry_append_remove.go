@@ -94,7 +94,7 @@ func parseEntryFromJSON(jsonData string) (*ValidatedEntry, error) {
 // processEntriesWithAppend processes entries and appends a new entry
 func processEntriesWithAppend(indexFile string, newEntry *ValidatedEntry, options *ParsedOptions) (int, int, error) {
 	// Load raw index data for safe processing
-	data, err := os.ReadFile(indexFile)
+	data, err := os.ReadFile(indexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}
@@ -150,7 +150,7 @@ func processEntriesWithAppend(indexFile string, newEntry *ValidatedEntry, option
 // processEntriesWithRemoval processes entries and removes matching paths
 func processEntriesWithRemoval(indexFile string, pathSet map[string]bool, options *ParsedOptions) (int, int, error) {
 	// Load raw index data for safe processing
-	data, err := os.ReadFile(indexFile)
+	data, err := os.ReadFile(indexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to read index file: %v", err)
 	}

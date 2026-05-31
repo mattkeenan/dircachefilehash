@@ -476,7 +476,7 @@ func (ifa *indexFileAccess) Close() error {
 }
 
 func openIndexFile(filePath string) (*indexFileAccess, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return nil, fmt.Errorf("failed to open index file: %v", err)
 	}
@@ -995,13 +995,13 @@ func createBackup(indexFile string, operation string, description string, option
 
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
+	srcFile, err := os.Open(src) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return err
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	dstFile, err := os.Create(dst)
+	dstFile, err := os.Create(dst) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return err
 	}
@@ -1023,7 +1023,7 @@ func saveMetadata(metadata *BackupMetadata, path string) error {
 
 // loadMetadata loads backup metadata from a JSON file
 func loadMetadata(path string) (*BackupMetadata, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return nil, err
 	}
@@ -1440,7 +1440,7 @@ func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []
 // loadIndexIntoSkiplist loads an index file and reads its data
 func loadIndexIntoSkiplist(indexFile string) (*EntryData, error) {
 	// Read the entire index file
-	data, err := os.ReadFile(indexFile)
+	data, err := os.ReadFile(indexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return nil, fmt.Errorf("failed to read index file: %w", err)
 	}
@@ -1518,7 +1518,7 @@ func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customH
 	customHeader.EntryCount = entryData.EntryCount
 
 	// Create output file
-	file, err := os.Create(outputPath)
+	file, err := os.Create(outputPath) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}

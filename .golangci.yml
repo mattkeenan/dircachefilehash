@@ -52,13 +52,17 @@ linters:
       excludes:
         # --- Permanent: architectural / intentional ---
         - G103  # use of unsafe — the zero-copy/mmap design (pkg/binary_entry.go)
-        - G304  # file path from variable — dcfh is a file scanner by definition
         - G401  # SHA-1 — git-compatible content addressing, not a security hash
         - G505  # crypto/sha1 import — same git-compatibility rationale as G401
         # G115 (int-overflow on conversion) is now ACTIVE: task 3.3 widened
         # Dev/Ino to uint64 (format v4), fixing the inode/device truncation bug
         # that motivated the temporary exclude. New G115 sites are triaged
         # per-line, never blanket-excluded.
+        # G304 (file-path-from-variable) is also ACTIVE (task 6): the former
+        # blanket exclude was converted to per-line //nolint:gosec // G304
+        # suppressions at each live site, so the one untrusted-reachable open
+        # (pkg/hash.go, via the wire RemoteHandler.hashOne path) carries an
+        # explicit guard-citing rationale rather than being silently excluded.
 
     cyclop:
       max-complexity: 20
