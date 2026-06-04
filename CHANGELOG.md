@@ -4,10 +4,69 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 10: Re-enable checkptr in the race gate
+
+### Status: Complete (completed 2026-06-04, ~1 day, within the 1–2 day estimate)
+### Impact: The pre-commit `-race` gate now runs with **checkptr ON** (the Go default) — the `GOFLAGS="-gcflags=all=-d=checkptr=0"` suppression is gone. The gate can again catch genuine pointer-arithmetic bugs tree-wide; the zero-copy mmap accessors were made checkptr-clean rather than the checker being disabled (option 1, not the document-and-accept option 2). No on-disk format change, no public API change, zero-copy preserved (0 allocs/op on the accessor path). Retires the **Very High** BACKLOG item "Re-enable checkptr in the race gate". Branch: f/g phase checkpoints (`29667d0`, `61fff80`) + j-retro, squashed.
+
+### Changes
+- **`pkg/binary_entry.go`** (C1, `GetBinaryEntry`): replaced the `uintptr`-round-trip pointer computation with `unsafe.Add(unsafe.Pointer(&Data[0]), headerSize+Offset)`. Both operands are `int`, so the dead `//nolint:gosec // G115` and `//nolint:govet` suppressions were removed.
+- **`pkg/format/entry.go`** (C2 `RelativePath`, C3 `calculatePathLength`): the trailing-NUL scan now walks an **integer length** over a single in-bounds base pointer (`base`/`&be.Path[0]`), materialising the result pointer only in the final `unsafe.String`/return expression. C3 preserves its `&be.Path[0]` start byte-for-byte (the pre-existing 8-byte disagreement with C2 is intentionally **not** unified here).
+- **`pkg/entry_serialiser_test.go`**: the round-trip assertion now calls `RelativePath()` on the heap-backed buffer (was a raw byte scan with a now-false checkptr comment) — turning the headline acceptance scenario into a live, named regression for the heap-backed C2 path.
+- **`.githooks/pre-commit`**: dropped the `GOFLAGS=...checkptr=0` prefix; comment rewritten to cite `unsafe.Add` provenance. The gate now runs `go test -race -short ./...`.
+- **`implementation-guide/cwf-project.json`**: added `security.review.max-lines-exclude-paths: ["implementation-guide/**"]` so the exec-phase security-review cap measures production code, not CWF plan docs.
+
+### Notable
+- **`unsafe.Add` clears checkptr's *arithmetic* check but not the GC's pointer-validity check.** The first implementation attempt (holding `pathEnd = base+Size` live as an `unsafe.Pointer`) cleared the original "pointer arithmetic result points to invalid allocation" abort but introduced a *different* fatal — `found bad pointer in Go heap` — because the GC scans a live past-the-end pointer. Fixed by never holding an out-of-bounds pointer in a live variable (integer-length trim). The full-runtime acceptance bar (`go test -race ./...`, not a grep) is what caught this.
+- **checkptr only bites heap-backed memory.** For true mmap regions `checkptrBase` returns 0 and the check is skipped — which is exactly why production never crashed and the disabled gate could hide the issue. TC-2 deliberately exercises the heap-backed path.
+- **A pre-existing latent bug was found and preserved, not silently "fixed".** `RelativePath` starts the path at `Sizeof(Entry)`; `calculatePathLength` starts it at `&be.Path[0]` (= `Sizeof(Entry)-8`) — an 8-byte disagreement over the same memory. Preserved byte-for-byte and filed as a Medium backlog item for a proper canonical-offset audit.
+- **Security review: f-phase and g-phase `cwf-security-reviewer-changeset` → both no findings** (the reviewer independently re-derived the C2 underflow guard and C3's guarded non-dereference). `golangci-lint run ./...` → 0 issues (one rationale-bearing `//nolint:gosec // G115` on a bounded `Sizeof-8` constant in C3).
+
+### Retired Backlog Items
+#### Re-enable checkptr in the race gate: make zero-copy accessors checkptr-clean
+
+The `.githooks/pre-commit` gate runs `go test -race` with checkptr globally
+disabled (`GOFLAGS="-gcflags=all=-d=checkptr=0"`) because the zero-copy core
+does intentional `unsafe.Pointer` arithmetic that checkptr flags. As a result
+the race gate cannot catch genuine pointer-arithmetic bugs anywhere in the tree
+— a real coverage hole.
+
+Running `go test -race ./...` *with* checkptr enabled (the default) fails with
+`checkptr: pointer arithmetic result points to invalid allocation` at multiple
+zero-copy accessors, e.g.:
+- `pkg/binary_entry.go:53-54` — `(*binaryEntryRef).GetBinaryEntry` (uintptr
+  round-trip; `unsafe.Add` fixes this one).
+- `pkg/format/entry.go` — `RelativePath` / `calculatePathLength` read the
+  trailing variable-length path past the fixed `Entry` struct; checkptr objects
+  when the test's backing allocation is struct-sized (`unsafe.Add` does NOT fix
+  these — it is the struct+trailing-data pattern itself).
+
+Goal: make the zero-copy accessors checkptr-clean (or scope them precisely with
+`//go:nocheckptr` and/or adjust how the test framework backs entries so the
+whole struct+path lives in one allocation checkptr can see), then re-enable
+checkptr in the race gate so it catches real defects. Investigate whether any
+checkptr hit reflects a genuine out-of-bounds read versus a tracking false
+positive.
+
+Acceptance: `go test -race ./...` passes with checkptr ENABLED (drop the
+`-d=checkptr=0` flag from `.githooks/pre-commit`), with rationale recorded for
+any `//go:nocheckptr` retained.
+
+Identified during task 8 (dcfhfix non-destructive default), 2026-06-04, when a
+manual `go test -race` surfaced the failures the gate's disabled-checkptr config
+otherwise hides.
+
+<!-- Note: Delivered as option 1 (fix): unsafe.Add + integer-length trimming made the zero-copy accessors checkptr-clean; gate re-armed (dropped -d=checkptr=0). -->
+
+### New Backlog Items
+- **Reconcile RelativePath vs calculatePathLength 8-byte pathStart discrepancy** (Medium) — the two accessors disagree by 8 bytes on where the path begins; audit which offset is canonical against the on-disk writer (`EntrySerialiser`) and fix the wrong one.
+
+### Backlog Items Touched
+- The `implementation-guide/**` exclude addresses CWF *process docs* tripping the security-review production-line cap. It is adjacent to — but does **not** close — the open Task-5/Task-9 Low item about discounting upstream-vendored `.cwf/**` from the cap; that remains open (a different path set with different trade-offs for pure-upgrade tasks).
+
 ## Task 9: Upgrade CWF to v1.1.177 via cwf-manage update
 
 ### Status: Complete (completed 2026-06-04, ~1 day, within the <0.5–1 day estimate)
-
 ### Impact: The installed CWF tooling subtree moves v1.1.169 → v1.1.177 (8 upstream tasks: T170–T177). `cwf-manage update v1.1.177` applied in a single clean pass — no artefact-conflict prompt, no perms abort, no `fix-security` pass — and `cwf-manage validate` is exit 0. No dircachefilehash source changed (`git diff --stat <baseline>..HEAD -- pkg cmd go.mod go.sum` empty); the only consumer-authored writes were `.cwf/version` and this task's workflow docs. CWF lives only on the `local-*` line, so the CWF-free public `main` is untouched.
 
 ### Changes
@@ -27,7 +86,6 @@ Pre-CWF history — organised by release version under Keep a Changelog / Semant
 ## Task 8: dcfhfix — default to non-destructive fix-to-new-file
 
 ### Status: Complete (completed 2026-06-04, ~1 day, within the 1–2 day estimate)
-
 ### Impact: `dcfhfix` no longer mutates a potentially-corrupt index in place by default. Every write path now preserves the pre-repair original at a visible `<index>.pre-fix-<UTC>` sibling *before* the atomic rename, matching the safety posture of `fsck -n`/`git fsck`. The legacy in-place behaviour survives behind a `--force`-gated `--edit-in-place` opt-out. The on-disk contract is purely additive — the repaired index still lands at the original path — so the change is backwards-compatible for anything that reads the result and trivially reversible. Retires the **Medium** BACKLOG item of the same name. Branch: 9 phase checkpoints (a `2a21d23` … i `14594ea`) + j-retro, squashed.
 
 ### Changes
@@ -44,13 +102,11 @@ Pre-CWF history — organised by release version under Keep a Changelog / Semant
 - **Security review: f-phase `cwf-security-reviewer-changeset` → no findings; `golangci-lint run ./...` → 0 issues** (rationale-bearing `//nolint:gosec // G304/G302` on the O_EXCL open).
 
 ### Retired Backlog Items
-
 #### dcfhfix: default to non-destructive fix-to-new-file
 
 Medium-priority item proposing `dcfhfix` preserve the original and require an explicit opt-in for in-place edits. Delivered as specified: non-destructive default across all four real write paths (header/entry-edit/append/remove — the docs' `scan` path does not exist), original preserved at a timestamped `.pre-fix-<UTC>` sibling, `--edit-in-place` gated behind `--force`, with help/DESIGN updated. Reconciled against the *existing* `--backup`/`fixes` stack during requirements: the sibling **complements** the backup stack rather than replacing it.
 
 ### New Backlog Items
-
 - **Re-enable checkptr in the race gate** (Very High) — make the zero-copy accessors checkptr-clean so the `-race` gate (currently `-d=checkptr=0`) can catch genuine pointer-arithmetic bugs tree-wide.
 - **`.pre-fix-*` sibling retention/GC** (Low) — optional cleanup subcommand if preserved siblings accumulate enough to annoy.
 - **Fault-injection seam for `preserveOriginal`** (Low) — to cover the residual Sync/Close/Lstat defensive branches (75.8% → 100%).
@@ -58,7 +114,6 @@ Medium-priority item proposing `dcfhfix` preserve the original and require an ex
 ## Task 7: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
 
 ### Status: Complete (completed 2026-05-31, < 0.5 day, on estimate)
-
 ### Impact: Makes `golangci-lint run ./...` green across the whole tree — 0 issues, down from 3. These three findings were masked by the `.githooks/pre-commit` `--new` staged mode and only surfaced on a full-tree run, blocking any future `--all` CI lint gate. All fixes are behaviour-preserving; on-disk index format and CLI output are byte-identical. Branch: 3 planning checkpoints (a/d/e) + f-exec (`77af72c`) + g-exec (`4e25ada`) + j-retro.
 
 ### Changes
@@ -73,7 +128,6 @@ Medium-priority item proposing `dcfhfix` preserve the original and require an ex
 - **Security review: empty changeset.** Go-source-only change; the CWF changeset reviewer scopes to CWF-internal/shebang-script files, so Go is covered by the always-on gosec floor (`golangci-lint run ./...` = 0 issues), not the semantic changeset pass.
 
 ### Retired Backlog Items
-
 #### Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
 
 Identified in Task 2 (Low priority) when gosec was wired into `.golangci.yml`, and explicitly carved out of Task 6's gosec scope. The three non-gosec findings — `parseTestToken`/`resolveOneSelector` cyclop overruns and the `createTestEntry` unparam — are now fixed via behaviour-preserving extract-method refactors plus an unused-parameter removal. `golangci-lint run ./...` is green tree-wide, unblocking a future hooks `--all` CI lint mode.
@@ -81,7 +135,6 @@ Identified in Task 2 (Low priority) when gosec was wired into `.golangci.yml`, a
 ## Task 6: Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
 
 ### Status: Complete (completed 2026-05-31, ~1 day within the 0.5–1 day estimate)
-
 ### Impact: Closes out the gosec security gate. The backlog premise (written at Task 2) was largely stale — perms (G301/G302/G306), subprocess (G204), pprof (G108) and http (G114) had all been handled per-line in Tasks 3–5; only **G304** (file-path-from-variable) remained a blanket exclude. This task audits every gosec exclude and per-line suppression against empirical ground truth, converts the G304 blanket exclude to **23 per-line, trust-classified `//nolint:gosec // G304` suppressions**, and corrects mislabelled comments — leaving `golangci-lint run ./...` gosec-clean with no untriaged debt. No project runtime behaviour changes (comment/config/doc only; on-disk index format and CLI output byte-identical). Branch: 5 planning checkpoints + f-exec (`90ff0f2`) + g-exec (`60e79d4`) + j-retro.
 
 ### Changes
@@ -97,7 +150,6 @@ Identified in Task 2 (Low priority) when gosec was wired into `.golangci.yml`, a
 - **Process incident, fully recovered.** A `cd` into the disposable scratch worktree left the shell CWD there, so subsequent `cd "$(git rev-parse --show-toplevel)"` resolved to the *worktree* root: the implementation edits, lint, and tests all ran in the worktree and were deleted with it. The work survived as a dangling `git stash` commit (`a49e33b`, "task6-verify") taken during verification, recovered via `git fsck --unreachable`, re-applied to the main tree, and re-verified from scratch (gosec-clean, `go build`, full `go test -race` green). The committed changeset is provably identical to what passed verification.
 
 ### Retired Backlog Items
-
 #### Triage deferred gosec findings (perms, subprocess, pprof, http timeout, G304 paths)
 
 Identified in Task 2 when gosec was wired into `.golangci.yml`. The deferred rules were triaged across the intervening tasks (perms/subprocess/pprof/http handled per-line in Tasks 3–5; G115 re-enabled in Task 3.3); this task closed the remaining work — the G304 blanket exclude — by converting it to 23 trust-classified per-line suppressions and reconciling all suppression-comment rule IDs against gosec's actual emission. Gate verified gosec-clean. (The separate Low-priority "cyclop/unparam full-tree lint" backlog item is explicitly **not** part of gosec scope and remains open.)
@@ -105,7 +157,6 @@ Identified in Task 2 when gosec was wired into `.golangci.yml`. The deferred rul
 ## Task 5: Upgrade CWF to v1.1.169
 
 ### Status: Complete (completed 2026-05-29, ~1 day across 2 sessions vs <0.5 day estimate — ~2× variance attributable entirely to the v1.1.163 packaging defect)
-
 ### Impact: Operational chore — upgrades the installed CWF subtree from v1.1.155 to v1.1.169 (SHA `473baea2dd1d77bac9f100a1036f091eeccd0a4b`, the annotated-tag object SHA). Retires the **Medium**-priority BACKLOG item "Upgrade CwF v1.1.155 to v1.1.163" — repointed forward to v1.1.169 mid-task because the original target carried a packaging defect (upstream T167) that aborted `cwf-apply-artefacts` under non-TTY on every consumer. The pivot resolved that blocker by construction (T167 dropped the offending `rules-inject` manifest artefact entirely) and picked up T164/T165/T166/T168 as side benefits. Branch tip: 9 install.bash auto squash commits + 1 post-laydown metadata commit + 6 phase checkpoints. `cwf-manage validate: OK` on completion; all 6/6 success-path TCs pass.
 
 ### Changes
@@ -123,7 +174,6 @@ Identified in Task 2 when gosec was wired into `.golangci.yml`. The deferred rul
 - **Security-review state recorded as `error: cap exceeded`** in both f-exec and g-exec. The helper reports `reviewed 19 files, 2252 lines (1632 production), anchor=07366ad`. Anchor at the task baseline includes the entire v1.1.169 laydown as production. The actually-new-in-this-task surface (settings.json hook entries, .cwf/version, workflow MD) is small and surfaced inline. Filed BACKLOG follow-up: configure `security.review.test-paths` to exclude upstream-shipped CWF directories so future upgrades don't trip the cap by construction.
 
 ### Retired Backlog Items
-
 #### Upgrade CwF v1.1.155 to v1.1.163
 
 The installed CwF tooling was v1.1.155, pinned via the subtree method from `file:///home/matt/repo/coding-with-files`. The original BACKLOG item targeted v1.1.163 to pick up a `security-review-changeset` empty-changeset fix observed during Task 3.3's f-phase. Landed as v1.1.169 instead — the v1.1.163 target carried an unrelated `rules-inject` packaging defect (upstream T167) that aborted `cwf-apply-artefacts` under non-TTY. Pivoting to v1.1.169 resolved that defect by construction and also picked up: T164 (hierarchy-aware validation), T165 (template-reference linter), T166 (subtask-aware context inference — *observably broken* on this branch under v1.1.155, *fixed* under v1.1.169), and T168 (production-weighted security-review cap). Verified end-to-end: `cwf-manage status` reports v1.1.169 with `cwf_sha=473baea2…`; `cwf-manage validate` exit 0; all 6/6 success-path TCs PASS.
@@ -131,7 +181,6 @@ The installed CwF tooling was v1.1.155, pinned via the subtree method from `file
 ## Task 4: Move FileSize/ByteSize to int64 in v4 and core
 
 ### Status: Complete (completed 2026-05-27, ~0.5 day — within the 0.5–1 day estimate)
-
 ### Impact: `os.FileInfo.Size()` is `int64`, but the on-disk `ByteSize` was `uint64`, so every bridge between them was a gosec-G115-flagged signed↔unsigned conversion. Task 3.3 had annotated 7 of these on the `FileSize`/`.Size()` path. This task reinterprets the on-disk size field as signed `int64` throughout `pkg/format` and core, retiring those 7 suppressions **by removing the conversions** rather than re-suppressing. It is a signedness reinterpretation of an already-8-byte field — **not** a format bump: `CurrentIndexVersion` stays 4 and v4 indices round-trip byte-identical.
 
 ### Changes
@@ -150,8 +199,13 @@ The installed CwF tooling was v1.1.155, pinned via the subtree method from `file
 ## Task 3: Fix inode/device truncation and re-enable gosec G115
 
 ### Status: Complete (parent task; completed 2026-05-26 — ~4 calendar days across 3 subtasks vs a ~1.5–2 week single-task estimate)
-
 ### Impact: `dcfh` stored `Dev`/`Ino` as `uint32` and keyed hardlink dedup on a truncated `[2]uint32`, silently collapsing distinct files as hardlinks on large-inode filesystems (XFS, Btrfs, large ext4). This parent task eliminates that by widening `Dev`/`Ino` to 64-bit and, to make the change single-sited, first encapsulates the entire versioned on-disk format behind one module (`pkg/format`) — then re-enables the gosec G115 gate Task 2 had deferred. Closes the **Very High** inode/device-truncation backlog item.
+### Status: Complete (subtask of Task 3; completed 2026-05-25, within the 2–3 day estimate)
+### Impact: dcfh stored `Dev`/`Ino` as uint32 and keyed hardlink dedup on a truncated `[2]uint32`, so on large-inode filesystems (XFS, Btrfs, large ext4) two distinct files whose low 32 bits collided were silently treated as hardlinks and one was dropped from `dcfh dupes`. This widens `DevID`/`Inode` to `uint64` (on-disk format **v4**), removes the ingest truncation, and re-enables the gosec G115 gate that was disabled to land Task 2. Closes the parent's **Very High** backlog item.
+### Status: Complete (subtask of Task 3; completed 2026-05-24, within the 1–2 day estimate)
+### Impact: The index load path's "cast the mmap to the entry layout" step was implicitly correct only because every shipped version (v2, v3) has a byte-identical entry layout — there was no owned decision tying a version to *how* it is materialised, and no gate rejecting an out-of-range version byte before use. Task 3.2 makes that decision an explicit, single-owned, tested seam (`StrategyForVersion`) and gives `pkg/format` ownership of the write version, so Task 3.3's v4 becomes "flip one dispatch arm", not "add a new load-path branch". No on-disk format, width, or version change.
+### Status: Complete (subtask of Task 3; completed 2026-05-24, well under the 2–4 day estimate)
+### Impact: The on-disk layout (entry/header structs, field widths, offset tables, version constants/validation) was duplicated across `pkg` and `cmd/dcfhfix`, so the upcoming inode/device width change (Task 3.3) would have had to be applied in several places. A new `pkg/format` package is now the single, cycle-free owner of that layout; core and dcfhfix alias onto it. No on-disk format, field-width, version, or behaviour change.
 
 ### Changes (delivered across three subtasks — see their entries below for detail)
 - **3.1 (chore)** — extract `pkg/format` as the single, cycle-free owner of the on-disk layout (vocabulary, canonical `Entry`/`Header`, bounds-checked codec, version constants/validation); migrate core + dcfhfix onto it; delete both dcfhfix duplicates and the parallel offset table. No width/version/behaviour change.
@@ -165,10 +219,6 @@ The installed CwF tooling was v1.1.155, pinned via the subtree method from `file
 - G115's whole-tree count went 63 → 52 → 52 → **0**; the Dev/Ino class fixed structurally (zero suppressions on it). Three pre-existing non-G115 findings (cyclop ×2, unparam ×1) in untouched functions remain backlogged — not regressions; the enforcing `--new` gate is clean.
 
 ## Task 3.3: Widen Dev/Ino to uint64 and re-enable gosec G115
-
-### Status: Complete (subtask of Task 3; completed 2026-05-25, within the 2–3 day estimate)
-
-### Impact: dcfh stored `Dev`/`Ino` as uint32 and keyed hardlink dedup on a truncated `[2]uint32`, so on large-inode filesystems (XFS, Btrfs, large ext4) two distinct files whose low 32 bits collided were silently treated as hardlinks and one was dropped from `dcfh dupes`. This widens `DevID`/`Inode` to `uint64` (on-disk format **v4**), removes the ingest truncation, and re-enables the gosec G115 gate that was disabled to land Task 2. Closes the parent's **Very High** backlog item.
 
 ### Changes
 - `pkg/format`: `DevID`/`Inode` `uint32`→`uint64`; `CurrentIndexVersion` 3→4 (every entry field after `Ino` shifts +8). v4 is written exclusively.
@@ -193,10 +243,6 @@ Retired from BACKLOG (was **Very High**, identified in Task 2). Closed by this t
 
 ## Task 3.2: Add version-aware read/write dispatch seam in pkg/format
 
-### Status: Complete (subtask of Task 3; completed 2026-05-24, within the 1–2 day estimate)
-
-### Impact: The index load path's "cast the mmap to the entry layout" step was implicitly correct only because every shipped version (v2, v3) has a byte-identical entry layout — there was no owned decision tying a version to *how* it is materialised, and no gate rejecting an out-of-range version byte before use. Task 3.2 makes that decision an explicit, single-owned, tested seam (`StrategyForVersion`) and gives `pkg/format` ownership of the write version, so Task 3.3's v4 becomes "flip one dispatch arm", not "add a new load-path branch". No on-disk format, width, or version change.
-
 ### Changes
 - Added `pkg/format/version_dispatch.go`: `StrategyForVersion(version) → (DecodeStrategy, error)`, a switch-with-default that maps current/recognised-legacy versions to `DecodeZeroCopy` and rejects everything else — never raw-indexed by the untrusted version byte. (`DecodeHeap` is intentionally absent until v4 gives a legacy entry layout to decode in 3.3.)
 - `SetHeaderForWritableIndex` dropped its `version` parameter and now sources `CurrentIndexVersion` from `pkg/format`; all three production writers migrated (compiler + grep confirmed no caller passes a version).
@@ -209,10 +255,6 @@ Retired from BACKLOG (was **Very High**, identified in Task 2). Closed by this t
 - Deliberately the *non-speculative* half of the parent's read-old/write-new model: the concrete legacy entry decoder, dcfhfix repair read-path resolver adoption, `BEIndexFileIOEntry.readEntryData` routing, the `Dev`/`Ino` widening, and re-enabling G115 are deferred to Task 3.3, where v4 gives them a divergent layout to exercise.
 
 ## Task 3.1: Extract pkg/format as single owner of on-disk layout
-
-### Status: Complete (subtask of Task 3; completed 2026-05-24, well under the 2–4 day estimate)
-
-### Impact: The on-disk layout (entry/header structs, field widths, offset tables, version constants/validation) was duplicated across `pkg` and `cmd/dcfhfix`, so the upcoming inode/device width change (Task 3.3) would have had to be applied in several places. A new `pkg/format` package is now the single, cycle-free owner of that layout; core and dcfhfix alias onto it. No on-disk format, field-width, version, or behaviour change.
 
 ### Changes
 - Added `pkg/format`: vocabulary aliases (`DevID`/`Inode`/`WallTime`/… — same-width, single owner of width/signedness), canonical `Entry` + `Header` (with all methods), version constants + `headerSizeForVersion`/`ValidateVersion`, and a two-tier bounds-checked `SafeEntry` codec (generic `readField`/`writeField`). Verified cycle-free via `go list`.
@@ -228,7 +270,6 @@ Retired from BACKLOG (was **Very High**, identified in Task 2). Closed by this t
 ## Task 2: Adopt full Go pre-commit hook and security review
 
 ### Status: Complete
-
 ### Impact: The repo ran without a security-focused static-analysis gate. `gosec` is now wired into `.golangci.yml` (so it fires on every `golangci-lint` run, including the staged `--new` pre-commit path) and contributes zero findings to a clean tree while staying active for new code. Adopting it immediately surfaced one genuine latent bug (inode/device truncation in `dcfh dupes`, now backlogged Very High).
 
 ### Changes
@@ -247,7 +288,6 @@ Retired from BACKLOG (was **Very High**, identified in Task 2). Closed by this t
 ## Task 1: Conform BACKLOG and CHANGELOG to CWF format
 
 ### Status: Complete
-
 ### Impact: The 15 existing BACKLOG entries were invisible to the `backlog-manager` tooling — they used the legacy `## Entry:` heading, so `list` returned nothing and `validate` passed only because it recognised zero entries. After conversion all entries are tool-visible and the heading-tree contract is enforced on every change.
 
 ### Changes

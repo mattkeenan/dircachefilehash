@@ -199,43 +199,6 @@ full suite still passes.
 Identified in: Task 3 retrospective (j-retrospective.md); first flagged in subtask 3.3's e-testing-plan
 robustness review and deferred.
 
-## Task: Re-enable checkptr in the race gate: make zero-copy accessors checkptr-clean
-
-### Task-Type: bugfix
-### Priority: Very High
-### Identified in: task 8
-
-The `.githooks/pre-commit` gate runs `go test -race` with checkptr globally
-disabled (`GOFLAGS="-gcflags=all=-d=checkptr=0"`) because the zero-copy core
-does intentional `unsafe.Pointer` arithmetic that checkptr flags. As a result
-the race gate cannot catch genuine pointer-arithmetic bugs anywhere in the tree
-— a real coverage hole.
-
-Running `go test -race ./...` *with* checkptr enabled (the default) fails with
-`checkptr: pointer arithmetic result points to invalid allocation` at multiple
-zero-copy accessors, e.g.:
-- `pkg/binary_entry.go:53-54` — `(*binaryEntryRef).GetBinaryEntry` (uintptr
-  round-trip; `unsafe.Add` fixes this one).
-- `pkg/format/entry.go` — `RelativePath` / `calculatePathLength` read the
-  trailing variable-length path past the fixed `Entry` struct; checkptr objects
-  when the test's backing allocation is struct-sized (`unsafe.Add` does NOT fix
-  these — it is the struct+trailing-data pattern itself).
-
-Goal: make the zero-copy accessors checkptr-clean (or scope them precisely with
-`//go:nocheckptr` and/or adjust how the test framework backs entries so the
-whole struct+path lives in one allocation checkptr can see), then re-enable
-checkptr in the race gate so it catches real defects. Investigate whether any
-checkptr hit reflects a genuine out-of-bounds read versus a tracking false
-positive.
-
-Acceptance: `go test -race ./...` passes with checkptr ENABLED (drop the
-`-d=checkptr=0` flag from `.githooks/pre-commit`), with rationale recorded for
-any `//go:nocheckptr` retained.
-
-Identified during task 8 (dcfhfix non-destructive default), 2026-06-04, when a
-manual `go test -race` surfaced the failures the gate's disabled-checkptr config
-otherwise hides.
-
 ## Task: dcfhfix: .pre-fix-* sibling retention/GC
 
 ### Task-Type: feature
@@ -269,3 +232,11 @@ Scope: introduce a small injectable failure seam (interface or test hook) so the
 Sync/Close/Lstat error paths can be driven from a unit test, lifting
 `preserveOriginal` to 100%. Low priority — these are defensive branches with no
 known live trigger.
+
+## Task: Reconcile RelativePath vs calculatePathLength 8-byte pathStart discrepancy
+
+### Task-Type: bugfix
+### Priority: Medium
+### Identified in: task 10
+
+RelativePath() computes pathStart as entryStart+Sizeof(Entry); calculatePathLength() uses &be.Path[0] (= Sizeof-8). They disagree by 8 bytes over the same entry memory. Task 10 preserved both byte-for-byte (checkptr-clean only). Audit which offset is canonical against the on-disk writer (EntrySerialiser) and fix the wrong one; add a test pinning path-start.

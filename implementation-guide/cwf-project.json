@@ -6,6 +6,13 @@
     "description" : "Go CLI tool and library for directory scanning, file hashing, and duplicate detection with a git-compatible binary index format",
     "name" : "dircachefilehash"
   },
+  "security" : {
+    "review" : {
+      "max-lines-exclude-paths" : [
+        "implementation-guide/**"
+      ]
+    }
+  },
   "source-management" : {
     "branch-naming-convention" : "{task-type}/{task-id}-{task-description}",
     "type" : "github",
@@ -39,7 +46,7 @@
   "title" : "Coding with Files Project Configuration",
   "version" : "v0.13.0",
   "versioning" : {
-    "last_released" : "v0.13.9",
+    "last_released" : "v0.13.10",
     "major_minor" : "v0.13"
   },
   "wf_step_config" : {

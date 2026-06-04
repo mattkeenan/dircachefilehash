@@ -45,16 +45,11 @@ func TestEntrySerialiserScanEntry(t *testing.T) {
 		t.Errorf("FileSize mismatch: got %d, want 2048", be.FileSize)
 	}
 
-	// Verify the serialised data contains the path at the correct offset.
-	// We read the path directly from the byte slice rather than via
-	// binaryEntry.RelativePath() because the race detector's checkptr
-	// mode rejects pointer arithmetic across heap allocation boundaries.
-	pathOffset := int(unsafe.Sizeof(binaryEntry{}))
-	pathEnd := pathOffset
-	for pathEnd < len(data) && data[pathEnd] != 0 {
-		pathEnd++
-	}
-	gotPath := string(data[pathOffset:pathEnd])
+	// Verify the path round-trips via RelativePath() on the heap-backed entry.
+	// This exercises the exact zero-copy accessor path that previously crashed
+	// under the race detector's checkptr mode; with the unsafe.Add rewrite it is
+	// checkptr-clean, so this doubles as a direct regression for that fix.
+	gotPath := be.RelativePath()
 	if gotPath != relPath {
 		t.Errorf("path mismatch: got %q, want %q", gotPath, relPath)
 	}

@@ -100,39 +100,52 @@ func (be *Entry) RelativePath() string {
 		panic(fmt.Sprintf("RelativePath: invalid Size %d (expected %d-65535)", be.Size, minEntrySize))
 	}
 
-	entryStart := uintptr(unsafe.Pointer(be))
-	entryEnd := entryStart + uintptr(be.Size)
-
-	// Calculate path start portably using struct size.
-	// The path data is stored immediately after the Entry struct.
-	// This accounts for all compiler padding and is portable across architectures.
+	// Derive the path via unsafe.Add from a single typed base so pointer
+	// provenance is preserved (checkptr-clean). The path data is stored
+	// immediately after the Entry struct; using unsafe.Sizeof accounts for all
+	// compiler padding and is portable across architectures.
+	//
+	// The backward scan trims trailing NUL padding using an integer length, so
+	// every dereferenced address (base + structSize + pathLen - 1) is strictly
+	// within the entry and we never hold a past-the-end pointer in a live
+	// variable (the GC rejects those). The Size guard above (Size >=
+	// minEntrySize = struct size) guarantees pathLen does not underflow.
+	base := unsafe.Pointer(be)
 	structSize := unsafe.Sizeof(*be)
-	pathStart := entryStart + structSize
 
 	// Scan backwards byte by byte from the end (endian-neutral).
 	// At most 8 bytes to scan due to 8-byte alignment, making this O(1).
-	pathEnd := entryEnd
-	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 { //nolint:govet // intentional pointer arithmetic for mmap path extraction
-		pathEnd--
+	pathLen := uintptr(be.Size) - structSize
+	for pathLen > 0 && *(*byte)(unsafe.Add(base, structSize+pathLen-1)) == 0 {
+		pathLen--
 	}
 
-	pathLen := int(pathEnd - pathStart)                               //nolint:gosec // G115: path length within an entry, bounded by Size (≤ 65535)
-	return unsafe.String((*byte)(unsafe.Pointer(pathStart)), pathLen) //nolint:govet // intentional pointer arithmetic for mmap path extraction
+	return unsafe.String((*byte)(unsafe.Add(base, structSize)), int(pathLen)) //nolint:gosec // G115: pathLen ≤ be.Size ≤ 65535, bounded non-negative
 }
 
 // calculatePathLength finds the length of the null-terminated path
 func (be *Entry) calculatePathLength() int {
-	entryStart := uintptr(unsafe.Pointer(be))
-	entryEnd := entryStart + uintptr(be.Size)
-	pathStart := uintptr(unsafe.Pointer(&be.Path[0]))
+	// pathStart keeps &be.Path[0] (the element-address cast is already
+	// checkptr-clean and in-bounds, so it is safe to hold live). NB: this starts
+	// the path at Sizeof(*be)-8 (Path is the last field), an 8-byte-earlier
+	// address than RelativePath uses — preserved here byte-for-byte; the
+	// discrepancy is tracked as a separate backlog item.
+	//
+	// The trailing-NUL trim uses an integer length so every dereferenced address
+	// (pathStart + n - 1) stays within the entry; no past-the-end pointer is
+	// ever held in a live variable. Signed length math mirrors the original's
+	// behaviour when be.Size is below the path-start offset.
+	base := unsafe.Pointer(be)
+	pathStart := unsafe.Pointer(&be.Path[0])
+	startOff := int(uintptr(pathStart) - uintptr(base)) //nolint:gosec // G115: = Sizeof(*be) - 8, a small struct-layout constant
 
 	// Scan for null terminator
-	pathEnd := entryEnd
-	for pathEnd > pathStart && *(*byte)(unsafe.Pointer(pathEnd - 1)) == 0 { //nolint:govet // intentional pointer arithmetic for mmap path extraction
-		pathEnd--
+	n := int(be.Size) - startOff //nolint:gosec // G115: be.Size ≤ 65535, bounded non-negative
+	for n > 0 && *(*byte)(unsafe.Add(pathStart, n-1)) == 0 {
+		n--
 	}
 
-	return int(pathEnd - pathStart) //nolint:gosec // G115: path length within an entry, bounded by Size (≤ 65535)
+	return n
 }
 
 // ValidateEntry performs comprehensive validation of an Entry.

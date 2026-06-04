@@ -99,10 +99,10 @@ if command -v govulncheck &>/dev/null; then
 fi
 
 # Run go test with race detector.
-# Disable checkptr: this codebase uses intentional unsafe.Pointer arithmetic
-# for mmap/zero-copy operations that checkptr incorrectly flags as invalid.
+# checkptr stays ON: the zero-copy accessors use unsafe.Add, which preserves
+# pointer provenance so checkptr can follow the arithmetic (task 10).
 echo "Running go test -race..."
-if ! GOFLAGS="-gcflags=all=-d=checkptr=0" go test -race -short ./...; then
+if ! go test -race -short ./...; then
     echo "ERROR: Tests failed"
     exit 1
 fi
