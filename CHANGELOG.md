@@ -4,6 +4,26 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 9: Upgrade CWF to v1.1.177 via cwf-manage update
+
+### Status: Complete (completed 2026-06-04, ~1 day, within the <0.5–1 day estimate)
+
+### Impact: The installed CWF tooling subtree moves v1.1.169 → v1.1.177 (8 upstream tasks: T170–T177). `cwf-manage update v1.1.177` applied in a single clean pass — no artefact-conflict prompt, no perms abort, no `fix-security` pass — and `cwf-manage validate` is exit 0. No dircachefilehash source changed (`git diff --stat <baseline>..HEAD -- pkg cmd go.mod go.sum` empty); the only consumer-authored writes were `.cwf/version` and this task's workflow docs. CWF lives only on the `local-*` line, so the CWF-free public `main` is untouched.
+
+### Changes
+- **CWF subtree v1.1.169 → v1.1.177** via subtree remove-then-re-add (`.cwf/`, `.cwf-skills/`, `.cwf-rules/`, `.cwf-agents/`), driven by `cwf-manage update`. 20 skill + 5 agent + 1 rule symlinks recreated; settings-merge added 0 entries.
+- **`.cwf/version`**: `cwf_version`/`cwf_ref` → `v1.1.177`; `cwf_sha` → the **annotated-tag object** `1cae055bf1b52bea0fd9b0cfce63871893757ab7`.
+- **T176 doc-split landed**: `.cwf/docs/workflow/workflow-steps.md` is now a ToC pointing at 10 per-phase files under `workflow-steps/`; the plan-phase SKILL Step-5 references repoint accordingly (all symlinks resolve).
+
+### Notable
+- **`cwf_sha` records the tag-object SHA, not the commit — by design for *this* upgrade.** T175 (ships *in* v1.1.177) changes the writer to record `git rev-parse <ref>^{commit}`, but it is **forward-only**: the authoritative `.cwf/version` write is performed by the *outer*, currently-installed **v1.1.169** cwf-manage (pre-T175), whose `resolve_sha` has no `^{commit}`. The commit form (`ed664b25…`) will land only on the *next* upgrade. Predicted by reading the installed `cwf-manage` source during planning (lines 209/448/502–510) — not the T175 changelog headline — and confirmed live. Same pattern as T159 (`git_describe_version`).
+- **T170 perms-ceiling self-cleaned the laydown.** The exact-perms pass tightened drifted modes (agent `.md` 0600→0444, `.cwf/scripts/**` 0700→0500) back to the recorded ceiling during the update, so `validate` was clean on the first run with no separate `fix-security`.
+- **Clean run, unlike Task 5.** The v1.1.163 `rules-inject` artefact defect that aborted Task 5's first attempt was fixed by T167; this span (170→177) carried no analogous packaging defect and the retained revert escape hatch was never needed.
+- **Security review recorded `error` in both exec phases — the documented contract, not a finding.** `security-review-changeset` exited `2` (1759 / 1906 production lines > the 500 cap) because the changeset is entirely upstream-vendored CWF content with no `max-lines-exclude-paths` discount configured; the deterministic `cwf-manage validate` (sha256 + perms) is the integrity gate and passed.
+
+### Backlog Items Touched
+- **Augmented** (not retired) the Task 5 follow-up *"Configure security.review.test-paths to exclude upstream-shipped CWF directories"* (Low) with Task 9's second data point and a caveat: discounting `.cwf/**` from the cap would flip a *pure* upgrade task from "error/skip" to "invoke the subagent on the entire vendored delta" — so the config fix is better-aimed at *mixed* tasks. No new backlog item created (the concern was already tracked).
+
 ## Task 8: dcfhfix — default to non-destructive fix-to-new-file
 
 ### Status: Complete (completed 2026-06-04, ~1 day, within the 1–2 day estimate)

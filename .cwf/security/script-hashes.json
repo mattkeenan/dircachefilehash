@@ -24,7 +24,7 @@
     "cwf-security-reviewer-changeset" : {
       "path" : ".claude/agents/cwf-security-reviewer-changeset.md",
       "permissions" : "0444",
-      "sha256" : "7c59992a807fd5e293ddb2fec2af28654054a77d615ed42dc18380bbd3c315ed"
+      "sha256" : "a26c776572e2b01fcc5af15f60996572fa118f250c8ec15ae3ef37929b0bab7f"
     }
   },
   "data" : {
@@ -56,7 +56,7 @@
     },
     "CWF::Common" : {
       "path" : ".cwf/lib/CWF/Common.pm",
-      "sha256" : "c8a3f2e542a42043a828ee445219b96d235ab3a628550d63bf696cac73c5d442"
+      "sha256" : "55eee06c1c9557bdebaeeb6e2f52b7f0d37d80173562290a61e9f25a201a7c8d"
     },
     "CWF::ContextInheritance::Core" : {
       "path" : ".cwf/lib/CWF/ContextInheritance/Core.pm",
@@ -76,11 +76,11 @@
     },
     "CWF::TaskContextInference" : {
       "path" : ".cwf/lib/CWF/TaskContextInference.pm",
-      "sha256" : "aa2cdc7df9173a9af0f29ae258c0b69710008463f4bdf193b25affb629e29fd4"
+      "sha256" : "fc51db575411d0fd4edcbccacd9f3f10c9c8b72bacce3514fc265b7489cf7d7b"
     },
     "CWF::TaskPath" : {
       "path" : ".cwf/lib/CWF/TaskPath.pm",
-      "sha256" : "bfc9e4b9d6ebd3e128122660043b2439b421853930fd278bd8ba6ffe8024a842"
+      "sha256" : "45eabdd56a59c88e972b677ad5f7e5ed8c8e33b0c3130786277aacbdd241a91d"
     },
     "CWF::TaskState" : {
       "path" : ".cwf/lib/CWF/TaskState.pm",
@@ -104,7 +104,7 @@
     },
     "CWF::Validate::Security" : {
       "path" : ".cwf/lib/CWF/Validate/Security.pm",
-      "sha256" : "b8e74cd7072f68c412eb42015dbaba238dea5e4ab224440560207e69081b7b68"
+      "sha256" : "9aa5474bed63956c3921a83316dbb1c1f29e7a710c49b6baf8c1c58e4a330017"
     },
     "CWF::Validate::TemplateRefs" : {
       "path" : ".cwf/lib/CWF/Validate/TemplateRefs.pm",
@@ -128,7 +128,7 @@
     },
     "CWF::WorkflowFiles" : {
       "path" : ".cwf/lib/CWF/WorkflowFiles.pm",
-      "sha256" : "4d9d9a439b97caf9d09c592c3323d9ade93e555d51b4b39f4f2ba2af186962c2"
+      "sha256" : "10de7d7d28ab1f10eac0c15c4199b6da99d5bc39aa34f391d0dee96897eadf82"
     },
     "CWF::WorkflowFiles::V20" : {
       "path" : ".cwf/lib/CWF/WorkflowFiles/V20.pm",
@@ -173,7 +173,7 @@
     "context-manager.d/location" : {
       "path" : ".cwf/scripts/command-helpers/context-manager.d/location",
       "permissions" : "0500",
-      "sha256" : "d745e9103994c71d63d5c260c118eebfd7090973cf4f24ea2f6aa73f16610cfb"
+      "sha256" : "3c25f201c75669a0f505fee60fa2949d36fbf8b0896062e47e27188815955652"
     },
     "context-manager.d/version" : {
       "path" : ".cwf/scripts/command-helpers/context-manager.d/version",
@@ -208,7 +208,7 @@
     "cwf-manage" : {
       "path" : ".cwf/scripts/cwf-manage",
       "permissions" : "0700",
-      "sha256" : "751f0283adcc3279f12fcf1e111977093bec2ea6880abc3303d9ba16d12ff109"
+      "sha256" : "7cc0d821059bc5709096066f32ad490183efb2cc004a2fa2a26613259a54f42d"
     },
     "cwf-set-status" : {
       "path" : ".cwf/scripts/command-helpers/cwf-set-status",
@@ -238,7 +238,7 @@
     "migrate-v2.1-file-order" : {
       "path" : ".cwf/scripts/migrations/migrate-v2.1-file-order",
       "permissions" : "0500",
-      "sha256" : "22b8d6da84337abfc0dd90a420cdca7c6fee1395caa66e375154af292a4d1a04"
+      "sha256" : "ff8466eda633ba97be0e218915ab7e739a129f49a5b2379c6dfc46b9f0b1e24d"
     },
     "rollback-migration.sh" : {
       "path" : ".cwf/scripts/rollback-migration.sh",
@@ -298,12 +298,12 @@
     "template-copier-v2.0" : {
       "path" : ".cwf/scripts/command-helpers/template-copier-v2.0",
       "permissions" : "0500",
-      "sha256" : "ea1a873cfd57d5c0e0b025271a85b7079fc856b43f13849814cacdca436c3409"
+      "sha256" : "fca4c9ca7bed1d1fefdd1f7b3bc13fdfb63cc6cbd2bd2bf9efee6a8c8ee180e6"
     },
     "security-review-changeset" : {
       "path" : ".cwf/scripts/command-helpers/security-review-changeset",
       "permissions" : "0500",
-      "sha256" : "064df660f0ea7d6f7300ca11a304c75065c0e619f5def968864e912ba6d0222b"
+      "sha256" : "f2a25dec87e60433afc07a3488561dfd30180db66b4552ebb77668ff4ae0dbba"
     },
     "security-review-classify" : {
       "path" : ".cwf/scripts/command-helpers/security-review-classify",
@@ -313,7 +313,7 @@
     "template-copier-v2.1" : {
       "path" : ".cwf/scripts/command-helpers/template-copier-v2.1",
       "permissions" : "0700",
-      "sha256" : "3e34496f32be254e286cd2af5ae09cae330ea5e3b75fa8ef6a42525a68662d4e"
+      "sha256" : "82f7df009806b9411dbe9d75cf10e62c64deb222a873affd7a7573386c48092a"
     },
     "validate-migration.sh" : {
       "path" : ".cwf/scripts/validate-migration.sh",

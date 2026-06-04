@@ -84,6 +84,22 @@ sub git_capture {
 # --- Version file -------------------------------------------------------------
 
 sub find_git_root {
+    # Worktree-safe (Task 173): cwf-manage installs/validates against the MAIN
+    # tree, so derive it from the common git dir rather than --show-toplevel
+    # (which returns a linked worktree's root). Keep list-form git_capture and
+    # the die-on-no-repo contract. Fall back to --show-toplevel when the common
+    # dir is not a .../.git directory (e.g. submodule gitdirs).
+    my ($cd, $crc) = git_capture('rev-parse', '--path-format=absolute', '--git-common-dir');
+    if ($crc == 0) {
+        my $common = $cd->[0] // '';
+        $common =~ s{/+$}{};
+        # --path-format=absolute guarantees an absolute path, so a literal
+        # /.git suffix strip is a well-defined parent derivation (no File::Spec;
+        # cwf-manage deliberately carries no File::Spec import).
+        if (length $common && $common =~ s{/\.git$}{}) {
+            return $common if length $common;
+        }
+    }
     my ($out, $rc) = git_capture('rev-parse', '--show-toplevel');
     my $root = $rc == 0 ? ($out->[0] // '') : '';
     die_msg("Not inside a git repository") unless length $root;
@@ -206,7 +222,7 @@ sub resolve_ref {
 
 sub resolve_sha {
     my ($clone_dir, $ref) = @_;
-    open my $fh, '-|', 'git', '-C', $clone_dir, 'rev-parse', $ref
+    open my $fh, '-|', 'git', '-C', $clone_dir, 'rev-parse', "$ref^{commit}"
         or die_msg("Failed to run git rev-parse: $!");
     my $sha = <$fh>;
     close $fh;
@@ -623,11 +639,13 @@ sub _read_hashes_data {
     return ($data, undef);
 }
 
-# Apply recorded permissions from decoded $data. $mode is 'additive' (raise
-# only missing bits — the standalone fix-security behaviour) or 'exact' (set
-# the exact recorded mode, removing excess bits — least-privilege enforcement
-# after a laydown). A missing file or sha256 mismatch is always reported as
-# unfixable. Returns (\@repaired, \@unfixable); never exits.
+# Apply recorded permissions from decoded $data. $mode is 'clamp' (clear only
+# the excess bits outside the recorded mask, never raising bits — the
+# standalone fix-security behaviour: recorded perms are a ceiling) or 'exact'
+# (set the exact recorded mode — least-privilege enforcement after a laydown;
+# exact <= ceiling, so a laid-down tree validates clean). A missing file or
+# sha256 mismatch is always reported as unfixable. Returns (\@repaired,
+# \@unfixable); never exits.
 sub _apply_recorded_perms {
     my ($git_root, $data, $mode, $dry_run) = @_;
     my @repaired;
@@ -680,12 +698,16 @@ sub _apply_recorded_perms {
             # sha matches — safe to fix permissions if needed.
             next unless defined $expected_perms;
             my $actual_perms = (stat($abs))[2] & 07777;
-            my $want         = oct($expected_perms);
+            my $recorded     = oct($expected_perms);
 
+            my $want;
             if ($mode eq 'exact') {
+                $want = $recorded;
                 next if $actual_perms == $want;          # already exact
             } else {
-                next if ($actual_perms & $want) == $want; # additive: bits present
+                # clamp: strip bits outside the recorded ceiling, never raise.
+                $want = $actual_perms & $recorded;
+                next if $actual_perms == $want;          # no excess ⇒ no-op
             }
 
             # Dry-run: record the would-be repair without mutating. The
@@ -696,13 +718,13 @@ sub _apply_recorded_perms {
                 push @repaired, {
                     rel => $rel,
                     from => sprintf('0%o', $actual_perms),
-                    to   => $expected_perms,
+                    to   => sprintf('0%o', $want),
                 };
             } elsif (chmod $want, $abs) {
                 push @repaired, {
                     rel => $rel,
                     from => sprintf('0%o', $actual_perms),
-                    to   => $expected_perms,
+                    to   => sprintf('0%o', $want),
                 };
             } else {
                 push @unfixable, {
@@ -730,7 +752,7 @@ sub cmd_fix_security {
     my ($data, $err) = _read_hashes_data($git_root);
     if ($err) { _print_unfixable($err); exit 1; }
 
-    my ($repaired, $unfixable) = _apply_recorded_perms($git_root, $data, 'additive', $dry_run);
+    my ($repaired, $unfixable) = _apply_recorded_perms($git_root, $data, 'clamp', $dry_run);
 
     my $pfx = $dry_run ? '[dry-run] ' : '';
     for my $r (@$repaired) {

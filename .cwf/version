@@ -1,7 +1,7 @@
 cwf_install_manifest_sha=e1926a2f6fc5982c6a614e581546978185f6b175f8c43e7c5284328638855cac
-cwf_installed=2026-05-29T16:26:04Z
+cwf_installed=2026-06-04T06:28:39Z
 cwf_method=subtree
-cwf_ref=v1.1.169
-cwf_sha=473baea2dd1d77bac9f100a1036f091eeccd0a4b
+cwf_ref=v1.1.177
+cwf_sha=1cae055bf1b52bea0fd9b0cfce63871893757ab7
 cwf_source=file:///home/matt/repo/coding-with-files
-cwf_version=v1.1.169
+cwf_version=v1.1.177
