@@ -57,6 +57,11 @@ dcfhfind cache --deleted --print | \
 - **Path validation**: Paths are validated against index contents before editing
 
 ### Safety Features
+- **Non-destructive default**: Before the repaired index atomically replaces the
+  original, the pre-repair index is preserved at a visible, timestamped
+  `<index>.pre-fix-<UTC>` sibling. Preservation strictly precedes the rename, so
+  the original is never lost. Opt out with `--force --edit-in-place`, which
+  overwrites in place (no sibling) and prints a destructive-action warning.
 - **FIFO backup stack**: Every modification creates a backup for easy rollback
 - **Dry-run support**: Preview changes before applying them
 - **Atomic operations**: All modifications use temp files with atomic rename
@@ -88,7 +93,6 @@ dcfhfix <index> entry edit <field> <value> <path>...
 dcfhfix <index> entry edit json <json-data> <path>...
 dcfhfix <index> entry append <json-data>
 dcfhfix <index> entry remove <path>...
-dcfhfix <index> entry resort
 ```
 
 ### Backup Management

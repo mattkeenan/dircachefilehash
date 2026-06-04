@@ -51,8 +51,8 @@ func processEntriesWithWorkflow(indexFile string, pathSet map[string]bool, field
 		return 0, 0, fmt.Errorf("failed to finalize temp index: %v", err)
 	}
 
-	// Atomically replace the original index file
-	err = os.Rename(tmpIndexFile, indexFile)
+	// Preserve the original (default) then atomically replace the index file
+	err = promoteRepairedIndex(tmpIndexFile, indexFile, options)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to replace original index file: %v", err)
 	}

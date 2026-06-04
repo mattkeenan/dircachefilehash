@@ -30,6 +30,7 @@ func main() {
 	options.DefineOption("dry-run", "n", OptionTypeBool, "false", "Preview changes without modifying files")
 	options.DefineOption("backup", "b", OptionTypeBool, "true", "Create backup before making changes")
 	options.DefineOption("force", "f", OptionTypeBool, "false", "Force operations even if validation passes")
+	options.DefineOption("edit-in-place", "", OptionTypeBool, "false", "Overwrite the index in place without preserving a .pre-fix sibling (requires --force)")
 	options.DefineOption("quiet", "q", OptionTypeBool, "false", "Suppress non-error output")
 	options.DefineOption("format", "", OptionTypeString, "human", "Output format for show commands (human|json)")
 
@@ -97,11 +98,19 @@ var commandTable = map[string]struct {
 	run      func(indexFile string, args []string, options *ParsedOptions) error
 }{
 	"header": {"dcfhfix <index-file> header <show|edit> [args...]", handleHeaderCommand},
-	"entry":  {"dcfhfix <index-file> entry <show|edit|append|remove|resort> [args...]", handleEntryCommand},
+	"entry":  {"dcfhfix <index-file> entry <show|edit|append|remove> [args...]", handleEntryCommand},
 	"fixes":  {"dcfhfix <index-file> fixes <list|pop|discard|clear> [args...]", handleFixesCommand},
 }
 
 func dispatchCommand(command, indexFile string, subArgs []string, options *ParsedOptions) error {
+	// Gate the destructive in-place opt-in once, before routing. Because every
+	// subcommand (including read-only ones) routes through here, a lone
+	// --edit-in-place is refused everywhere — intentional: the flag is
+	// meaningless on reads and one chokepoint is simpler than per-write-path checks.
+	if err := validateEditInPlaceGate(options); err != nil {
+		return err
+	}
+
 	h, ok := commandTable[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; try 'dcfhfix --help'", command)
@@ -123,7 +132,6 @@ func showHelp() {
 	fmt.Printf("  entry edit <field> <value> <path>...  Edit entry field\n")
 	fmt.Printf("  entry append <json>            Append new entry from JSON\n")
 	fmt.Printf("  entry remove <path>...         Remove entries by path\n")
-	fmt.Printf("  entry resort                   Resort all entries by path\n")
 	fmt.Printf("  fixes list                     List backup stack\n")
 	fmt.Printf("  fixes pop                      Restore latest backup and remove from stack\n")
 	fmt.Printf("  fixes discard                  Remove latest backup from stack without restoring\n")
@@ -137,6 +145,7 @@ func showHelp() {
 	fmt.Printf("  -n, --dry-run       Preview changes without modifying files\n")
 	fmt.Printf("  -b, --backup        Create backup before changes (default: true)\n")
 	fmt.Printf("  -f, --force         Force operations even if validation passes\n")
+	fmt.Printf("      --edit-in-place Overwrite the index in place, no .pre-fix sibling (requires --force)\n")
 	fmt.Printf("  -q, --quiet         Suppress non-error output\n")
 	fmt.Printf("      --format        Output format for show commands (human|json, default: human)\n\n")
 
@@ -169,15 +178,15 @@ func showHelp() {
 	fmt.Printf("  # Remove entries\n")
 	fmt.Printf("  dcfhfix main entry remove old-file.txt temp/\n\n")
 
-	fmt.Printf("  # Resort index\n")
-	fmt.Printf("  dcfhfix main entry resort\n\n")
-
 	fmt.Printf("  # Manage fix backups\n")
 	fmt.Printf("  dcfhfix main fixes list\n")
 	fmt.Printf("  dcfhfix main fixes pop\n")
 	fmt.Printf("  dcfhfix main fixes clear\n\n")
 
 	fmt.Printf("Safety Features:\n")
+	fmt.Printf("  - Non-destructive by default: the pre-repair index is preserved at a\n")
+	fmt.Printf("    visible '.pre-fix-<timestamp>' sibling before the repaired index replaces it\n")
+	fmt.Printf("    (opt out with --force --edit-in-place)\n")
 	fmt.Printf("  - Creates FIFO backup stack by default (disable with --backup=false)\n")
 	fmt.Printf("  - Easy rollback with 'fixes pop' command\n")
 	fmt.Printf("  - Validates changes before applying\n")
@@ -642,6 +651,7 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 	}
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit header field '%s' to value '%s'\n", field, value)
+		reportDryRunPreservation(indexFile, options)
 		return nil
 	}
 
@@ -757,6 +767,7 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 	}
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit entry field '%s' to value '%s' for paths: %s\n", field, value, pathsDesc)
+		reportDryRunPreservation(indexFile, options)
 		return nil
 	}
 
@@ -829,6 +840,7 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would append entry from JSON: %s\n", jsonDesc)
+		reportDryRunPreservation(indexFile, options)
 		return nil
 	}
 
@@ -876,6 +888,7 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would remove entries for paths: %s\n", pathsDesc)
+		reportDryRunPreservation(indexFile, options)
 		return nil
 	}
 
@@ -1482,7 +1495,7 @@ func getIndexHeader(indexFile string) (*indexHeader, error) {
 }
 
 // writeIndexWithModifiedHeader writes an index with a modified header
-func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHeader *indexHeader, _ *ParsedOptions) error {
+func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHeader *indexHeader, options *ParsedOptions) error {
 	// Create temporary file path
 	tempFile := indexFile + ".tmp"
 	defer func() {
@@ -1497,8 +1510,8 @@ func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHea
 		return fmt.Errorf("failed to write index with custom header: %w", err)
 	}
 
-	// Atomic replace
-	if err := os.Rename(tempFile, indexFile); err != nil {
+	// Preserve the original (default) then atomic replace.
+	if err := promoteRepairedIndex(tempFile, indexFile, options); err != nil {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 

@@ -57,37 +57,6 @@ Scope when picked up:
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
 the remote host holds no dcfh state to repair.
 
-## Task: dcfhfix: default to non-destructive fix-to-new-file
-
-### Task-Type: feature
-### Priority: Medium
-
-`dcfhfix` should default to writing repairs to a *new* index file (e.g.
-`<name>.fixed.idx` or similar), moving the original out of the way
-rather than mutating it in place. In-place editing should require an
-explicit `--force --edit-in-place` (or equivalent) — a "break glass in
-case of nuclear war" flag, not the default.
-
-Why: dcfhfix operates on potentially-corrupted state where the only
-remaining evidence is the index itself. The current in-place default
-makes destructive edits the path of least resistance; a fix-to-new-file
-default preserves the original automatically and matches the safety
-posture of comparable tools (`fsck -n`, `git fsck` write nothing).
-
-Scope when picked up:
-- Make non-destructive output the default for `dcfhfix scan`, `entry`,
-  `header` write paths.
-- Original index moved aside (`<name>.idx.pre-fix` or timestamped) so a
-  user can compare/roll back without thinking about it.
-- `--edit-in-place` (gated by `--force` or its own clear flag) for the
-  rare case where users explicitly want the old behaviour.
-- Big warnings on the in-place path; clean-flag header check still
-  applies as the in-use lockout (separate concern).
-- Update help text and DESIGN docs to reflect the new default.
-
-Dependency: aligns naturally with the Fix-primitive restructure above
-(non-destructive output is a property of `FixRequest` semantics).
-
 ## Task: Add comprehensive integration tests for edge cases
 
 ### Task-Type: chore
@@ -227,3 +196,74 @@ full suite still passes.
 
 Identified in: Task 3 retrospective (j-retrospective.md); first flagged in subtask 3.3's e-testing-plan
 robustness review and deferred.
+
+## Task: Re-enable checkptr in the race gate: make zero-copy accessors checkptr-clean
+
+### Task-Type: bugfix
+### Priority: Very High
+### Identified in: task 8
+
+The `.githooks/pre-commit` gate runs `go test -race` with checkptr globally
+disabled (`GOFLAGS="-gcflags=all=-d=checkptr=0"`) because the zero-copy core
+does intentional `unsafe.Pointer` arithmetic that checkptr flags. As a result
+the race gate cannot catch genuine pointer-arithmetic bugs anywhere in the tree
+— a real coverage hole.
+
+Running `go test -race ./...` *with* checkptr enabled (the default) fails with
+`checkptr: pointer arithmetic result points to invalid allocation` at multiple
+zero-copy accessors, e.g.:
+- `pkg/binary_entry.go:53-54` — `(*binaryEntryRef).GetBinaryEntry` (uintptr
+  round-trip; `unsafe.Add` fixes this one).
+- `pkg/format/entry.go` — `RelativePath` / `calculatePathLength` read the
+  trailing variable-length path past the fixed `Entry` struct; checkptr objects
+  when the test's backing allocation is struct-sized (`unsafe.Add` does NOT fix
+  these — it is the struct+trailing-data pattern itself).
+
+Goal: make the zero-copy accessors checkptr-clean (or scope them precisely with
+`//go:nocheckptr` and/or adjust how the test framework backs entries so the
+whole struct+path lives in one allocation checkptr can see), then re-enable
+checkptr in the race gate so it catches real defects. Investigate whether any
+checkptr hit reflects a genuine out-of-bounds read versus a tracking false
+positive.
+
+Acceptance: `go test -race ./...` passes with checkptr ENABLED (drop the
+`-d=checkptr=0` flag from `.githooks/pre-commit`), with rationale recorded for
+any `//go:nocheckptr` retained.
+
+Identified during task 8 (dcfhfix non-destructive default), 2026-06-04, when a
+manual `go test -race` surfaced the failures the gate's disabled-checkptr config
+otherwise hides.
+
+## Task: dcfhfix: .pre-fix-* sibling retention/GC
+
+### Task-Type: feature
+### Priority: Low
+### Status: Follow-up from Task 8
+### Identified in: Task 8 retrospective (j-retrospective.md)
+
+`dcfhfix` now preserves the pre-repair index at a `<index>.pre-fix-<UTC>`
+sibling on every default-path repair (task 8). There is no automatic pruning,
+so repeated repairs against the same index accumulate `.pre-fix-*` files next to
+it. Operators currently prune them by hand.
+
+Scope: add an optional cleanup/retention subcommand mirroring the existing
+`fixes` stack (e.g. keep-newest-N, or age-based), so preserved siblings can be
+garbage-collected without manual `rm`. Low priority — only worth doing if the
+accumulation becomes a real annoyance in practice.
+
+## Task: Fault-injection seam for dcfhfix preserveOriginal
+
+### Task-Type: chore
+### Priority: Low
+### Status: Follow-up from Task 8
+### Identified in: Task 8 retrospective (j-retrospective.md)
+
+`preserveOriginal` in `cmd/dcfhfix/promote.go` is 75.8% covered; the residual
+uncovered lines are the `Sync`/`Close`/`Lstat`-error defensive branches, which
+need a fault-injection seam to exercise. The copy-error branch is already
+covered.
+
+Scope: introduce a small injectable failure seam (interface or test hook) so the
+Sync/Close/Lstat error paths can be driven from a unit test, lifting
+`preserveOriginal` to 100%. Low priority — these are defensive branches with no
+known live trigger.

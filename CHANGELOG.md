@@ -4,6 +4,37 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 8: dcfhfix — default to non-destructive fix-to-new-file
+
+### Status: Complete (completed 2026-06-04, ~1 day, within the 1–2 day estimate)
+
+### Impact: `dcfhfix` no longer mutates a potentially-corrupt index in place by default. Every write path now preserves the pre-repair original at a visible `<index>.pre-fix-<UTC>` sibling *before* the atomic rename, matching the safety posture of `fsck -n`/`git fsck`. The legacy in-place behaviour survives behind a `--force`-gated `--edit-in-place` opt-out. The on-disk contract is purely additive — the repaired index still lands at the original path — so the change is backwards-compatible for anything that reads the result and trivially reversible. Retires the **Medium** BACKLOG item of the same name. Branch: 9 phase checkpoints (a `2a21d23` … i `14594ea`) + j-retro, squashed.
+
+### Changes
+- **`cmd/dcfhfix/promote.go`** (new, 143 LOC): `promoteRepairedIndex` is the single choke-point all four write paths route through. `preserveOriginal` copies the original to a `.pre-fix-<UTC>` sibling via `os.OpenFile(O_WRONLY|O_CREATE|O_EXCL)`, classifying any EEXIST occupant with `Lstat` (regular → advance a bounded `-1`…`-100` counter; non-regular → hard refusal) and cleaning up the partial sibling on any copy/sync failure (NFR5: preserve-before-rename, never consume the temp on a failed preserve). `validateEditInPlaceGate` refuses lone `--edit-in-place` without `--force`; `reportDryRunPreservation` previews the action.
+- **`cmd/dcfhfix/{main,entry_workflow_main,entry_append_remove}.go`**: replaced the four raw `os.Rename` promotions (header edit, entry edit, entry append, entry remove) with `promoteRepairedIndex`; un-blanked the header path's `*ParsedOptions`; added the `--edit-in-place` option, the gate call, and dry-run previews; removed a stale `entry resort` reference from usage/help.
+- **`cmd/dcfhfix/DESIGN.md`**: non-destructive default recorded under Safety Features.
+- **`go.mod`**: Go toolchain `go1.26.3 → go1.26.4` (forced — govulncheck hard-failed on GO-2026-5039/5037 in the 1.26.3 stdlib during the f-phase commit).
+- **Tests** (`promote_test.go` +399, `promote_integration_test.go` +340): unit coverage of the helpers (naming, byte-identical preserve, symlink/dir refusal, EEXIST counter, bound exhaustion, gate matrix) and a per-write-path integration matrix (default preserves / `--edit-in-place` suppresses), plus force-gating refusal, dry-run, `fixes`-stack coexistence (FR5), message/quiet matrix, and NFR5 failure-ordering.
+
+### Notable
+- **One choke-point made the behaviour change a four-line call-site diff.** Routing all four paths through `promoteRepairedIndex` kept the change small, reviewable, and rollback-trivial (additive on-disk contract).
+- **`O_EXCL` + Lstat-classify is the safe sibling-write idiom.** EXCL prevents clobbering; classifying the EEXIST occupant (advance on regular, refuse on symlink/dir/device) prevents writing through a non-regular path. Bounded retry (100) prevents spinning.
+- **Self-inflicted process error, caught in-task.** A plain `go test -race` checkptr failure was briefly mistaken for a commit blocker before reading `.githooks/pre-commit` — which *deliberately* disables checkptr (`-d=checkptr=0`) for the zero-copy core. Not a regression; the gate's reduced power is now tracked by a **Very High** backlog item.
+- **Security review: f-phase `cwf-security-reviewer-changeset` → no findings; `golangci-lint run ./...` → 0 issues** (rationale-bearing `//nolint:gosec // G304/G302` on the O_EXCL open).
+
+### Retired Backlog Items
+
+#### dcfhfix: default to non-destructive fix-to-new-file
+
+Medium-priority item proposing `dcfhfix` preserve the original and require an explicit opt-in for in-place edits. Delivered as specified: non-destructive default across all four real write paths (header/entry-edit/append/remove — the docs' `scan` path does not exist), original preserved at a timestamped `.pre-fix-<UTC>` sibling, `--edit-in-place` gated behind `--force`, with help/DESIGN updated. Reconciled against the *existing* `--backup`/`fixes` stack during requirements: the sibling **complements** the backup stack rather than replacing it.
+
+### New Backlog Items
+
+- **Re-enable checkptr in the race gate** (Very High) — make the zero-copy accessors checkptr-clean so the `-race` gate (currently `-d=checkptr=0`) can catch genuine pointer-arithmetic bugs tree-wide.
+- **`.pre-fix-*` sibling retention/GC** (Low) — optional cleanup subcommand if preserved siblings accumulate enough to annoy.
+- **Fault-injection seam for `preserveOriginal`** (Low) — to cover the residual Sync/Close/Lstat defensive branches (75.8% → 100%).
+
 ## Task 7: Clear pre-existing full-tree golangci-lint failures (cyclop, unparam)
 
 ### Status: Complete (completed 2026-05-31, < 0.5 day, on estimate)
