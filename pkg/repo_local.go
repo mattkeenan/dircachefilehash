@@ -314,6 +314,7 @@ func (r *repoCore) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, 
 		res.Added = collector.added
 		res.Modified = collector.modified
 		res.Deleted = collector.deleted
+		res.DeletedSizes = collector.deletedSizes
 	}
 	return res, nil
 }

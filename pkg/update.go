@@ -17,10 +17,17 @@ type changeCollector struct {
 	added    []string
 	modified []string
 	deleted  []string
+	// deletedSizes records the last-known size of each deleted path so the
+	// post-update viewer can rank deletions by bytes — the entry is gone
+	// from the merged index after the atomic rename, so this captured at
+	// comparison time is the only no-extra-walk source (task 12, KD3).
+	deletedSizes map[string]int64
 }
 
-// add records one op-classified path. OpUnchanged is ignored.
-func (c *changeCollector) add(op PipelineOp, path string) {
+// add records one op-classified path. size is the last-known file size,
+// used only for the OpDeleted branch (0 for other ops). OpUnchanged is
+// ignored.
+func (c *changeCollector) add(op PipelineOp, path string, size int64) {
 	if c == nil {
 		return
 	}
@@ -31,6 +38,10 @@ func (c *changeCollector) add(op PipelineOp, path string) {
 		c.modified = append(c.modified, path)
 	case OpDeleted:
 		c.deleted = append(c.deleted, path)
+		if c.deletedSizes == nil {
+			c.deletedSizes = make(map[string]int64)
+		}
+		c.deletedSizes[path] = size
 	}
 }
 

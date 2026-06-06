@@ -134,9 +134,7 @@ func (h *RemoteHandler) HashFiles(ctx context.Context, req HashRequest) (*HashRe
 
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			buf := make([]byte, 2*1024*1024)
 			for i := range jobs {
 				if err := ctx.Err(); err != nil {
@@ -145,7 +143,7 @@ func (h *RemoteHandler) HashFiles(ctx context.Context, req HashRequest) (*HashRe
 				}
 				digests[i] = h.hashOne(ctx, req.Paths[i], algo, buf, cache)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return &HashResponse{Digests: digests}, nil

@@ -155,6 +155,13 @@ type UpdateResult struct {
 	Added    []string `json:"added,omitempty"`
 	Modified []string `json:"modified,omitempty"`
 	Deleted  []string `json:"deleted,omitempty"`
+
+	// DeletedSizes maps each deleted path to its last-known size, so the
+	// post-update viewer can rank deletions by bytes (the entry is gone
+	// from the merged index after the rename). Populated alongside Deleted
+	// when CollectChanges is set; nil otherwise (omitempty ⇒ absent on the
+	// status path, which sources deleted sizes from the in-index tombstone).
+	DeletedSizes map[string]int64 `json:"deleted_sizes,omitempty"`
 }
 
 // Repo is the transport-neutral surface that every CLI command uses.

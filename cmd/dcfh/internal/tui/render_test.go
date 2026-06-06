@@ -23,6 +23,9 @@ func dir(label string, children ...*dcfh.Node) *dcfh.Node {
 		n.Stats.Modified += c.Stats.Modified
 		n.Stats.Deleted += c.Stats.Deleted
 		n.Stats.Unchanged += c.Stats.Unchanged
+		n.Stats.AddedBytes += c.Stats.AddedBytes
+		n.Stats.ModifiedBytes += c.Stats.ModifiedBytes
+		n.Stats.DeletedBytes += c.Stats.DeletedBytes
 	}
 	return n
 }
@@ -35,9 +38,9 @@ func dir(label string, children ...*dcfh.Node) *dcfh.Node {
 //	readme.md     (unchanged)
 func treeForSim(t *testing.T) *dcfh.Tree {
 	t.Helper()
-	oldmd := &dcfh.Node{Label: "old.md", Cat: dcfh.Deleted, Stats: dcfh.Stats{Deleted: 1}}
-	mainGo := &dcfh.Node{Label: "main.go", Cat: dcfh.Modified, Stats: dcfh.Stats{Files: 1, Bytes: 200, Modified: 1}}
-	newGo := &dcfh.Node{Label: "new.go", Cat: dcfh.Added, Stats: dcfh.Stats{Files: 1, Bytes: 50, Added: 1}}
+	oldmd := &dcfh.Node{Label: "old.md", Cat: dcfh.Deleted, Stats: dcfh.Stats{Deleted: 1, DeletedBytes: 900}}
+	mainGo := &dcfh.Node{Label: "main.go", Cat: dcfh.Modified, Stats: dcfh.Stats{Files: 1, Bytes: 200, Modified: 1, ModifiedBytes: 200}}
+	newGo := &dcfh.Node{Label: "new.go", Cat: dcfh.Added, Stats: dcfh.Stats{Files: 1, Bytes: 50, Added: 1, AddedBytes: 50}}
 	readme := &dcfh.Node{Label: "readme.md", Cat: dcfh.Unchanged, Stats: dcfh.Stats{Files: 1, Bytes: 10, Unchanged: 1}}
 	root := dir("", dir("docs", oldmd), dir("src", mainGo, newGo), readme)
 	return &dcfh.Tree{Root: root}
@@ -228,6 +231,99 @@ func TestRun_EmptyTreeNoOp(t *testing.T) {
 	if err := Run(&dcfh.Tree{}, Options{}); err != nil {
 		t.Errorf("Run(empty) = %v, want nil", err)
 	}
+}
+
+// screenText flattens the simulation screen's cell buffer into one string
+// per row, so tests can assert on rendered header/footer/pane text.
+func screenText(sim tcell.SimulationScreen) string {
+	cells, w, h := sim.GetContents()
+	var b strings.Builder
+	for y := range h {
+		for x := range w {
+			c := cells[y*w+x]
+			if len(c.Runes) > 0 {
+				b.WriteRune(c.Runes[0])
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// TC-7/TC-8 (FR5/FR6/AC1/AC2): a freshly opened viewer defaults to
+// change_bytes(desc); 'f' switches to change_files; 'r' flips direction.
+func TestDefaultSortAndKeyToggles(t *testing.T) {
+	m, sim := newSimModel(t, 100, 24, Options{Title: "status"})
+	defer sim.Fini()
+
+	m.draw(sim)
+	sim.Show()
+	if got := screenText(sim); !strings.Contains(got, "sort:change_bytes(desc)") {
+		t.Errorf("default header missing change_bytes(desc); header line:\n%s", firstLine(got))
+	}
+
+	// 'f' → change_files (still desc by default).
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'f', tcell.ModNone))
+	m.draw(sim)
+	sim.Show()
+	if got := screenText(sim); !strings.Contains(got, "sort:change_files(desc)") {
+		t.Errorf("after 'f' header missing change_files(desc); header line:\n%s", firstLine(got))
+	}
+
+	// 'r' flips direction.
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone))
+	m.draw(sim)
+	sim.Show()
+	if got := screenText(sim); !strings.Contains(got, "sort:change_files(asc)") {
+		t.Errorf("after 'r' header missing change_files(asc); header line:\n%s", firstLine(got))
+	}
+}
+
+// TC-11 (KD6/AC1): the stats pane annotates each change line with its
+// bytes via FormatHumanSize when the screen is wide enough.
+func TestStatsPaneByteAnnotations(t *testing.T) {
+	m, sim := newSimModel(t, 120, 24, Options{Title: "status", MinWidthForStats: 80})
+	defer sim.Fini()
+
+	// Default change_bytes(desc) orders root children docs(900) > src(250)
+	// > readme(0); select src (Added 1 / Modified 1) to show byte sums.
+	m.selectNode(findRow(m, "src"))
+	m.draw(sim)
+	sim.Show()
+	got := screenText(sim)
+	for _, want := range []string{
+		"Added:     1 (" + dcfh.FormatHumanSize(50) + ")",
+		"Modified:  1 (" + dcfh.FormatHumanSize(200) + ")",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stats pane missing %q in:\n%s", want, got)
+		}
+	}
+
+	// And a deleted-only dir shows its deleted bytes.
+	m.selectNode(findRow(m, "docs"))
+	m.draw(sim)
+	sim.Show()
+	if got := screenText(sim); !strings.Contains(got, "Deleted:   1 ("+dcfh.FormatHumanSize(900)+")") {
+		t.Errorf("stats pane missing deleted bytes in:\n%s", got)
+	}
+}
+
+// findRow returns the visible node with the given label (test helper).
+func findRow(m *model, label string) *dcfh.Node {
+	for _, r := range m.rows {
+		if r.node.Label == label {
+			return r.node
+		}
+	}
+	return nil
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 func rowOrder(m *model) string {

@@ -4,6 +4,33 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 12: Byte-weighted default sort for the interactive-tree viewer
+
+### Status: Complete (completed 2026-06-06, single session, within the 0.5–1 day / Medium estimate)
+### Impact: The `--interactive-tree` viewer now sorts by **volume of change** by default instead of count. A new `change_bytes` metric (Added+Modified+Deleted **bytes**) is the default sort, so the directories where the most *data* changed — large deletions included — surface first; the header opens at `sort:change_bytes(desc)`. The former count metric is renamed `change_files` and reachable on the `f` key (`c` now selects bytes); `a`/`m`/`d`/`n`/`r` unchanged. The right-hand stats pane annotates each change line with its bytes (`Added: 12 (3.4 MB)` …) so the order is self-explaining. No on-disk format change; non-interactive `status`/`update` output and index bytes are byte-identical (proven). Retires the **Low** BACKLOG item "Byte-weighted sort option for interactive-tree viewer". Branch: f–j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/treeview.go`**: `Stats` gains `AddedBytes`/`ModifiedBytes`/`DeletedBytes` (`int64`), aggregated up every directory; `leafStats` retains the deleted leaf's last-known size (still excluded from live `Files`/`Bytes`); `ChangeSet` gains `DeletedSizes map[string]int64` and the deleted-union step uses it.
+- **`pkg/update.go`, `pkg/comparison_sink.go`**: `changeCollector` gains `deletedSizes`; the single `add` write site is widened to `add(op, path, size)` (preserving the lock-free single-writer invariant); `scanWriteSink.record` captures the left entry's `FileSize()` (err→0) on `OpDeleted` — the only no-extra-walk source for the update path, since the entry is gone after the atomic rename.
+- **`pkg/repo.go`, `pkg/repo_local.go`**: additive `UpdateResult.DeletedSizes` (`json:"deleted_sizes,omitempty"`), copied from the collector in `Apply`. `status.go` needs no change — the deleted size comes from the in-index tombstone the cache refresh retains (KD2 dual-source, one "last-known size" rule).
+- **`cmd/dcfh/internal/tui/sort.go`**: add `sortChangeBytes` (default/zero value), rename `sortChange`→`sortChangeFiles`; `metric()` widened to `int64` (no overflow on large trees, no new G115 suppression); `label()` + `keyForRune` (`c`→bytes, `f`→files).
+- **`cmd/dcfh/internal/tui/render.go`**: default `sortKey: sortChangeBytes`; footer legend `c/f/a/m/d/n`; stats-pane per-category byte annotations via `FormatHumanSize`.
+- **`cmd/dcfh/update.go`**: threads `ChangeSet.DeletedSizes = result.DeletedSizes`.
+
+### Notable
+- **Dual-source deleted bytes resolve to one value.** `status` reads the deletion tombstone the cache-delta refresh keeps (with its `FileSize`); `update` carries the captured size on `ChangeSet.DeletedSizes`. Both resolve to "last-known size", so a single `Stats.DeletedBytes` total is consistent across launch paths — proven by one cross-path fixture (`TestPostRunTree_CrossPathByteIdentity`, status + update subtests against a real temp repo) rather than two divergent paths. On a path present in both sources the tombstone wins (the existing `seenDeleted` guard).
+- **The #1 design risk became the most-tested seam.** The deleted-byte attribution asymmetry was flagged in planning and settled in design (KD2) before exec, so implementation had zero plan deviations.
+- **Stats-pane bytes close the loop on the originating confusion.** The task was triggered by "why did this sort here?" — the pane now shows the bytes behind the order.
+- **Security review: both exec-phase `cwf-security-reviewer-changeset` runs recorded `error` (cap exceeded).** This repo does not list `**/*_test.go` in `security.review.max-lines-exclude-paths`, so the four new test suites (411 lines) pushed the production-weighted count over the 500 cap even though the production code is ~154 low-risk lines (deleted sizes are `int64` from the index/collector, carried in a map, rendered only via numeric `FormatHumanSize`; `sanitiseLabel` untouched). Recorded as `error` per the CWF contract, not silently downgraded. `golangci-lint run ./...` → 0 issues; `-race -d=checkptr=0 ./pkg/` clean. A config follow-up to add test globs to the exclude list is filed to BACKLOG.
+- **Incidental `go fix` modernisation** (pre-commit ran `go fix ./...`, rewriting `pkg/wire_handler.go` + `pkg/binary_entry_interface_test_framework_test.go` from `wg.Add`/`go func` to `sync.WaitGroup.Go`) is included in this task's squash — the change was produced during Task 12, so it lands with Task 12 rather than being curated out.
+
+### Retired Backlog Items
+#### Byte-weighted sort option for interactive-tree viewer
+
+Sorting is by change COUNTS (added+modified+deleted) because per-category byte sizes are not retained for deleted/old-modified files (design KD8). A byte-weighted sort would need the update collector to capture the left-entry size at OnLeftOnly/OnMatch and thread an aggregated byte delta onto the tree Stats. Deferred from task 11 as out-of-scope plumbing.
+
+<!-- Note: Implemented as the new default change_bytes sort with change_files rename; deleted-byte plumbing added (collector left-size capture + dual-source builder). -->
+
 ## Task 11: `--interactive-tree` gdu-style post-run viewer for status/update
 
 ### Status: Complete (completed 2026-06-05, single session, under the 3–5 day / Medium-High estimate)

@@ -57,7 +57,10 @@ func newScanWriteSink(hashLookup *skiplistWrapper, policy scanWritePolicy, hashC
 
 // record appends an op-classified path to the collector (if any). On a
 // RelativePath() error the path is dropped — the viewer pane is
-// cosmetic and must never abort an otherwise-successful update.
+// cosmetic and must never abort an otherwise-successful update. For a
+// deletion it also captures the entry's last-known size (the left entry,
+// before the rename discards it); a FileSize() error drops to size 0,
+// mirroring the path-error policy (task 12, KD3).
 func (s *scanWriteSink) record(op PipelineOp, entry BinaryEntryInterface) {
 	if s.collector == nil {
 		return
@@ -66,7 +69,11 @@ func (s *scanWriteSink) record(op PipelineOp, entry BinaryEntryInterface) {
 	if err != nil {
 		return
 	}
-	s.collector.add(op, path)
+	var size int64
+	if op == OpDeleted {
+		size, _ = entry.FileSize() // err → 0; pane is cosmetic
+	}
+	s.collector.add(op, path, size)
 }
 
 // OnMatch handles entries present in both the existing index and the scan.

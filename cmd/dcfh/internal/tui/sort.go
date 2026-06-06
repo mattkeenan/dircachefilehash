@@ -12,9 +12,13 @@ import (
 type sortKey int
 
 const (
-	// sortChange: Added+Modified+Deleted, descending by default — the
-	// "where did the most change happen, regardless of type" metric.
-	sortChange sortKey = iota
+	// sortChangeBytes: Added+Modified+Deleted *bytes*, descending by
+	// default — the default metric, ranking "where did the most change
+	// happen by volume" (large deletions included). Zero value/default.
+	sortChangeBytes sortKey = iota
+	// sortChangeFiles: Added+Modified+Deleted *counts* — the former
+	// "change" metric, now reachable via the 'f' key.
+	sortChangeFiles
 	sortAdded
 	sortModified
 	sortDeleted
@@ -24,6 +28,8 @@ const (
 // label is the short name shown in the header sort indicator.
 func (k sortKey) label() string {
 	switch k {
+	case sortChangeFiles:
+		return "change_files"
 	case sortAdded:
 		return "added"
 	case sortModified:
@@ -33,23 +39,27 @@ func (k sortKey) label() string {
 	case sortName:
 		return "name"
 	default:
-		return "change"
+		return "change_bytes"
 	}
 }
 
-// metric returns the count a node contributes for key. Name has no count.
-func metric(n *dcfh.Node, key sortKey) int {
+// metric returns the value a node contributes for key, as int64 so byte
+// sums over a large subtree never truncate/overflow (KD4). Count keys
+// return int64(count); name has no value.
+func metric(n *dcfh.Node, key sortKey) int64 {
 	switch key {
+	case sortChangeFiles:
+		return int64(n.Stats.Added + n.Stats.Modified + n.Stats.Deleted)
 	case sortAdded:
-		return n.Stats.Added
+		return int64(n.Stats.Added)
 	case sortModified:
-		return n.Stats.Modified
+		return int64(n.Stats.Modified)
 	case sortDeleted:
-		return n.Stats.Deleted
-	case sortChange:
-		return n.Stats.Added + n.Stats.Modified + n.Stats.Deleted
-	default:
+		return int64(n.Stats.Deleted)
+	case sortName:
 		return 0
+	default: // sortChangeBytes
+		return n.Stats.AddedBytes + n.Stats.ModifiedBytes + n.Stats.DeletedBytes
 	}
 }
 
@@ -96,7 +106,9 @@ func nodeLess(a, b *dcfh.Node, key sortKey, reverse bool) bool {
 func keyForRune(r rune) (sortKey, bool) {
 	switch r {
 	case 'c':
-		return sortChange, true
+		return sortChangeBytes, true
+	case 'f':
+		return sortChangeFiles, true
 	case 'a':
 		return sortAdded, true
 	case 'm':
@@ -106,6 +118,6 @@ func keyForRune(r rune) (sortKey, bool) {
 	case 'n':
 		return sortName, true
 	default:
-		return sortChange, false
+		return sortChangeBytes, false
 	}
 }

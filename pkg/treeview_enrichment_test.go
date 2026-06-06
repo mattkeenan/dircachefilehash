@@ -130,6 +130,146 @@ func TestApply_CollectChangesByteIdentical(t *testing.T) {
 	}
 }
 
+// TC-5 (FR4/AC3): Apply with CollectChanges records the deleted file's
+// last-known size on UpdateResult.DeletedSizes (the update path's source
+// for deleted bytes, since the entry is gone after the rename).
+func TestApply_CollectChangesDeletedSizes(t *testing.T) {
+	repo, root := newTestRepo(t)
+	defer func() { _ = repo.Close() }()
+	ctx := context.Background()
+
+	const goneContent = "doomed content of a known length\n"
+	writeFile(t, root, "keep.txt", "stays\n")
+	writeFile(t, root, "sub/gone.txt", goneContent)
+	if _, err := repo.Apply(ctx, ApplyRequest{}); err != nil {
+		t.Fatalf("baseline apply: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(root, "sub", "gone.txt")); err != nil {
+		t.Fatalf("remove gone.txt: %v", err)
+	}
+	res, err := repo.Apply(ctx, ApplyRequest{CollectChanges: true})
+	if err != nil {
+		t.Fatalf("collecting apply: %v", err)
+	}
+
+	want := int64(len(goneContent))
+	if got := res.DeletedSizes["sub/gone.txt"]; got != want {
+		t.Errorf("DeletedSizes[sub/gone.txt] = %d, want %d", got, want)
+	}
+	// The change-set path-sets are unchanged from prior behaviour.
+	if !slices.Contains(res.Deleted, "sub/gone.txt") {
+		t.Errorf("Deleted = %v, want it to contain sub/gone.txt", res.Deleted)
+	}
+}
+
+// With CollectChanges off, DeletedSizes stays nil too.
+func TestApply_NoDeletedSizesByDefault(t *testing.T) {
+	repo, root := newTestRepo(t)
+	defer func() { _ = repo.Close() }()
+	ctx := context.Background()
+
+	writeFile(t, root, "gone.txt", "bye\n")
+	if _, err := repo.Apply(ctx, ApplyRequest{}); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "gone.txt")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	res, err := repo.Apply(ctx, ApplyRequest{})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.DeletedSizes != nil {
+		t.Errorf("DeletedSizes should be nil when CollectChanges is off, got %v", res.DeletedSizes)
+	}
+}
+
+// TC-4 (FR1/FR3/KD1/KD2/AC3): a modified file's ModifiedBytes is its
+// post-change (current) size, and a deletion's DeletedBytes is identical,
+// across BOTH the status refresh path and the update path. This guards
+// the cache-refresh FileSize timing and the dual-source deleted-byte rule
+// against a real temp-repo, not a literal builder.
+func TestPostRunTree_CrossPathByteIdentity(t *testing.T) {
+	const newModContent = "this modified body is deliberately longer than the original\n"
+	const goneContent = "doomed payload\n"
+	wantMod := int64(len(newModContent))
+	wantDel := int64(len(goneContent))
+
+	// seedAndMutate builds a fresh repo, indexes a baseline, then modifies
+	// mod.txt and deletes gone.txt on disk. Returns the repo + root.
+	seedAndMutate := func(t *testing.T) (*localRepo, string) {
+		t.Helper()
+		repo, root := newTestRepo(t)
+		ctx := context.Background()
+		writeFile(t, root, "mod.txt", "short\n")
+		writeFile(t, root, "gone.txt", goneContent)
+		if _, err := repo.Apply(ctx, ApplyRequest{}); err != nil {
+			t.Fatalf("baseline apply: %v", err)
+		}
+		writeFile(t, root, "mod.txt", newModContent)
+		if err := os.Remove(filepath.Join(root, "gone.txt")); err != nil {
+			t.Fatalf("remove gone.txt: %v", err)
+		}
+		return repo, root
+	}
+
+	assertTree := func(t *testing.T, tree *Tree, path string) {
+		t.Helper()
+		mod := descend(t, tree.Root, "mod.txt")
+		if mod.Stats.ModifiedBytes != wantMod {
+			t.Errorf("%s: mod.txt ModifiedBytes = %d, want %d", path, mod.Stats.ModifiedBytes, wantMod)
+		}
+		gone := descend(t, tree.Root, "gone.txt")
+		if gone.Stats.DeletedBytes != wantDel {
+			t.Errorf("%s: gone.txt DeletedBytes = %d, want %d", path, gone.Stats.DeletedBytes, wantDel)
+		}
+	}
+
+	ctx := context.Background()
+
+	// Status path: Diff refreshes the cache (new size + deletion tombstone),
+	// PostRunTree reads the merged index — no DeletedSizes needed (KD2).
+	t.Run("status", func(t *testing.T) {
+		repo, _ := seedAndMutate(t)
+		defer func() { _ = repo.Close() }()
+		st, err := repo.Diff(ctx, DiffRequest{})
+		if err != nil {
+			t.Fatalf("Diff: %v", err)
+		}
+		tree, err := repo.PostRunTree(ctx, ChangeSet{
+			Added:    st.Added,
+			Modified: st.Modified,
+			Deleted:  st.Deleted,
+		})
+		if err != nil {
+			t.Fatalf("PostRunTree: %v", err)
+		}
+		assertTree(t, tree, "status")
+	})
+
+	// Update path: Apply discards the deleted entry, so the deleted size
+	// rides DeletedSizes; the modified size comes from the post-rename merge.
+	t.Run("update", func(t *testing.T) {
+		repo, _ := seedAndMutate(t)
+		defer func() { _ = repo.Close() }()
+		res, err := repo.Apply(ctx, ApplyRequest{CollectChanges: true})
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		tree, err := repo.PostRunTree(ctx, ChangeSet{
+			Added:        res.Added,
+			Modified:     res.Modified,
+			Deleted:      res.Deleted,
+			DeletedSizes: res.DeletedSizes,
+		})
+		if err != nil {
+			t.Fatalf("PostRunTree: %v", err)
+		}
+		assertTree(t, tree, "update")
+	})
+}
+
 // PostRunTree end-to-end: after a full update that deleted a file, the
 // tree (built from the post-run merged index + the enriched ChangeSet)
 // surfaces the deletion via the union path and aggregates live counts.

@@ -259,9 +259,7 @@ func (suite *BinaryEntryTestSuite) TestConcurrentAccess(t *testing.T) {
 
 	// Start multiple readers
 	for range numReaders {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numOperations {
 				// Test concurrent read access
 				if path, err := entry.RelativePath(); err != nil {
@@ -275,7 +273,7 @@ func (suite *BinaryEntryTestSuite) TestConcurrentAccess(t *testing.T) {
 				// Brief pause to encourage race conditions
 				time.Sleep(time.Microsecond)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

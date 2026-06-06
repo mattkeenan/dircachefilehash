@@ -137,9 +137,10 @@ after the run, for ad-hoc browsing. It is TTY-only: ignored with
 		// state is gone after the atomic rename, so this is the only
 		// no-extra-walk source of update's change-set.
 		launchInteractiveTree(ctx, repo, "update", dcfh.ChangeSet{
-			Added:    result.Added,
-			Modified: result.Modified,
-			Deleted:  result.Deleted,
+			Added:        result.Added,
+			Modified:     result.Modified,
+			Deleted:      result.Deleted,
+			DeletedSizes: result.DeletedSizes,
 		}, showTree)
 		return nil
 	},

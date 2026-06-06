@@ -184,6 +184,98 @@ func TestBuildTree_CanonicalOrder(t *testing.T) {
 	}
 }
 
+// TC-1b (FR1/FR2/AC3): per-category byte fields populate per leaf and sum
+// up every directory; live Bytes/Files still exclude deleted.
+func TestBuildTree_ByteAggregation(t *testing.T) {
+	entries := []treeEntry{
+		{Path: "a/added.txt", Size: 10},
+		{Path: "a/mod.txt", Size: 200},
+		{Path: "a/same.txt", Size: 5},
+		{Path: "a/gone.txt", Size: 900, Deleted: true},
+	}
+	cs := ChangeSet{Added: []string{"a/added.txt"}, Modified: []string{"a/mod.txt"}}
+	tree := buildTreeFromEntries(entries, cs)
+
+	a := descend(t, tree.Root, "a")
+	if a.Stats.AddedBytes != 10 {
+		t.Errorf("a AddedBytes = %d, want 10", a.Stats.AddedBytes)
+	}
+	if a.Stats.ModifiedBytes != 200 {
+		t.Errorf("a ModifiedBytes = %d, want 200", a.Stats.ModifiedBytes)
+	}
+	if a.Stats.DeletedBytes != 900 {
+		t.Errorf("a DeletedBytes = %d, want 900", a.Stats.DeletedBytes)
+	}
+	// Live footprint excludes the deletion: 10 + 200 + 5.
+	if a.Stats.Bytes != 215 {
+		t.Errorf("a Bytes = %d, want 215 (deleted excluded)", a.Stats.Bytes)
+	}
+	if a.Stats.Files != 3 {
+		t.Errorf("a Files = %d, want 3 (deleted excluded)", a.Stats.Files)
+	}
+	// Root mirrors the only subtree.
+	if tree.Root.Stats.DeletedBytes != 900 || tree.Root.Stats.AddedBytes != 10 {
+		t.Errorf("root byte sums = %+v", tree.Root.Stats)
+	}
+}
+
+// TC-2 (FR3/AC3): a deleted file's bytes are identical whether sourced
+// from the in-index tombstone (status) or ChangeSet.DeletedSizes (update).
+func TestBuildTree_DeletedBytes_DualSourceIdentical(t *testing.T) {
+	const size = int64(1) << 32 // > 2³², exercises int64 end-to-end
+
+	// status: tombstone carries the size in the merged entry.
+	statusTree := buildTreeFromEntries(
+		[]treeEntry{{Path: "dir/gone.bin", Size: size, Deleted: true}},
+		ChangeSet{Deleted: []string{"dir/gone.bin"}},
+	)
+	// update: entry absent; size travels on DeletedSizes.
+	updateTree := buildTreeFromEntries(
+		nil,
+		ChangeSet{Deleted: []string{"dir/gone.bin"}, DeletedSizes: map[string]int64{"dir/gone.bin": size}},
+	)
+
+	for _, tc := range []struct {
+		name string
+		tree *Tree
+	}{{"status", statusTree}, {"update", updateTree}} {
+		s := tc.tree.Root.Stats
+		if s.DeletedBytes != size {
+			t.Errorf("%s: root DeletedBytes = %d, want %d", tc.name, s.DeletedBytes, size)
+		}
+		if s.Deleted != 1 {
+			t.Errorf("%s: root Deleted = %d, want 1", tc.name, s.Deleted)
+		}
+	}
+}
+
+// TC-3 (FR3/KD2/AC3): a path present as BOTH an in-index tombstone and in
+// DeletedSizes yields exactly one node, sized by the tombstone (no
+// double-count).
+func TestBuildTree_DeletedBytes_BothPresentPrecedence(t *testing.T) {
+	const tombstoneSize, changeSetSize = int64(900), int64(123)
+	tree := buildTreeFromEntries(
+		[]treeEntry{{Path: "gone.txt", Size: tombstoneSize, Deleted: true}},
+		ChangeSet{Deleted: []string{"gone.txt"}, DeletedSizes: map[string]int64{"gone.txt": changeSetSize}},
+	)
+
+	var goneCount int
+	for _, c := range tree.Root.Children {
+		if c.Label == "gone.txt" {
+			goneCount++
+		}
+	}
+	if goneCount != 1 {
+		t.Fatalf("expected exactly 1 gone.txt node, got %d", goneCount)
+	}
+	if tree.Root.Stats.Deleted != 1 {
+		t.Errorf("root Deleted = %d, want 1 (no double count)", tree.Root.Stats.Deleted)
+	}
+	if tree.Root.Stats.DeletedBytes != tombstoneSize {
+		t.Errorf("root DeletedBytes = %d, want %d (tombstone wins)", tree.Root.Stats.DeletedBytes, tombstoneSize)
+	}
+}
+
 // TC-6 (AC7): sanitiseLabel neutralises control/escape/DEL/C1/invalid-UTF-8
 // bytes — including bytes OUTSIDE any enumerated CSI set, so a regression
 // to a literal blocklist fails.

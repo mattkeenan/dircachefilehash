@@ -24,15 +24,20 @@ const (
 	Deleted
 )
 
-// Stats aggregates per-subtree counts and the current total size.
+// Stats aggregates per-subtree counts and per-category byte sums.
 //
 // Files and Bytes describe the *live* footprint: Files counts only
 // non-deleted files and Bytes sums their current sizes. The per-category
 // counts (Added/Modified/Deleted/Unchanged) classify every node;
-// Deleted is tracked separately and is NOT included in Files/Bytes
-// (deleted/old sizes are not retained post-rename — see KD2/KD3 in the
-// design notes), so the invariant Files == Added+Modified+Unchanged
-// holds for any subtree.
+// Deleted is tracked separately and is NOT included in Files/Bytes, so
+// the invariant Files == Added+Modified+Unchanged holds for any subtree.
+//
+// AddedBytes/ModifiedBytes/DeletedBytes record the bytes behind each
+// change category for the change_bytes sort (task 12). Added/Modified
+// bytes are the file's current size; DeletedBytes separately retains the
+// last-known deleted size — sourced from the in-index tombstone (status)
+// or ChangeSet.DeletedSizes (update), per KD2/KD3 — and is likewise NOT
+// part of Bytes/Files.
 type Stats struct {
 	Files     int   // live (non-deleted) file count in subtree
 	Bytes     int64 // aggregated current size of live files
@@ -40,6 +45,10 @@ type Stats struct {
 	Modified  int
 	Deleted   int
 	Unchanged int
+
+	AddedBytes    int64 // current size of added files
+	ModifiedBytes int64 // current size of modified files
+	DeletedBytes  int64 // last-known size of deleted files (not in Bytes)
 }
 
 // Node is one entry in the viewer tree: a directory (IsDir, with
@@ -59,16 +68,23 @@ type Tree struct {
 	Root *Node
 }
 
-// ChangeSet carries a command's per-path change labels (paths only, no
-// bytes). status fills it from StatusResult; update fills it from the
-// enriched UpdateResult. It labels live entries by path-set membership;
-// Deleted paths are unioned into the tree even when absent from the
-// merged index (the update-full case, where the merged index retains no
-// deleted entries).
+// ChangeSet carries a command's per-path change labels. status fills it
+// from StatusResult; update fills it from the enriched UpdateResult. It
+// labels live entries by path-set membership; Deleted paths are unioned
+// into the tree even when absent from the merged index (the update-full
+// case, where the merged index retains no deleted entries).
+//
+// DeletedSizes carries the last-known size of each deleted path for the
+// update path, where the entry is gone after the atomic rename so its
+// size cannot be read from the merged index. It is named *Sizes (not
+// *Bytes) to avoid colliding with the aggregate Stats.DeletedBytes. nil
+// on the status path (the in-index tombstone supplies the size there);
+// indexing a nil map yields 0, so the union step needs no guard.
 type ChangeSet struct {
-	Added    []string
-	Modified []string
-	Deleted  []string
+	Added        []string
+	Modified     []string
+	Deleted      []string
+	DeletedSizes map[string]int64
 }
 
 // treeEntry is the pure builder's input: one merged-index file. Keeping
@@ -171,13 +187,15 @@ func buildTreeFromEntries(entries []treeEntry, cs ChangeSet) *Tree {
 
 	// Union in deleted paths absent from the merged entries. After a
 	// full update the merged index carries no deleted entries, so the
-	// ChangeSet is the only source of deletions; synthesised nodes are
-	// count-only (size 0).
+	// ChangeSet is the only source of deletions; their last-known size
+	// travels on cs.DeletedSizes (nil map → 0, no guard needed). A path
+	// present as both a tombstone and in DeletedSizes is skipped here via
+	// seenDeleted — the tombstone size wins (KD2: both are last-known).
 	for _, p := range cs.Deleted {
 		if seenDeleted[p] {
 			continue
 		}
-		insert(p, 0, Deleted)
+		insert(p, cs.DeletedSizes[p], Deleted)
 	}
 
 	aggregate(root)
@@ -191,11 +209,13 @@ func buildTreeFromEntries(entries []treeEntry, cs ChangeSet) *Tree {
 func leafStats(size int64, cat Category) Stats {
 	switch cat {
 	case Added:
-		return Stats{Files: 1, Bytes: size, Added: 1}
+		return Stats{Files: 1, Bytes: size, Added: 1, AddedBytes: size}
 	case Modified:
-		return Stats{Files: 1, Bytes: size, Modified: 1}
+		return Stats{Files: 1, Bytes: size, Modified: 1, ModifiedBytes: size}
 	case Deleted:
-		return Stats{Deleted: 1}
+		// Deleted stays out of Files/Bytes; DeletedBytes separately
+		// retains the last-known size for the change_bytes sort.
+		return Stats{Deleted: 1, DeletedBytes: size}
 	default: // Unchanged
 		return Stats{Files: 1, Bytes: size, Unchanged: 1}
 	}
@@ -216,6 +236,9 @@ func aggregate(n *Node) Stats {
 		s.Modified += cs.Modified
 		s.Deleted += cs.Deleted
 		s.Unchanged += cs.Unchanged
+		s.AddedBytes += cs.AddedBytes
+		s.ModifiedBytes += cs.ModifiedBytes
+		s.DeletedBytes += cs.DeletedBytes
 	}
 	n.Stats = s
 	return s

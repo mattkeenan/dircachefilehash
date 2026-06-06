@@ -249,10 +249,10 @@ RelativePath() computes pathStart as entryStart+Sizeof(Entry); calculatePathLeng
 
 The tcell viewer (cmd/dcfh/internal/tui) treats every rune as one display column in drawText/truncation. Wide runes (CJK, some emoji) therefore under-count width and can misalign or overlap the size column / stats-pane divider. Cosmetic only — the sanitiser already guarantees no escape bytes reach the terminal. Fix: account for rune width (tcell vendors rivo/uniseg) in drawText and the rune-aware truncation.
 
-## Task: Byte-weighted sort option for interactive-tree viewer
+## Task: Add test-file globs to security.review.max-lines-exclude-paths
 
-### Task-Type: feature
-### Priority: Low
-### Identified in: task 11
+### Task-Type: chore
+### Priority: Medium
+### Identified in: Task 12 retrospective (j-retrospective.md)
 
-Sorting is by change COUNTS (added+modified+deleted) because per-category byte sizes are not retained for deleted/old-modified files (design KD8). A byte-weighted sort would need the update collector to capture the left-entry size at OnLeftOnly/OnMatch and thread an aggregated byte delta onto the tree Stats. Deferred from task 11 as out-of-scope plumbing.
+Both Task 12 exec-phase security reviews (f and g) exited 2 (cap exceeded) and recorded State: error, so the cwf-security-reviewer-changeset subagent never ran semantically. Cause: security.review.max-lines-exclude-paths in implementation-guide/cwf-project.json lists implementation-guide/** but NOT Go test files, so **/*_test.go lines count as production. Task 12 added 411 test lines vs ~154 production lines, pushing the production-weighted count to 565/577 > 500. Fix: add **/*_test.go (and any other test conventions) to security.review.max-lines-exclude-paths so test files are reviewed but discounted from the cap, letting the semantic review run on the production diff for test-heavy tasks. Config change only.

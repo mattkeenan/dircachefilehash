@@ -39,7 +39,7 @@ func newModel(t *dcfh.Tree, o Options) *model {
 		root:     t.Root,
 		opts:     o,
 		expanded: make(map[*dcfh.Node]bool),
-		sortKey:  sortChange,
+		sortKey:  sortChangeBytes,
 	}
 	m.rebuildRows()
 	return m
@@ -146,7 +146,7 @@ func (m *model) drawHeader(s tcell.Screen, width int) {
 
 func (m *model) drawFooter(s tcell.Screen, width, y int) {
 	style := tcell.StyleDefault.Dim(true)
-	help := "↑/↓ move  →/← expand/collapse  c/a/m/d/n sort  r reverse  q quit"
+	help := "↑/↓ move  →/← expand/collapse  c/f/a/m/d/n sort  r reverse  q quit"
 	drawText(s, 0, y, width, style, help)
 }
 
@@ -230,9 +230,9 @@ func (m *model) drawStats(s tcell.Screen, x, top, bottom, width int) {
 		{fmt.Sprintf("Files:     %d", st.Files), tcell.StyleDefault},
 		{"Size:      " + dcfh.FormatHumanSize(st.Bytes), tcell.StyleDefault},
 		{"", tcell.StyleDefault},
-		{fmt.Sprintf("Added:     %d", st.Added), styleAdded},
-		{fmt.Sprintf("Modified:  %d", st.Modified), styleModified},
-		{fmt.Sprintf("Deleted:   %d", st.Deleted), styleDeleted},
+		{fmt.Sprintf("Added:     %d (%s)", st.Added, dcfh.FormatHumanSize(st.AddedBytes)), styleAdded},
+		{fmt.Sprintf("Modified:  %d (%s)", st.Modified, dcfh.FormatHumanSize(st.ModifiedBytes)), styleModified},
+		{fmt.Sprintf("Deleted:   %d (%s)", st.Deleted, dcfh.FormatHumanSize(st.DeletedBytes)), styleDeleted},
 		{fmt.Sprintf("Unchanged: %d", st.Unchanged), tcell.StyleDefault},
 	}
 	y := top
