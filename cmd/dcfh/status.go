@@ -42,7 +42,11 @@ in .dcfh/ignore.
 
 The scan refreshes the cache against on-disk truth regardless of
 filters; --ignore is the one exception, since it can short-circuit
-the scan walker.`,
+the scan walker.
+
+--interactive-tree opens a gdu-style full-screen tree of the result
+after the run, for ad-hoc browsing. It is TTY-only: ignored with
+--json or when stdout is piped, and never modifies the index.`,
 	// With DisableFlagParsing the cobra-level arg validator sees raw
 	// flag tokens (--json, --print, …) as positionals and would reject
 	// them. The RunE preamble enforces "no positional args" after
@@ -52,7 +56,7 @@ the scan walker.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		_, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, cmdStatus)
+		state, prints, ignores, positionals, noIgnoreFile, err := resolveScopes(args, cmdStatus)
 		if err != nil {
 			return err
 		}
@@ -120,6 +124,15 @@ the scan walker.`,
 		}
 
 		renderStatusHuman(os.Stdout, repoRoot, relCwd, sinceStr, status, info.EntryCount)
+
+		// Post-run interactive tree (TTY-only; inert with --json or when
+		// piped). status needs no core change — its path-sets are the
+		// ChangeSet labels directly (design KD3).
+		launchInteractiveTree(ctx, repo, "status", dcfh.ChangeSet{
+			Added:    status.Added,
+			Modified: status.Modified,
+			Deleted:  status.Deleted,
+		}, interactiveTreeWanted(state.interactiveTree))
 		return nil
 	},
 }

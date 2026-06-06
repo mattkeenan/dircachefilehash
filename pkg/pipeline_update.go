@@ -17,7 +17,11 @@ import (
 //
 // On success, the temp file is atomically renamed to main.idx.
 // On failure, the temp file is deleted.
-func RunUpdatePipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, leftIter, rightIter BinaryEntryIterator, tempPath string) error {
+// collector, when non-nil, records op-classified changed paths during
+// the comparison stage for the post-run interactive-tree view. It is
+// safe without a lock: only the single comparison goroutine writes it,
+// and the caller reads it only after wg.Wait() returns.
+func RunUpdatePipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, leftIter, rightIter BinaryEntryIterator, tempPath string, collector *changeCollector) error {
 	// Channel buffer size: absorbs burst between stages without excessive memory
 	const bufSize = 100
 
@@ -45,10 +49,8 @@ func RunUpdatePipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, leftIter
 
 	// --- Stage 1: Compare (runs in this goroutine via hwangLin) ---
 	// We run comparison in a goroutine so the other stages can start concurrently.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sink := newScanWriteSink(nil, scanWriteCanonical, hashCh, bypassCh)
+	wg.Go(func() {
+		sink := newScanWriteSink(nil, scanWriteCanonical, hashCh, bypassCh, collector)
 		adapter := newSinkCallbackAdapter(sink)
 		err := hwangLin(leftIter, rightIter, adapter, ctx)
 		if err != nil {
@@ -60,37 +62,31 @@ func RunUpdatePipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, leftIter
 			// (OnComplete/Close may not have been called if hwangLin returned early)
 			// sink.Close() is idempotent via the adapter's OnComplete
 		}
-	}()
+	})
 
 	// --- Stage 2: Hash Pool ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		pool := newHashPool(ms, sr, hashCh, hashedCh, sr.HashWorkers)
 		if err := pool.Run(ctx); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("hash stage: %w", err))
 		}
-	}()
+	})
 
 	// --- Stage 3: Reorder Buffer ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		rb := newReorderBuffer(retiredCh)
 		if err := rb.Run(ctx, bypassCh, hashedCh); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("reorder stage: %w", err))
 		}
-	}()
+	})
 
 	// --- Stage 4: Write ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		err := runWriteStage(ctx, ms, tempPath, retiredCh)
 		if err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("write stage: %w", err))
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -209,7 +205,7 @@ func finaliseMainIndex(ms *MetaStore, tempName, logPrefix string, ok bool) {
 // lastScanError) used to live here. It is now owned by the Repo impl
 // and acquired around the verb call (see localRepo.Apply); this
 // function performs the work, the caller serialises the calls.
-func (ms *MetaStore) performPipelineScan(ctx context.Context, sr *ScanRun, paths []string, compareSkiplist *skiplistWrapper) error {
+func (ms *MetaStore) performPipelineScan(ctx context.Context, sr *ScanRun, paths []string, compareSkiplist *skiplistWrapper, collector *changeCollector) error {
 	defer VerboseEnter()()
 
 	// Generate timestamped main index filename
@@ -223,7 +219,7 @@ func (ms *MetaStore) performPipelineScan(ctx context.Context, sr *ScanRun, paths
 	scanIterator := NewFilesystemScanIterator(ctx, sr, paths, "scan")
 
 	// Run the pipeline
-	err := RunUpdatePipeline(ctx, ms, sr, existingIterator, scanIterator, tempMainIndexFileName)
+	err := RunUpdatePipeline(ctx, ms, sr, existingIterator, scanIterator, tempMainIndexFileName, collector)
 	if err != nil {
 		return err
 	}

@@ -123,6 +123,13 @@ type ApplyRequest struct {
 	Ignores      []FilterOptions `json:"ignores,omitempty"`
 	NoIgnoreFile bool            `json:"no_ignore_file,omitempty"`
 	Filter       FilterOptions   `json:"filter,omitzero"`
+
+	// CollectChanges, when true, asks Apply to record the op-classified
+	// changed paths on UpdateResult.Added/Modified/Deleted so the
+	// post-run interactive-tree viewer can label them. Default-off keeps
+	// the non-interactive path byte-for-byte unchanged (no collector is
+	// attached, so the pipeline behaves exactly as before).
+	CollectChanges bool `json:"collect_changes,omitempty"`
 }
 
 // GroupsRequest selects duplicate-detection options. Filter holds the
@@ -140,6 +147,14 @@ type UpdateResult struct {
 	FileCount    int      `json:"file_count"`
 	TotalSize    int64    `json:"total_size"`
 	PathsUpdated []string `json:"paths_updated,omitempty"`
+
+	// Added/Modified/Deleted are the op-classified changed paths from the
+	// canonical update pass. Distinct from PathsUpdated (which echoes the
+	// requested path args, not results). Populated only when
+	// ApplyRequest.CollectChanges is set; nil otherwise.
+	Added    []string `json:"added,omitempty"`
+	Modified []string `json:"modified,omitempty"`
+	Deleted  []string `json:"deleted,omitempty"`
 }
 
 // Repo is the transport-neutral surface that every CLI command uses.
@@ -162,6 +177,14 @@ type Repo interface {
 	Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error)
 	Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error)
 	Filter(ctx context.Context, req FilterRequest) (*FilterResult, error)
+
+	// PostRunTree builds the read-only interactive-tree view from the
+	// post-run merged index (an index-file read, not a filesystem walk)
+	// labelled by cs. Intended to be called by the local CLI behind the
+	// TTY/non-JSON guard after Diff/Apply completes. For a wireRepo this
+	// reads the local invoker-side state, so the viewer is scoped to
+	// local-TTY use (the call-site guard enforces this).
+	PostRunTree(ctx context.Context, cs ChangeSet) (*Tree, error)
 
 	Snapshots() SnapshotRepo
 	Config() ConfigRepo

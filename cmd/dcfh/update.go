@@ -36,7 +36,11 @@ the rewritten main index (the merge never sees it). The cache index
 keeps its prior entry, so no data is lost — but a subsequent
 ` + "`dcfh status`" + ` will report the file as added rather than
 modified. Use --no-ignore-file or omit --ignore to round-trip
-ignored entries through the index.`,
+ignored entries through the index.
+
+--interactive-tree opens a gdu-style full-screen tree of the change
+after the run, for ad-hoc browsing. It is TTY-only: ignored with
+--json or when stdout is piped. The viewer is read-only.`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -49,7 +53,7 @@ ignored entries through the index.`,
 			return err
 		}
 
-		_, prints, ignores, paths, noIgnoreFile, err := resolveScopes(args, cmdUpdate)
+		state, prints, ignores, paths, noIgnoreFile, err := resolveScopes(args, cmdUpdate)
 		if err != nil {
 			return err
 		}
@@ -85,12 +89,18 @@ ignored entries through the index.`,
 
 		start := time.Now()
 
+		// Only collect the op-classified change-set when the viewer will
+		// actually run — avoids the extra bookkeeping on the piped/JSON
+		// path and keeps it byte-for-byte unchanged.
+		showTree := interactiveTreeWanted(state.interactiveTree)
+
 		result, err := repo.Apply(ctx, dcfh.ApplyRequest{
-			Options:      buildOptions(),
-			Paths:        paths,
-			Prints:       prints,
-			Ignores:      ignores,
-			NoIgnoreFile: noIgnoreFile,
+			Options:        buildOptions(),
+			Paths:          paths,
+			Prints:         prints,
+			Ignores:        ignores,
+			NoIgnoreFile:   noIgnoreFile,
+			CollectChanges: showTree,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
@@ -122,6 +132,15 @@ ignored entries through the index.`,
 			}
 		}
 
+		// Post-run interactive tree (TTY-only). The change labels come
+		// from the enriched UpdateResult (design KD3) — the pre-update
+		// state is gone after the atomic rename, so this is the only
+		// no-extra-walk source of update's change-set.
+		launchInteractiveTree(ctx, repo, "update", dcfh.ChangeSet{
+			Added:    result.Added,
+			Modified: result.Modified,
+			Deleted:  result.Deleted,
+		}, showTree)
 		return nil
 	},
 }

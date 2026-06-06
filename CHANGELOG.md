@@ -4,6 +4,27 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 11: `--interactive-tree` gdu-style post-run viewer for status/update
+
+### Status: Complete (completed 2026-06-05, single session, under the 3–5 day / Medium-High estimate)
+### Impact: `dcfh status` and `dcfh update` gain an opt-in `--interactive-tree` flag that, after the normal run, opens a full-screen gdu/Midnight-Commander-style viewer: a navigable directory tree on the left and a width-gated before/after stats pane on the right. Default-off and TTY-only (inert with `--json` or when piped), so existing behaviour is byte-for-byte unchanged (proven). Read-only — navigating never touches the index or filesystem. Sort is runtime-switchable (default = sum of added+modified+deleted, plus per-category and name, with reverse), which matters because `update` is destructive and the change snapshot is one-shot. No on-disk format change. **Raises the minimum Go toolchain to 1.25.0** (tcell requirement). Branch: f–j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/treeview.go`** (new): terminal-free data layer — exported `Tree/Node/Stats/Category/ChangeSet`, the pure `buildTreeFromEntries` (path-split + up-tree aggregation; deleted paths unioned in count-only for the full-update case), the `BuildTree` skiplist adapter, and `sanitiseLabel`/`SanitiseLabel` (reject-by-default printable allowlist neutralising C0/C1/DEL/ESC/CSI/OSC and invalid UTF-8).
+- **`pkg/repo.go`, `pkg/repo_local.go`**: `Repo.PostRunTree(ctx, ChangeSet)` (reloads the merged main+cache index via mmap — no second filesystem walk); additive `UpdateResult.Added/Modified/Deleted` and `ApplyRequest.CollectChanges`.
+- **`pkg/update.go`, `pkg/comparison_sink.go`, `pkg/pipeline_update.go`, `pkg/pipeline_status.go`**: a lock-free `changeCollector` threaded through the canonical update pass only (never the cache-refresh delta pass), populating the change-set labels when requested.
+- **`cmd/dcfh/internal/tui/`** (new package): tcell render layer — `Run`/`runScreen`, two-pane width-gated layout, navigation (arrows + hjkl + Enter), sort keys (`c/a/m/d/n` + `r` reverse), idempotent `sync.Once` teardown, rune-aware truncation of sanitised labels.
+- **`cmd/dcfh/filters.go`, `status.go`, `update.go`, `common.go`**: per-command `--interactive-tree` flag, the `flag ∧ !--json ∧ IsTerminal(stdout)` guard, and the post-run launch.
+- **`go.mod`/`go.sum`**: add `github.com/gdamore/tcell/v2` + `golang.org/x/term`; `go` directive 1.24.3 → 1.25.0. **`CLAUDE.md`** dependencies section updated to match.
+
+### Notable
+- **Two-layer split by purpose, not package.** The data layer lives *inside* `package dircachefilehash` (so it can name the unexported skiplist/entry types) but imports no terminal; only the exported `Tree` crosses to the `tui` package. This resolved the package-boundary blocker the plan-review caught, while keeping all correctness logic unit-testable without a TTY.
+- **"No second filesystem walk" was reframed to "no second *filesystem* walk".** The stats pane needs the full file set with sizes, which the thin result structs discard; reloading the merged index (an mmap read) supplies it without re-scanning the tree.
+- **Escape-injection defence verified in a real terminal.** A `pty.fork()` harness drove the actual `tcell` screen; a filename carrying `ESC[2J` + an OSC title-injection was escaped to inert text and rendered harmlessly — the allowlist (not a blocklist) is what makes this hold for bytes outside any enumerated sequence.
+- **Collector is lock-free and provably so**: single comparison-goroutine writer, read after `wg.Wait()`; `-race` clean and independently confirmed by the FR4 security review.
+- **Security review: f-phase `cwf-security-reviewer-changeset` → no findings.** The g-phase (testing) review hit the production-weighted line cap (exit 2) because that phase counts test files as production — recorded as `error` per the CWF contract; the production code was already cleared in f. `golangci-lint run ./...` → 0 issues (one rationale-bearing `//nolint:gosec // G115` on the bounded stdout-fd narrowing).
+- **Deferred** (filed to BACKLOG, Low): wide-rune (CJK) column-width accounting (cosmetic) and a byte-weighted sort option (needs deleted/old-size capture). Counts are exact today; byte figures for changed files are current-state.
+
 ## Task 10: Re-enable checkptr in the race gate
 
 ### Status: Complete (completed 2026-06-04, ~1 day, within the 1–2 day estimate)

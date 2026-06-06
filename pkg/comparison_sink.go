@@ -34,18 +34,39 @@ type scanWriteSink struct {
 	policy     scanWritePolicy
 	hashCh     chan<- *PipelineEntry
 	bypassCh   chan<- *PipelineEntry
+	collector  *changeCollector
 	seqNum     uint64
 }
 
 // newScanWriteSink creates the unified update/cache-refresh sink. The
 // caller must close hashCh and bypassCh only after Close() returns.
-func newScanWriteSink(hashLookup *skiplistWrapper, policy scanWritePolicy, hashCh, bypassCh chan<- *PipelineEntry) *scanWriteSink {
+//
+// collector is the optional post-run change-set recorder. It must be
+// supplied ONLY for the canonical update pass (main.idx); the
+// cache-refresh delta pass passes nil, otherwise its second scan would
+// double-record the change-set. nil disables recording entirely.
+func newScanWriteSink(hashLookup *skiplistWrapper, policy scanWritePolicy, hashCh, bypassCh chan<- *PipelineEntry, collector *changeCollector) *scanWriteSink {
 	return &scanWriteSink{
 		hashLookup: hashLookup,
 		policy:     policy,
 		hashCh:     hashCh,
 		bypassCh:   bypassCh,
+		collector:  collector,
 	}
+}
+
+// record appends an op-classified path to the collector (if any). On a
+// RelativePath() error the path is dropped — the viewer pane is
+// cosmetic and must never abort an otherwise-successful update.
+func (s *scanWriteSink) record(op PipelineOp, entry BinaryEntryInterface) {
+	if s.collector == nil {
+		return
+	}
+	path, err := entry.RelativePath()
+	if err != nil {
+		return
+	}
+	s.collector.add(op, path)
 }
 
 // OnMatch handles entries present in both the existing index and the scan.
@@ -62,6 +83,7 @@ func (s *scanWriteSink) OnMatch(left, right BinaryEntryInterface) error {
 		}
 		return nil
 	}
+	s.record(OpModified, right)
 	return s.emitHashed(right, OpModified)
 }
 
@@ -69,10 +91,15 @@ func (s *scanWriteSink) OnMatch(left, right BinaryEntryInterface) error {
 // Canonical drops them (main.idx omits deletions); Delta keeps them so the
 // cache reflects what was removed.
 func (s *scanWriteSink) OnLeftOnly(entry BinaryEntryInterface) error {
-	if s.policy == scanWriteCanonical {
+	// An already-tombstoned left entry is not a new deletion — skip it
+	// for both the change-set and the emit (matches diffComparisonSink).
+	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
 		return nil
 	}
-	if isDeleted, err := entry.IsDeleted(); err == nil && isDeleted {
+	s.record(OpDeleted, entry)
+	if s.policy == scanWriteCanonical {
+		// Canonical (main.idx) omits deletions from the written index,
+		// but the change-set still wants them — recorded above.
 		return nil
 	}
 	s.emit(entry, OpDeleted, false)
@@ -82,6 +109,7 @@ func (s *scanWriteSink) OnLeftOnly(entry BinaryEntryInterface) error {
 // OnRightOnly handles entries only in the scan (new files). Both policies
 // write them; Delta consults the hash lookup first to skip re-hashing.
 func (s *scanWriteSink) OnRightOnly(entry BinaryEntryInterface) error {
+	s.record(OpNewFile, entry)
 	return s.emitHashed(entry, OpNewFile)
 }
 

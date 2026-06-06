@@ -493,10 +493,12 @@ This reasoning pattern is fundamental to effective development and must be consc
 - organised (not organized)
 
 ### Dependencies
-- **Go 1.24.3** with minimal external dependencies
+- **Go 1.25.0** with minimal external dependencies (floor raised from 1.24.3 by tcell, task 11)
 - **github.com/mattkeenan/zerocopyskiplist v0.9.0** - Zero-copy skiplist with vectorio integration
 - **github.com/google/vectorio** - Efficient bulk I/O operations via `writev()`
 - **golang.org/x/sys/unix** - System calls for mmap and file operations
+- **github.com/gdamore/tcell/v2** - Terminal UI for the `--interactive-tree` post-run viewer (`dcfh status`/`update`); the stack gdu uses
+- **golang.org/x/term** - TTY detection for the interactive-tree guard
 
 ### Constraints and Design Rules
 

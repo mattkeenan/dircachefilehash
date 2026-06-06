@@ -19,6 +19,10 @@ const (
 	cmdDupes  = "dupes"
 )
 
+// flagInteractiveTree is the per-command (status/update) toggle for the
+// post-run gdu-style interactive tree viewer.
+const flagInteractiveTree = "interactive-tree"
+
 // filterFlagsState is the per-segment state populated by the registry
 // in RegisterCmdFlags. String fields hold raw flag values; size and
 // date strings parse into FilterOptions only when BuildFilterOptions
@@ -51,6 +55,10 @@ type filterFlagsState struct {
 	exclusive       yesNoFlag
 	ignoreHardlinks bool
 	fsDedupe        bool
+
+	// status/update segment-zero-only toggle: open the post-run
+	// interactive tree viewer (TTY-only; see status.go/update.go guard).
+	interactiveTree bool
 }
 
 func newFilterFlagsState() *filterFlagsState {
@@ -87,6 +95,14 @@ var cmdFlagRegistry = []cmdFlagGroup{
 				"collapse hardlinks to the same inode to one entry per group")
 			fs.BoolVar(&state.fsDedupe, flagFSDedupe, false,
 				"reclaim disk blocks from duplicates via FIDEDUPERANGE (Linux only; combine with --dry-run to see the plan without changing anything)")
+		},
+	},
+	{
+		commands:   []string{cmdStatus, cmdUpdate},
+		perSegment: false,
+		register: func(fs *pflag.FlagSet, state *filterFlagsState) {
+			fs.BoolVar(&state.interactiveTree, flagInteractiveTree, false,
+				"after the run, open an interactive tree view of the result (TTY only; ignored with --json or when piped)")
 		},
 	},
 }

@@ -40,48 +40,42 @@ func RunStatusPipeline(ctx context.Context, ms *MetaStore, sr *ScanRun, cacheSki
 		}
 	}
 
-	sink := newScanWriteSink(cacheSkiplist, scanWriteDelta, hashCh, bypassCh)
+	// Delta (cache-refresh) pass: never collect change-set labels here —
+	// that is the canonical update pass's job (see comparison_sink.go).
+	sink := newScanWriteSink(cacheSkiplist, scanWriteDelta, hashCh, bypassCh, nil)
 
 	// --- Stage 1: Compare (main.idx vs filesystem) ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		adapter := newSinkCallbackAdapter(sink)
 		err := hwangLin(leftIter, rightIter, adapter, ctx)
 		if err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("comparison stage: %w", err))
 		}
-	}()
+	})
 
 	// --- Stage 2: Hash Pool ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		pool := newHashPool(ms, sr, hashCh, hashedCh, sr.HashWorkers)
 		if err := pool.Run(ctx); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("hash stage: %w", err))
 		}
-	}()
+	})
 
 	// --- Stage 3: Reorder Buffer ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		rb := newReorderBuffer(retiredCh)
 		if err := rb.Run(ctx, bypassCh, hashedCh); err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("reorder stage: %w", err))
 		}
-	}()
+	})
 
 	// --- Stage 4: Write ---
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		err := runWriteStage(ctx, ms, tempPath, retiredCh)
 		if err != nil && ctx.Err() == nil {
 			recordErr(fmt.Errorf("write stage: %w", err))
 		}
-	}()
+	})
 
 	wg.Wait()
 

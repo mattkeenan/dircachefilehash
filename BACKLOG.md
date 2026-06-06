@@ -240,3 +240,19 @@ known live trigger.
 ### Identified in: task 10
 
 RelativePath() computes pathStart as entryStart+Sizeof(Entry); calculatePathLength() uses &be.Path[0] (= Sizeof-8). They disagree by 8 bytes over the same entry memory. Task 10 preserved both byte-for-byte (checkptr-clean only). Audit which offset is canonical against the on-disk writer (EntrySerialiser) and fix the wrong one; add a test pinning path-start.
+
+## Task: Wide-rune (CJK) column width in interactive-tree viewer
+
+### Task-Type: bugfix
+### Priority: Low
+### Identified in: task 11
+
+The tcell viewer (cmd/dcfh/internal/tui) treats every rune as one display column in drawText/truncation. Wide runes (CJK, some emoji) therefore under-count width and can misalign or overlap the size column / stats-pane divider. Cosmetic only — the sanitiser already guarantees no escape bytes reach the terminal. Fix: account for rune width (tcell vendors rivo/uniseg) in drawText and the rune-aware truncation.
+
+## Task: Byte-weighted sort option for interactive-tree viewer
+
+### Task-Type: feature
+### Priority: Low
+### Identified in: task 11
+
+Sorting is by change COUNTS (added+modified+deleted) because per-category byte sizes are not retained for deleted/old-modified files (design KD8). A byte-weighted sort would need the update collector to capture the left-entry size at OnLeftOnly/OnMatch and thread an aggregated byte delta onto the tree Stats. Deferred from task 11 as out-of-scope plumbing.

@@ -9,9 +9,46 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/term"
+
+	"github.com/mattkeenan/dircachefilehash/cmd/dcfh/internal/tui"
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 	"github.com/mattkeenan/dircachefilehash/pkg/fsdedupe"
 )
+
+// interactiveStatsMinWidth is the terminal width (columns) at or above
+// which the viewer shows the right-hand before/after stats pane.
+const interactiveStatsMinWidth = 80
+
+// interactiveTreeWanted reports whether the post-run viewer should run:
+// the flag is set AND stdout is an interactive TTY AND output is not
+// JSON. This single predicate also gates update's change-set collection,
+// so we never do the extra work when the viewer can't appear (FR3/AC1c).
+func interactiveTreeWanted(flag bool) bool {
+	// G115: os.Stdout.Fd() is the process's own stdout descriptor (a
+	// small constant, 1), so the documented uintptr→int narrowing the
+	// x/term API requires cannot overflow.
+	return flag && getOutputFormat() != OutputJSON && term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: stdout fd is a small constant, no overflow
+}
+
+// launchInteractiveTree opens the read-only viewer when show is true. It
+// is best-effort: a tree-build or screen-init failure is reported to
+// stderr (sanitised) but never changes the command's exit status — the
+// underlying status/update already completed and printed its summary
+// (FR9). cs labels the tree's nodes.
+func launchInteractiveTree(ctx context.Context, repo dcfh.Repo, title string, cs dcfh.ChangeSet, show bool) {
+	if !show {
+		return
+	}
+	tree, err := repo.PostRunTree(ctx, cs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "interactive tree: %s\n", dcfh.SanitiseLabel(err.Error()))
+		return
+	}
+	if err := tui.Run(tree, tui.Options{Title: title, MinWidthForStats: interactiveStatsMinWidth}); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", dcfh.SanitiseLabel(err.Error()))
+	}
+}
 
 // Output structures for JSON
 type InitOutput struct {

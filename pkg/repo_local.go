@@ -287,7 +287,16 @@ func (r *repoCore) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, 
 	r.scanInProgress = true
 	defer func() { r.scanInProgress = false }()
 
-	if err := runUpdate(ctx, r.ms, r.scanRun(), flags, req.Paths...); err != nil {
+	// Attach a change collector only when the caller wants the
+	// interactive-tree labels. nil keeps the non-interactive path
+	// byte-for-byte unchanged (the canonical sink behaves exactly as
+	// before — no recording, no serialisation perturbation).
+	var collector *changeCollector
+	if req.CollectChanges {
+		collector = &changeCollector{}
+	}
+
+	if err := runUpdateCollecting(ctx, r.ms, r.scanRun(), flags, collector, req.Paths...); err != nil {
 		r.lastScanError = err
 		return nil, err
 	}
@@ -296,11 +305,29 @@ func (r *repoCore) Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, 
 	if err != nil {
 		return nil, err
 	}
-	return &UpdateResult{
+	res := &UpdateResult{
 		FileCount:    count,
 		TotalSize:    size,
 		PathsUpdated: req.Paths,
-	}, nil
+	}
+	if collector != nil {
+		res.Added = collector.added
+		res.Modified = collector.modified
+		res.Deleted = collector.deleted
+	}
+	return res, nil
+}
+
+// PostRunTree builds the read-only interactive-tree view from the
+// post-run merged index (an mmap index read, not a filesystem walk) and
+// labels live entries via cs. See the Repo interface for the wireRepo
+// scoping caveat.
+func (r *repoCore) PostRunTree(_ context.Context, cs ChangeSet) (*Tree, error) {
+	merged, err := r.ms.LoadMergedMainCacheIndex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load index for tree view: %w", err)
+	}
+	return BuildTree(merged, cs), nil
 }
 
 func (r *repoCore) Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error) {
