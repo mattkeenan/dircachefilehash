@@ -42,3 +42,4 @@ callgraph.*
 all_calls.*
 .cwf/task-stack
 .cwf/.update.lock
+.cwf/sandbox-violations.log

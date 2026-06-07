@@ -94,7 +94,6 @@
       "Bash(.cwf/scripts/command-helpers/cwf-check-tree-symlinks:*)",
       "Bash(.cwf/scripts/command-helpers/security-review-classify:*)",
       "Bash(.cwf/scripts/hooks/subagentstop-security-verdict-guard)"
-    ],
-    "deny" : []
+    ]
   }
 }

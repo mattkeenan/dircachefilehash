@@ -24,14 +24,14 @@
     "cwf-security-reviewer-changeset" : {
       "path" : ".claude/agents/cwf-security-reviewer-changeset.md",
       "permissions" : "0444",
-      "sha256" : "a26c776572e2b01fcc5af15f60996572fa118f250c8ec15ae3ef37929b0bab7f"
+      "sha256" : "2d2cc05af2ff3d37d1252f4fe67e534aca8cec486be68bf7d9e553ba9265df43"
     }
   },
   "data" : {
     "install-manifest" : {
       "path" : ".cwf/install-manifest.json",
       "permissions" : "0444",
-      "sha256" : "e1926a2f6fc5982c6a614e581546978185f6b175f8c43e7c5284328638855cac"
+      "sha256" : "74fb7e26d2e3ac9bee9a92aedbba905090dc6f42b685a4fa7f7315cad78f4a95"
     },
     "claude-md-preamble-template" : {
       "path" : ".cwf/templates/install/claude-md-preamble.md",
@@ -70,6 +70,10 @@
       "path" : ".cwf/lib/CWF/Options.pm",
       "sha256" : "4a2173ec40734da78622c7a311ae288d4a78f26f8aee633f1d87ada3843352f6"
     },
+    "CWF::PlanningGuard" : {
+      "path" : ".cwf/lib/CWF/PlanningGuard.pm",
+      "sha256" : "beec9f0af5ff00bd3f13cf0774ed72b38be4225cd7528a89a3e792ae14c2401b"
+    },
     "CWF::StatusAggregator::Core" : {
       "path" : ".cwf/lib/CWF/StatusAggregator/Core.pm",
       "sha256" : "a778f61dde2176da9d4abb25600b6568b0a04bc5e38dcba29db265e03c85830a"
@@ -92,7 +96,7 @@
     },
     "CWF::Validate::Config" : {
       "path" : ".cwf/lib/CWF/Validate/Config.pm",
-      "sha256" : "6a6913f75ba4b6e905e7823419eef1c8d5099554d6834b398a43a7464c62d2b3"
+      "sha256" : "fea750bf35ce77c131392021a8f5de466367cd1f510223013e80908757fa1a19"
     },
     "CWF::Validate::Consistency" : {
       "path" : ".cwf/lib/CWF/Validate/Consistency.pm",
@@ -203,7 +207,7 @@
     "cwf-claude-settings-merge" : {
       "path" : ".cwf/scripts/command-helpers/cwf-claude-settings-merge",
       "permissions" : "0500",
-      "sha256" : "5e4efc8b44bf95839edb940471310c0ce304962f93735159f1be09aa6091835f"
+      "sha256" : "221bc4d7dd98f7ee0b57dc20c0df35e2887b77e660bb9e3af04daf7e1396a7a4"
     },
     "cwf-manage" : {
       "path" : ".cwf/scripts/cwf-manage",
@@ -255,6 +259,16 @@
       "permissions" : "0700",
       "sha256" : "e57dce296bb828db51b354db4556e3f852e17cda9bd6e7eb0ca82e80fca8349e"
     },
+    "pretooluse-planning-write-guard" : {
+      "path" : ".cwf/scripts/hooks/pretooluse-planning-write-guard",
+      "permissions" : "0500",
+      "sha256" : "d6651e72788196a91536005e12eca12aee283acb43e18d7aa54d4fe0bc1d0f40"
+    },
+    "pretooluse-sandbox-logging" : {
+      "path" : ".cwf/scripts/hooks/pretooluse-sandbox-logging",
+      "permissions" : "0500",
+      "sha256" : "a0d970ac36a20b451cda482600c4672fc8275f250003c075373bac05f94a98cd"
+    },
     "stop-stale-status-detector" : {
       "path" : ".cwf/scripts/hooks/stop-stale-status-detector",
       "permissions" : "0500",
@@ -303,7 +317,7 @@
     "security-review-changeset" : {
       "path" : ".cwf/scripts/command-helpers/security-review-changeset",
       "permissions" : "0500",
-      "sha256" : "f2a25dec87e60433afc07a3488561dfd30180db66b4552ebb77668ff4ae0dbba"
+      "sha256" : "828cceb49e5b65341cd957cc01336ae76bc75e3a59c12b64e1a8619acb0db36e"
     },
     "security-review-classify" : {
       "path" : ".cwf/scripts/command-helpers/security-review-classify",

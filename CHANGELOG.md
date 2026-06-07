@@ -4,6 +4,24 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 14: Upgrade CWF subtree to v1.1.183
+
+### Status: Complete (completed 2026-06-07, ~1 day, within the <0.5–1 day / Low estimate)
+### Impact: Upgrades the vendored CWF workflow tooling from v1.1.177 to v1.1.183 via `cwf-manage update v1.1.183` (subtree method). No dircachefilehash product code changes — `.cwf/`, `.cwf-skills/`, `.cwf-rules/`, `.cwf-agents/`, `.claude/{skills,agents}` symlinks, `.cwf/version`, `.claude/settings.json`, and `.gitignore` only. Brings in the v1.1.178→183 deltas: Claude Code sandboxing substrate (T179), the phase-scoped planning-write PreToolUse guard (T180), the guarded-worktree convention (T181), the `security-review-changeset` `--wf-step=` contract (T182), and the permission-drift fix-on-sight rule (T183). All new sandbox/guard surface is **inert** in this repo. Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`.cwf/` (+ `.cwf-skills/`, `.cwf-rules/`, `.cwf-agents/`)**: replaced at v1.1.183 by the subtree remove-then-add laydown. New runtime surface: `.cwf/scripts/hooks/pretooluse-planning-write-guard`, `.cwf/scripts/hooks/pretooluse-sandbox-logging`, `.cwf/lib/CWF/PlanningGuard.pm`, plus docs (`sandboxing.md`, `worktree-process.md`) and the rewritten `security-review-changeset` helper.
+- **`.cwf/version`**: `cwf_version=v1.1.183`, `cwf_ref=v1.1.183`, `cwf_sha=faf92479fac564f241ce10afb8ec00c986ad37f1` — the **commit** SHA, recorded by the outer post-T175 v1.1.177 `cwf-manage` whose `resolve_sha` uses `^{commit}`.
+- **`.claude/settings.json`**: the only mutation was removal of a stray empty `"deny": []` array (net −1 line). The settings-merge added **0 hook entries** — the new hooks ship as on-disk files but stay unregistered until a project enables sandbox.
+- **`.gitignore`**: `+.cwf/sandbox-violations.log` (the sandbox-logging hook's output path).
+- **`.claude/skills/cwf-*` / `.claude/agents/cwf-*`**: 20 skill + 5 agent symlinks recreated (incl. the T182-hardened `cwf-security-reviewer-changeset`).
+
+### Notable
+- **The `cwf_sha` form is the exact inverse of Task 9.** Task 9 recorded the tag-object SHA (pre-T175 writer); this upgrade records the commit SHA because the authoritative writer is now post-T175. Pinned in planning by reading the installed `cwf-manage` `resolve_sha` by sub name (drift-proof), not the changelog headline — making exec a confirmation pass.
+- **The top settings-merge risk failed safe.** The +260-line merge was expected to inject two PreToolUse hooks; it added none (hooks opt-in, unregistered with sandbox off). Verifying hook *registration state* — not just a behaviour knob — was the right check.
+- **T183 perms fix-on-sight ran in-laydown.** The exact-perms pass clamped the 5 pre-existing floor-drift files (agent `.md` 0600→0444, helper scripts 0700→0500), so `cwf-manage validate` was exit 0 on the first run with no `fix-security` pass.
+- **Security review: both exec phases `no findings`.** `security-review-changeset` (T182 `--wf-step=`) exited 2 (cap exceeded: 1302/1305 production lines > 500 — the vendored `.cwf/` delta; `implementation-guide/**` already excluded). Per user direction the cap was raised once per phase (`--max-lines=5000`, no persistent config change) and the `cwf-security-reviewer-changeset` subagent reviewed the full delta → `no findings` both times. This is a fresh data point for the standing BACKLOG item on excluding upstream CWF dirs from the cap (Task 5/9): it confirms excluding `.cwf/**` would route every CWF self-upgrade through a full ~100k-token subagent pass over upstream-vetted code.
+
 ## Task 13: Interactive-tree size column tracks the active sort metric
 
 ### Status: Complete (completed 2026-06-07, single session, within the <0.5 day / Low estimate)
