@@ -4,6 +4,24 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 13: Interactive-tree size column tracks the active sort metric
+
+### Status: Complete (completed 2026-06-07, single session, within the <0.5 day / Low estimate)
+### Impact: Fixes a display bug shipped in task 12. The `--interactive-tree` viewer's right-aligned per-row number now reflects the **active sort metric** instead of the directory's on-disk footprint. Under the default `change_bytes(desc)` sort a directory shows its **change volume** (Added+Modified+Deleted bytes), so the number matches its position in the order — e.g. a directory with ~112 MB of churn no longer renders its 51.9 GB disk size. Toggling the sort key swaps the column to match: `change_bytes`/`name` show a humanised size, `change_files`/`added`/`modified`/`deleted` show the integer count; the header sort indicator already names the active metric so the unit is unambiguous. Render-layer only — no on-disk format change, no change to `Stats`/`ChangeSet` or non-interactive `status`/`update` output. Branch: a–j phase checkpoints, squashed.
+
+### Changes
+- **`cmd/dcfh/internal/tui/sort.go`**: new `columnText(n, key)` helper, co-located with `metric()`. It reuses `metric()` (the same value the comparator ranks on) so the displayed number can never diverge from the order; `change_bytes` formats via `dcfh.FormatHumanSize`, count keys via `strconv.FormatInt`. `name` has no numeric key (`metric()` returns 0), so it is remapped to `change_bytes` **before** the value is read.
+- **`cmd/dcfh/internal/tui/render.go`**: `drawRow` now draws `columnText(row.node, m.sortKey)` instead of the hardcoded `dcfh.FormatHumanSize(row.node.Stats.Bytes)`; locals renamed `size`→`colVal`, `sizeX`→`colX`. The stats pane still shows `Stats.Bytes` as the live `Size:` line (unchanged).
+- **`cmd/dcfh/internal/tui/sort_test.go`**: `TestColumnText` — per-key matrix incl. the `name`→change-bytes guard (must not regress to `0 B`) and a deleted-only discriminator (Stats.Bytes 0 vs change_bytes 900).
+- **`cmd/dcfh/internal/tui/render_test.go`**: `TestColumnTracksActiveSortMetric` — headless SimulationScreen test asserting the `docs/` row (deleted child) shows `900 B` under `change_bytes` and the count after `f`. Incidental cleanups: `rowLine` helper uses `strings.SplitSeq`; the dead `h` parameter on `newSimModel` was dropped (cleared a pre-existing full-tree `unparam`).
+
+### Notable
+- **Root cause: a metric/display split from task 12.** Task 12 changed the default sort to `change_bytes` but left `drawRow` rendering `Stats.Bytes`; the ordering was correct while the visible number contradicted it. The fix re-points the column at the same `metric()` the sort uses, making divergence structurally impossible.
+- **The `name`→0 trap was caught before code.** Three of four design plan-reviewers independently flagged that `metric(n, sortName)` returns 0, so the fallback had to remap the key first; promoted to an explicit ordered requirement and locked by a test.
+- **Genuine regression guard.** Tests assert on the `docs/` node where `Stats.Bytes` (0) and change_bytes (900) differ — the old code drew `0 B`, the fix draws `900 B`. A colliding node (`src`, 250==250) was explicitly rejected.
+- **Coverage / gates.** `columnText` 100% covered; package 82.1%. Full `cmd`+`pkg` regression and `go test -race` green; `golangci-lint run ./...` → 0 issues; `govulncheck` → 0 called. Both exec-phase `cwf-security-reviewer-changeset` runs recorded **no findings** (132 production lines, under the 500 cap — unlike task 12).
+- **Process learning.** Task 12's render tests asserted header/legend/stats-pane text but never a per-row data cell, so the column could silently disagree with the sort. Recommendation recorded: for sort/aggregation-metric changes in a viewer, assert the rendered per-row value, not just the chrome.
+
 ## Task 12: Byte-weighted default sort for the interactive-tree viewer
 
 ### Status: Complete (completed 2026-06-06, single session, within the 0.5–1 day / Medium estimate)

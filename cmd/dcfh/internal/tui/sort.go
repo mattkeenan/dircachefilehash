@@ -2,6 +2,7 @@ package tui
 
 import (
 	"sort"
+	"strconv"
 
 	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 )
@@ -61,6 +62,24 @@ func metric(n *dcfh.Node, key sortKey) int64 {
 	default: // sortChangeBytes
 		return n.Stats.AddedBytes + n.Stats.ModifiedBytes + n.Stats.DeletedBytes
 	}
+}
+
+// columnText formats the right-aligned per-row value for the active sort
+// key, reusing metric() so the displayed number can never diverge from the
+// ordering. The change_bytes value formats as a human size; count keys
+// format as a decimal integer. name has no numeric key (metric() returns 0
+// for it), so it falls back to the change_bytes value (change volume).
+//
+// Precondition: n is non-nil (rebuildRows never enqueues a nil node).
+func columnText(n *dcfh.Node, key sortKey) string {
+	if key == sortName {
+		key = sortChangeBytes // name → change volume; metric(name) is 0
+	}
+	v := metric(n, key)
+	if key == sortChangeBytes {
+		return dcfh.FormatHumanSize(v)
+	}
+	return strconv.FormatInt(v, 10)
 }
 
 // sortNodes returns a NEW slice of children ordered by key/reverse — the

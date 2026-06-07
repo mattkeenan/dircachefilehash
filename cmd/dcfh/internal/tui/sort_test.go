@@ -128,6 +128,55 @@ func TestSortNodes_ChangeBytes(t *testing.T) {
 	}
 }
 
+// Task 13: columnText renders the active-sort metric, not Stats.Bytes.
+// Byte keys (change_bytes, and name which falls back to it) humanise the
+// change volume; count keys render a decimal integer. The fixture has
+// counts AND bytes set (the node()/nodeBytes() helpers set only one), and
+// Stats.Bytes deliberately differs from change_bytes so a regression to the
+// old on-disk-size column is caught.
+func TestColumnText(t *testing.T) {
+	// Added 1/50B, Modified 1/200B, Deleted 1/900B → change_bytes 1150,
+	// change_files 3. Bytes (live footprint) is 250 (added+modified), which
+	// differs from change_bytes 1150 — the discriminator.
+	n := &dcfh.Node{
+		Label: "x", IsDir: true,
+		Stats: dcfh.Stats{
+			Files: 2, Bytes: 250,
+			Added: 1, Modified: 1, Deleted: 1,
+			AddedBytes: 50, ModifiedBytes: 200, DeletedBytes: 900,
+		},
+	}
+	cases := []struct {
+		key  sortKey
+		want string
+	}{
+		{sortChangeBytes, dcfh.FormatHumanSize(1150)},
+		{sortName, dcfh.FormatHumanSize(1150)}, // name → change volume (not "0 B")
+		{sortChangeFiles, "3"},
+		{sortAdded, "1"},
+		{sortModified, "1"},
+		{sortDeleted, "1"},
+	}
+	for _, c := range cases {
+		if got := columnText(n, c.key); got != c.want {
+			t.Errorf("columnText(key=%d) = %q, want %q", c.key, got, c.want)
+		}
+	}
+
+	// Explicit F1 guard: name must not regress to metric(name)==0 → "0 B".
+	if got := columnText(n, sortName); got == dcfh.FormatHumanSize(0) {
+		t.Errorf("name fell back to 0; got %q (metric(sortName) leaked)", got)
+	}
+
+	// Discriminator: a deleted-only node has Stats.Bytes 0 but change_bytes
+	// 900 — columnText must show 900, never the old "0 B" footprint.
+	del := nodeBytes("d", 0, 0, 900)
+	if got := columnText(del, sortChangeBytes); got != dcfh.FormatHumanSize(900) {
+		t.Errorf("deleted-only change_bytes = %q, want %q (read Stats.Bytes?)",
+			got, dcfh.FormatHumanSize(900))
+	}
+}
+
 // TC-8 (FR6/AC2): the rename surfaces in label() output; no metric is
 // labelled with the bare word "change".
 func TestSortKeyLabels(t *testing.T) {

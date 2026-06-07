@@ -197,11 +197,12 @@ func (m *model) drawRow(s tcell.Screen, y, width int, row rowItem, selected bool
 	left := fmt.Sprintf("%*s%s%s", indent, "", marker, label)
 	x := drawText(s, 0, y, width, base, left)
 
-	// Right-aligned size for files / aggregate size for dirs.
-	size := dcfh.FormatHumanSize(row.node.Stats.Bytes)
-	sizeX := width - len(size)
-	if sizeX > x+1 {
-		drawText(s, sizeX, y, width-sizeX, base, size)
+	// Right-aligned value tracks the active sort metric: change volume
+	// (human size) for change_bytes/name, else the integer count.
+	colVal := columnText(row.node, m.sortKey)
+	colX := width - len(colVal)
+	if colX > x+1 {
+		drawText(s, colX, y, width-colX, base, colVal)
 	}
 }
 

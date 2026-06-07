@@ -76,13 +76,14 @@ func driveUntilQuit(t *testing.T, sim tcell.SimulationScreen, key tcell.Key, r r
 }
 
 // newSimModel returns a model plus a sized, initialised simulation screen.
-func newSimModel(t *testing.T, w, h int, o Options) (*model, tcell.SimulationScreen) {
+// Height is fixed at 24 (every caller used the same value).
+func newSimModel(t *testing.T, w int, o Options) (*model, tcell.SimulationScreen) {
 	t.Helper()
 	sim := tcell.NewSimulationScreen("UTF-8")
 	if err := sim.Init(); err != nil {
 		t.Fatalf("sim init: %v", err)
 	}
-	sim.SetSize(w, h)
+	sim.SetSize(w, 24)
 	if o.MinWidthForStats <= 0 {
 		o.MinWidthForStats = defaultMinWidthForStats
 	}
@@ -130,7 +131,7 @@ func TestWidthGating(t *testing.T) {
 // TC-14 (AC4/FR5): navigation — expand reveals children; down moves the
 // selection; collapse hides children again.
 func TestNavigation(t *testing.T) {
-	m, sim := newSimModel(t, 100, 24, Options{Title: "update"})
+	m, sim := newSimModel(t, 100, Options{Title: "update"})
 	defer sim.Fini()
 
 	startRows := len(m.rows)
@@ -255,7 +256,7 @@ func screenText(sim tcell.SimulationScreen) string {
 // TC-7/TC-8 (FR5/FR6/AC1/AC2): a freshly opened viewer defaults to
 // change_bytes(desc); 'f' switches to change_files; 'r' flips direction.
 func TestDefaultSortAndKeyToggles(t *testing.T) {
-	m, sim := newSimModel(t, 100, 24, Options{Title: "status"})
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
 	defer sim.Fini()
 
 	m.draw(sim)
@@ -284,7 +285,7 @@ func TestDefaultSortAndKeyToggles(t *testing.T) {
 // TC-11 (KD6/AC1): the stats pane annotates each change line with its
 // bytes via FormatHumanSize when the screen is wide enough.
 func TestStatsPaneByteAnnotations(t *testing.T) {
-	m, sim := newSimModel(t, 120, 24, Options{Title: "status", MinWidthForStats: 80})
+	m, sim := newSimModel(t, 120, Options{Title: "status", MinWidthForStats: 80})
 	defer sim.Fini()
 
 	// Default change_bytes(desc) orders root children docs(900) > src(250)
@@ -309,6 +310,48 @@ func TestStatsPaneByteAnnotations(t *testing.T) {
 	if got := screenText(sim); !strings.Contains(got, "Deleted:   1 ("+dcfh.FormatHumanSize(900)+")") {
 		t.Errorf("stats pane missing deleted bytes in:\n%s", got)
 	}
+}
+
+// Task 13: the drawn column tracks the active sort metric end-to-end, not
+// Stats.Bytes. docs/ aggregates a deleted file (Stats.Bytes 0, change_bytes
+// 900), so it is the discriminator: the old code drew "0 B", the fix draws
+// "900 B". (Stats pane disabled via MinWidthForStats > width so the only
+// "900" on screen is the tree column, never the pane's "Deleted (900 B)".)
+func TestColumnTracksActiveSortMetric(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status", MinWidthForStats: 200})
+	defer sim.Fini()
+
+	// Default change_bytes(desc): docs row shows its change volume, 900 B.
+	m.draw(sim)
+	sim.Show()
+	line := rowLine(screenText(sim), "docs/")
+	if !strings.Contains(line, dcfh.FormatHumanSize(900)) {
+		t.Errorf("change_bytes: docs row should show %q (change volume), got:\n%s",
+			dcfh.FormatHumanSize(900), line)
+	}
+
+	// Toggle to change_files: the column becomes the count (1 deleted file),
+	// and the byte size is gone.
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'f', tcell.ModNone))
+	m.draw(sim)
+	sim.Show()
+	line = rowLine(screenText(sim), "docs/")
+	if strings.Contains(line, dcfh.FormatHumanSize(900)) {
+		t.Errorf("change_files: docs row should no longer show bytes, got:\n%s", line)
+	}
+	if !strings.Contains(line, "1") {
+		t.Errorf("change_files: docs row should show the count 1, got:\n%s", line)
+	}
+}
+
+// rowLine returns the first flattened screen line containing sub (helper).
+func rowLine(screen, sub string) string {
+	for ln := range strings.SplitSeq(screen, "\n") {
+		if strings.Contains(ln, sub) {
+			return ln
+		}
+	}
+	return ""
 }
 
 // findRow returns the visible node with the given label (test helper).
