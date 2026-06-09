@@ -4,6 +4,22 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 15: Interactive-tree status colour coding
+
+### Status: Complete (completed 2026-06-09, ~1 day, within the 1–2 day / Low–Medium estimate)
+### Impact: Makes change status legible at a glance in the `--interactive-tree` post-run viewer (`dcfh status`/`update`). Every changed node now carries a status glyph (`+` added / `~` modified / `-` deleted / `*` mixed-directory), a status colour, and bold weight; unchanged nodes show no glyph, default colour, non-bold. Directory rows blend their descendants' statuses additively (presence-based, channels R=deleted / G=added / B=modified): added=green, modified=blue, deleted=red, add+mod=cyan, mod+del=magenta, add+del=yellow, all-three=white — a single changed descendant flips the channel. The glyph is the primary (colour-vision-deficiency-safe) signal; colour reinforces. The stats pane gains a glyph-prefixed, colour-matched legend (`+ Added` / `~ Modified` / `- Deleted` + `* mixed`). Render-layer only — no on-disk format change, no change to `Stats`/`Node` or non-interactive output. Branch: a–j phase checkpoints, squashed.
+
+### Changes
+- **`cmd/dcfh/internal/tui/render.go`**: replaced `categoryStyle(n) tcell.Style` (which special-cased `IsDir`→default) with a single pure `nodeStyle(n) (rune, tcell.Style)` — one `switch` over the 3-bit present-set derived from `Stats.{Added,Modified,Deleted} > 0`, returning glyph and colour together so they can't drift; bold iff the set is non-empty. `drawRow` inserts a fixed-width glyph slot after the expand marker (`"%*s%s%c %s"`); the selection `Reverse` compose and the `colX > x+1` value guard are unchanged. `styleModified` recoloured yellow→blue (frees yellow for the add+del blend; updates the stats pane in lockstep). `drawStats` gains the glyph-prefixed legend lines + a dimmed `* mixed (directory)` note, with a 2-col leading slot on every line to keep colons aligned.
+- **`cmd/dcfh/internal/tui/render_test.go`**: `TestNodeStyle` (8-set table: glyph, colour, bold, safe-alphabet, `bold==set≠∅`) + simulation tests TC-S1…S10 (glyph placement, leaf colour/bold, directory blend, all-three dir via a `treeAllThreeDir` fixture, selection compose, stats-pane modified=blue, narrow-width value-drop, legend). New helpers: `expandAllVisible`, `rowYOf`, `styleOfRuneInRow`, `fgBoldReverse`.
+
+### Notable
+- **One resolver for leaves and directories.** Keying on `Added+Modified+Deleted` counts (not `Stats.Files`, which **excludes** deletions) is what makes a deleted-only directory render as changed (AC9) rather than unchanged — the canonical trap, now guarded by a dedicated test.
+- **Plan review earned its keep.** Three of four reviewers flagged the modified=yellow→blue collision (the additive model needs the B channel); review also caught that tcell has no `ColorCyan`/`ColorMagenta` (cyan=`ColorAqua`, magenta=`ColorFuchsia`) before any code was written.
+- **Scope addition mid-flight.** An on-screen legend (FR9) was added with user approval and folded back into the b–e plans before exec, so the plans stayed authoritative.
+- **Test-plan gap caught at test-writing.** TC-S3/S6 assumed an all-three "root row", but the implicit root (label "") is never rendered (`rebuildRows` walks `m.root.Children`); covered instead by the pure table plus a `treeAllThreeDir` fixture. Recorded as a lesson (e-/j-).
+- **Coverage / gates.** `nodeStyle` and `drawRow` 100% covered; package total 84.4%. Full `cmd`+`pkg` regression and `go test -race` green; `golangci-lint run ./cmd/dcfh/internal/tui/...` → 0 issues; `govulncheck` → 0 called. Both exec-phase `cwf-security-reviewer-changeset` runs recorded **no findings** (388 production lines, under the 500 cap) — TUI-only, glyph constrained to a closed alphabet pinned by `TestNodeStyle`.
+
 ## Task 14 (round 2): Upgrade CWF subtree to v1.1.185
 
 ### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)

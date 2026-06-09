@@ -344,6 +344,313 @@ func TestColumnTracksActiveSortMetric(t *testing.T) {
 	}
 }
 
+// --- Task 15: status glyph + colour + bold (FR1–FR9) -----------------------
+
+// expandAllVisible expands every currently-visible directory once and
+// rebuilds rows. treeForSim nests only one level, so a single pass reveals
+// every leaf.
+func expandAllVisible(m *model) {
+	for _, r := range append([]rowItem(nil), m.rows...) {
+		if r.node.IsDir {
+			m.expanded[r.node] = true
+		}
+	}
+	m.rebuildRows()
+}
+
+// rowYOf returns the y of the first screen row whose flattened text contains
+// sub, or -1.
+func rowYOf(sim tcell.SimulationScreen, sub string) int {
+	cells, w, h := sim.GetContents()
+	for y := range h {
+		var b strings.Builder
+		for x := range w {
+			c := cells[y*w+x]
+			if len(c.Runes) > 0 {
+				b.WriteRune(c.Runes[0])
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		if strings.Contains(b.String(), sub) {
+			return y
+		}
+	}
+	return -1
+}
+
+// styleOfRuneInRow returns the style of the first cell on row y holding r.
+func styleOfRuneInRow(sim tcell.SimulationScreen, y int, r rune) (tcell.Style, bool) {
+	cells, w, _ := sim.GetContents()
+	if y < 0 {
+		return tcell.StyleDefault, false
+	}
+	for x := range w {
+		c := cells[y*w+x]
+		if len(c.Runes) > 0 && c.Runes[0] == r {
+			return c.Style, true
+		}
+	}
+	return tcell.StyleDefault, false
+}
+
+// fgBoldReverse decomposes a style into the assertions task 15 cares about.
+func fgBoldReverse(st tcell.Style) (tcell.Color, bool, bool) {
+	fg, _, attr := st.Decompose()
+	return fg, attr&tcell.AttrBold != 0, attr&tcell.AttrReverse != 0
+}
+
+// treeAllThreeDir builds a tree with a single visible top-level directory
+// "proj" holding one added, one modified and one deleted child — so the
+// rendered dir row exercises the all-three (white) blend, which the
+// treeForSim root (unrendered) cannot.
+func treeAllThreeDir() *dcfh.Tree {
+	a := &dcfh.Node{Label: "a", Cat: dcfh.Added, Stats: dcfh.Stats{Files: 1, Bytes: 1, Added: 1, AddedBytes: 1}}
+	md := &dcfh.Node{Label: "m", Cat: dcfh.Modified, Stats: dcfh.Stats{Files: 1, Bytes: 1, Modified: 1, ModifiedBytes: 1}}
+	d := &dcfh.Node{Label: "d", Cat: dcfh.Deleted, Stats: dcfh.Stats{Deleted: 1, DeletedBytes: 1}}
+	return &dcfh.Tree{Root: dir("", dir("proj", a, md, d))}
+}
+
+// TC-U1 (AC1–AC4, FR1–FR5): nodeStyle is pure — table-driven over all 8
+// present-sets, asserting glyph, foreground colour, bold, the safe glyph
+// alphabet, and bold == (set ≠ ∅).
+func TestNodeStyle(t *testing.T) {
+	safe := func(r rune) bool {
+		return r == '+' || r == '~' || r == '-' || r == '*' || r == ' '
+	}
+	cases := []struct {
+		name    string
+		a, m, d int
+		glyph   rune
+		fg      tcell.Color
+		bold    bool
+	}{
+		{"unchanged", 0, 0, 0, ' ', tcell.ColorDefault, false},
+		{"added", 1, 0, 0, '+', tcell.ColorGreen, true},
+		{"modified", 0, 1, 0, '~', tcell.ColorBlue, true},
+		{"deleted", 0, 0, 1, '-', tcell.ColorRed, true},
+		{"add+mod", 1, 1, 0, '*', tcell.ColorAqua, true},
+		{"mod+del", 0, 1, 1, '*', tcell.ColorFuchsia, true},
+		{"add+del", 1, 0, 1, '*', tcell.ColorYellow, true},
+		{"all-three", 1, 1, 1, '*', tcell.ColorWhite, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &dcfh.Node{Stats: dcfh.Stats{Added: tc.a, Modified: tc.m, Deleted: tc.d}}
+			glyph, st := nodeStyle(n)
+			if !safe(glyph) {
+				t.Fatalf("glyph %q not in safe alphabet {+ ~ - * space}", glyph)
+			}
+			if glyph != tc.glyph {
+				t.Errorf("glyph = %q, want %q", glyph, tc.glyph)
+			}
+			fg, bold, _ := fgBoldReverse(st)
+			if fg != tc.fg {
+				t.Errorf("fg = %v, want %v", fg, tc.fg)
+			}
+			if bold != tc.bold {
+				t.Errorf("bold = %v, want %v", bold, tc.bold)
+			}
+			set := tc.a > 0 || tc.m > 0 || tc.d > 0
+			if bold != set {
+				t.Errorf("bold (%v) must equal (set ≠ ∅) (%v)", bold, set)
+			}
+		})
+	}
+}
+
+// TC-S1 (AC1/AC3, FR1/FR3): the status glyph appears on each changed row and
+// not on the unchanged leaf.
+func TestRenderGlyphPlacement(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	expandAllVisible(m)
+	m.draw(sim)
+	sim.Show()
+	screen := screenText(sim)
+
+	for _, tc := range []struct {
+		label string
+		glyph string
+	}{
+		{"new.go", "+"},
+		{"main.go", "~"},
+		{"old.md", "-"},
+		{"docs/", "-"}, // deleted-only dir
+		{"src/", "*"},  // add+mod mixed dir
+	} {
+		if line := rowLine(screen, tc.label); !strings.Contains(line, tc.glyph) {
+			t.Errorf("%s row missing glyph %q; line:\n%q", tc.label, tc.glyph, line)
+		}
+	}
+	// readme.md (unchanged) carries no status glyph.
+	if line := rowLine(screen, "readme.md"); strings.ContainsAny(line, "+~*") {
+		t.Errorf("unchanged readme.md row should carry no status glyph; line:\n%q", line)
+	}
+}
+
+// TC-S2 (AC1/AC4, FR1): changed leaves render their category colour and bold;
+// the unchanged leaf is default fg and not bold.
+func TestRenderLeafColourAndBold(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	expandAllVisible(m)
+	m.draw(sim)
+	sim.Show()
+
+	for _, tc := range []struct {
+		label string
+		glyph rune
+		fg    tcell.Color
+	}{
+		{"new.go", '+', tcell.ColorGreen},
+		{"main.go", '~', tcell.ColorBlue},
+		{"old.md", '-', tcell.ColorRed},
+	} {
+		st, ok := styleOfRuneInRow(sim, rowYOf(sim, tc.label), tc.glyph)
+		if !ok {
+			t.Fatalf("%s: glyph %q not found on its row", tc.label, tc.glyph)
+		}
+		fg, bold, _ := fgBoldReverse(st)
+		if fg != tc.fg || !bold {
+			t.Errorf("%s: fg=%v bold=%v, want fg=%v bold=true", tc.label, fg, bold, tc.fg)
+		}
+	}
+
+	// readme.md: style of its label cell is default fg and non-bold.
+	st, ok := styleOfRuneInRow(sim, rowYOf(sim, "readme.md"), 'r')
+	if !ok {
+		t.Fatal("readme.md label cell not found")
+	}
+	if fg, bold, _ := fgBoldReverse(st); fg != tcell.ColorDefault || bold {
+		t.Errorf("readme.md: fg=%v bold=%v, want default/non-bold", fg, bold)
+	}
+}
+
+// TC-S3/TC-S5 (AC2/AC9, FR2): directory blend colour — a deleted-only dir is
+// red (not "unchanged"), and an add+mod dir is aqua (cyan); both bold.
+func TestRenderDirectoryBlend(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	m.draw(sim) // top-level dirs visible without expansion
+	sim.Show()
+
+	st, ok := styleOfRuneInRow(sim, rowYOf(sim, "docs/"), '-')
+	if !ok {
+		t.Fatal("docs/ glyph '-' not found (deleted-only dir should render '-')")
+	}
+	if fg, bold, _ := fgBoldReverse(st); fg != tcell.ColorRed || !bold {
+		t.Errorf("docs/ deleted-only: fg=%v bold=%v, want Red/bold", fg, bold)
+	}
+
+	st, ok = styleOfRuneInRow(sim, rowYOf(sim, "src/"), '*')
+	if !ok {
+		t.Fatal("src/ glyph '*' not found (add+mod dir should render '*')")
+	}
+	if fg, bold, _ := fgBoldReverse(st); fg != tcell.ColorAqua || !bold {
+		t.Errorf("src/ add+mod: fg=%v bold=%v, want Aqua/bold", fg, bold)
+	}
+}
+
+// TC-S6 (AC10): an all-three directory renders white / '*' / bold and is
+// distinguishable from an unchanged row (which is default / no-glyph / non-bold).
+func TestRenderAllThreeDirectory(t *testing.T) {
+	m := newModel(treeAllThreeDir(), Options{Title: "status"})
+	sim := tcell.NewSimulationScreen("UTF-8")
+	if err := sim.Init(); err != nil {
+		t.Fatalf("sim init: %v", err)
+	}
+	defer sim.Fini()
+	sim.SetSize(100, 24)
+	m.draw(sim)
+	sim.Show()
+
+	st, ok := styleOfRuneInRow(sim, rowYOf(sim, "proj/"), '*')
+	if !ok {
+		t.Fatal("proj/ glyph '*' not found")
+	}
+	fg, bold, _ := fgBoldReverse(st)
+	if fg != tcell.ColorWhite || !bold {
+		t.Errorf("all-three proj/: fg=%v bold=%v, want White/bold", fg, bold)
+	}
+}
+
+// TC-S7 (AC6, FR6): selection composes Reverse over the category style while
+// the status glyph stays on the row.
+func TestRenderSelectionComposes(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	m.selectNode(findRow(m, "docs")) // a changed (deleted-only) dir
+	m.draw(sim)
+	sim.Show()
+
+	st, ok := styleOfRuneInRow(sim, rowYOf(sim, "docs/"), '-')
+	if !ok {
+		t.Fatal("selected docs/ glyph '-' not found")
+	}
+	fg, bold, reverse := fgBoldReverse(st)
+	if !reverse {
+		t.Errorf("selected row should set Reverse; style fg=%v bold=%v", fg, bold)
+	}
+	if !bold || fg != tcell.ColorRed {
+		t.Errorf("selection must compose over the category style (Red/bold), got fg=%v bold=%v", fg, bold)
+	}
+}
+
+// TC-S8 (AC11, FR8): the stats-pane Modified line renders blue, matching a
+// modified leaf — not the old yellow.
+func TestStatsPaneModifiedIsBlue(t *testing.T) {
+	m, sim := newSimModel(t, 120, Options{Title: "status", MinWidthForStats: 80})
+	defer sim.Fini()
+	m.selectNode(findRow(m, "src"))
+	m.draw(sim)
+	sim.Show()
+
+	y := rowYOf(sim, "Modified:")
+	if y < 0 {
+		t.Fatal("stats pane 'Modified:' line not found")
+	}
+	st, ok := styleOfRuneInRow(sim, y, '~')
+	if !ok {
+		t.Fatal("stats pane Modified glyph '~' not found")
+	}
+	if fg, _, _ := fgBoldReverse(st); fg != tcell.ColorBlue {
+		t.Errorf("stats-pane Modified fg=%v, want Blue", fg)
+	}
+}
+
+// TC-S9 (AC7, FR7): at a narrow width the +2 glyph columns squeeze the
+// right-aligned value, which drops (guard holds) — no panic, label survives.
+func TestRenderNarrowWidthDropsValue(t *testing.T) {
+	m, sim := newSimModel(t, 12, Options{Title: "status"})
+	defer sim.Fini()
+	m.draw(sim) // must not panic
+	sim.Show()
+	line := rowLine(screenText(sim), "docs")
+	if !strings.Contains(line, "docs") {
+		t.Errorf("narrow render dropped the label too; line:\n%q", line)
+	}
+	if strings.Contains(line, dcfh.FormatHumanSize(900)) {
+		t.Errorf("narrow render should drop the size value; line:\n%q", line)
+	}
+}
+
+// TC-S10 (AC12, FR9): the stats pane shows the glyph-prefixed, colour-matched
+// category legend lines and the "* mixed" note.
+func TestStatsPaneLegend(t *testing.T) {
+	m, sim := newSimModel(t, 120, Options{Title: "status", MinWidthForStats: 80})
+	defer sim.Fini()
+	m.selectNode(findRow(m, "src"))
+	m.draw(sim)
+	sim.Show()
+	got := screenText(sim)
+	for _, want := range []string{"+ Added:", "~ Modified:", "- Deleted:", "* mixed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stats-pane legend missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 // rowLine returns the first flattened screen line containing sub (helper).
 func rowLine(screen, sub string) string {
 	for ln := range strings.SplitSeq(screen, "\n") {

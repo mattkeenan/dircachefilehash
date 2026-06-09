@@ -172,7 +172,7 @@ func (m *model) drawTree(s tcell.Screen, top, bottom, width int) {
 }
 
 func (m *model) drawRow(s tcell.Screen, y, width int, row rowItem, selected bool) {
-	base := categoryStyle(row.node)
+	glyph, base := nodeStyle(row.node)
 	if selected {
 		base = base.Reverse(true)
 	}
@@ -194,7 +194,7 @@ func (m *model) drawRow(s tcell.Screen, y, width int, row rowItem, selected bool
 	if row.node.IsDir {
 		label += "/"
 	}
-	left := fmt.Sprintf("%*s%s%s", indent, "", marker, label)
+	left := fmt.Sprintf("%*s%s%c %s", indent, "", marker, glyph, label)
 	x := drawText(s, 0, y, width, base, left)
 
 	// Right-aligned value tracks the active sort metric: change volume
@@ -225,16 +225,17 @@ func (m *model) drawStats(s tcell.Screen, x, top, bottom, width int) {
 		label string
 		style tcell.Style
 	}{
-		{"Selected: " + n.Label, tcell.StyleDefault.Bold(true)},
-		{"Type:      " + kind, tcell.StyleDefault},
+		{"  Selected: " + n.Label, tcell.StyleDefault.Bold(true)},
+		{"  Type:      " + kind, tcell.StyleDefault},
 		{"", tcell.StyleDefault},
-		{fmt.Sprintf("Files:     %d", st.Files), tcell.StyleDefault},
-		{"Size:      " + dcfh.FormatHumanSize(st.Bytes), tcell.StyleDefault},
+		{fmt.Sprintf("  Files:     %d", st.Files), tcell.StyleDefault},
+		{"  Size:      " + dcfh.FormatHumanSize(st.Bytes), tcell.StyleDefault},
 		{"", tcell.StyleDefault},
-		{fmt.Sprintf("Added:     %d (%s)", st.Added, dcfh.FormatHumanSize(st.AddedBytes)), styleAdded},
-		{fmt.Sprintf("Modified:  %d (%s)", st.Modified, dcfh.FormatHumanSize(st.ModifiedBytes)), styleModified},
-		{fmt.Sprintf("Deleted:   %d (%s)", st.Deleted, dcfh.FormatHumanSize(st.DeletedBytes)), styleDeleted},
-		{fmt.Sprintf("Unchanged: %d", st.Unchanged), tcell.StyleDefault},
+		{fmt.Sprintf("+ Added:     %d (%s)", st.Added, dcfh.FormatHumanSize(st.AddedBytes)), styleAdded},
+		{fmt.Sprintf("~ Modified:  %d (%s)", st.Modified, dcfh.FormatHumanSize(st.ModifiedBytes)), styleModified},
+		{fmt.Sprintf("- Deleted:   %d (%s)", st.Deleted, dcfh.FormatHumanSize(st.DeletedBytes)), styleDeleted},
+		{fmt.Sprintf("  Unchanged: %d", st.Unchanged), tcell.StyleDefault},
+		{"* mixed (directory)", tcell.StyleDefault.Dim(true)},
 	}
 	y := top
 	for _, ln := range lines {
@@ -267,24 +268,52 @@ func drawText(s tcell.Screen, x, y, maxW int, style tcell.Style, text string) in
 
 var (
 	styleAdded    = tcell.StyleDefault.Foreground(tcell.ColorGreen)
-	styleModified = tcell.StyleDefault.Foreground(tcell.ColorYellow)
+	styleModified = tcell.StyleDefault.Foreground(tcell.ColorBlue)
 	styleDeleted  = tcell.StyleDefault.Foreground(tcell.ColorRed)
 )
 
-// categoryStyle colours a node by its change category. Directories use
-// the default style (their composition shows in the stats pane).
-func categoryStyle(n *dcfh.Node) tcell.Style {
-	if n.IsDir {
-		return tcell.StyleDefault
+// nodeStyle maps a node's present change-category set (Stats counts > 0) to its
+// status glyph and base style (foreground colour + bold). Pure; identical for
+// leaf and dir. Unchanged → (' ', default). Glyph is always one of
+// '+','~','-','*',' ' — never a control rune (drawText sanitised-string contract).
+// Colours are ANSI-palette names (0–15) so terminal themes remap them.
+func nodeStyle(n *dcfh.Node) (rune, tcell.Style) {
+	const (
+		bA = 1 << iota // added
+		bM             // modified
+		bD             // deleted
+	)
+	set := 0
+	if n.Stats.Added > 0 {
+		set |= bA
 	}
-	switch n.Cat {
-	case dcfh.Added:
-		return styleAdded
-	case dcfh.Modified:
-		return styleModified
-	case dcfh.Deleted:
-		return styleDeleted
-	default:
-		return tcell.StyleDefault
+	if n.Stats.Modified > 0 {
+		set |= bM
 	}
+	if n.Stats.Deleted > 0 {
+		set |= bD
+	}
+	var (
+		glyph  rune
+		colour tcell.Color
+	)
+	switch set {
+	case 0:
+		return ' ', tcell.StyleDefault
+	case bA:
+		glyph, colour = '+', tcell.ColorGreen
+	case bM:
+		glyph, colour = '~', tcell.ColorBlue
+	case bD:
+		glyph, colour = '-', tcell.ColorRed
+	case bA | bM:
+		glyph, colour = '*', tcell.ColorAqua // cyan
+	case bM | bD:
+		glyph, colour = '*', tcell.ColorFuchsia // magenta
+	case bA | bD:
+		glyph, colour = '*', tcell.ColorYellow
+	default: // bA | bM | bD
+		glyph, colour = '*', tcell.ColorWhite
+	}
+	return glyph, tcell.StyleDefault.Foreground(colour).Bold(true)
 }
