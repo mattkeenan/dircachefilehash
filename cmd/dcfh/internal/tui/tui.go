@@ -129,6 +129,11 @@ func (m *model) handleRune(r rune) (quit bool) {
 		m.reverse = !m.reverse
 		m.rebuildRows()
 		m.selectNode(cur)
+	case 'z':
+		cur := m.current()
+		m.hideUnchanged = !m.hideUnchanged
+		m.rebuildRows()
+		m.selectNode(cur)
 	default:
 		if key, ok := keyForRune(r); ok {
 			cur := m.current()

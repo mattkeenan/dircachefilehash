@@ -4,6 +4,22 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 16: `z` key hides unchanged entries in the interactive tree
+
+### Status: Complete (completed 2026-06-09, <0.5 day, within the <0.5 day / Low estimate)
+### Impact: Adds a `z` toggle to the `--interactive-tree` post-run viewer (`dcfh status`/`update`) that hides unchanged entries, collapsing the tree to only what changed. The mode is OFF by default (the viewer still launches with the full tree); pressing `z` hides every unchanged file and every wholly-unchanged directory, pressing it again restores them. A directory stays visible whenever its subtree contains any change (so the path to a changed leaf is never broken) and is **not** force-expanded. The footer help line advertises the binding (`z hide`). Render-layer only — no on-disk format change, no change to `Stats`/`Node`, no effect on `--json` or any non-interactive path. Branch: a–j phase checkpoints, squashed.
+
+### Changes
+- **`cmd/dcfh/internal/tui/render.go`**: new `hideUnchanged bool` field on `model`; new pure predicate `hasChange(n) = n.Stats.Added+n.Stats.Modified+n.Stats.Deleted > 0` (next to `nodeStyle`, the exact complement of its `set == 0` unchanged arm); one `if m.hideUnchanged && !hasChange(c) { continue }` guard inside `rebuildRows.walk`, before append/recurse, so a wholly-unchanged subtree is pruned in one step; footer help string gains ` z hide`.
+- **`cmd/dcfh/internal/tui/tui.go`**: `case 'z':` in `handleRune`, a line-for-line analogue of the `r` reverse toggle (capture `current()` → flip `hideUnchanged` → `rebuildRows()` → `selectNode(cur)`), so selection-preservation and clamp-on-hidden fall out of existing machinery.
+- **`cmd/dcfh/internal/tui/render_test.go`**: `TestHasChange` (pure table incl. the deletion-only case) + TC-1…TC-9 simulation/event tests (toggle round-trip, unchanged-leaf hide, deletion-only collapsed dir stays, wholly-unchanged dir hidden, composition with sort+reverse, selection preserved, selection clamped, footer advertises `z`, all-hidden empty-state + navigation-no-panic). Two new fixtures (`treeWithUnchangedDir`, `treeAllUnchanged`) + helpers (`simModelFor`, `pressZ`).
+
+### Notable
+- **The `Stats.Files` deletion trap, pre-empted.** Keying the predicate on `Added+Modified+Deleted` (never `Stats.Files`, which excludes deletions) is what keeps a deletion-only directory visible in hide mode. The trap was recorded in task 15's retrospective and designed against from the first line; TC-U1 (deleted-only) and TC-3 (deletion-only collapsed dir) guard it.
+- **Directory visibility is free.** Because a directory's `Stats` already aggregate its whole subtree, filtering a directory by its own change-sum keeps the path to a changed leaf without an ancestor walk and without force-expanding — a derived consequence, not extra code.
+- **One choke point.** Filtering inside `rebuildRows` (the one function every view-mutating key already calls) makes hide compose with sort/reverse/expand with no second code path (TC-5).
+- **Coverage / gates.** `hasChange` and the `rebuildRows` hide branch 100% covered; package total 88.1%. Full `cmd`+`pkg` regression and `go test -race ./...` green; `golangci-lint run ./cmd/dcfh/internal/tui/...` → 0 issues; `govulncheck` → 0 called. Both exec-phase `cwf-security-reviewer-changeset` runs recorded **no findings** (261 production lines, under the 500 cap) — read-only TUI, no new node-derived strings rendered. The selection-clamp path was the only pattern note (panic-only ceiling, covered by TC-7/TC-9).
+
 ## Task 15: Interactive-tree status colour coding
 
 ### Status: Complete (completed 2026-06-09, ~1 day, within the 1–2 day / Low–Medium estimate)

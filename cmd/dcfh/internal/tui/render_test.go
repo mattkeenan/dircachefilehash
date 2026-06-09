@@ -684,3 +684,244 @@ func rowOrder(m *model) string {
 	}
 	return b.String()
 }
+
+// --- Task 16: z hides unchanged tree entries (FR1–FR8) ---------------------
+
+// simModelFor returns a model over an arbitrary tree plus a sized,
+// initialised simulation screen (the treeForSim-agnostic sibling of
+// newSimModel, for the two Task-16 fixtures).
+func simModelFor(t *testing.T, tree *dcfh.Tree, w int, o Options) (*model, tcell.SimulationScreen) {
+	t.Helper()
+	sim := tcell.NewSimulationScreen("UTF-8")
+	if err := sim.Init(); err != nil {
+		t.Fatalf("sim init: %v", err)
+	}
+	sim.SetSize(w, 24)
+	if o.MinWidthForStats <= 0 {
+		o.MinWidthForStats = defaultMinWidthForStats
+	}
+	return newModel(tree, o), sim
+}
+
+// pressZ injects the hide-unchanged toggle through the real key path.
+func pressZ(m *model) {
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone))
+}
+
+// treeWithUnchangedDir builds a tree with a changed dir, a wholly-unchanged
+// dir, and an unchanged leaf — the only fixture that exercises hiding a
+// wholly-unchanged directory (FR4/AC4):
+//
+//	src/main.go    (modified)
+//	vendor/lib.go  (unchanged)
+//	readme.md      (unchanged)
+func treeWithUnchangedDir() *dcfh.Tree {
+	mainGo := &dcfh.Node{Label: "main.go", Cat: dcfh.Modified, Stats: dcfh.Stats{Files: 1, Bytes: 200, Modified: 1, ModifiedBytes: 200}}
+	libGo := &dcfh.Node{Label: "lib.go", Cat: dcfh.Unchanged, Stats: dcfh.Stats{Files: 1, Bytes: 80, Unchanged: 1}}
+	readme := &dcfh.Node{Label: "readme.md", Cat: dcfh.Unchanged, Stats: dcfh.Stats{Files: 1, Bytes: 10, Unchanged: 1}}
+	root := dir("", dir("src", mainGo), dir("vendor", libGo), readme)
+	return &dcfh.Tree{Root: root}
+}
+
+// treeAllUnchanged builds a tree of only unchanged leaves — for the
+// all-hidden empty-state (FR8/AC8).
+func treeAllUnchanged() *dcfh.Tree {
+	a := &dcfh.Node{Label: "a.txt", Cat: dcfh.Unchanged, Stats: dcfh.Stats{Files: 1, Bytes: 10, Unchanged: 1}}
+	b := &dcfh.Node{Label: "b.txt", Cat: dcfh.Unchanged, Stats: dcfh.Stats{Files: 1, Bytes: 20, Unchanged: 1}}
+	return &dcfh.Tree{Root: dir("", a, b)}
+}
+
+// TC-U1 (AC2, FR2): hasChange is pure — true iff Added+Modified+Deleted > 0,
+// including the deletion-only case a Stats.Files predicate would get wrong.
+func TestHasChange(t *testing.T) {
+	cases := []struct {
+		name    string
+		a, m, d int
+		want    bool
+	}{
+		{"unchanged", 0, 0, 0, false},
+		{"added", 1, 0, 0, true},
+		{"modified", 0, 1, 0, true},
+		{"deleted-only", 0, 0, 1, true},
+		{"mixed", 1, 1, 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &dcfh.Node{Stats: dcfh.Stats{Added: tc.a, Modified: tc.m, Deleted: tc.d}}
+			if got := hasChange(n); got != tc.want {
+				t.Errorf("hasChange(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TC-1 (AC1, FR1): one z hides unchanged entries; a second z restores them
+// (row count returns to the original).
+func TestHideToggleRoundTrip(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	expandAllVisible(m)
+	start := len(m.rows)
+
+	pressZ(m)
+	if findRow(m, "readme.md") != nil {
+		t.Errorf("after hide-on, unchanged readme.md should be absent")
+	}
+	pressZ(m)
+	if findRow(m, "readme.md") == nil {
+		t.Errorf("after hide-off, readme.md should return")
+	}
+	if len(m.rows) != start {
+		t.Errorf("round-trip row count: want %d, got %d", start, len(m.rows))
+	}
+}
+
+// TC-2 (AC3, FR3): an unchanged leaf is hidden; changed leaves remain.
+func TestHideUnchangedLeaf(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	expandAllVisible(m)
+	m.hideUnchanged = true
+	m.rebuildRows()
+
+	if findRow(m, "readme.md") != nil {
+		t.Errorf("unchanged readme.md should be hidden")
+	}
+	for _, label := range []string{"new.go", "main.go", "old.md"} {
+		if findRow(m, label) == nil {
+			t.Errorf("changed leaf %s should remain visible", label)
+		}
+	}
+}
+
+// TC-3 (AC2/AC4b, FR2/FR4): a deletion-only collapsed dir stays visible and
+// is not force-expanded — guards the predicate against Stats.Files.
+func TestHideKeepsDeletionOnlyCollapsedDir(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	docs := findRow(m, "docs")
+	if docs == nil {
+		t.Fatal("docs/ not found at top level")
+	}
+	m.hideUnchanged = true
+	m.rebuildRows()
+
+	if findRow(m, "docs") == nil {
+		t.Errorf("deletion-only docs/ must stay visible in hide mode")
+	}
+	if m.expanded[docs] {
+		t.Errorf("hide mode must not force-expand docs/")
+	}
+}
+
+// TC-4 (AC4, FR4): a wholly-unchanged directory is hidden; a changed dir stays.
+func TestHideWhollyUnchangedDir(t *testing.T) {
+	m, sim := simModelFor(t, treeWithUnchangedDir(), 100, Options{Title: "status"})
+	defer sim.Fini()
+	m.hideUnchanged = true
+	m.rebuildRows()
+
+	if findRow(m, "vendor") != nil {
+		t.Errorf("wholly-unchanged vendor/ should be hidden")
+	}
+	if findRow(m, "src") == nil {
+		t.Errorf("changed src/ should remain visible")
+	}
+}
+
+// TC-5 (AC6, FR6): hide composes with sort + reverse — unchanged stay hidden
+// across both rebuilds and every visible row is a changed node.
+func TestHideComposesWithSortReverse(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	expandAllVisible(m)
+
+	pressZ(m)                                                         // hide on
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone)) // sort added
+	m.handleKey(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone)) // reverse
+
+	if findRow(m, "readme.md") != nil {
+		t.Errorf("hide mode must persist across sort+reverse")
+	}
+	for _, r := range m.rows {
+		if !hasChange(r.node) {
+			t.Errorf("every visible row must be changed; %s is unchanged", r.node.Label)
+		}
+	}
+}
+
+// TC-6 (AC5, FR5): toggling preserves the selection when the node stays visible.
+func TestHideSelectionPreserved(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	src := findRow(m, "src")
+	m.selectNode(src)
+	pressZ(m)
+	if m.current() != src {
+		t.Errorf("selection should stay on changed src/ across toggle")
+	}
+}
+
+// TC-7 (AC5, FR5): toggling onto a now-hidden node clamps to a valid row.
+func TestHideSelectionClampedWhenHidden(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	m.selectNode(findRow(m, "readme.md"))
+	pressZ(m) // hides readme.md
+	if m.sel < 0 || m.sel >= len(m.rows) {
+		t.Errorf("selection must clamp in-range after its node is hidden: sel=%d len=%d", m.sel, len(m.rows))
+	}
+	if m.current() == nil {
+		t.Errorf("with surviving rows, current() should be non-nil")
+	}
+}
+
+// TC-8 (AC7, FR7): the footer advertises the z binding.
+func TestFooterAdvertisesHide(t *testing.T) {
+	m, sim := newSimModel(t, 100, Options{Title: "status"})
+	defer sim.Fini()
+	m.draw(sim)
+	sim.Show()
+	if got := screenText(sim); !strings.Contains(got, "z hide") {
+		t.Errorf("footer should advertise the z binding; screen:\n%s", got)
+	}
+}
+
+// TC-9 (AC8, FR8): an all-unchanged tree with hide on shows the empty-state,
+// keeps the header/stats panes, returns a nil selection, survives navigation
+// without panic, and is restored by a second z.
+func TestHideAllUnchangedEmptyStateAndNav(t *testing.T) {
+	m, sim := simModelFor(t, treeAllUnchanged(), 120, Options{Title: "status", MinWidthForStats: 80})
+	defer sim.Fini()
+
+	pressZ(m) // hide on → everything hidden
+	if len(m.rows) != 0 {
+		t.Fatalf("all-unchanged tree with hide on should have 0 rows, got %d", len(m.rows))
+	}
+	m.draw(sim)
+	sim.Show()
+	got := screenText(sim)
+	if !strings.Contains(got, "(no changes to display)") {
+		t.Errorf("empty-state body message missing:\n%s", got)
+	}
+	if !strings.Contains(got, "2 files") {
+		t.Errorf("header should still show the root file count:\n%s", firstLine(got))
+	}
+	if !strings.Contains(got, "(nothing selected)") {
+		t.Errorf("stats pane should show (nothing selected):\n%s", got)
+	}
+	if m.current() != nil {
+		t.Errorf("current() must be nil with zero rows")
+	}
+
+	// Navigation on an empty row set must not panic.
+	m.handleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	m.handleKey(tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone))
+	m.draw(sim)
+	sim.Show()
+
+	pressZ(m) // restore
+	if len(m.rows) == 0 {
+		t.Errorf("second z should restore the unchanged tree")
+	}
+}

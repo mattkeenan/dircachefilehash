@@ -29,6 +29,8 @@ type model struct {
 	sortKey  sortKey
 	reverse  bool
 
+	hideUnchanged bool // when true, rebuildRows prunes unchanged nodes
+
 	rows []rowItem
 	sel  int // index into rows
 	top  int // first visible row (scroll offset)
@@ -53,6 +55,9 @@ func (m *model) rebuildRows() {
 	var walk func(n *dcfh.Node, depth int)
 	walk = func(n *dcfh.Node, depth int) {
 		for _, c := range sortNodes(n.Children, m.sortKey, m.reverse) {
+			if m.hideUnchanged && !hasChange(c) {
+				continue // prune unchanged node + its whole subtree; no force-expand
+			}
 			m.rows = append(m.rows, rowItem{node: c, depth: depth})
 			if c.IsDir && m.expanded[c] {
 				walk(c, depth+1)
@@ -146,7 +151,7 @@ func (m *model) drawHeader(s tcell.Screen, width int) {
 
 func (m *model) drawFooter(s tcell.Screen, width, y int) {
 	style := tcell.StyleDefault.Dim(true)
-	help := "↑/↓ move  →/← expand/collapse  c/f/a/m/d/n sort  r reverse  q quit"
+	help := "↑/↓ move  →/← expand/collapse  c/f/a/m/d/n sort  r reverse  z hide  q quit"
 	drawText(s, 0, y, width, style, help)
 }
 
@@ -271,6 +276,14 @@ var (
 	styleModified = tcell.StyleDefault.Foreground(tcell.ColorBlue)
 	styleDeleted  = tcell.StyleDefault.Foreground(tcell.ColorRed)
 )
+
+// hasChange reports whether n carries any change in its (subtree-aggregated)
+// Stats. Keys on Added+Modified+Deleted — never Stats.Files, which excludes
+// deletions, so a deletion-only node correctly counts as changed. This is the
+// exact complement of nodeStyle's unchanged arm (set == 0 → ' ').
+func hasChange(n *dcfh.Node) bool {
+	return n.Stats.Added+n.Stats.Modified+n.Stats.Deleted > 0
+}
 
 // nodeStyle maps a node's present change-category set (Stats counts > 0) to its
 // status glyph and base style (foreground colour + bold). Pure; identical for
