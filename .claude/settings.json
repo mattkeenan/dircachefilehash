@@ -93,7 +93,8 @@
       "Bash(.cwf/scripts/command-helpers/workflow-manager:*)",
       "Bash(.cwf/scripts/command-helpers/cwf-check-tree-symlinks:*)",
       "Bash(.cwf/scripts/command-helpers/security-review-classify:*)",
-      "Bash(.cwf/scripts/hooks/subagentstop-security-verdict-guard)"
+      "Bash(.cwf/scripts/hooks/subagentstop-security-verdict-guard)",
+      "Bash(.cwf/scripts/command-helpers/cwf-detect-merges:*)"
     ]
   }
 }

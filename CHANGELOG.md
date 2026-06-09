@@ -4,6 +4,26 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 14 (round 2): Upgrade CWF subtree to v1.1.185
+
+### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
+### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
+
+### Changes
+- **`.cwf/version`**: `cwf_version=v1.1.185`, `cwf_ref=v1.1.185`, `cwf_sha=6659c1cca72ef033d92546fcd9d42a0f4d817dd9` (commit form, consistent with the 183 record); **`cwf_method=read-tree`** (was `subtree`).
+- **`.cwf/scripts/cwf-manage`**: gains `read-tree` as an accepted method and the `subtree`→`read-tree` migration in `cmd_update`; wires in the new merge-advisory helper.
+- **`.cwf/scripts/command-helpers/cwf-detect-merges`** (new): read-only Perl helper that fingerprints subtree-install merges; counts-only output, list-form git spawn, `-z`/`%x1f` porcelain.
+- **`.cwf/lib/CWF/Backlog.pm`**: adds a CHANGELOG-005 stale-brand warning check (constant-needle `index`, intro-array scoped).
+- **`.cwf/security/script-hashes.json`**: re-pinned by the installer atomically with the scripts it hashes (hence `validate: OK` on first run, no separate hash refresh).
+- **`.claude/settings.json`**: settings-merge added **exactly one** scoped Bash allowlist entry — `Bash(.cwf/scripts/command-helpers/cwf-detect-merges:*)` — and **zero** hook entries.
+
+### Notable
+- **The forward-only gap was the crux, caught in planning.** The *installed* 183 `cwf-manage` reads `cwf_method=subtree` and passes `CWF_METHOD=subtree`, which 185's `install.bash` hard-refuses (`:82-83`) — the `subtree`→`read-tree` translation lives only in 185's `cmd_update`. Three of four b-phase plan reviewers independently flagged this. Resolved by the user's suggestion: materialise a throwaway v1.1.185 checkout and drive the upgrade with **its** migration-aware `cwf-manage` (FindBin loads 185 libs while `$git_root` resolves to this repo via cwd) — CWF's documented forward-only recovery.
+- **Merge-free landing achieved.** read-tree (`git fetch` + `git read-tree --prefix`) stages the four `.cwf*` prefixes with no commit; our single consumer commit is single-parent. `git log --merges 700baba..HEAD` stayed empty.
+- **Fail-closed migration confirmed.** `cwf_method` is rewritten to `read-tree` only after laydown/artefacts/perms succeed — a mid-update abort leaves `subtree` intact. Driver exited 0 first attempt; the design's bare-bootstrap fallback was not needed.
+- **detect-merges advisory (expected).** Flagged the 4 pre-existing subtree-install merges (`103537c`/`28cfb50`/`a2c7635`/`75e3ae4`), all in base history before `700baba` — advisory only; relates to the parked `.githooks`/re-linearisation decision, out of scope here.
+- **Security review: both exec phases `no findings`.** The changeset stayed under the production-weighted cap (209 lines), unlike the 183 round — the 183→185 source delta is small (4 files). The new `cwf-detect-merges` helper was reviewed in full and judged clean.
+
 ## Task 14: Upgrade CWF subtree to v1.1.183
 
 ### Status: Complete (completed 2026-06-07, ~1 day, within the <0.5–1 day / Low estimate)
