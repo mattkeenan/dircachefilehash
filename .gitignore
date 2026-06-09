@@ -1,45 +1,40 @@
 .dcfh
 .*.swp
 
-# Build artifacts and binaries (root-level only)
+# Compiled binaries (root + per-cmd build locations)
 /dcfh
 /dcfhfind
 /dcfhfix
-/pkg.test
+cmd/*/dcfh
+cmd/*/dcfhfind
+cmd/*/dcfhfix
+*.test
 /dist/
 
-# Build artifacts in cmd subdirectories
-cmd/dcfh/dcfh
-cmd/dcfhfind/dcfhfind
-cmd/dcfhfix/dcfhfix
+# Generated version stamps
+cmd/*/constants_version.go
 
-# test directories
+# Stray root-level index files (real fixtures live under pkg/format/testdata/)
+/*.idx
+
+# Test scratch directories
 test-*/
 test_*/
 
-# Generated files
-cmd/dcfh/constants_version.go
-cmd/dcfhfind/constants_version.go
-cmd/dcfhfix/constants_version.go
-
-# Profile data and benchmark results
+# Profiling / benchmark output
 *.prof
 /benchmark-results/
 
-# Log files
+# Logs
 *.log
 
-# Local version override
+# Local build version override
 .local-version
 
-# Editor files
+# Editor / tooling
 tags
 
-# Callgraph analysis files
-*.svg.gv
-*.svg.svg
-callgraph.*
-all_calls.*
+# CWF runtime state
 .cwf/task-stack
 .cwf/.update.lock
 .cwf/sandbox-violations.log
