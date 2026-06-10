@@ -4,6 +4,27 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 17: Review and refactor docs into doc directory
+
+### Status: Complete (completed 2026-06-10, single session, under the 1–2 day / Medium estimate)
+### Impact: Brings the repository's documentation back into sync with the shipped v0.7 CLI and tidies the root. Five architecture/design docs (`ARCHITECTURE.md`, `ARCHITECTURE-IMPROVEMENTS.md`, `architecture-v0.7.md`, `design.md`, `streaming-iterator-architecture.md`) move under `docs/` via history-preserving `git mv`, leaving the root with only `README.md`, `CHANGELOG.md`, `BACKLOG.md`, `CLAUDE.md`. The root README is rewritten from the removed `DirectoryCache`/`FileEntry` library API to the actual CLI trio (`dcfh`/`dcfhfind`/`dcfhfix`) plus `--interactive-tree`; `docs/ARCHITECTURE.md` is corrected against source; the three superseded docs gain "Historical — superseded." banners; and a new tagged `docs/README.md` indexes everything Current/Historical. Docs-only — the sole `.go` change is two comment lines in `pkg/doc.go`. Unblocks a clean public release. Branch: a–j phase checkpoints, squashed.
+
+### Changes
+- **Relocation (`git mv`)**: the five docs into `docs/`; root Markdown reduced to the four canonical files. `--follow` history preserved across the rename.
+- **`README.md`** (root): full CLI-first rewrite — tools overview, install (Go 1.25, `make build`, goreleaser deb/rpm/tar.gz for linux amd64+arm64), Quick Start, `dcfh` command table, global-options table, `dcfhfind`/`dcfhfix` sections, Documentation links. Zero `DirectoryCache`/`FileEntry`/`NewDirectoryCache`; `remote` omitted (it is `Hidden: true`).
+- **`docs/ARCHITECTURE.md`**: dropped the deleted `BEIndexFileIOEntry` / `binary_entry_index_file.go` row (kept the live `_mmap.go` neighbour); struck the phantom `AppendEntryToScanIndex@index.go:1008`; "four entry storage modes" → "three concrete + one conceptual"; §6 RWMutex reframed load-bearing → defensive (per CLAUDE.md); §5 doc table relinked by target.
+- **Historical banners**: `architecture-v0.7.md`, `streaming-iterator-architecture.md`, `design.md` (line 3, under H1).
+- **`docs/README.md`** (new): single tagged index — Architecture & design (Current/Historical) + Reference tables; root README "Documentation" section points to it (≤2 clicks to any doc).
+- **`pkg/doc.go`**: two comment edits — ARCHITECTURE.md locator "at the repo root" → "in docs/"; RWMutex framing "now a defensive guard, since the `mremap`'d scan path it once protected has been removed".
+- **`CLAUDE.md`**: CLI Usage command list gains `diff`/`subrepo`/`completion` + `remote` (flagged hidden); Security Review section untouched.
+
+### Notable
+- **Verify-before-edit caught two phantom citations.** Treating the drifted docs as untrusted input and grepping every cited symbol/file/line against `cmd/`/`pkg/` surfaced that not just `AppendEntryToScanIndex@index.go:1008` but also §6's `appendEntryToNamedIndex@index.go:967` were non-existent — so §6's stale mremap paragraph was replaced wholesale, not merely reframed. A trust-the-doc pass would have copied both errors.
+- **FR3 code-grounded classification was the leverage point.** Doing the CURRENT/HISTORICAL/NEEDS-REWRITE triage with file/line evidence in the design phase made implementation a checklist and beat the estimate.
+- **Honest history preserved.** The optional `:93` `architecture-v0.6.md` mention in `ARCHITECTURE-IMPROVEMENTS.md` was deliberately left untouched — it sits inside a struck-through *closed-item* record describing a past action; editing it would falsify a history note. That file stayed a pure rename.
+- **Testing.** Static verification (no runtime code): 9/9 test cases PASS; link-integrity sweep 0 broken; removed-API grep clean; `go build`/`go test ./...` green; only `pkg/doc.go` `.go`-changed.
+- **Security review.** Both exec phases hit the 500-line cap (2604 / 2632 production lines) because no `docs/`/`*.md` glob is in `security.review.max-lines-exclude-paths`, so prose counts as production — the `cwf-security-reviewer-changeset` subagent did **not** run (recorded `State: error`). Benign: the only non-Markdown change is two `pkg/doc.go` comments. Logged a low-priority BACKLOG item to add a docs exclude glob.
+
 ## Task 16: `z` key hides unchanged entries in the interactive tree
 
 ### Status: Complete (completed 2026-06-09, <0.5 day, within the <0.5 day / Low estimate)

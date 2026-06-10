@@ -258,3 +258,11 @@ The tcell viewer (cmd/dcfh/internal/tui) treats every rune as one display column
 ### Identified in: Task 12 retrospective (j-retrospective.md)
 
 Both Task 12 exec-phase security reviews (f and g) exited 2 (cap exceeded) and recorded State: error, so the cwf-security-reviewer-changeset subagent never ran semantically. Cause: security.review.max-lines-exclude-paths in implementation-guide/cwf-project.json lists implementation-guide/** but NOT Go test files, so **/*_test.go lines count as production. Task 12 added 411 test lines vs ~154 production lines, pushing the production-weighted count to 565/577 > 500. Fix: add **/*_test.go (and any other test conventions) to security.review.max-lines-exclude-paths so test files are reviewed but discounted from the cap, letting the semantic review run on the production diff for test-heavy tasks. Config change only.
+
+## Task: Add docs/Markdown globs to security.review.max-lines-exclude-paths
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 17 retrospective (j-retrospective.md)
+
+Both Task 17 exec-phase security reviews (f and g) exited 2 (cap exceeded: 2604 / 2632 production lines > 500) and recorded State: error, so the cwf-security-reviewer-changeset subagent never ran. Cause: Task 17 was a docs refactor (full README rewrite + five moved/edited Markdown docs + a tagged index), and security.review.max-lines-exclude-paths has no `docs/**` or `*.md` glob, so all the prose counts as production. The genuine code surface of the whole changeset was two `pkg/doc.go` comment lines. Fix: add `docs/**` and/or `*.md` to security.review.max-lines-exclude-paths so a docs-heavy task discounts prose from the cap and the semantic review runs against the real code delta. Config change only. Distinct from the Task-12 test-file item (this is Markdown prose, not `_test.go`) and the Task-5/9/14 CWF-vendored item (this is consumer-authored docs). Weigh the same caveat surfaced in those items: the full changeset is always emitted to the subagent regardless of the cap, so excluding `docs/**` flips a pure-docs task from "error → skipped" to "subagent invoked on the full prose diff" — low cost here since the prose is small, but note it.

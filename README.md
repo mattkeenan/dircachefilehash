@@ -1,299 +1,141 @@
-```go
-// Default: .dcfh directory in same location as indexed directory
-cache := dcfh.NewDirectoryCache("/home/user/documents", "")
+# dircachefilehash
 
-// Custom: .dcfh directory in different location  
-cache := dcfh.NewDirectoryCache("/home/user/# dircachefilehash
+A fast directory-scanning, file-hashing, and duplicate-detection tool. `dcfh`
+maintains a compact, git-inspired binary index (SHA-1 content hashes plus full
+Unix metadata) so that integrity checks, change detection, and duplicate
+identification stay quick even on trees of tens of millions of files.
 
-A Go package for scanning directories, hashing file contents, and maintaining a sorted index file compatible with git's dircache format. Useful for file integrity checking, change detection, and duplicate file identification.
+## The tools
 
-## Features
+`dircachefilehash` ships three command-line programs:
 
-- **Directory Scanning**: Recursively walks through directories to catalog all files
-- **SHA-1 Hashing**: Computes SHA-1 hashes of file contents (git-compatible)
-- **Git-Compatible Format**: Uses the same field structure as git's dircache index
-- **Sorted Index**: Maintains entries sorted by hash for efficient lookups
-- **Duplicate Detection**: Identifies files with identical content
-- **Metadata Tracking**: Stores complete Unix file metadata (timestamps, permissions, ownership)
-- **Binary Index Format**: Uses compact binary format with "dcfh" signature and checksums for integrity
-- **Persistent Storage**: Compact binary index file with built-in corruption detection
+- **`dcfh`** — daily operations: initialise a repository, check status, update
+  the index, find duplicates, manage snapshots and configuration.
+- **`dcfhfind`** — a find(1)-style search tool for index files, with pattern,
+  size, time, hash, and validity predicates and AND/OR/NOT expressions.
+- **`dcfhfix`** — a repair tool for damaged index files (header, entry, and
+  full-scan repair, with dry-run and backup support).
 
 ## Installation
 
-```bash
-go get github.com/mattkeenan/dircachefilehash
-```
+### From a release package (Linux)
 
-## Quick Start
+Releases are built for Linux (amd64 and arm64) as `.deb`, `.rpm`, and `.tar.gz`
+artefacts:
 
-```go
-package main
+- **Debian/Ubuntu**: `sudo dpkg -i dcfh_*.deb`
+- **Fedora/RHEL**: `sudo rpm -i dcfh_*.rpm`
+- **Other**: extract the `.tar.gz` and place the binaries on your `PATH`.
 
-import (
-    "fmt"
-    "log"
-    "os"
-    
-    "github.com/mattkeenan/dircachefilehash"
-)
+### From source
 
-func main() {
-    // Get user's home directory
-    homeDir, err := os.UserHomeDir()
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Create a new directory cache
-    cache := dircachefilehash.NewDirectoryCache(homeDir, homeDir)
-    
-    // Scan directory and create index
-    if err := cache.Update(); err != nil {
-        log.Fatal(err)
-    }
-    
-    // Get statistics
-    fileCount, totalSize, _ := cache.Stats()
-    fmt.Printf("Indexed %d files, total size: %d bytes\n", fileCount, totalSize)
-}
-```
-
-## API Reference
-
-### DirectoryCache
-
-The main type for managing file caches.
-
-#### Methods
-
-- `NewDirectoryCache(rootDir, dcfhDir string) *DirectoryCache` - Creates a new cache instance
-- `ScanDirectory() error` - Scans the directory and generates file entries with hashes
-- `WriteIndex() error` - Writes the sorted index to file
-- `LoadIndex() error` - Loads an existing index file
-- `Update() error` - Convenience method that scans and writes in one call
-- `GetEntries() []FileEntry` - Returns a copy of current entries
-- `FindByHash(hash string) []FileEntry` - Finds entries with specified hash (binary search)
-- `FindDuplicates() map[string][]FileEntry` - Returns groups of files with identical hashes
-- `Stats() (int, int64, error)` - Returns file count and total size
-
-### FileEntry
-
-Represents a file with its hash and metadata, matching git's dircache format.
-
-```go
-type FileEntry struct {
-    CTime        time.Time // Change time (metadata last changed)
-    CTimeNano    int32     // Change time nanoseconds
-    MTime        time.Time // Modification time (content last modified) 
-    MTimeNano    int32     // Modification time nanoseconds
-    Dev          uint32    // Device ID
-    Ino          uint32    // Inode number
-    Mode         uint32    // File mode (permissions and type)
-    UID          uint32    // User ID (owner)
-    GID          uint32    // Group ID
-    Size         uint32    // File size in bytes
-    Hash         string    // SHA-1 hash (40 hex chars)
-    Flags        uint16    // Index flags
-    PathLen      uint16    // Length of relative path (big-endian)
-    RelativePath string    // Relative path from root directory
-}
-```
-
-## Index File Format
-
-The index file uses a binary format similar to git's index file:
-
-```
-Header (12 bytes):
-  - Signature: "dcfh" (4 bytes)
-  - Version: 1 (4 bytes, big-endian)
-  - Entry Count: number of entries (4 bytes, big-endian)
-
-For each entry (variable length, padded to 8-byte boundary):
-  - CTime: change time seconds (4 bytes, big-endian)
-  - CTime Nano: change time nanoseconds (4 bytes, big-endian)  
-  - MTime: modification time seconds (4 bytes, big-endian)
-  - MTime Nano: modification time nanoseconds (4 bytes, big-endian)
-  - Device: device ID (4 bytes, big-endian)
-  - Inode: inode number (4 bytes, big-endian)
-  - Mode: file mode (4 bytes, big-endian)
-  - UID: user ID (4 bytes, big-endian)
-  - GID: group ID (4 bytes, big-endian)
-  - Size: file size (4 bytes, big-endian)
-  - Hash: SHA-1 hash (20 bytes)
-  - Flags: index flags (2 bytes, big-endian)
-  - Path Length: length of path (2 bytes, big-endian)
-  - Path: relative file path (variable length)
-  - Null terminator: 0x00 (1 byte)
-  - Padding: zero bytes to align to 8-byte boundary
-
-Footer:
-  - Checksum: SHA-1 of entire file content (20 bytes)
-```
-
-This binary format provides:
-- **Compact storage**: Much smaller than text format
-- **Fast parsing**: No string parsing overhead  
-- **Integrity checking**: Built-in SHA-1 checksum
-- **Custom format**: "dcfh" signature distinguishes from git index files
-
-## Examples
-
-### Finding Duplicate Files
-
-```go
-cache := dircachefilehash.NewDirectoryCache("/home/user/documents", "docs_index.txt")
-cache.Update()
-
-duplicates := cache.FindDuplicates()
-for hash, files := range duplicates {
-    fmt.Printf("Hash %s has %d duplicates:\n", hash[:8], len(files))
-    for _, file := range files {
-        fmt.Printf("  %s\n", file.RelativePath)
-    }
-}
-```
-
-### Loading and Querying Existing Index
-
-```go
-cache := dircachefilehash.NewDirectoryCache("/data", "data_index.txt")
-
-// Load existing index
-if err := cache.LoadIndex(); err != nil {
-    log.Fatal(err)
-}
-
-// Find files by hash
-hash := "da39a3ee5e6b4b0d3255bfef95601890afd80709"
-matches := cache.FindByHash(hash)
-fmt.Printf("Found %d files with hash %s\n", len(matches), hash[:8])
-```
-
-### Monitoring Directory Changes
-
-```go
-cache := dircachefilehash.NewDirectoryCache("/var/log", "log_index.txt")
-
-// Create initial index
-cache.Update()
-oldEntries := cache.GetEntries()
-
-// Later, rescan and compare
-cache.ScanDirectory()
-newEntries := cache.GetEntries()
-
-// Compare old vs new entries to detect changes
-// (Implementation depends on your specific needs)
-```
-
-## Use Cases
-
-- **File Integrity Monitoring**: Detect when files have been modified
-- **Backup Verification**: Ensure backup copies match originals
-- **Deduplication**: Find and remove duplicate files
-- **Change Detection**: Monitor directories for file system changes
-- **Content Indexing**: Build searchable indexes of file content hashes
-- **Git Integration**: Work with git-compatible file metadata
-
-## Platform Compatibility
-
-This package uses Unix system calls (`syscall.Stat_t`) to extract detailed file metadata. It's designed for Unix-like systems (Linux, macOS, BSD) and may require modifications for Windows compatibility.
-
-## Development
-
-### Prerequisites
-
-- Go 1.21 or later
-- gotags for code navigation: `go install github.com/jstemmer/gotags@latest`
-
-### Setup
-
-The repository includes automated tooling to maintain code quality:
-
-**Pre-commit Hook**: Automatically generates/updates the `tags` file before each commit:
-```bash
-# The pre-commit hook is automatically installed in .git/hooks/
-# It runs `gotags -R -f tags .` before each commit
-```
-
-**GitHub Actions**: 
-- `ci.yml` - Runs tests, builds, and verifies code quality
-- `tags-check.yml` - Ensures the tags file stays up to date
-
-### Testing
+Requires Go 1.25 or later on a Unix-like system (the tool uses `syscall.Stat_t`
+and mmap, so it is Linux/Unix-only).
 
 ```bash
-# Run all tests
-go test ./...
-
-# Run tests with verbose output  
-go test -v ./...
-
-# Build and test CLI
-go build -o dcfh cmd/dcfh.go
+make build      # produces ./dcfh, ./dcfhfind, ./dcfhfix
 ./dcfh --help
 ```
 
-### Performance Benchmarks
-
-The repository includes comprehensive performance benchmarks for testing scalability with large datasets:
+## Quick start
 
 ```bash
-# Run small benchmark (1K files, ~5s)
-./run_benchmarks.sh -t small
+# Initialise a repository for a directory
+dcfh init /path/to/dir
 
-# Run medium benchmark (100K files, ~10s) 
-./run_benchmarks.sh -t medium
+# See what has changed (status hashes changed files and caches the results)
+dcfh status
 
-# Run large benchmark (1M+ files, ~30s)
-./run_benchmarks.sh -t large
+# Record the current state of the tree in the index
+dcfh update
 
-# Run all benchmarks
-./run_benchmarks.sh -t all
-
-# Generate memory and CPU profiles
-./run_benchmarks.sh -t medium --memprofile --cpuprofile
+# Find duplicate files by content hash
+dcfh dupes
 ```
 
-**Benchmark Configurations:**
-- **Small**: 1,000 files (50 large >1MB, 950 small), 3 directory levels
-- **Medium**: 100,000 files (1,000 large >5MB, 99,000 small), 5 directory levels  
-- **Large**: 1,000,000 files (10,000 large >10MB, 990,000 small), 8 directory levels
+`status` is not read-only: it hashes files whose metadata changed and persists
+those hashes to the cache index, so subsequent operations stay fast.
 
-**What's Measured:**
-- Directory scanning and file hashing performance
-- Index file read/write operations
-- Memory usage and efficiency
-- Status checking and duplicate detection
+## `dcfh` commands
 
-The benchmarks generate deterministic test datasets with varied file sizes and directory structures, providing reproducible performance measurements for optimization work.
+| Command | Purpose |
+|---------|---------|
+| `init <directory>` | Initialise a new dcfh repository. |
+| `status` | Show the status of files in the repository. |
+| `update [paths...]` | Update the index with current file states. |
+| `dupes [paths...]` | Find and display duplicate files. |
+| `snapshot <subcommand>` | Create and manage index-state snapshots (`create`, `list`, `forget`, `remove`, `status`). |
+| `config [key] [value]` | Get and set repository configuration options. |
+| `diff <left-ref> <right-ref>` | Compare any two index references. |
+| `subrepo <subcommand>` | Discover and manage nested repositories (`find`, `add`). |
+| `completion [bash\|zsh]` | Generate a shell completion script. |
+| `version` | Show version information. |
 
-### Tags File
+Every command has detailed help: `dcfh <command> help` (or `--help`).
 
-The `tags` file is automatically generated by `gotags` and provides code navigation for editors. It's maintained automatically by:
+### Interactive tree viewer
 
-1. **Pre-commit hook** - Updates tags before each commit
-2. **GitHub Actions** - Validates tags file is current on PRs/pushes
+`dcfh status` and `dcfh update` accept `--interactive-tree`, which opens a
+gdu-style full-screen tree of the result after the run. It requires an
+interactive terminal (TTY).
 
-If you need to manually update tags:
+## `dcfhfind`
+
+A Unix `find`-style interface for searching index files:
+
 ```bash
-gotags -R -f tags .
+dcfhfind main --name "*.go" --print
+dcfhfind all --corrupt --validate
+dcfhfind cache --size +100M --ls
 ```
 
-## Development
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+[`cmd/dcfhfind/DESIGN.md`](cmd/dcfhfind/DESIGN.md) for the full predicate and
+action surface.
 
-The maintainer occasionally uses AI assistance (Claude) as a personal development tool to help with code implementation, testing, and documentation. This is simply a personal preference. Contributors are welcome to use whatever development tools and methodologies they prefer - the use of AI tools is neither encouraged nor discouraged. No explicit AI tooling or references are maintained within the repository itself.
+## `dcfhfix`
+
+Targeted repair for corrupted index files:
+
+```bash
+dcfhfix .dcfh/main.idx header --dry-run
+dcfhfix .dcfh/cache.idx entry --offset 1024
+dcfhfix .dcfh/scan-123.idx scan --backup
+```
+
+See [`cmd/dcfhfix/DESIGN.md`](cmd/dcfhfix/DESIGN.md) for the repair workflows.
+
+## Global options
+
+These persistent flags apply across `dcfh` commands:
+
+| Flag | Meaning |
+|------|---------|
+| `-o, --output` | Output format: `human` (default), `json`, `fdupes`. |
+| `-j, --json` | Shorthand for `--output=json`. |
+| `-v, --verbose` | Increase verbosity (repeat: `-v`, `-vv`, `-vvv`). |
+| `--symlinks` | Directory-symlink handling: `none` (default), `all`, `internal`, `external`. |
+| `-s, --follow-symlinks` | Alias for `--symlinks=all`. |
+| `-w, --hash-workers` | Number of concurrent hash workers (`0` = config default). |
+| `-f, --filehash` | Hash-algorithm override (e.g. `default:sha256`). |
+| `--dry-run` | Show what would be done without doing it. |
+| `--meta-dir` | Use an external `.dcfh` directory instead of auto-discovery. |
+
+## Documentation
+
+Architecture and design documentation lives under [`docs/`](docs/):
+
+- [`docs/README.md`](docs/README.md) — index of all documentation, with a
+  current/historical marker for each document.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the current architecture
+  overview: layers, index file types, and the core system metaphors.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest features.
-
-When contributing:
-1. The pre-commit hook will automatically update the tags file
-2. GitHub Actions will validate your changes
-3. Ensure all tests pass with `go test ./...`
+Contributions are welcome — pull requests, bug reports, and feature suggestions
+alike. Please ensure `go build ./...` and `go test ./...` pass before
+submitting.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License — see the [LICENSE](LICENSE) file for details.

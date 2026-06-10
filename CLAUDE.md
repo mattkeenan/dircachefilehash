@@ -92,6 +92,10 @@ go test -v ./pkg/...  # verbose output
 - `dcfh dupes` - Find duplicate files
 - `dcfh snapshot <subcommand>` - Create and manage index state snapshots (create, list, forget, remove, status)
 - `dcfh config` - Get and set repository configuration options
+- `dcfh diff <left-ref> <right-ref>` - Compare any two index references
+- `dcfh subrepo <subcommand>` - Discover and manage nested repositories (find, add)
+- `dcfh completion [bash|zsh]` - Generate a shell completion script
+- `dcfh remote <root>` - Hidden SSH audit-mode endpoint (machine-invoked over ssh, not an end-user command)
 
 Global options: `--json`, `--verbose`, `--version`, `--dry-run`, `--hash-workers`, `--symlinks`
 

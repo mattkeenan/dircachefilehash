@@ -29,7 +29,7 @@
 //
 // # Architecture in five layers
 //
-// See ARCHITECTURE.md at the repo root for the canonical structure-and-
+// See ARCHITECTURE.md in docs/ for the canonical structure-and-
 // metaphors document. In brief:
 //
 //   - Layer 1 — Foundation: index format, mmap loading, hashing, config.
@@ -63,8 +63,9 @@
 //     policy keys off it. Mixing contexts in one skiplist is intentional.
 //
 // ARCHITECTURE.md expands these and adds three more (Hwang-Lin merge,
-// the RWMutex-on-mmap protecting against `mremap` SIGSEGV, the temp+
-// rename atomicity contract).
+// the RWMutex-on-mmap — now a defensive guard, since the `mremap`'d scan
+// path it once protected has been removed — and the temp+rename
+// atomicity contract).
 //
 // # Configuration
 //

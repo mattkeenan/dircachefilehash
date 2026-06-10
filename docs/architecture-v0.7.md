@@ -1,5 +1,12 @@
 # Unified Architecture v0.7: BinaryEntryInterface & Iterator Unification
 
+> **Historical — superseded.** This document records an earlier design spec
+> and does **not** describe the shipped code (the shipped scan path is a
+> four-stage channel pipeline with heap-allocated entries, not the
+> callback/iterative-write model below). For the current architecture see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) and the project
+> [`CLAUDE.md`](../CLAUDE.md). Kept for context/rationale.
+
 ## ⚠️ CRITICAL REQUIREMENT: ITERATIVE APPROACH IS MANDATORY ⚠️
 
 **HARD REQUIREMENT**: All operations MUST use iterative writing during hwangLinUnified execution. This is NOT optional and takes precedence over "the best part is no part" principle.

@@ -1,5 +1,13 @@
 # Streaming Iterator Architecture with Async Hashing
 
+> **Historical — superseded.** This document records an earlier proposal
+> and does **not** describe the shipped code: the shipped
+> `FilesystemScanIterator` does not subscribe to the hash-job monitor
+> (`RegisterIteratorNotification` has no production caller), and scan
+> entries are heap-allocated `BEScanEntry` values, not mmap-backed. For the
+> current architecture see [`ARCHITECTURE.md`](ARCHITECTURE.md) and the
+> project [`CLAUDE.md`](../CLAUDE.md). Kept for context/rationale.
+
 ## Overview
 
 This document outlines the architecture for implementing a streaming `FilesystemScanIterator` that integrates with the existing hash job system to provide memory-efficient, ordered iteration through filesystem data with asynchronous hashing.

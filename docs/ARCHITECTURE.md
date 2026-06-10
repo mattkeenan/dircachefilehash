@@ -54,10 +54,9 @@ elided for brevity.
 
 | File | Role |
 |------|------|
-| `pkg/binary_entry_interface.go` | `BinaryEntryInterface`: the v0.7 abstraction over the four entry storage modes. Full per-mode comment at `pkg/binary_entry_interface.go:16`. |
+| `pkg/binary_entry_interface.go` | `BinaryEntryInterface`: the v0.7 abstraction over the entry storage modes — three concrete implementations plus one conceptual read/write mode that is no longer implemented. Full per-mode comment at `pkg/binary_entry_interface.go:16`. |
 | `pkg/binary_entry_skiplist.go` | `BESkiplistEntry` — entries living inside a loaded mmap'd index. |
 | `pkg/binary_entry_scan.go` | `BEScanEntry` — heap-allocated entries created during a filesystem scan (`pkg/binary_entry_scan.go:28`). |
-| `pkg/binary_entry_index_file.go` | `BEIndexFileIOEntry` — entries read via plain I/O. |
 | `pkg/binary_entry_index_file_mmap.go` | `BEIndexFileMmapEntry` — entries read via mmap, used by `dcfhfind` and recovery. |
 | `pkg/skiplist.go` | `skiplistWrapper`: the zerocopyskiplist wrapper with context-tagged entries and vectorio integration (`pkg/skiplist.go:39`). |
 | `pkg/iterator.go` | `BinaryEntryIterator` interface and shared `iteratorBase` helpers. |
@@ -133,9 +132,10 @@ Canonical references: the per-mode comment block at
 `pkg/binary_entry_interface.go:16` and the index lifecycle in
 `pkg/index.go:66`.
 
-The v0.7 scan path is heap-allocated. The older mmap-backed scan path
-(`AppendEntryToScanIndex` in `pkg/index.go:1008`) is retained for
-recovery only — see the improvements doc.
+The v0.7 scan path is heap-allocated. There are no mmap-backed
+scan-`*.idx` files — that machinery (mremap-grown writable mmaps) was
+removed because it was no longer load-bearing once the channel pipeline
+shipped.
 
 ### 2. Hwang-Lin merge of sorted streams
 
@@ -183,20 +183,22 @@ old mapping. The orphan list is drained at `MetaStore.Close()`.
 This is the only correct way to load an index from inside the package.
 Direct mmap callers are a bug.
 
-### 6. RWMutex on every mmap
+### 6. RWMutex on every mmap (defensive)
 
-When a scan-mode index grows, the mapping is `mremap`ped, which can
-move the memory region. Hash workers reading the same memory at that
-moment would SIGSEGV. The fix is an RWMutex on `mmapIndexFile`:
-readers (hash workers) take read locks for entry access, the writer
-(`appendEntryToNamedIndex` at `pkg/index.go:967`) takes the write lock
-around the mremap. Read locks are held only over the offset-to-pointer
-conversion — the pattern is "acquire under lock, dereference under
-lock, release before slow work."
+`mmapIndexFile` carries an RWMutex that is still acquired on every entry
+access (`GetBinaryEntry`, serialisation, etc.). In v0.7 it is
+**defensive rather than load-bearing**: the dynamically-growing,
+`mremap`'d scan-index path that originally motivated the locking has
+been removed, so the writer side of the lock has no producer in
+production code.
 
-In v0.7 this matters less for the scan path (entries are heap-allocated
-and don't grow under hash workers), but it still protects the main /
-cache mmap'd indices from being remapped during a concurrent read.
+The locks are kept for two reasons: `mmapIndexFile.Cleanup()` takes the
+write lock to coordinate `munmap` with any in-flight readers
+(refcount-driven), and removing every reader-side `RLock` would touch
+many files without a current performance justification. Treat the
+locking as a no-op-in-practice guard — new code that mmaps or unmaps an
+index should still go through this path; new code that merely reads
+through `binaryEntryRef.GetBinaryEntry()` need not think about `mremap`.
 
 ### 7. Atomic index replacement via temp + rename
 
@@ -253,11 +255,11 @@ tracked in `BACKLOG.md`.
 
 | Doc | When to read it |
 |-----|-----------------|
-| `architecture-v0.7.md` | The v0.6→v0.7 migration plan: what changed, why, what's still in flight. |
-| `streaming-iterator-architecture.md` | How `BinaryEntryInterface` and the iterator hierarchy were designed. |
-| `design.md` | Earlier design notes; superseded by this doc + `architecture-v0.7.md` for current behaviour. |
-| `cmd/dcfhfind/DESIGN.md` | The find(1)-style predicate + action surface, including the filter expression grammar. |
-| `cmd/dcfhfix/DESIGN.md` | Recovery-tool spec: header / entry / scan repair workflows, backup stack semantics. |
-| `CLAUDE.md` | Operational guide for AI assistants and contributors. Authoritative on conventions, anti-patterns, and the locking design. |
-| `BACKLOG.md` | Open work items. |
-| `ARCHITECTURE-IMPROVEMENTS.md` | Known rough edges in the architecture described here. |
+| [`architecture-v0.7.md`](architecture-v0.7.md) | The v0.6→v0.7 migration plan: what changed, why, what's still in flight. (Historical.) |
+| [`streaming-iterator-architecture.md`](streaming-iterator-architecture.md) | How `BinaryEntryInterface` and the iterator hierarchy were designed. (Historical.) |
+| [`design.md`](design.md) | Earlier design notes; superseded by this doc + `architecture-v0.7.md` for current behaviour. (Historical.) |
+| [`cmd/dcfhfind/DESIGN.md`](../cmd/dcfhfind/DESIGN.md) | The find(1)-style predicate + action surface, including the filter expression grammar. |
+| [`cmd/dcfhfix/DESIGN.md`](../cmd/dcfhfix/DESIGN.md) | Recovery-tool spec: header / entry / scan repair workflows, backup stack semantics. |
+| [`CLAUDE.md`](../CLAUDE.md) | Operational guide for AI assistants and contributors. Authoritative on conventions, anti-patterns, and the locking design. |
+| [`BACKLOG.md`](../BACKLOG.md) | Open work items. |
+| [`ARCHITECTURE-IMPROVEMENTS.md`](ARCHITECTURE-IMPROVEMENTS.md) | Known rough edges in the architecture described here. |

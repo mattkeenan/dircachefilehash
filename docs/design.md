@@ -1,5 +1,14 @@
 # dircachefilehash design decisions
 
+> **Historical — superseded.** This document records the pre-v0.7 design.
+> The design *philosophy* (a git-like index, byte-ordered entries, avoiding
+> needless I/O) still holds, but concrete details have changed: the index
+> files are now `main.idx` / `cache.idx` (not `index` / `index.cache`), the
+> constructor is `NewMetaStore` (not `NewDirectoryCache`), and writes flow
+> through a four-stage channel pipeline. For the current architecture see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) and the project
+> [`CLAUDE.md`](../CLAUDE.md). Kept for context/rationale.
+
 The dircachefilehash package (and hence the dcfh cli program), are designed to be able to track changes to files at massive scale (10s of millions of files, if not more). So there are a number of considerations to be made, firstly performance, flexibility, and security.
 
 ## background context
