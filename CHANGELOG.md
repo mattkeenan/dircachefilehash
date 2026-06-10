@@ -4,6 +4,23 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 18: Showcase key features in README
+
+### Status: Complete (completed 2026-06-10, single session, within the <0.5 day / Low estimate)
+### Impact: Makes the root `README.md` *sell* the two undersold differentiators — block-level filesystem dedupe and the change-tracking interactive-tree viewer — while keeping every claim grep-verified against shipped source (task 17's honesty bar). Three additive edits: a new `## Features` highlights section (teaser bullets), a `### Duplicate detection and dedupe` subsection documenting `--fs-dedupe` accurately, and an expanded `### Interactive tree viewer` reframed from "disk-usage browser" to change-tracking. Docs-only — `README.md` is the sole source change; no `.go`/config/test change. Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`README.md` — `## Features`** (new, before `## The tools`): four one-line teasers (block-level dedupe, change-tracking tree viewer, fast-by-design ~9×, snapshots/diffs/nested-repo). Detail deferred to the dedicated subsections — no duplicated FS/glyph lists.
+- **`README.md` — `### Duplicate detection and dedupe`** (new, after the command table): `dcfh dupes` matches by content with size-/date-/hardlink-aware selection (pointer to `dcfh dupes help`); `--fs-dedupe` documented as **Linux-only**, block-level via `FIDEDUPERANGE`, copy-on-write extent sharing on reflink filesystems (btrfs, XFS `reflink=1`, bcachefs), implies `--ignore-hardlinks`, defaults `--min-size` 4096, **frees space without removing files**, and **skips and reports** unsupported devices (not a silent no-op). Three-line fenced example.
+- **`README.md` — `### Interactive tree viewer`** (expanded): reframed as change-tracking; coloured status glyphs `+` added / `~` modified / `-` deleted / `*` mixed-directory; `z` hide-unchanged; `c/f/a/m/d/n` sort (changed-bytes/changed-files/added/modified/deleted/name) + `r` reverse; nav keys; TTY requirement kept.
+
+### Notable
+- **Verify-at-exec caught the one defect.** The first draft of the interactive-tree edit mislabelled the `c/f/a/m/d/n` sort keys; re-reading `cmd/dcfh/internal/tui/sort.go` at edit time corrected them to changed-bytes/changed-files/added/modified/deleted/name before commit — exactly the "sell-copy drifts ahead of code" risk the plan flagged.
+- **Plan review removed two inaccuracies before any prose was written.** It dropped `--exclusive` from the sell copy (path-scoped, not a flat filter) and corrected "no-ops on unsupported FS" → "skips and reports the device" (pinned to `dupes.go:281`), and de-duplicated the Features teasers against the detail subsections.
+- **Lesson: pin semantics, not just surface.** The d-plan pinned the footer key string and glyphs but not the sort-key *meaning* (the `sort.go` switch); a definition-site pin would have made the first draft correct. Recorded for future doc chores.
+- **Testing.** Static verification (no runtime code): TC-1…TC-7 all PASS — claim-to-source greps, link sweep 7/7, invented-flag/removed-API negatives clean, `go build`/`go test ./...` green, diff = `README.md` only.
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent (41 production-weighted lines, well under the 500 cap) — **no findings**. Docs-only: no code, secrets, auth, env, or prompt-injection surface.
+
 ## Task 17: Review and refactor docs into doc directory
 
 ### Status: Complete (completed 2026-06-10, single session, under the 1–2 day / Medium estimate)

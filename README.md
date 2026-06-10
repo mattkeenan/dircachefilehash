@@ -5,6 +5,17 @@ maintains a compact, git-inspired binary index (SHA-1 content hashes plus full
 Unix metadata) so that integrity checks, change detection, and duplicate
 identification stay quick even on trees of tens of millions of files.
 
+## Features
+
+- **Block-level filesystem dedupe** — reclaim disk space from duplicate files
+  without deleting them (`dcfh dupes --fs-dedupe`; see below).
+- **Change-tracking tree viewer** — `--interactive-tree` shows what changed at a
+  glance, in colour (see below).
+- **Fast by design** — tracks change, not content: `dcfh status` runs roughly 9×
+  faster than `git status` on the same tree.
+- **Snapshots, diffs, and nested-repo discovery** on top of the mmap-loaded
+  index.
+
 ## The tools
 
 `dircachefilehash` ships three command-line programs:
@@ -73,10 +84,38 @@ those hashes to the cache index, so subsequent operations stay fast.
 
 Every command has detailed help: `dcfh <command> help` (or `--help`).
 
+### Duplicate detection and dedupe
+
+`dcfh dupes` finds files with identical **content** (matched by hash, not by
+name) and supports size-, date-, and hardlink-aware selection — see
+`dcfh dupes help` for the full flag set.
+
+On Linux, `--fs-dedupe` goes a step further: after listing duplicates it asks
+the kernel, via `FIDEDUPERANGE`, to share the underlying extents copy-on-write
+on reflink-capable filesystems (btrfs, XFS with `reflink=1`, bcachefs). This
+**frees space without removing any files** — each path stays independent and a
+later write transparently triggers copy-on-write. It implies
+`--ignore-hardlinks` and defaults `--min-size` to 4096 (sub-block files save
+nothing). On a filesystem without `FIDEDUPERANGE` support, dcfh skips that
+device and reports it rather than failing.
+
+```bash
+dcfh dupes --min-size 1M       # only consider files ≥ 1 MiB
+dcfh dupes --fs-dedupe         # share extents of duplicates (Linux, reflink FS)
+dcfh dupes --fs-dedupe --dry-run   # show the dedupe plan without changing anything
+```
+
 ### Interactive tree viewer
 
 `dcfh status` and `dcfh update` accept `--interactive-tree`, which opens a
-gdu-style full-screen tree of the result after the run. It requires an
+gdu-style full-screen tree of the result after the run. Unlike a plain
+disk-usage browser it is **change-tracking**: each row carries a coloured status
+glyph — `+` added (green), `~` modified (blue), `-` deleted (red), and `*` for a
+directory mixing several states — so you can see at a glance what moved.
+
+Press `z` to hide unchanged entries, `c`/`f`/`a`/`m`/`d`/`n` to sort (by changed
+bytes, changed files, added, modified, deleted, or name) and `r` to reverse,
+`→`/`←` to expand and collapse, `↑`/`↓` to move, and `q` to quit. It requires an
 interactive terminal (TTY).
 
 ## `dcfhfind`
