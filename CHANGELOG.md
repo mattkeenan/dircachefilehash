@@ -4,6 +4,22 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 19: Repair stale CI workflow to match cleaned v0.7 repo
+
+### Status: Complete (completed 2026-06-10, single session, within the <0.5 day / Low estimate)
+### Impact: Repairs the GitHub Actions CI that broke when the cleaned public-release history was force-pushed to `origin/main` this session and ran against the v0.7 tree for the first time. The workflows predated the architecture refactor and were mismatched on five points; the rewrite makes CI track the build contract (`make`, `go.mod`, `.golangci.yml`) rather than re-spelling stale commands. CI-config-only — no `.go`/`Makefile`/`go.mod`/`.golangci.yml` change. Branch: a/d/e/f/g/j phase checkpoints, squashed. The authoritative green `pull_request` run is the merge gate (executed when the branch is pushed and a PR to `main` is opened; `main` is protected).
+
+### Changes
+- **`.github/workflows/ci.yml`** (rewrite): triggers `[main]` only (dropped `claude-code-experiment`); `test` job = `actions/checkout@v5` → `actions/setup-go@v5` (`go-version-file: go.mod`, so CI tracks Go 1.25 from `go.mod`) → `go mod verify` → `make build` → `make test` → CLI smoke (`./dcfh --version`/`--help`) → `run_benchmarks.sh -t small`. `lint` job = checkout@v5 → setup-go@v5 → standalone `go generate ./...` → `golangci/golangci-lint-action@v7` with concrete `version: v2.11.2`. Dropped the gotags steps and the dead `go build -o dcfh cmd/dcfh.go`; `@v5`/`@v7` actions clear the Node 20 deprecation.
+- **`.github/workflows/tags-check.yml`** (removed): gated on an untracked editor `tags` artefact (`git diff tags` always empty → always passed) — no code-health value; removal also drops a `go install …@latest` fetch from CI.
+
+### Notable
+- **Root cause: gitignored generated files are a CI contract.** `cmd/*/constants_version.go` defines `getVersionString`/`getGitCommit` and is produced only by `go generate` (driven by `make`); CI ran `go test` directly → `undefined: getVersionString`. Every lane that compiles the packages — build, test, *and* golangci-lint — must generate first. The lint lane needs its own `go generate ./...` because `golangci-lint-action` manages its own binary and never goes through `make`.
+- **golangci-lint v2 config needs a v2 action/binary.** `.golangci.yml` `version: "2"` against the old `golangci-lint-action@v3` + `version: latest` produced exit 3 (config-parse). Pinned `v2.11.2`.
+- **Plan review caught a real defect.** The robustness reviewer flagged that `golangci-lint-action`'s `version` input takes `latest` or a concrete tag — a `v2.x` wildcard would error. Pinned the concrete patch instead; that would otherwise have been a red CI run discovered only on GitHub.
+- **Testing.** Two layers — local CI-step reproduction (TC-1…TC-6 all PASS: clean build/test with regenerated constants, golangci-lint v2.11.2 = 0 issues, CLI smoke, benchmarks, no stale refs, CI-config-only scope) + the authoritative GitHub `pull_request` run (TC-7, the merge gate, pending push).
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent (133 production-weighted lines, under the 500 cap) — **no findings**: no `${{ }}`→shell interpolation, triggers limited to push/PR on `main` (no `pull_request_target`), removes a `@latest` tool fetch. Floating major-tag action pins match documented repo policy (no SHA-pin in force).
+
 ## Task 18: Showcase key features in README
 
 ### Status: Complete (completed 2026-06-10, single session, within the <0.5 day / Low estimate)

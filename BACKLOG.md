@@ -146,7 +146,7 @@ No prometheus/expvar/metrics hooks exist anywhere. Optional metrics (timings, th
 ### Task-Type: chore
 ### Priority: Low
 
-CI pins `go-version: '1.21'` with no matrix. A Go-version matrix across supported versions would catch toolchain-specific issues earlier.
+CI now resolves the toolchain from `go-version-file: go.mod` (single version, no matrix) after Task 19. A Go-version matrix across supported versions would catch toolchain-specific issues earlier. See also the consolidated CI-enhancements item below.
 
 ## Task: Fix stale 'see CHANGELOG' reference in pkg/ignore.go
 
@@ -266,3 +266,25 @@ Both Task 12 exec-phase security reviews (f and g) exited 2 (cap exceeded) and r
 ### Identified in: Task 17 retrospective (j-retrospective.md)
 
 Both Task 17 exec-phase security reviews (f and g) exited 2 (cap exceeded: 2604 / 2632 production lines > 500) and recorded State: error, so the cwf-security-reviewer-changeset subagent never ran. Cause: Task 17 was a docs refactor (full README rewrite + five moved/edited Markdown docs + a tagged index), and security.review.max-lines-exclude-paths has no `docs/**` or `*.md` glob, so all the prose counts as production. The genuine code surface of the whole changeset was two `pkg/doc.go` comment lines. Fix: add `docs/**` and/or `*.md` to security.review.max-lines-exclude-paths so a docs-heavy task discounts prose from the cap and the semantic review runs against the real code delta. Config change only. Distinct from the Task-12 test-file item (this is Markdown prose, not `_test.go`) and the Task-5/9/14 CWF-vendored item (this is consumer-authored docs). Weigh the same caveat surfaced in those items: the full changeset is always emitted to the subagent regardless of the cap, so excluding `docs/**` flips a pure-docs task from "error → skipped" to "subagent invoked on the full prose diff" — low cost here since the prose is small, but note it.
+
+## Task: CI enhancements deferred in Task 19 (coverage, caching, actionlint)
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 19 retrospective (j-retrospective.md)
+
+Task 19 scoped strictly to "make the existing two CI jobs pass on the cleaned
+v0.7 tree" and deliberately deferred all CI feature additions. Candidate
+enhancements, none load-bearing for correctness:
+- **Coverage upload** — emit `go test -coverprofile` and publish (e.g. Codecov or
+  a job-summary artefact).
+- **Module/build caching** — `actions/setup-go@v5` cache or an explicit
+  `actions/cache` keyed on `go.sum` to cut CI wall-clock.
+- **Local `actionlint`** — add to the toolchain (and optionally the pre-commit
+  gate) so GitHub-Actions syntax errors (like the `golangci-lint-action` `version`
+  input rejecting a `v2.x` wildcard, caught by plan review in Task 19) surface
+  before a PR run rather than on GitHub.
+
+Related: the Go-version-matrix item above ("Test with various Go versions") is the
+matrix half of the same theme; fold together if picked up. Scope is
+`.github/workflows/` + toolchain only — no Go change.

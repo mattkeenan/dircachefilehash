@@ -2,53 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [ main, claude-code-experiment ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v5
+
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
-    
-    - name: Install gotags
-      run: go install github.com/jstemmer/gotags@latest
-    
-    - name: Generate tags file
-      run: gotags -R -f tags .
-    
-    - name: Check if tags file is up to date
-      run: |
-        if git diff --quiet tags; then
-          echo "✓ Tags file is up to date"
-        else
-          echo "❌ Tags file is not up to date. Please run 'gotags -R -f tags .' and commit the changes."
-          echo "Differences found:"
-          git diff tags
-          exit 1
-        fi
-    
+        go-version-file: go.mod
+
     - name: Verify Go modules
       run: go mod verify
-    
+
+    - name: Build binaries
+      run: make build
+
     - name: Run tests
-      run: go test -v ./...
-    
-    - name: Build binary
-      run: go build -o dcfh cmd/dcfh.go
-    
+      run: make test
+
     - name: Test CLI functionality
       run: |
         ./dcfh --version
         ./dcfh --help
-    
+
     - name: Run performance benchmarks
       run: |
         chmod +x ./run_benchmarks.sh
@@ -56,17 +39,20 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v5
+
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
-    
+        go-version-file: go.mod
+
+    - name: Generate version constants
+      run: go generate ./...
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v7
       with:
-        version: latest
+        version: v2.11.2
         args: --timeout=5m
