@@ -4,6 +4,21 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 20: Exclude test and docs globs from review line cap
+
+### Status: Complete (completed 2026-06-11, single session + one compaction, within the <0.5 day / Low estimate)
+### Impact: Restores the exec-phase `cwf-security-reviewer-changeset` gate on test-heavy and docs-heavy tasks. The helper caps its semantic review at 500 production-weighted lines (added+deleted outside any `security.review.max-lines-exclude-paths` glob); with only `implementation-guide/**` excluded, `_test.go` and prose lines counted as production, so test/docs-heavy tasks tripped the cap and the subagent was **skipped** (recorded `State: error`) — observed on Task 12 (565/577 lines) and Task 17 (2604/2632 lines). This appends `**/*_test.go`, `docs/**`, and `*.md` so the cap measures only consumer production code and the semantic review runs on the real code delta. Config-only — single key in `implementation-guide/cwf-project.json`; no `.go`/`Makefile`/build-contract change. Branch: a/d/e/f/g/j phase checkpoints, squashed. Resolves the Task 12 and Task 17 BACKLOG items.
+
+### Changes
+- **`implementation-guide/cwf-project.json`**: `security.review.max-lines-exclude-paths` gains `**/*_test.go` (root + nested test files), `docs/**` (the docs tree), and `*.md` (root-level Markdown only) alongside the existing `implementation-guide/**`.
+
+### Notable
+- **Excluding a path changes only the cap *count*, never what the subagent reads.** The full changeset is always emitted to the reviewer; the glob only discounts those lines from the 500-line trip-wire. Net effect is strictly *more* review coverage — a test/docs-heavy task flips from "cap exceeded → subagent skipped" to "subagent invoked on the full diff". Both exec-phase reviews confirmed this and returned **no findings**.
+- **`*.md` is deliberately root-only, and that is the security boundary.** A bare `*` does not cross `/` in git pathspec semantics, so `:(glob)*.md` matches only `README.md`/`CHANGELOG.md`/`CLAUDE.md`/`BACKLOG.md` — **not** the 287 vendored `.cwf/**`/`.claude/**`/`.cwf-*` mirror prompt files. `**/*.md` was explicitly rejected: the vendored prompt-injection surface is exactly where a malicious edit would hide, so keeping it cap-counted means a bulk edit there still trips the cap and forces an error/halt. Verified by TC-3 (`git ls-files -- ':(glob)*.md'` returns only the four root files).
+- **`.cwf/**` exclude left out of scope** (the Task 5/9/14 caveat): excluding the vendored CWF surface would flip pure-upgrade tasks from "error→skipped" to "subagent on the full vendored delta" at real token cost. Reserved for *mixed* tasks; the deterministic `cwf-manage validate` gate covers pure upgrades. `docs/**` is content-agnostic (discounts everything under `docs/`, not just Markdown) — accepted consciously, flagged as a watch-item.
+- **Testing.** Config-only, so no Go unit tests — verification is config-validation + git-pathspec resolution + helper cap-count behaviour. TC-1…TC-5 all PASS (4 criticals clean): `cwf-manage validate` OK; the three globs resolve as intended; `*.md` confirmed root-only (TC-3, security); the discount mechanism measured **exactly** at 830 lines = the excluded files' own added+deleted total over range `826fab4..a22530d` (TC-4, proving git's `:(glob,exclude)` engine discounts precisely those paths); helper exit 0 with N=526 full-diff lines (>0 → subagent invoked) and 0 production lines (TC-5).
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent (0 production-weighted lines — this task's own changed files sit under `implementation-guide/**`) — **no findings**. The change is data (git pathspecs) flowing into git's `:(glob,exclude)` engine, never a shell; fail-safe in direction (any unmatched path counts as production, so the cap fires earlier not later).
+
 ## Task 19: Repair stale CI workflow to match cleaned v0.7 repo
 
 ### Status: Complete (completed 2026-06-10, single session, within the <0.5 day / Low estimate)
