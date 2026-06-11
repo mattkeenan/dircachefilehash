@@ -31,7 +31,7 @@ func TestIntegration(t *testing.T) {
 	// Build dcfhfind executable for testing
 	dcfhfindPath := "./dcfhfind"
 	if _, err := os.Stat(dcfhfindPath); os.IsNotExist(err) {
-		t.Fatal("dcfhfind executable not found. Run 'make build' first.")
+		t.Skip("dcfhfind executable not found. Run 'make build' first.")
 	}
 
 	// Convert to absolute path so it works when we change working directory
@@ -168,7 +168,7 @@ func TestValidationIntegration(t *testing.T) {
 
 	dcfhfindPath := "./dcfhfind"
 	if _, err := os.Stat(dcfhfindPath); os.IsNotExist(err) {
-		t.Fatal("dcfhfind executable not found")
+		t.Skip("dcfhfind executable not found. Run 'make build' first.")
 	}
 
 	// Convert to absolute path so it works when we change working directory
@@ -250,7 +250,7 @@ func TestActionFormats(t *testing.T) {
 
 	dcfhfindPath := "./dcfhfind"
 	if _, err := os.Stat(dcfhfindPath); os.IsNotExist(err) {
-		t.Fatal("dcfhfind executable not found")
+		t.Skip("dcfhfind executable not found. Run 'make build' first.")
 	}
 
 	// Convert to absolute path so it works when we change working directory
@@ -325,7 +325,7 @@ func TestActionFormats(t *testing.T) {
 func TestPerformanceWarning(t *testing.T) {
 	dcfhfindPath := "./dcfhfind"
 	if _, err := os.Stat(dcfhfindPath); os.IsNotExist(err) {
-		t.Fatal("dcfhfind executable not found")
+		t.Skip("dcfhfind executable not found. Run 'make build' first.")
 	}
 
 	// Convert to absolute path

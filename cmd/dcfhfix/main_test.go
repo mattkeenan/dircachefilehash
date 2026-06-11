@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -527,34 +529,47 @@ func TestHandleFixesCommand(t *testing.T) {
 	options := NewParsedOptions()
 	options.DefineOption("format", "", OptionTypeString, "human", "Output format")
 
+	// Hermetic .dcfh so the list case's getBackupDir discovery resolves without
+	// depending on an ambient .dcfh/ in the repo (mirrors promote_integration_test.go).
+	// The index path sits directly in tmpDir so filepath.Dir(indexFile) == tmpDir and the
+	// parent walk stops on its first iteration, never consulting the temp dir's ancestors.
+	tmpDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmpDir, ".dcfh"), 0755); err != nil {
+		t.Fatalf("failed to create temp .dcfh: %v", err)
+	}
+
 	tests := []struct {
-		name    string
-		args    []string
-		wantErr bool
-		errMsg  string
+		name      string
+		args      []string
+		indexFile string
+		wantErr   bool
+		errMsg    string
 	}{
 		{
-			name:    "No subcommand",
-			args:    []string{},
-			wantErr: true,
-			errMsg:  "requires subcommand",
+			name:      "No subcommand",
+			args:      []string{},
+			indexFile: "nonexistent.idx",
+			wantErr:   true,
+			errMsg:    "requires subcommand",
 		},
 		{
-			name:    "Unknown subcommand",
-			args:    []string{"unknown"},
-			wantErr: true,
-			errMsg:  "unknown fixes subcommand",
+			name:      "Unknown subcommand",
+			args:      []string{"unknown"},
+			indexFile: "nonexistent.idx",
+			wantErr:   true,
+			errMsg:    "unknown fixes subcommand",
 		},
 		{
-			name:    "List command (will succeed with no backups)",
-			args:    []string{"list"},
-			wantErr: false, // Will succeed and show "No backups found"
+			name:      "List command (will succeed with no backups)",
+			args:      []string{"list"},
+			indexFile: filepath.Join(tmpDir, "nonexistent.idx"),
+			wantErr:   false, // Will succeed and show "No backups found"
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := handleFixesCommand("nonexistent.idx", tt.args, options)
+			err := handleFixesCommand(tt.indexFile, tt.args, options)
 
 			if tt.wantErr {
 				if err == nil {

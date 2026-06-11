@@ -4,6 +4,22 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 21: Harden env-fragile dcfhfind and dcfhfix CI tests
+
+### Status: Complete (completed 2026-06-11, single session, within the <0.5 day / Low estimate)
+### Impact: Fixes two false-negative test failures that task 19's repaired CI surfaced the first time `make test` ran on a clean checkout (`go test ./...` without a prior `make build`). Both tests assumed ambient developer-machine state: `cmd/dcfhfind` `TestPerformanceWarning` `t.Fatal`-ed on a missing `./dcfhfind` build artifact, and `cmd/dcfhfix` `TestHandleFixesCommand/List` depended on the repo's gitignored `.dcfh/` being discoverable up the tree. Test-only — no production code touched (`getBackupDir`/`listBackups`/`handleFixesCommand` unchanged). Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`cmd/dcfhfind/integration_test.go`**: all four `t.Fatal("dcfhfind executable not found"…)` binary-missing guards → `t.Skip("dcfhfind executable not found. Run 'make build' first.")`. A missing build artifact is a "cannot run" not a "test failed" condition; only `TestPerformanceWarning` was failing CI (the other three were shielded by an earlier `t.Skip` on the missing `test-data/test-repo`), but all four shared the latent bug and are unified.
+- **`cmd/dcfhfix/main_test.go`**: `TestHandleFixesCommand` made hermetic — adds `os`/`path/filepath` imports, creates `t.TempDir()` + `os.Mkdir(.../.dcfh, 0755)`, gives each case its own `indexFile`, and points the `list` case at an index path inside that temp dir so `getBackupDir` resolves the test's own `.dcfh/` rather than the ambient repo's.
+
+### Notable
+- **Ambient-state coupling is invisible until a clean-checkout CI runs the suite.** A gitignored `.dcfh/` and an in-place build artifact both make tests pass on a developer machine; the stale CI repaired in task 19 hid the gap until it ran the v0.7 tree clean for the first time. Hermetic `t.TempDir()` roots and skip-on-missing-artifact remove the coupling.
+- **`getBackupDir`'s parent-walk is hermetic only if the index path sits directly in the temp dir** — so `filepath.Dir(indexFile) == tmpDir`, the walk terminates on iteration one and never escapes to system-temp ancestors. Mirrors the existing precedent at `cmd/dcfhfix/promote_integration_test.go:157-163` (a plan-review finding: reuse, don't reinvent).
+- **Verified the CI condition directly.** Moved `cmd/dcfhfind/dcfhfind` aside and confirmed all four integration tests report `--- SKIP` (not FAIL); restored it and confirmed `TestPerformanceWarning` still *executes* on the developer path.
+- **Testing.** TC-1 (clean-checkout SKIP), TC-2/TC-3 (dcfhfix list hermetic + error-case assertions intact), TC-4 (`make test` green, dev path). Pre-commit gate clean: golangci-lint 0 issues, govulncheck 0 affecting, `go test -race` green.
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent (0 production-weighted lines — the changeset is test files + `implementation-guide/**`) — **no findings**: no shell/env/injection surface; the `0755` `t.TempDir` `.dcfh` mkdir is test-scoped (gosec `_test.go`-excluded) and matches the verified precedent.
+
 ## Task 20: Exclude test and docs globs from review line cap
 
 ### Status: Complete (completed 2026-06-11, single session + one compaction, within the <0.5 day / Low estimate)
