@@ -4,6 +4,28 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 24: Reconcile RelativePath vs calculatePathLength pathStart discrepancy
+
+### Status: Complete (completed 2026-06-11, single session, on the <1 day / Low estimate)
+### Impact: Reconciles the two `pkg/format/entry.go` readers that disagreed on where an entry's variable-length path begins, and fixes a latent dead validator surfaced in the process. Empirical layout measurement showed the discrepancy is **12 bytes, not the backlog's "8"** (`Sizeof(Entry)=144`, `Offsetof(Path)=132` → 4 bytes tail padding; path data is written at `Sizeof`). `calculatePathLength` started its scan 12 bytes early at `&be.Path[0]`; the canonical offset (writer `EntrySerialiser` + `RelativePath` + `SafeEntry.GetPath`) is `Sizeof(Entry)`. The same false "Path is the last 8 bytes" premise also made `validateLayout` (asserting `Offsetof(Path)==Sizeof-8`) panic on every well-formed entry — swallowed by `ValidateEntry`'s `recover()`, so `ValidateEntry` had been a no-op that always returned `nil`. User-approved scope widening fixed both. Read-side only: on-disk format and the default (non-`extravalidation`) path are unchanged. Net removal of duplicate `unsafe` code; two CWF security reviews returned no findings. Branch: a/c/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/format/entry.go`** — `calculatePathLength()` now `return len(be.RelativePath())`, deleting ~15 lines of duplicate checkptr-sensitive `unsafe` pointer arithmetic and a `//nolint:gosec` G115 site so the path-start offset has a single owner. `validateLayout()` asserts `unsafe.Offsetof(be.Path)` instead of `unsafe.Sizeof(*be)-8`, so it no longer panics on valid entries and `ValidateEntry`'s size/hash-type checks execute again. Comments corrected to describe the real layout (4-byte tail padding; path data at `Sizeof`).
+- **`pkg/format/entry_test.go`** (new) — `TestEntry_PathLength_MatchesRelativePath` (positive pin across mod-8 path lengths: `RelativePath`, `calculatePathLength==len(path)`, `validateLayout` no-panic, genuine `ValidateEntry()==nil`) and `TestEntry_ValidateEntry_RejectsCorruptSize` (negative liveness pin; corrupts `Size` downward-only to stay in-bounds).
+
+### Notable
+- The "8-byte" figure in the backlog (and Task 10's note) was imprecise; the over-count is 12 because `Path[8]` is not the last 8 bytes of the struct. Re-derived empirically with a throwaway `go test` layout diagnostic before building the fix.
+- `ValidateEntry`'s broad `recover()` that discards its value (`_ = r`) silently converted "always panics" into "always passes" — `validateLayout` had been latently dead. The negative test pins that `ValidateEntry` rejects corruption again, not merely that it returns `nil`.
+- The mandatory plan-review panel was load-bearing twice: it corrected the 8→12 byte model / surfaced the no-op, and caught an out-of-bounds read in an earlier negative-test draft (`Size += 8` past an exactly-sized buffer → `checkptr` fatal under `-race`).
+- `calculatePathLength`/`ValidateEntry` are only reachable under the `extravalidation` debug flag (`pkg/index.go:437,745`), which is why the bug stayed latent.
+
+### Retired Backlog Items
+#### Reconcile RelativePath vs calculatePathLength 8-byte pathStart discrepancy
+
+RelativePath() computes pathStart as entryStart+Sizeof(Entry); calculatePathLength() uses &be.Path[0] (= Sizeof-8). They disagree by 8 bytes over the same entry memory. Task 10 preserved both byte-for-byte (checkptr-clean only). Audit which offset is canonical against the on-disk writer (EntrySerialiser) and fix the wrong one; add a test pinning path-start.
+
+<!-- Note: Scope corrected during design: the discrepancy is 12 bytes (4-byte tail padding after Path), and the same false premise also broke validateLayout, making ValidateEntry a swallowed-panic no-op. Both fixed. -->
+
 ## Task 23: Fault-injection tests for atomic replacement
 
 ### Status: Complete (completed 2026-06-11, single session, ~1 day vs the 1.5-2 day / Medium estimate)
@@ -157,6 +179,8 @@ Atomicity of the temp-write + rename path needs explicit failure-injection cover
 ### Impact: Makes change status legible at a glance in the `--interactive-tree` post-run viewer (`dcfh status`/`update`). Every changed node now carries a status glyph (`+` added / `~` modified / `-` deleted / `*` mixed-directory), a status colour, and bold weight; unchanged nodes show no glyph, default colour, non-bold. Directory rows blend their descendants' statuses additively (presence-based, channels R=deleted / G=added / B=modified): added=green, modified=blue, deleted=red, add+mod=cyan, mod+del=magenta, add+del=yellow, all-three=white — a single changed descendant flips the channel. The glyph is the primary (colour-vision-deficiency-safe) signal; colour reinforces. The stats pane gains a glyph-prefixed, colour-matched legend (`+ Added` / `~ Modified` / `- Deleted` + `* mixed`). Render-layer only — no on-disk format change, no change to `Stats`/`Node` or non-interactive output. Branch: a–j phase checkpoints, squashed.
 ### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
 ### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
+### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
+### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
 
 ### Changes
 - **`cmd/dcfh/internal/tui/render.go`**: replaced `categoryStyle(n) tcell.Style` (which special-cased `IsDir`→default) with a single pure `nodeStyle(n) (rune, tcell.Style)` — one `switch` over the 3-bit present-set derived from `Stats.{Added,Modified,Deleted} > 0`, returning glyph and colour together so they can't drift; bold iff the set is non-empty. `drawRow` inserts a fixed-width glyph slot after the expand marker (`"%*s%s%c %s"`); the selection `Reverse` compose and the `colX > x+1` value guard are unchanged. `styleModified` recoloured yellow→blue (frees yellow for the add+del blend; updates the stats pane in lockstep). `drawStats` gains the glyph-prefixed legend lines + a dimmed `* mixed (directory)` note, with a 2-col leading slot on every line to keep colons aligned.
@@ -170,9 +194,6 @@ Atomicity of the temp-write + rename path needs explicit failure-injection cover
 - **Coverage / gates.** `nodeStyle` and `drawRow` 100% covered; package total 84.4%. Full `cmd`+`pkg` regression and `go test -race` green; `golangci-lint run ./cmd/dcfh/internal/tui/...` → 0 issues; `govulncheck` → 0 called. Both exec-phase `cwf-security-reviewer-changeset` runs recorded **no findings** (388 production lines, under the 500 cap) — TUI-only, glyph constrained to a closed alphabet pinned by `TestNodeStyle`.
 
 ## Task 14 (round 2): Upgrade CWF subtree to v1.1.185
-
-### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
-### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
 
 ### Changes
 - **`.cwf/version`**: `cwf_version=v1.1.185`, `cwf_ref=v1.1.185`, `cwf_sha=6659c1cca72ef033d92546fcd9d42a0f4d817dd9` (commit form, consistent with the 183 record); **`cwf_method=read-tree`** (was `subtree`).

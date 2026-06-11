@@ -228,14 +228,6 @@ Sync/Close/Lstat error paths can be driven from a unit test, lifting
 `preserveOriginal` to 100%. Low priority — these are defensive branches with no
 known live trigger.
 
-## Task: Reconcile RelativePath vs calculatePathLength 8-byte pathStart discrepancy
-
-### Task-Type: bugfix
-### Priority: Medium
-### Identified in: task 10
-
-RelativePath() computes pathStart as entryStart+Sizeof(Entry); calculatePathLength() uses &be.Path[0] (= Sizeof-8). They disagree by 8 bytes over the same entry memory. Task 10 preserved both byte-for-byte (checkptr-clean only). Audit which offset is canonical against the on-disk writer (EntrySerialiser) and fix the wrong one; add a test pinning path-start.
-
 ## Task: Wide-rune (CJK) column width in interactive-tree viewer
 
 ### Task-Type: bugfix
@@ -289,3 +281,12 @@ pkg/shutdown_test.go is skipped pending pipeline migration and is structurally s
 ### Identified in: Task 23 retrospective (j-retrospective.md), backlog-manager validate --all
 
 The CHANGELOG entry "## Task 14 (round 2): Upgrade CWF subtree to v1.1.185" violates the heading grammar ^## Task N: (Backlog.pm parser regex requires a colon immediately after the digits). The (round 2) parenthetical means the heading is not recognised as an entry boundary, so the preceding entry Notable subsection bleeds in and backlog-manager validate --all reports CHANGELOG-003 (subsections out of order) against that entry Changes line. Pre-existing on HEAD; the lighter cwf-manage validate used by the checkpoint hook does not catch it. Two entries currently share Task number 14 (the v1.1.183 round and this v1.1.185 round 2), so the fix needs a disambiguation the grammar accepts.
+
+## Task: Audit recover()-and-swallow sites for latently-dead logic
+
+### Task-Type: discovery
+### Priority: Low
+### Status: Follow-up from Task 24
+### Identified in: Task 24 retrospective (j-retrospective.md)
+
+Task 24 found that ValidateEntry wrapped its body in a deferred recover() that discards the panic value (`_ = r`), silently converting validateLayout's always-panic into an always-nil pass — the validator had been dead for an unknown period. Other recover-and-swallow sites may hide similarly dead logic. Scope: grep for `recover()` blocks that drop the recovered value without re-surfacing it as an error/log, audit whether the protected body can panic on normal input, and add a test (or remove the dead guard) where one does. Low priority — investigative.

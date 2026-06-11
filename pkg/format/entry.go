@@ -65,9 +65,14 @@ func (be *Entry) SetHashed() {
 // validateLayout performs runtime validation of struct layout assumptions.
 // This should only be called in debug/development builds.
 func (be *Entry) validateLayout() {
+	// Path is the trailing declared field but NOT the last 8 bytes of the struct:
+	// there are 4 bytes of tail padding (Sizeof=144, Offsetof(Path)=132), and the
+	// variable-length path data is appended at Sizeof(Entry). Assert against the
+	// real field offset, not the historical (wrong) Sizeof-8 which panicked on
+	// every well-formed entry (task 24).
 	entryStart := uintptr(unsafe.Pointer(be))
 	pathFieldOffset := uintptr(unsafe.Pointer(&be.Path[0])) - entryStart
-	expectedOffset := unsafe.Sizeof(*be) - 8
+	expectedOffset := unsafe.Offsetof(be.Path)
 
 	if pathFieldOffset != expectedOffset {
 		panic(fmt.Sprintf("Entry layout assumption violated: Path field at offset %d, expected %d",
@@ -123,29 +128,15 @@ func (be *Entry) RelativePath() string {
 	return unsafe.String((*byte)(unsafe.Add(base, structSize)), int(pathLen)) //nolint:gosec // G115: pathLen ≤ be.Size ≤ 65535, bounded non-negative
 }
 
-// calculatePathLength finds the length of the null-terminated path
+// calculatePathLength returns the true length of the entry's variable-length
+// path. It delegates to RelativePath so the canonical path-start offset
+// (Sizeof(Entry), per the EntrySerialiser writer) has a single owner — previously
+// this duplicated the offset math and started 12 bytes early at &be.Path[0]
+// (task 24). Safe only because the sole caller, ValidateEntry, guards
+// Size ∈ [minSize, 4096] — a strict subset of RelativePath's [minEntrySize, 65535]
+// panic guard. Audit any new caller added outside those guards.
 func (be *Entry) calculatePathLength() int {
-	// pathStart keeps &be.Path[0] (the element-address cast is already
-	// checkptr-clean and in-bounds, so it is safe to hold live). NB: this starts
-	// the path at Sizeof(*be)-8 (Path is the last field), an 8-byte-earlier
-	// address than RelativePath uses — preserved here byte-for-byte; the
-	// discrepancy is tracked as a separate backlog item.
-	//
-	// The trailing-NUL trim uses an integer length so every dereferenced address
-	// (pathStart + n - 1) stays within the entry; no past-the-end pointer is
-	// ever held in a live variable. Signed length math mirrors the original's
-	// behaviour when be.Size is below the path-start offset.
-	base := unsafe.Pointer(be)
-	pathStart := unsafe.Pointer(&be.Path[0])
-	startOff := int(uintptr(pathStart) - uintptr(base)) //nolint:gosec // G115: = Sizeof(*be) - 8, a small struct-layout constant
-
-	// Scan for null terminator
-	n := int(be.Size) - startOff //nolint:gosec // G115: be.Size ≤ 65535, bounded non-negative
-	for n > 0 && *(*byte)(unsafe.Add(pathStart, n-1)) == 0 {
-		n--
-	}
-
-	return n
+	return len(be.RelativePath())
 }
 
 // ValidateEntry performs comprehensive validation of an Entry.
