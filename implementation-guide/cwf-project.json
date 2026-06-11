@@ -1,6 +1,5 @@
 {
   "_cwf-version-note" : "Should match your project version for consistency",
-  "_version-note" : "Use git describe --tags --always format for version tracking",
   "cwf-version" : "HEAD",
   "project" : {
     "description" : "Go CLI tool and library for directory scanning, file hashing, and duplicate detection with a git-compatible binary index format",
@@ -47,9 +46,8 @@
     "task-reference-format" : "standard"
   },
   "title" : "Coding with Files Project Configuration",
-  "version" : "v0.13.0",
   "versioning" : {
-    "last_released" : "v0.13.21",
+    "last_released" : "v0.13.22",
     "major_minor" : "v0.13"
   },
   "wf_step_config" : {

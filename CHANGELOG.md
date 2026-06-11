@@ -4,6 +4,23 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 22: Upgrade CwF to v1.1.189
+
+### Status: Complete (completed 2026-06-11, single session + one plan-review pause, well under the ~0.5 day / Low estimate)
+### Impact: Bumps the installed CWF subtree from v1.1.185 to v1.1.189 via the merge-free `read-tree` laydown, keeping `.cwf/version` consistent, the tree `cwf-manage validate`-clean, and the task branch linear (no merge commit). The 185→189 delta is four upstream tasks (186 reviewer-agents-prefer-tools-over-Bash, 187 low-effort exec wf-step skills, 188 retire vestigial `version`/`_version-note` from `cwf-project.json`, 189 docs sync). No product Go code touched — `.cwf/**` content, agent/skill frontmatter, `script-hashes.json`, and one consumer-config reconciliation. Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`.cwf/**`, `.cwf-skills/`, `.cwf-rules/`, `.cwf-agents/`, `.claude/` artefacts** (tool-produced): laid down by `cwf-manage update v1.1.189` — docs, agent/skill rules, templates, refreshed symlinks, and `.cwf/security/script-hashes.json`. `.cwf/version` now records `cwf_version=v1.1.189`, `cwf_ref=v1.1.189`, `cwf_sha=6af636e32ad1ffaebd2601c7101dd46c8a3c30b7`, `cwf_method=read-tree`.
+- **`implementation-guide/cwf-project.json`** (manual, task-188 reconciliation): removed the vestigial top-level `version` (`v0.13.0`) and `_version-note` keys to match the new schema. Deliberately retained `cwf-version`/`_cwf-version-note` (upstream task-188 kept them) and the `versioning` block (`last_released=v0.13.21`, `major_minor=v0.13` — the dircachefilehash project version, not CWF's).
+
+### Notable
+- **Merge-free read-tree held end-to-end.** `cwf_method=read-tree` created no commit; `git log --merges 82ff991..HEAD` stayed empty. The headline linear-history risk was retired by checking `--merges` immediately after laydown rather than only at the end.
+- **First CWF self-upgrade that did *not* trip the review cap.** Unlike Tasks 5/9/14 (1632/1759/1302 production lines → cap exceeded → subagent skipped), this delta measured only 78–79 production lines (684/801 total), so both exec-phase `cwf-security-reviewer-changeset` subagents ran on the full diff. Cause: a genuinely small vendored delta (frontmatter + `script-hashes.json` + one doc) combined with task-20's `implementation-guide/**`/`docs/**`/`*.md`/`**/*_test.go` cap excludes. A useful data point for the open BACKLOG item on excluding `.cwf/**` — a small upgrade clears the cap without that exclude.
+- **Empirical verification over plan text.** The task-188 config edit was driven by diffing the *laid-down* `cwf-project.json.template` to confirm exactly two keys were dropped, not by trusting the plan's quoted excerpt. Plan review had earlier split the edit into two non-adjacent edits (the keys sit at file lines 3 and 50, not together).
+- **Annotated-tag dereferencing pre-empted a false blocker.** `v1.1.189` is annotated; bare `git rev-parse v1.1.189` yields the tag object (`ba42ab1…`) while the recorded `cwf_sha` is the dereferenced commit (`6af636e…`).
+- **Testing.** TC-1 (version pinned), TC-2 (no merge commit), TC-3 (`cwf-manage validate` OK), TC-4 (config reconciled — `version`/`_version-note` absent, `cwf-version`/`_cwf-version-note`/`versioning` present, valid JSON), TC-5 (workflow tooling functional) all PASS; `go test ./pkg/...` green (regression sanity). One test-command usage correction (TC-5 helper takes positional `TASK_PATH`, not `--task-path`); no product defect.
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent — **no findings**. Each independently surfaced the same documented awareness item: the v1.1.189 reviewer agents widen their tool grant to include `Bash`, which CWF's own `security-review.md` records as a deliberate FR4(c) posture choice (mitigated by no `Edit`/`Write` + tool-tier guidance). Not blocking; no local action.
+
 ## Task 21: Harden env-fragile dcfhfind and dcfhfix CI tests
 
 ### Status: Complete (completed 2026-06-11, single session, within the <0.5 day / Low estimate)
