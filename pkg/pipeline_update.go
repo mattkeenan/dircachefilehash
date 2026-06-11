@@ -186,7 +186,7 @@ func finaliseMainIndex(ms *MetaStore, tempName, logPrefix string, ok bool) {
 	if IsDebugEnabled("write") {
 		VerboseLog(3, "%s Renaming %s (%d bytes) -> %s", logPrefix, tempName, stat.Size(), ms.IndexFile)
 	}
-	if renameErr := os.Rename(tempName, ms.IndexFile); renameErr != nil {
+	if renameErr := fsRename(tempName, ms.IndexFile); renameErr != nil {
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "%s Warning: failed to rename %s to main.idx: %v\n", logPrefix, tempName, renameErr)
 		}
@@ -222,6 +222,16 @@ func (ms *MetaStore) performPipelineScan(ctx context.Context, sr *ScanRun, paths
 	err := RunUpdatePipeline(ctx, ms, sr, existingIterator, scanIterator, tempMainIndexFileName, collector)
 	if err != nil {
 		return err
+	}
+
+	// A cancelled context must not promote a partial index: the pipeline
+	// stages only record errors while ctx is live (ctx.Err() == nil), so a
+	// mid-scan cancel can leave RunUpdatePipeline returning nil with only a
+	// subset of entries written. Treating cancellation as non-success keeps
+	// operationSuccessful false, so the deferred finaliseMainIndex takes the
+	// !ok (temp-removed, no rename) branch and main.idx is preserved.
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	operationSuccessful = true

@@ -112,6 +112,10 @@ func (hp *hashPool) hashEntry(ctx context.Context, pe *PipelineEntry, buffer []b
 		return fmt.Errorf("failed to get relative path: %w", err)
 	}
 
+	if hashPreReadHook != nil {
+		hashPreReadHook(relPath)
+	}
+
 	// Check for symlink — hash target path, not target contents
 	mode, err := entry.Mode()
 	if err != nil {

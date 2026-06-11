@@ -136,7 +136,7 @@ func finaliseStatusCache(ms *MetaStore, cacheTempFileName string, ok bool) {
 	if _, err := os.Stat(cacheTempFileName); err != nil {
 		return
 	}
-	if renameErr := os.Rename(cacheTempFileName, ms.CacheFile); renameErr != nil {
+	if renameErr := fsRename(cacheTempFileName, ms.CacheFile); renameErr != nil {
 		if IsDebugEnabled("scan") {
 			fmt.Fprintf(os.Stderr, "[STATUS] Warning: failed to rename %s to cache.idx: %v\n", cacheTempFileName, renameErr)
 		}

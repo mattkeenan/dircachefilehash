@@ -64,13 +64,6 @@ the remote host holds no dcfh state to repair.
 
 Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
 
-## Task: Validate atomic index replacement under failure conditions
-
-### Task-Type: chore
-### Priority: High
-
-Atomicity of the temp-write + rename path needs explicit failure-injection coverage (crash mid-write, rename failure, full disk). No `os.Rename` fault-injection tests exist today.
-
 ## Task: Update API documentation with current architecture
 
 ### Task-Type: chore
@@ -272,3 +265,27 @@ enhancements, none load-bearing for correctness:
 Related: the Go-version-matrix item above ("Test with various Go versions") is the
 matrix half of the same theme; fold together if picked up. Scope is
 `.github/workflows/` + toolchain only — no Go change.
+
+## Task: Reconcile ValidateIndexHeader checksum with production writer
+
+### Task-Type: bugfix
+### Priority: Low
+### Identified in: Task 23 retrospective (j-retrospective.md), deviation D1
+
+The repair/dcfhfind path validator validateHeaderChecksum (via ValidateIndexHeader) diverges from the production verifyHeaderChecksum: a normally-promoted main.idx fails ValidateIndexHeader even though it loads cleanly via loadIndexFromFileWithTracking. Reconcile the two so the repair and dcfhfind paths can validate a normally-written index. Surfaced when Task 23 had to switch its "loads clean" test oracle off ValidateIndexHeader onto the production loader.
+
+## Task: Retire stale skipped pkg/shutdown_test.go
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 23 retrospective (j-retrospective.md), Risk-3 deferral
+
+pkg/shutdown_test.go is skipped pending pipeline migration and is structurally stale against the v0.7 channel pipeline. Task 23 wrote a fresh focused cancellation test (TC-9 in scan_edge_cases_test.go) rather than un-skipping it, so the v0.7 mid-scan-cancel invariant is now covered. Remove the obsolete skipped test.
+
+## Task: Fix non-conformant Task 14 (round 2) CHANGELOG heading
+
+### Task-Type: bugfix
+### Priority: Low
+### Identified in: Task 23 retrospective (j-retrospective.md), backlog-manager validate --all
+
+The CHANGELOG entry "## Task 14 (round 2): Upgrade CWF subtree to v1.1.185" violates the heading grammar ^## Task N: (Backlog.pm parser regex requires a colon immediately after the digits). The (round 2) parenthetical means the heading is not recognised as an entry boundary, so the preceding entry Notable subsection bleeds in and backlog-manager validate --all reports CHANGELOG-003 (subsections out of order) against that entry Changes line. Pre-existing on HEAD; the lighter cwf-manage validate used by the checkpoint hook does not catch it. Two entries currently share Task number 14 (the v1.1.183 round and this v1.1.185 round 2), so the fix needs a disambiguation the grammar accepts.

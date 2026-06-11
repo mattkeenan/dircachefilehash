@@ -4,6 +4,35 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 23: Fault-injection tests for atomic replacement
+
+### Status: Complete (completed 2026-06-11, single session, ~1 day vs the 1.5-2 day / Medium estimate)
+### Impact: Proves the atomic index-replacement invariant ("main index is only updated on complete success") holds under injected I/O failures, and closes the previously-uneven scan edge-case coverage. Adds a test-only function-pointer seam (`pkg/io_seam.go`) for the os-level write primitives so tests can inject `os.Rename`/`os.OpenFile`/`*os.File.Sync` failures without a real failing disk, plus 9 fault-injection tests (TC-1..TC-9). Also fixes one real bug found in scope: a mid-scan context cancellation was promoting a partial index. Production footprint is 37 lines across 5 files (four inert os-primitive seam swaps + one nil-guarded pre-read hook + the FR6 `ctx.Err()` guard); the rest is `_test.go` and process docs. Branch: a/d/e/f/g/h/i/j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/io_seam.go`** (new): four unexported package-level seam vars — `fsRename`/`fsOpenFile`/`fsSync` defaulting to the real `os` primitives, and `hashPreReadHook` (nil in production). Doc comment encodes the INVARIANT: never assigned outside `_test.go`, never wired to env/config/flag — a production assignment would turn these into a runtime index-write-failure / pre-read-injection override vector.
+- **`pkg/pipeline_update.go`**: `os.Rename`→`fsRename`; plus the FR6 fix — an `if ctx.Err() != nil { return ctx.Err() }` guard in `performPipelineScan` so a cancelled run takes the cleanup (`!ok`) branch instead of promoting a partial index.
+- **`pkg/status.go`**: cache-path `os.Rename`→`fsRename`.
+- **`pkg/temp_index_writer.go`**: `os.OpenFile`→`fsOpenFile`, `Sync()`→`fsSync` (G302 `//nolint:gosec` rationale preserved verbatim across the rename).
+- **`pkg/hash_pool.go`**: nil-guarded `hashPreReadHook(relPath)` call, fired once the entry's relative path resolves (the seam point for delete/modify/cancel-before-hash injection).
+- **`pkg/fault_inject_test.go`, `pkg/atomic_index_test.go`, `pkg/scan_edge_cases_test.go`** (new): a generic `swapFn[T](t, *T, T)` + `t.Cleanup` restore helper, four `with*` fault installers, and TC-1..TC-9.
+
+### Notable
+- **The minimal seam held — no interface needed.** The planned package-level `var` indirection (Risk-1 mitigation) was sufficient; resisting a threaded `FileOps` interface kept the production diff at 37 lines with near-zero blast radius. The wire-handler write site (`wire_handler.go:445`, audit-mode SSH path) was deliberately left unseamed, keeping the seam off the untrusted surface.
+- **Deterministic fault injection, zero flakes.** Driving delete/modify/cancel through `hashPreReadHook` at a known pipeline stage (Risk-2 mitigation) gave a clean 20× `-race` loop with no wall-clock sleeps in any assertion.
+- **`-race` earned its keep.** It caught a multi-goroutine race in the TC-9 cancel hook (the hook fires on every hash worker; a plain bool was a data race) — fixed with `sync.Once` around the one-shot `cancel()`. The race even cascaded a spurious failure into an unrelated wire test until fixed.
+- **Teeth checks confirm the suite bites.** Reverting each guard (T-A FR6 guard, T-B `finaliseMainIndex` `!ok` cleanup, T-C the seam itself) failed exactly the expected test. T-B notably left TC-2 green — correct, because an open fault never creates a temp, so TC-3 carries the cleanup-path teeth.
+- **Three test-oracle corrections (D1-D3), all from existing-code reality.** D1: the repair-path `ValidateIndexHeader`/`validateHeaderChecksum` disagrees with the production writer and fails even a normally-promoted `main.idx`, so the "loads clean" oracle uses the production loader `loadIndexFromFileWithTracking`. D2: "modify before hash" yields a *coherent non-empty* hash (the re-read succeeds), not the empty hash of the delete case. D3: the cancel-hook race above.
+- **Testing.** TC-1..TC-9 all PASS; `go test ./pkg/...` and `go test -race -gcflags=all=-d=checkptr=0 ./pkg/...` green; `golangci-lint run ./...` 0 issues; `govulncheck` clean.
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent — **no findings**. The only note (category e) is the seam-invariant audit framing, already documented inline in `io_seam.go`: audit any future non-test assignment of the seam vars or reuse of the test hooks against a non-temp path.
+
+### Retired Backlog Items
+#### Validate atomic index replacement under failure conditions
+
+Atomicity of the temp-write + rename path needs explicit failure-injection coverage (crash mid-write, rename failure, full disk). No `os.Rename` fault-injection tests exist today.
+
+<!-- Note: Delivered as a function-pointer seam (io_seam.go) + 9 fault tests (TC-1..TC-9) covering rename/open/sync faults on both main and cache paths; also fixed the FR6 mid-scan-cancel partial-promotion bug. -->
+
 ## Task 22: Upgrade CwF to v1.1.189
 
 ### Status: Complete (completed 2026-06-11, single session + one plan-review pause, well under the ~0.5 day / Low estimate)
@@ -126,6 +155,8 @@ Pre-CWF history — organised by release version under Keep a Changelog / Semant
 
 ### Status: Complete (completed 2026-06-09, ~1 day, within the 1–2 day / Low–Medium estimate)
 ### Impact: Makes change status legible at a glance in the `--interactive-tree` post-run viewer (`dcfh status`/`update`). Every changed node now carries a status glyph (`+` added / `~` modified / `-` deleted / `*` mixed-directory), a status colour, and bold weight; unchanged nodes show no glyph, default colour, non-bold. Directory rows blend their descendants' statuses additively (presence-based, channels R=deleted / G=added / B=modified): added=green, modified=blue, deleted=red, add+mod=cyan, mod+del=magenta, add+del=yellow, all-three=white — a single changed descendant flips the channel. The glyph is the primary (colour-vision-deficiency-safe) signal; colour reinforces. The stats pane gains a glyph-prefixed, colour-matched legend (`+ Added` / `~ Modified` / `- Deleted` + `* mixed`). Render-layer only — no on-disk format change, no change to `Stats`/`Node` or non-interactive output. Branch: a–j phase checkpoints, squashed.
+### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
+### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
 
 ### Changes
 - **`cmd/dcfh/internal/tui/render.go`**: replaced `categoryStyle(n) tcell.Style` (which special-cased `IsDir`→default) with a single pure `nodeStyle(n) (rune, tcell.Style)` — one `switch` over the 3-bit present-set derived from `Stats.{Added,Modified,Deleted} > 0`, returning glyph and colour together so they can't drift; bold iff the set is non-empty. `drawRow` inserts a fixed-width glyph slot after the expand marker (`"%*s%s%c %s"`); the selection `Reverse` compose and the `colX > x+1` value guard are unchanged. `styleModified` recoloured yellow→blue (frees yellow for the add+del blend; updates the stats pane in lockstep). `drawStats` gains the glyph-prefixed legend lines + a dimmed `* mixed (directory)` note, with a 2-col leading slot on every line to keep colons aligned.
