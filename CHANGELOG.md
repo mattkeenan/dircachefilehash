@@ -4,6 +4,19 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 25: Fix CHANGELOG Task 14 round 2 heading defect
+
+### Status: Complete (completed 2026-06-12, single session, on the <0.5 day / Low estimate)
+### Impact: Restores `backlog-manager validate --all` to exit 0 — the gate had been failing at the Task 14 (round 2) entry with `CHANGELOG-003` (subsections out of order), which blocked the format check every subsequent CWF checkpoint commit runs. Root cause (re-attributed during planning): `## Task 14 (round 2):` fails the entry regex (`Backlog.pm:231` requires the colon immediately after the digits), so the heading and its body were absorbed into the preceding `## Task 15` entry, producing a duplicate `Changes` subsection — the actual `CHANGELOG-003` trigger. The heading rename is the load-bearing edit. Documentation-only change confined to two CHANGELOG entries (4 insertions / 5 deletions); no product code, no build. Both exec-phase security reviews returned no findings. Branch: a/d/e/f/g/h/j phase checkpoints, squashed.
+
+### Changes
+- **`CHANGELOG.md`** — renamed `## Task 14 (round 2): Upgrade CWF subtree to v1.1.185` → `## Task 14: Upgrade CWF subtree to v1.1.185 (round 2)` so it parses as a real entry (colon right after the digits); added the round-2 entry's own `### Status:`/`### Impact:` pair before its `### Changes`; removed two byte-identical stray v1.1.185 Status/Impact pairs that had been absorbed under `## Task 15`.
+
+### Notable
+- The symptom (`CHANGELOG-003` at the round-2 entry) and the cause (the heading one entry earlier failing the regex) were one entry apart — diagnosis, not the edit, was the work. The d-plan's empirical verification corrected the initial "missing Status/Impact anchor" framing.
+- The fix used a raw `Edit` because `backlog-manager` has no heading-rename/relocate subcommand; safe here only because `validate --all` ran afterwards as a blocking acceptance gate (TC-1). TC-2 independently reproduced the baseline red state (`7dbced1a`) via a Perl harness driving `parse_changelog_tree`/`validate_changelog_tree`.
+- Known-acceptable quirk carried forward: two `## Task 14:` entries now coexist (round 1 "v1.1.183" + renamed round 2 "v1.1.185"). The validator accepts both, but `find_changelog_entry_by_task_num` resolves task-14 lookups to round 1. Pre-existing; no action taken.
+
 ## Task 24: Reconcile RelativePath vs calculatePathLength pathStart discrepancy
 
 ### Status: Complete (completed 2026-06-11, single session, on the <1 day / Low estimate)
@@ -177,10 +190,6 @@ Atomicity of the temp-write + rename path needs explicit failure-injection cover
 
 ### Status: Complete (completed 2026-06-09, ~1 day, within the 1–2 day / Low–Medium estimate)
 ### Impact: Makes change status legible at a glance in the `--interactive-tree` post-run viewer (`dcfh status`/`update`). Every changed node now carries a status glyph (`+` added / `~` modified / `-` deleted / `*` mixed-directory), a status colour, and bold weight; unchanged nodes show no glyph, default colour, non-bold. Directory rows blend their descendants' statuses additively (presence-based, channels R=deleted / G=added / B=modified): added=green, modified=blue, deleted=red, add+mod=cyan, mod+del=magenta, add+del=yellow, all-three=white — a single changed descendant flips the channel. The glyph is the primary (colour-vision-deficiency-safe) signal; colour reinforces. The stats pane gains a glyph-prefixed, colour-matched legend (`+ Added` / `~ Modified` / `- Deleted` + `* mixed`). Render-layer only — no on-disk format change, no change to `Stats`/`Node` or non-interactive output. Branch: a–j phase checkpoints, squashed.
-### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
-### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
-### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
-### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
 
 ### Changes
 - **`cmd/dcfh/internal/tui/render.go`**: replaced `categoryStyle(n) tcell.Style` (which special-cased `IsDir`→default) with a single pure `nodeStyle(n) (rune, tcell.Style)` — one `switch` over the 3-bit present-set derived from `Stats.{Added,Modified,Deleted} > 0`, returning glyph and colour together so they can't drift; bold iff the set is non-empty. `drawRow` inserts a fixed-width glyph slot after the expand marker (`"%*s%s%c %s"`); the selection `Reverse` compose and the `colX > x+1` value guard are unchanged. `styleModified` recoloured yellow→blue (frees yellow for the add+del blend; updates the stats pane in lockstep). `drawStats` gains the glyph-prefixed legend lines + a dimmed `* mixed (directory)` note, with a 2-col leading slot on every line to keep colons aligned.
@@ -193,7 +202,10 @@ Atomicity of the temp-write + rename path needs explicit failure-injection cover
 - **Test-plan gap caught at test-writing.** TC-S3/S6 assumed an all-three "root row", but the implicit root (label "") is never rendered (`rebuildRows` walks `m.root.Children`); covered instead by the pure table plus a `treeAllThreeDir` fixture. Recorded as a lesson (e-/j-).
 - **Coverage / gates.** `nodeStyle` and `drawRow` 100% covered; package total 84.4%. Full `cmd`+`pkg` regression and `go test -race` green; `golangci-lint run ./cmd/dcfh/internal/tui/...` → 0 issues; `govulncheck` → 0 called. Both exec-phase `cwf-security-reviewer-changeset` runs recorded **no findings** (388 production lines, under the 500 cap) — TUI-only, glyph constrained to a closed alphabet pinned by `TestNodeStyle`.
 
-## Task 14 (round 2): Upgrade CWF subtree to v1.1.185
+## Task 14: Upgrade CWF subtree to v1.1.185 (round 2)
+
+### Status: Complete (completed 2026-06-09, ~0.5 day, within the ~0.5 day / Medium estimate)
+### Impact: Upgrades the vendored CWF workflow tooling from v1.1.183 to v1.1.185 **merge-free**, layered as a single linear commit on top of the preserved 183 landing (`700baba`). v1.1.185 is the release that replaces `git subtree` with a `read-tree` laydown ("Task 185: Replace git-subtree with merge-free read-tree laydown") — the root-cause fix for the subtree merge-commit bug recorded against this repo. The recorded laydown method migrates `subtree`→`read-tree`. No dircachefilehash product code changes (no `*.go` diff). Branch: a–g + j phase checkpoints (incl. the b/c phases run at user request, normally skipped for a chore), squashed.
 
 ### Changes
 - **`.cwf/version`**: `cwf_version=v1.1.185`, `cwf_ref=v1.1.185`, `cwf_sha=6659c1cca72ef033d92546fcd9d42a0f4d817dd9` (commit form, consistent with the 183 record); **`cwf_method=read-tree`** (was `subtree`).

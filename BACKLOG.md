@@ -290,3 +290,11 @@ The CHANGELOG entry "## Task 14 (round 2): Upgrade CWF subtree to v1.1.185" viol
 ### Identified in: Task 24 retrospective (j-retrospective.md)
 
 Task 24 found that ValidateEntry wrapped its body in a deferred recover() that discards the panic value (`_ = r`), silently converting validateLayout's always-panic into an always-nil pass — the validator had been dead for an unknown period. Other recover-and-swallow sites may hide similarly dead logic. Scope: grep for `recover()` blocks that drop the recovered value without re-surfacing it as an error/log, audit whether the protected body can panic on normal input, and add a test (or remove the dead guard) where one does. Low priority — investigative.
+
+## Task: Reject "## Task N (...):" CHANGELOG headings at write time
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 25 retrospective (j-retrospective.md)
+
+The CHANGELOG entry regex (CWF/Backlog.pm) requires the colon immediately after the task digits; a parenthetical between the number and the colon (e.g. "## Task 14 (round 2):") silently fails to parse and is absorbed into the preceding entry, surfacing only as a downstream CHANGELOG-003 one entry later. Task 25 fixed one instance by hand. Add a backlog-manager check (or lint rule) that rejects "## Task N (...):" headings at write time so the trap cannot recur. Low priority — the validator already catches the downstream symptom; this would catch the cause at the source and give a clearer error.
