@@ -4,6 +4,35 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 26: Add runnable Repo library usage examples
+
+### Status: Complete (completed 2026-06-12, single session, within the <1 day / Low estimate)
+### Impact: Gives external consumers of the `Repo` library surface runnable, godoc-rendered usage guidance instead of having to read source for the entry points. Adds one new black-box test file `pkg/example_repo_test.go` (`package dircachefilehash_test`) with eight `Example*` functions covering the whole consumer surface — `CreateRepo`, `OpenRepo`, and `Repo.Diff`/`Apply`/`Groups`/`Filter`/`Config`/`Snapshots` — each with a verified `// Output:` block so `go test` executes and asserts them. Because the file lives in an external test package and compiles only against the exported API, it doubles as a compile-time guard against public-surface signature drift. No production (`.go` non-test) change; existing tests unaffected. Both exec-phase `cwf-security-reviewer-changeset` reviews returned no findings. Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/example_repo_test.go`** (new) — black-box `package dircachefilehash_test` importing `pkg` under its consumer alias `dircachefilehash`; the first external-test-package file in `pkg/` (all prior tests are white-box). Eight `Example*` functions plus an unexported `mustExampleRepo()` helper that builds a throwaway repo in an `os.MkdirTemp` dir, seeds three literal-named files (two identical `.go` → one duplicate group, one `.txt`), and returns the open `Repo` plus a `Close()`-then-`RemoveAll` cleanup. One seed set drives every example deterministically: Diff (3 added), Apply (3 indexed), Groups (1 dupe group), Filter (2 sorted `*.go` matches). Only stable derived values appear in `// Output:` — no timestamps, temp paths, or unsorted slices.
+
+### Notable
+- **One fixture, every verb.** A single seed set satisfies Diff/Apply/Groups/Filter simultaneously, keeping the helper minimal.
+- **Two pre-code plan-review catches held in exec, no failed runs.** (1) Index-reading verbs (`Groups`/`Filter`) operate on the main index, not the live filesystem, so the examples must `Apply` first or counts come back 0; (2) `Filter` errors on empty `Actions`, so each passes `Actions: []FilterAction{&PrintAction{}}`.
+- **`go vet`, not `go doc`, is authoritative.** The `go doc` CLI does not render `Example*` bodies (only the godoc HTTP server does); the example↔symbol association is checked by `go vet`'s examples analyser, which passed.
+- **Opportunistic godoc edit correctly dropped at d-plan review.** The a-plan's plan to fold doc comments onto five filter-DSL AST nodes (`MMinTest`, `CTimeTest`, `CMinTest`, `OrExpression`, `NotExpression`) was abandoned: those nodes are already documented by deliberate group comments (`filter.go:445`, `:523`) — the survey's "undocumented" finding was a heuristic miss. This kept the task purely additive and zero-production-change.
+- **Testing.** TC-1..TC-5 all PASS; 8/8 examples execute with matching output; `-count=2` determinism stable; `go vet ./pkg/...` clean; full `go test ./pkg/...` green; `make build` OK; pre-commit `-race`/`govulncheck`/`golangci-lint` clean on the implementation commit.
+- **Security review.** Both exec phases ran the `cwf-security-reviewer-changeset` subagent — **no findings**. The only note (category e) is that the helper's `os.WriteFile` uses literal-constant seed names (taint-free); audit if a future maintainer parameterises them from caller input.
+
+### Retired Backlog Items
+#### Add usage examples for library consumers
+
+`pkg/` has no `example_*_test.go` files and no `examples/` directory; consumers must read source to figure out the entry points.
+
+<!-- Note: Delivered as 8 runnable godoc Example* functions in pkg/example_repo_test.go covering the full Repo consumer surface. -->
+
+#### Update API documentation with current architecture
+
+`pkg/doc.go` and exported-symbol godoc pre-date the layered/pipeline architecture and the scan-index workflow; library consumers see stale guidance.
+
+<!-- Note: Superseded by Task 17, which rewrote pkg/doc.go to v0.7 and resynced docs/; the Repo consumer surface in pkg/repo.go was already fully godoc-documented. No outstanding doc work remained. -->
+
 ## Task 25: Fix CHANGELOG Task 14 round 2 heading defect
 
 ### Status: Complete (completed 2026-06-12, single session, on the <0.5 day / Low estimate)

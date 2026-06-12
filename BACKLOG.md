@@ -64,20 +64,6 @@ the remote host holds no dcfh state to repair.
 
 Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
 
-## Task: Update API documentation with current architecture
-
-### Task-Type: chore
-### Priority: High
-
-`pkg/doc.go` and exported-symbol godoc pre-date the layered/pipeline architecture and the scan-index workflow; library consumers see stale guidance.
-
-## Task: Add usage examples for library consumers
-
-### Task-Type: chore
-### Priority: High
-
-`pkg/` has no `example_*_test.go` files and no `examples/` directory; consumers must read source to figure out the entry points.
-
 ## Task: Implement dry-run mode for `dcfh update`
 
 ### Task-Type: feature
