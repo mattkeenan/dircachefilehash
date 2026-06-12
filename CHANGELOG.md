@@ -4,6 +4,32 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 27: Add scan edge-case integration tests (discovery→hash boundary races)
+
+### Status: Complete (completed 2026-06-12, single session, on the ~0.5 day / Low estimate)
+### Impact: Pins dcfh's existing tolerant behaviour at the discovery→hash boundary with three deterministic integration tests, closing the residual concurrent-modification coverage gaps Task 23 left open. Together with Task 23 (delete/modify/cancel + atomic write-path faults) this retires the High-priority "comprehensive integration tests for edge cases" backlog item: mid-scan interrupts (TC-9), partial writes (`atomic_index_test.go`), and concurrent modification during scan (TC-7/8 + the new TC-10/11/12) are now all exercised. Test-only — no production (`.go` non-test) change. Both exec-phase `cwf-security-reviewer-changeset` reviews returned no findings. Branch: a/d/e/f/g/j phase checkpoints, squashed.
+
+### Changes
+- **`pkg/scan_edge_cases_test.go`** — three new functions appended alongside the TC-7/8/9 family, each driving a full `runUpdate` scan/hash/promote cycle against a `seedMainRepo` temp dir and re-reading the promoted main, reusing Task 23's `hashPreReadHook` seam:
+  - `TestScanEdge_GrowBeforeHash_Tolerated` (TC-10) — file grows between scan-time stat and read; the read over the grown bytes succeeds → success, clean load, present entry, non-empty hash.
+  - `TestScanEdge_ShrinkBeforeHash_Tolerated` (TC-11) — mirror with strictly shorter (still non-empty) contents → same coherence-only oracle.
+  - `TestScanEdge_FileToDirBeforeHash_Tolerated` (TC-12) — file replaced by a directory; `entry.Mode()` returns the scan-time regular mode so the entry stays on the non-symlink `HashOne` branch, the read fails `EISDIR` and is swallowed → success, clean load, present entry, **empty** hash (mirrors TC-7's delete tolerance).
+- **`pkg/scan_edge_cases_test.go`** (`freshFind` helper) — comment expansion plus `//nolint:unparam // rel kept general for future edge-case tests`.
+
+### Notable
+- **Coherence-only oracle, not exact bytes.** Grow/shrink assert hash *presence* (success + clean load + parseable entry), not recorded-size equality — the stamped scan-time size and the hashed bytes legitimately diverge, so an equality assertion would be brittle (the TC-8 philosophy, flagged as Risk 1 in the plan and borne out).
+- **One swallow mechanism, two tolerances.** The hash-error swallow (`hash_pool.go:87-94`) is the single mechanism behind both delete-tolerance (TC-7) and file→dir-tolerance (TC-12); coverage confirms TC-12 reaches it.
+- **`unparam` is whole-program.** Adding the third+ all-`"z.txt"` `freshFind` call site tipped `unparam` into reporting the shared helper's `rel` param in a full-repo audit — invisible to the `--new` staged gate, caught only by full `golangci-lint run ./...`. Suppressed with rationale rather than churning the clean TC-7/8/9 call sites.
+- **Walk-phase race deferred (approved at plan time).** The readdir→lstat mid-walk disappearance (`scan.go:224`) has no seam; testing it deterministically would need a new production walk-phase hook for a narrow, arguably-correct silent-skip. Deferred test-only and carried to BACKLOG.md.
+- **Testing.** TC-10/11/12 PASS; full `go test ./pkg/...` green; `-race -gcflags=all=-d=checkptr=0` green; full-repo pre-commit `-race`/`govulncheck`/`golangci-lint` clean; gosec G306/G301 suppressions scoped to test temp paths.
+
+### Retired Backlog Items
+#### Add comprehensive integration tests for edge cases
+
+Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
+
+<!-- Note: Fully covered across Task 23 (delete/modify-before-hash TC-7/8, mid-scan cancel TC-9, atomic write-path faults in atomic_index_test.go) and Task 27 (grow/shrink/file→dir TC-10/11/12). Residual walk-phase lstat-ENOENT race re-filed as its own Low-priority item. -->
+
 ## Task 26: Add runnable Repo library usage examples
 
 ### Status: Complete (completed 2026-06-12, single session, within the <1 day / Low estimate)

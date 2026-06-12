@@ -57,13 +57,6 @@ Scope when picked up:
 Dependency: none blocking — Phase 2 (audit mode) does not need Fix since
 the remote host holds no dcfh state to repair.
 
-## Task: Add comprehensive integration tests for edge cases
-
-### Task-Type: chore
-### Priority: High
-
-Edge-case coverage (mid-scan interrupts, partial writes, concurrent modification) is uneven across packages. `pkg/shutdown_test.go` covers context cancellation; partial writes and concurrent modification during scan are not exercised.
-
 ## Task: Implement dry-run mode for `dcfh update`
 
 ### Task-Type: feature
@@ -284,3 +277,11 @@ Task 24 found that ValidateEntry wrapped its body in a deferred recover() that d
 ### Identified in: Task 25 retrospective (j-retrospective.md)
 
 The CHANGELOG entry regex (CWF/Backlog.pm) requires the colon immediately after the task digits; a parenthetical between the number and the colon (e.g. "## Task 14 (round 2):") silently fails to parse and is absorbed into the preceding entry, surfacing only as a downstream CHANGELOG-003 one entry later. Task 25 fixed one instance by hand. Add a backlog-manager check (or lint rule) that rejects "## Task N (...):" headings at write time so the trap cannot recur. Low priority — the validator already catches the downstream symptom; this would catch the cause at the source and give a clearer error.
+
+## Task: Walk-phase lstat-ENOENT race test for the scan walker
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 27 retrospective (j-retrospective.md)
+
+Task 27 covered the discovery→hash boundary races (grow/shrink/file→dir) via the existing `hashPreReadHook` seam, but the earlier readdir→lstat mid-walk race in `statAndFilter` (`pkg/scan.go:224`) has no test because there is no seam: `io_seam.go` exposes only `fsRename`/`fsOpenFile`/`fsSync`/`hashPreReadHook`, not lstat. Testing the case where a path is returned by readdir but disappears (ENOENT) before `os.Lstat` deterministically needs a small production walk-phase hook mirroring `hashPreReadHook`. The current handling (silent skip) is arguably correct and low-risk, which is why Task 27 deferred this rather than add production surface for one narrow test. Take it only if the minimal seam is justified.
