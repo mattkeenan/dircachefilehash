@@ -147,6 +147,16 @@ func (c *Config) setDefaults() error {
 	return nil
 }
 
+// newConfigForHashType builds an in-memory Config (no file backing) whose only
+// meaningful setting is the default hash algorithm. dcfhfix's repo-less repair
+// path uses it so a synthesised MetaStore's GetCurrentHashType() reflects the
+// subject index's checksum_type without loading a .dcfh config from disk.
+func newConfigForHashType(algorithmName string) *Config {
+	cfg := &Config{ini: ini.Empty()}
+	cfg.ini.Section("filehash").Key("default").SetValue(algorithmName)
+	return cfg
+}
+
 // GetHashConfig returns the hash configuration
 func (c *Config) GetHashConfig() *HashConfig {
 	hashConfig := &HashConfig{

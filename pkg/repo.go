@@ -167,8 +167,7 @@ type UpdateResult struct {
 // Repo is the transport-neutral surface that every CLI command uses.
 // Implementations: localRepo wrapping a MetaStore; the MetaStore's
 // walker/hasher pair is swapped to the wire-backed pair for ssh:// roots.
-// colocatedRepo (Phase 3) will proxy the full interface. Fix is deferred
-// to Phase 1b.
+// colocatedRepo (Phase 3) will proxy the full interface.
 //
 // Session semantics: Repo owns index handles / RPC sessions. Close releases
 // them. Snapshots() and Config() return views into the same session —
@@ -184,6 +183,12 @@ type Repo interface {
 	Apply(ctx context.Context, req ApplyRequest) (*UpdateResult, error)
 	Groups(ctx context.Context, req GroupsRequest) ([]DuplicateGroup, error)
 	Filter(ctx context.Context, req FilterRequest) (*FilterResult, error)
+
+	// Fix repairs a single-source index, mirroring Filter: it resolves the
+	// IndexSelectors, confines every write destination to the repo's MetaDir
+	// (D2/NFR4), and runs the FixRequest's command batch. For a wireRepo this
+	// acts on the invoker-side MetaDir (remote-fix semantics are out of scope).
+	Fix(ctx context.Context, req FixRequest) (*FixResult, error)
 
 	// PostRunTree builds the read-only interactive-tree view from the
 	// post-run merged index (an index-file read, not a filesystem walk)

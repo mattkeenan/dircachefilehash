@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
 // Test argument parsing
@@ -251,10 +253,14 @@ func TestHandleHeaderCommand(t *testing.T) {
 			errMsg:  "failed to open index file",
 		},
 		{
-			name:    "Edit field command",
-			args:    []string{"edit", "version", "2"},
-			wantErr: true, // File doesn't exist
-			errMsg:  "failed to load index",
+			name: "Edit field command",
+			args: []string{"edit", "version", "2"},
+			// File doesn't exist. header edit now routes through RunFix →
+			// ApplyHeaderEdit (task 28.2 relocation), which reports the failed
+			// read; the CLI wraps it as "failed to write modified index"
+			// (was "failed to load index" pre-relocation — documented fix, AC3).
+			wantErr: true,
+			errMsg:  "failed to write modified index",
 		},
 		{
 			name:    "Edit without args",
@@ -486,16 +492,16 @@ func TestGetIndexType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := getIndexType(tt.input)
+			result := dircachefilehash.BackupIndexType(tt.input)
 			if result != tt.expected {
-				t.Errorf("getIndexType(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("BackupIndexType(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
 func TestBackupMetadata(t *testing.T) {
-	metadata := &BackupMetadata{
+	metadata := &dircachefilehash.BackupMetadata{
 		Timestamp:   time.Now(),
 		Operation:   "test-op",
 		Description: "test description",
@@ -510,7 +516,7 @@ func TestBackupMetadata(t *testing.T) {
 	}
 
 	// Test JSON unmarshaling
-	var restored BackupMetadata
+	var restored dircachefilehash.BackupMetadata
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatalf("Failed to unmarshal metadata: %v", err)
 	}

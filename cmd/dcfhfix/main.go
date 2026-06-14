@@ -3,17 +3,12 @@
 package main
 
 import (
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
@@ -102,12 +97,40 @@ var commandTable = map[string]struct {
 	"fixes":  {"dcfhfix <index-file> fixes <list|pop|discard|clear> [args...]", handleFixesCommand},
 }
 
+// fixFlags projects the CLI ParsedOptions onto the narrow FixEntryFlags shim
+// consumed by the relocated pkg/ repair workflow and promote helpers.
+func fixFlags(options *ParsedOptions) dircachefilehash.FixEntryFlags {
+	return dircachefilehash.FixEntryFlags{
+		Quiet:       options.GetBool("quiet"),
+		EditInPlace: options.GetBool("edit-in-place"),
+		Force:       options.GetBool("force"),
+	}
+}
+
+// runFixWrite translates one CLI write subcommand into a single-command
+// FixRequest and runs it through the shared RunFix core against the explicitly
+// named subject (writeRoot "" — the explicit-subject exemption; the user named
+// the file directly, so MetaDir confinement is not imposed). RunFix owns the
+// pre-write backup and the single-writer index write.
+func runFixWrite(indexFile string, cmd dircachefilehash.FixCommand, options *ParsedOptions) (*dircachefilehash.FixResult, error) {
+	req := dircachefilehash.FixRequest{
+		Commands: []dircachefilehash.FixCommand{cmd},
+		Mode:     dircachefilehash.FixModeAuto,
+		DryRun:   options.GetBool("dry-run"),
+		Backup:   options.GetBool("backup"),
+		Verbose:  options.GetInt("verbose"),
+		Flags:    fixFlags(options),
+	}
+	refs := []dircachefilehash.IndexRef{{Path: indexFile, Type: dircachefilehash.RefTypeFile}}
+	return dircachefilehash.RunFix(context.Background(), refs, req, "", os.Stderr)
+}
+
 func dispatchCommand(command, indexFile string, subArgs []string, options *ParsedOptions) error {
 	// Gate the destructive in-place opt-in once, before routing. Because every
 	// subcommand (including read-only ones) routes through here, a lone
 	// --edit-in-place is refused everywhere — intentional: the flag is
 	// meaningless on reads and one chokepoint is simpler than per-write-path checks.
-	if err := validateEditInPlaceGate(options); err != nil {
+	if err := dircachefilehash.ValidateEditInPlaceGate(fixFlags(options)); err != nil {
 		return err
 	}
 
@@ -371,15 +394,6 @@ func showFixesHelp() {
 	fmt.Printf("  - Stack persists between dcfhfix sessions\n")
 }
 
-// Backup metadata structure
-type BackupMetadata struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Operation   string    `json:"operation"`
-	Description string    `json:"description"`
-	IndexFile   string    `json:"index_file"`
-	BackupFile  string    `json:"backup_file"`
-}
-
 // Command handlers
 func handleHeaderCommand(indexFile string, args []string, options *ParsedOptions) error {
 	if len(args) < 1 {
@@ -569,105 +583,30 @@ func headerShow(indexFile string, options *ParsedOptions) error {
 	return nil
 }
 
-// headerFieldEditor is the per-field implementation of header edit.
-// validate runs first (may reject with a formatted error); apply
-// mutates the copied header in place. A nil apply means the field is
-// validate-only (i.e., always rejected).
-type headerFieldEditor struct {
-	validate func(value string) error
-	apply    func(h *indexHeader, value string)
-}
-
-var headerFieldEditors = map[string]headerFieldEditor{
-	"signature": {
-		validate: func(v string) error {
-			if len(v) != 4 {
-				return fmt.Errorf("signature must be exactly 4 characters, got %d", len(v))
-			}
-			return nil
-		},
-		apply: func(h *indexHeader, v string) { copy(h.Signature[:], v) },
-	},
-	"version": {
-		validate: func(v string) error {
-			if _, err := parseUint32(v); err != nil {
-				return fmt.Errorf("invalid version value: %v", err)
-			}
-			return nil
-		},
-		apply: func(h *indexHeader, v string) { val, _ := parseUint32(v); h.Version = val },
-	},
-	"flags": {
-		validate: func(v string) error {
-			if _, err := parseUint16(v); err != nil {
-				return fmt.Errorf("invalid flags value: %v", err)
-			}
-			return nil
-		},
-		apply: func(h *indexHeader, v string) { val, _ := parseUint16(v); h.Flags = val },
-	},
-	"checksum_type": {
-		validate: func(v string) error {
-			if _, err := parseUint16(v); err != nil {
-				return fmt.Errorf("invalid checksum_type value: %v", err)
-			}
-			return nil
-		},
-		apply: func(h *indexHeader, v string) { val, _ := parseUint16(v); h.ChecksumType = val },
-	},
-	"entry_count": {validate: func(string) error {
-		return fmt.Errorf("entry_count is auto-calculated and cannot be manually edited")
-	}},
-	"checksum": {validate: func(string) error {
-		return fmt.Errorf("checksum is auto-calculated and cannot be manually edited")
-	}},
-	"byte_order": {validate: func(string) error {
-		return fmt.Errorf("byte_order is fixed and cannot be edited")
-	}},
-}
+// The header field editor model and its surgical writer now live in
+// pkg/fix_header.go (task 28.2); see dircachefilehash.ValidateHeaderEdit /
+// ApplyHeaderEdit, driven through RunFix.
 
 func headerEdit(indexFile string, field string, value string, options *ParsedOptions) error {
 	if field == "json" {
 		return headerEditJSON(indexFile, value, options)
 	}
 
-	editor, ok := headerFieldEditors[field]
-	if !ok {
-		return fmt.Errorf("unknown header field: %s", field)
-	}
-	if err := editor.validate(value); err != nil {
+	// Validate up front so an unknown/invalid field is rejected before any
+	// dry-run preview or write (RunFix re-validates on the real write).
+	if err := dircachefilehash.ValidateHeaderEdit(field, value); err != nil {
 		return err
 	}
-	if editor.apply == nil {
-		// Validate-only fields rejected above.
-		return fmt.Errorf("field %q is not editable", field)
-	}
 
-	if !options.GetBool("dry-run") {
-		description := fmt.Sprintf("Edit header.%s = %s", field, value)
-		if err := createBackup(indexFile, "header-edit", description, options); err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
 	if options.GetBool("dry-run") {
 		fmt.Printf("Would edit header field '%s' to value '%s'\n", field, value)
-		reportDryRunPreservation(indexFile, options)
+		dircachefilehash.ReportDryRunPreservation(indexFile, fixFlags(options))
 		return nil
 	}
 
-	entryData, err := loadIndexIntoSkiplist(indexFile)
-	if err != nil {
-		return fmt.Errorf("failed to load index: %v", err)
-	}
-	currentHeader, err := getIndexHeader(indexFile)
-	if err != nil {
-		return fmt.Errorf("failed to read current header: %v", err)
-	}
-
-	newHeaderData := *currentHeader
-	editor.apply(&newHeaderData, value)
-
-	if err := writeIndexWithModifiedHeader(entryData, indexFile, &newHeaderData, options); err != nil {
+	if _, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpHeaderEdit, Field: field, Value: value,
+	}, options); err != nil {
 		return fmt.Errorf("failed to write modified index: %v", err)
 	}
 	if !options.GetBool("quiet") {
@@ -677,20 +616,12 @@ func headerEdit(indexFile string, field string, value string, options *ParsedOpt
 }
 
 func headerEditJSON(indexFile string, jsonData string, options *ParsedOptions) error {
-	// Create backup before editing
-	description := fmt.Sprintf("Edit header with JSON: %.50s...", jsonData)
-	if len(jsonData) <= 50 {
-		description = fmt.Sprintf("Edit header with JSON: %s", jsonData)
-	}
-
-	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "header-edit-json", description, options)
-		if err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
-
-	return fmt.Errorf("header edit JSON not yet implemented")
+	// The shared core takes the pre-write backup (unless --dry-run) and returns
+	// the preserved "not yet implemented" stub error.
+	_, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpHeaderEdit, Field: "json", Value: jsonData,
+	}, options)
+	return err
 }
 
 func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
@@ -715,19 +646,22 @@ func entryShow(indexFile string, paths []string, options *ParsedOptions) error {
 // write. Fields that are non-editable return an error from validate;
 // entryEdit never reaches the underlying store for them.
 var entryFieldValidators = map[string]func(value string) error{
-	"ctime":           func(v string) error { _, err := parseTimeValue(v); return errWrap("ctime", err) },
-	"mtime":           func(v string) error { _, err := parseTimeValue(v); return errWrap("mtime", err) },
-	"dev":             func(v string) error { _, err := parseUint32(v); return errWrap("dev", err) },
-	"ino":             func(v string) error { _, err := parseUint32(v); return errWrap("ino", err) },
-	"uid":             func(v string) error { _, err := parseUint32(v); return errWrap("uid", err) },
-	"gid":             func(v string) error { _, err := parseUint32(v); return errWrap("gid", err) },
-	"mode":            func(v string) error { _, err := parseUint32(v); return errWrap("mode", err) },
-	"file_size":       func(v string) error { _, err := parseInt64(v); return errWrap("file_size", err) },
-	"hash_type":       func(v string) error { _, err := parseUint16(v); return errWrap("hash_type", err) },
-	"hash":            func(v string) error { _, err := parseHashValue(v); return errWrap("hash", err) },
-	"flag_is_deleted": func(v string) error { _, err := parseBoolValue(v); return errWrap("flag_is_deleted", err) },
-	"path":            func(string) error { return fmt.Errorf("path cannot be edited (would change entry identity)") },
-	"size":            func(string) error { return fmt.Errorf("size is auto-calculated and cannot be manually edited") },
+	"ctime":     func(v string) error { _, err := dircachefilehash.ParseTimeValue(v); return errWrap("ctime", err) },
+	"mtime":     func(v string) error { _, err := dircachefilehash.ParseTimeValue(v); return errWrap("mtime", err) },
+	"dev":       func(v string) error { _, err := dircachefilehash.ParseUint32(v); return errWrap("dev", err) },
+	"ino":       func(v string) error { _, err := dircachefilehash.ParseUint32(v); return errWrap("ino", err) },
+	"uid":       func(v string) error { _, err := dircachefilehash.ParseUint32(v); return errWrap("uid", err) },
+	"gid":       func(v string) error { _, err := dircachefilehash.ParseUint32(v); return errWrap("gid", err) },
+	"mode":      func(v string) error { _, err := dircachefilehash.ParseUint32(v); return errWrap("mode", err) },
+	"file_size": func(v string) error { _, err := dircachefilehash.ParseInt64(v); return errWrap("file_size", err) },
+	"hash_type": func(v string) error { _, err := dircachefilehash.ParseUint16(v); return errWrap("hash_type", err) },
+	"hash":      func(v string) error { _, err := dircachefilehash.ParseHashValue(v); return errWrap("hash", err) },
+	"flag_is_deleted": func(v string) error {
+		_, err := dircachefilehash.ParseBoolValue(v)
+		return errWrap("flag_is_deleted", err)
+	},
+	"path": func(string) error { return fmt.Errorf("path cannot be edited (would change entry identity)") },
+	"size": func(string) error { return fmt.Errorf("size is auto-calculated and cannot be manually edited") },
 }
 
 // errWrap annotates the common "invalid X value: ..." pattern with
@@ -755,45 +689,31 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 		return err
 	}
 
-	pathsDesc := fmt.Sprintf("%d paths", len(paths))
-	if len(paths) <= 3 {
-		pathsDesc = strings.Join(paths, ", ")
-	}
-	if !options.GetBool("dry-run") {
-		description := fmt.Sprintf("Edit entry.%s = %s for %s", field, value, pathsDesc)
-		if err := createBackup(indexFile, "entry-edit", description, options); err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
 	if options.GetBool("dry-run") {
+		pathsDesc := fmt.Sprintf("%d paths", len(paths))
+		if len(paths) <= 3 {
+			pathsDesc = strings.Join(paths, ", ")
+		}
 		fmt.Printf("Would edit entry field '%s' to value '%s' for paths: %s\n", field, value, pathsDesc)
-		reportDryRunPreservation(indexFile, options)
+		dircachefilehash.ReportDryRunPreservation(indexFile, fixFlags(options))
 		return nil
 	}
 
-	pathSet := make(map[string]bool, len(paths))
-	for _, path := range paths {
-		normalizedPath := filepath.Clean(path)
-		if normalizedPath == "." {
-			normalizedPath = ""
-		}
-		pathSet[normalizedPath] = true
-	}
-
-	// Process entries using safe workflow approach (never edit files directly)
-	entriesFixed, entriesDiscarded, err := processEntriesWithWorkflow(indexFile, pathSet, field, value, options)
+	res, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpEntryEdit, Field: field, Value: value, Paths: paths,
+	}, options)
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
 
-	if entriesFixed == 0 {
+	if res.RepairsApplied == 0 {
 		return fmt.Errorf("no matching entries found for specified paths")
 	}
 
 	if !options.GetBool("quiet") {
-		fmt.Printf("Updated field '%s' to '%s' for %d matching entries", field, value, entriesFixed)
-		if entriesDiscarded > 0 {
-			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		fmt.Printf("Updated field '%s' to '%s' for %d matching entries", field, value, res.RepairsApplied)
+		if res.EntriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", res.EntriesDiscarded)
 		}
 		fmt.Println()
 	}
@@ -802,64 +722,36 @@ func entryEdit(indexFile string, field string, value string, paths []string, opt
 }
 
 func entryEditJSON(indexFile string, jsonData string, paths []string, options *ParsedOptions) error {
-	// Create backup before editing
-	pathsDesc := fmt.Sprintf("%d paths", len(paths))
-	if len(paths) <= 3 {
-		pathsDesc = strings.Join(paths, ", ")
-	}
-	jsonDesc := fmt.Sprintf("%.30s...", jsonData)
-	if len(jsonData) <= 30 {
-		jsonDesc = jsonData
-	}
-	description := fmt.Sprintf("Edit entries with JSON %s for %s", jsonDesc, pathsDesc)
-
-	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "entry-edit-json", description, options)
-		if err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
-
-	return fmt.Errorf("entry edit JSON not yet implemented")
+	// The shared core takes the pre-write backup (unless --dry-run) and returns
+	// the preserved "not yet implemented" stub error.
+	_, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpEntryEdit, Field: "json", Value: jsonData, Paths: paths,
+	}, options)
+	return err
 }
 
 func entryAppend(indexFile string, jsonData string, options *ParsedOptions) error {
-	// Create backup before appending
-	jsonDesc := fmt.Sprintf("%.40s...", jsonData)
-	if len(jsonData) <= 40 {
-		jsonDesc = jsonData
-	}
-	description := fmt.Sprintf("Append entry: %s", jsonDesc)
-
-	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "entry-append", description, options)
-		if err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
-
 	if options.GetBool("dry-run") {
+		jsonDesc := fmt.Sprintf("%.40s...", jsonData)
+		if len(jsonData) <= 40 {
+			jsonDesc = jsonData
+		}
 		fmt.Printf("Would append entry from JSON: %s\n", jsonDesc)
-		reportDryRunPreservation(indexFile, options)
+		dircachefilehash.ReportDryRunPreservation(indexFile, fixFlags(options))
 		return nil
 	}
 
-	// Parse and validate the JSON entry
-	newEntry, err := parseEntryFromJSON(jsonData)
+	res, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpEntryAppend, Value: jsonData,
+	}, options)
 	if err != nil {
-		return fmt.Errorf("failed to parse JSON entry: %v", err)
-	}
-
-	// Process entries using the workflow to append the new entry
-	entriesAdded, entriesDiscarded, err := processEntriesWithAppend(indexFile, newEntry, options)
-	if err != nil {
-		return fmt.Errorf("failed to process entries: %v", err)
+		return err
 	}
 
 	if !options.GetBool("quiet") {
-		fmt.Printf("Added %d entry", entriesAdded)
-		if entriesDiscarded > 0 {
-			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		fmt.Printf("Added %d entry", res.RepairsApplied)
+		if res.EntriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", res.EntriesDiscarded)
 		}
 		fmt.Println()
 	}
@@ -868,54 +760,35 @@ func entryAppend(indexFile string, jsonData string, options *ParsedOptions) erro
 }
 
 func entryRemove(indexFile string, paths []string, options *ParsedOptions) error {
-	// Create backup before removing
-	pathsDesc := fmt.Sprintf("%d paths", len(paths))
-	if len(paths) <= 5 {
-		pathsDesc = strings.Join(paths, ", ")
-	}
-	description := fmt.Sprintf("Remove entries: %s", pathsDesc)
-
-	if !options.GetBool("dry-run") {
-		err := createBackup(indexFile, "entry-remove", description, options)
-		if err != nil {
-			return fmt.Errorf("failed to create backup: %v", err)
-		}
-	}
-
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths specified")
 	}
 
 	if options.GetBool("dry-run") {
+		pathsDesc := fmt.Sprintf("%d paths", len(paths))
+		if len(paths) <= 5 {
+			pathsDesc = strings.Join(paths, ", ")
+		}
 		fmt.Printf("Would remove entries for paths: %s\n", pathsDesc)
-		reportDryRunPreservation(indexFile, options)
+		dircachefilehash.ReportDryRunPreservation(indexFile, fixFlags(options))
 		return nil
 	}
 
-	// Convert paths to a map for quick lookup
-	pathSet := make(map[string]bool)
-	for _, path := range paths {
-		normalizedPath := filepath.Clean(path)
-		if normalizedPath == "." {
-			normalizedPath = ""
-		}
-		pathSet[normalizedPath] = true
-	}
-
-	// Process entries using the workflow to remove matching paths
-	entriesRemoved, entriesDiscarded, err := processEntriesWithRemoval(indexFile, pathSet, options)
+	res, err := runFixWrite(indexFile, dircachefilehash.FixCommand{
+		Op: dircachefilehash.FixOpEntryRemove, Paths: paths,
+	}, options)
 	if err != nil {
 		return fmt.Errorf("failed to process entries: %v", err)
 	}
 
-	if entriesRemoved == 0 {
+	if res.RepairsApplied == 0 {
 		return fmt.Errorf("no matching entries found for specified paths")
 	}
 
 	if !options.GetBool("quiet") {
-		fmt.Printf("Removed %d entries", entriesRemoved)
-		if entriesDiscarded > 0 {
-			fmt.Printf(" (%d corrupted entries discarded)", entriesDiscarded)
+		fmt.Printf("Removed %d entries", res.RepairsApplied)
+		if res.EntriesDiscarded > 0 {
+			fmt.Printf(" (%d corrupted entries discarded)", res.EntriesDiscarded)
 		}
 		fmt.Println()
 	}
@@ -923,198 +796,25 @@ func entryRemove(indexFile string, paths []string, options *ParsedOptions) error
 	return nil
 }
 
-// Backup management functions
-
-// getIndexType extracts the index type from the file path (e.g., "main" from "main.idx")
-func getIndexType(indexFile string) string {
-	base := filepath.Base(indexFile)
-	if before, ok := strings.CutSuffix(base, ".idx"); ok {
-		return before
-	}
-	return "unknown"
-}
-
-// getBackupDir returns the backup directory for a specific index type
-func getBackupDir(indexFile string) (string, error) {
-	// Find .dcfh directory by walking up from index file
-	dir := filepath.Dir(indexFile)
-	for {
-		dcfhDir := filepath.Join(dir, ".dcfh")
-		if info, err := os.Stat(dcfhDir); err == nil && info.IsDir() {
-			indexType := getIndexType(indexFile)
-			backupDir := filepath.Join(dcfhDir, "fixes", indexType)
-			return backupDir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break // reached root
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("could not find .dcfh directory")
-}
-
-// createBackup creates a backup of the index file and returns the backup metadata
-func createBackup(indexFile string, operation string, description string, options *ParsedOptions) error {
-	if !options.GetBool("backup") {
-		return nil // backup disabled
-	}
-
-	backupDir, err := getBackupDir(indexFile)
-	if err != nil {
-		return fmt.Errorf("failed to find backup directory: %v", err)
-	}
-
-	// Create backup directory if it doesn't exist
-	if err := os.MkdirAll(backupDir, 0755); err != nil { //nolint:gosec // G301: .dcfh/ backup dir, non-secret (index backups)
-		return fmt.Errorf("failed to create backup directory: %v", err)
-	}
-
-	// Generate backup filename with timestamp
-	timestamp := time.Now()
-	backupFilename := fmt.Sprintf("%d-%s.idx", timestamp.Unix(), timestamp.Format("20060102T150405"))
-	backupPath := filepath.Join(backupDir, backupFilename)
-
-	// Copy the index file to backup location
-	if err := copyFile(indexFile, backupPath); err != nil {
-		return fmt.Errorf("failed to create backup: %v", err)
-	}
-
-	// Create metadata
-	metadata := &BackupMetadata{
-		Timestamp:   timestamp,
-		Operation:   operation,
-		Description: description,
-		IndexFile:   indexFile,
-		BackupFile:  backupPath,
-	}
-
-	// Save metadata
-	metadataPath := strings.TrimSuffix(backupPath, ".idx") + ".json"
-	if err := saveMetadata(metadata, metadataPath); err != nil {
-		// Remove the backup file if metadata save fails
-		_ = os.Remove(backupPath)
-		return fmt.Errorf("failed to save backup metadata: %v", err)
-	}
-
-	if options.GetInt("verbose") > 0 && !options.GetBool("quiet") {
-		fmt.Printf("Created backup: %s\n", backupFilename)
-	}
-
-	return nil
-}
-
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcFile.Close() }()
-
-	dstFile, err := os.Create(dst) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dstFile.Close() }()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
-}
-
-// saveMetadata saves backup metadata to a JSON file
-func saveMetadata(metadata *BackupMetadata, path string) error {
-	data, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0644) //nolint:gosec // G306: .dcfh/ index file, non-secret (metadata + hashes)
-}
-
-// loadMetadata loads backup metadata from a JSON file
-func loadMetadata(path string) (*BackupMetadata, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
-	if err != nil {
-		return nil, err
-	}
-
-	var metadata BackupMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, err
-	}
-
-	return &metadata, nil
-}
-
-// listBackups returns all backup metadata in chronological order (newest first)
-func listBackups(indexFile string) ([]*BackupMetadata, error) {
-	backupDir, err := getBackupDir(indexFile)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if backup directory exists
-	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		return []*BackupMetadata{}, nil // no backups
-	}
-
-	// Read all .json files in backup directory
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read backup directory: %v", err)
-	}
-
-	var backups []*BackupMetadata
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
-			metadataPath := filepath.Join(backupDir, entry.Name())
-			metadata, err := loadMetadata(metadataPath)
-			if err != nil {
-				// Skip invalid metadata files
-				continue
-			}
-			backups = append(backups, metadata)
-		}
-	}
-
-	// Sort by timestamp, newest first
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].Timestamp.After(backups[j].Timestamp)
-	})
-
-	return backups, nil
-}
-
-// removeBackupFiles removes both the backup file and its metadata
-func removeBackupFiles(metadata *BackupMetadata) error {
-	// Remove backup file
-	if err := os.Remove(metadata.BackupFile); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove backup file: %v", err)
-	}
-
-	// Remove metadata file
-	metadataPath := strings.TrimSuffix(metadata.BackupFile, ".idx") + ".json"
-	if err := os.Remove(metadataPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove metadata file: %v", err)
-	}
-
-	return nil
-}
+// Backup management presenters
+//
+// The backup-stack logic now lives in pkg/fix_backup.go (task 28.2, FR3). The
+// edit handlers no longer take backups themselves — RunFix owns the pre-write
+// backup. The functions here are thin CLI presenters for the fixes subcommands:
+// they own the stdout rendering (human/JSON tables, dry-run notices, quiet
+// handling) and call the pkg stack cores.
 
 // Fixes command implementations
 
 func fixesList(indexFile string, options *ParsedOptions) error {
-	backups, err := listBackups(indexFile)
+	backups, err := dircachefilehash.ListBackups(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
 
 	if len(backups) == 0 {
 		if !options.GetBool("quiet") {
-			fmt.Printf("No backups found for %s\n", getIndexType(indexFile))
+			fmt.Printf("No backups found for %s\n", dircachefilehash.BackupIndexType(indexFile))
 		}
 		return nil
 	}
@@ -1128,7 +828,7 @@ func fixesList(indexFile string, options *ParsedOptions) error {
 		fmt.Printf("%s\n", data)
 	} else {
 		// Human-readable format
-		fmt.Printf("Backup stack for %s (%d entries):\n\n", getIndexType(indexFile), len(backups))
+		fmt.Printf("Backup stack for %s (%d entries):\n\n", dircachefilehash.BackupIndexType(indexFile), len(backups))
 		fmt.Printf("%-20s %-15s %-30s\n", "Timestamp", "Operation", "Description")
 		fmt.Printf("%-20s %-15s %-30s\n", strings.Repeat("-", 20), strings.Repeat("-", 15), strings.Repeat("-", 30))
 
@@ -1150,18 +850,15 @@ func fixesList(indexFile string, options *ParsedOptions) error {
 }
 
 func fixesPop(indexFile string, options *ParsedOptions) error {
-	backups, err := listBackups(indexFile)
-	if err != nil {
-		return fmt.Errorf("failed to list backups: %v", err)
-	}
-
-	if len(backups) == 0 {
-		return fmt.Errorf("no backups available to restore")
-	}
-
-	latest := backups[0] // newest backup
-
 	if options.GetBool("dry-run") {
+		backups, err := dircachefilehash.ListBackups(indexFile)
+		if err != nil {
+			return fmt.Errorf("failed to list backups: %v", err)
+		}
+		if len(backups) == 0 {
+			return fmt.Errorf("no backups available to restore")
+		}
+		latest := backups[0]
 		fmt.Printf("Would restore backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
@@ -1169,14 +866,9 @@ func fixesPop(indexFile string, options *ParsedOptions) error {
 		return nil
 	}
 
-	// Restore the backup
-	if err := copyFile(latest.BackupFile, indexFile); err != nil {
-		return fmt.Errorf("failed to restore backup: %v", err)
-	}
-
-	// Remove the backup files
-	if err := removeBackupFiles(latest); err != nil {
-		return fmt.Errorf("backup restored but failed to clean up backup files: %v", err)
+	latest, err := dircachefilehash.PopBackup(indexFile)
+	if err != nil {
+		return err
 	}
 
 	if !options.GetBool("quiet") {
@@ -1190,18 +882,15 @@ func fixesPop(indexFile string, options *ParsedOptions) error {
 }
 
 func fixesDiscard(indexFile string, options *ParsedOptions) error {
-	backups, err := listBackups(indexFile)
-	if err != nil {
-		return fmt.Errorf("failed to list backups: %v", err)
-	}
-
-	if len(backups) == 0 {
-		return fmt.Errorf("no backups available to discard")
-	}
-
-	latest := backups[0] // newest backup
-
 	if options.GetBool("dry-run") {
+		backups, err := dircachefilehash.ListBackups(indexFile)
+		if err != nil {
+			return fmt.Errorf("failed to list backups: %v", err)
+		}
+		if len(backups) == 0 {
+			return fmt.Errorf("no backups available to discard")
+		}
+		latest := backups[0]
 		fmt.Printf("Would discard backup from %s (%s: %s)\n",
 			latest.Timestamp.Format("2006-01-02 15:04:05"),
 			latest.Operation,
@@ -1209,9 +898,9 @@ func fixesDiscard(indexFile string, options *ParsedOptions) error {
 		return nil
 	}
 
-	// Remove the backup files
-	if err := removeBackupFiles(latest); err != nil {
-		return fmt.Errorf("failed to discard backup: %v", err)
+	latest, err := dircachefilehash.DiscardBackup(indexFile)
+	if err != nil {
+		return err
 	}
 
 	if !options.GetBool("quiet") {
@@ -1225,143 +914,33 @@ func fixesDiscard(indexFile string, options *ParsedOptions) error {
 }
 
 func fixesClear(indexFile string, options *ParsedOptions) error {
-	backups, err := listBackups(indexFile)
+	backups, err := dircachefilehash.ListBackups(indexFile)
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %v", err)
 	}
 
 	if len(backups) == 0 {
 		if !options.GetBool("quiet") {
-			fmt.Printf("No backups to clear for %s\n", getIndexType(indexFile))
+			fmt.Printf("No backups to clear for %s\n", dircachefilehash.BackupIndexType(indexFile))
 		}
 		return nil
 	}
 
 	if options.GetBool("dry-run") {
-		fmt.Printf("Would clear %d backup(s) for %s\n", len(backups), getIndexType(indexFile))
+		fmt.Printf("Would clear %d backup(s) for %s\n", len(backups), dircachefilehash.BackupIndexType(indexFile))
 		return nil
 	}
 
-	// Remove all backup files
-	for _, backup := range backups {
-		if err := removeBackupFiles(backup); err != nil {
-			return fmt.Errorf("failed to remove backup from %s: %v",
-				backup.Timestamp.Format("2006-01-02 15:04:05"), err)
-		}
+	cleared, err := dircachefilehash.ClearBackups(indexFile)
+	if err != nil {
+		return err
 	}
 
-	// Remove backup directory if it's empty
-	backupDir, _ := getBackupDir(indexFile)
-	_ = os.Remove(backupDir) // ignore error if directory not empty or doesn't exist
-
 	if !options.GetBool("quiet") {
-		fmt.Printf("Cleared %d backup(s) for %s\n", len(backups), getIndexType(indexFile))
+		fmt.Printf("Cleared %d backup(s) for %s\n", cleared, dircachefilehash.BackupIndexType(indexFile))
 	}
 
 	return nil
-}
-
-// Helper functions for parsing values
-
-func parseUint16(value string) (uint16, error) {
-	// Handle hex values (with or without 0x prefix)
-	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
-		val, err := strconv.ParseUint(value[2:], 16, 16)
-		return uint16(val), err
-	}
-	// Handle octal values (with 0 prefix)
-	if strings.HasPrefix(value, "0") && len(value) > 1 {
-		val, err := strconv.ParseUint(value, 8, 16)
-		return uint16(val), err
-	}
-	// Handle decimal values
-	val, err := strconv.ParseUint(value, 10, 16)
-	return uint16(val), err
-}
-
-func parseUint32(value string) (uint32, error) {
-	// Handle hex values (with or without 0x prefix)
-	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
-		val, err := strconv.ParseUint(value[2:], 16, 32)
-		return uint32(val), err
-	}
-	// Handle octal values (with 0 prefix)
-	if strings.HasPrefix(value, "0") && len(value) > 1 {
-		val, err := strconv.ParseUint(value, 8, 32)
-		return uint32(val), err
-	}
-	// Handle decimal values
-	val, err := strconv.ParseUint(value, 10, 32)
-	return uint32(val), err
-}
-
-// parseInt64 parses a string value as int64 with support for hex/octal/decimal.
-// Used for file_size, which is a signed int64 (off_t-style) on disk; parsing
-// signed end-to-end avoids a uint64->int64 narrowing conversion.
-func parseInt64(value string) (int64, error) {
-	// Handle hex values (with or without 0x prefix)
-	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
-		val, err := strconv.ParseInt(value[2:], 16, 64)
-		return val, err
-	}
-	// Handle octal values (with 0 prefix)
-	if strings.HasPrefix(value, "0") && len(value) > 1 {
-		val, err := strconv.ParseInt(value, 8, 64)
-		return val, err
-	}
-	// Handle decimal values
-	val, err := strconv.ParseInt(value, 10, 64)
-	return val, err
-}
-
-// parseTimeValue parses time in various formats and returns wall time
-func parseTimeValue(value string) (uint64, error) {
-	// Try ISO 8601 format first
-	if t, err := time.Parse("2006-01-02T15:04:05.000000000Z", value); err == nil {
-		return dircachefilehash.TimeToWall(t), nil
-	}
-	if t, err := time.Parse("2006-01-02T15:04:05Z", value); err == nil {
-		return dircachefilehash.TimeToWall(t), nil
-	}
-	// Try Unix timestamp
-	if timestamp, err := strconv.ParseInt(value, 10, 64); err == nil {
-		t := time.Unix(timestamp, 0)
-		return dircachefilehash.TimeToWall(t), nil
-	}
-	return 0, fmt.Errorf("invalid time format, use ISO 8601 (2006-01-02T15:04:05Z) or Unix timestamp")
-}
-
-// parseHashValue parses and validates a hash string
-func parseHashValue(value string) ([]byte, error) {
-	// Remove any 0x prefix
-	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
-		value = value[2:]
-	}
-
-	// Decode hex string
-	hash, err := hex.DecodeString(value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid hex string: %v", err)
-	}
-
-	// Validate hash length (must be 20, 32, or 64 bytes for SHA1, SHA256, SHA512)
-	if len(hash) != 20 && len(hash) != 32 && len(hash) != 64 {
-		return nil, fmt.Errorf("invalid hash length %d, must be 20 (SHA1), 32 (SHA256), or 64 (SHA512) bytes", len(hash))
-	}
-
-	return hash, nil
-}
-
-// parseBoolValue parses various boolean representations
-func parseBoolValue(value string) (bool, error) {
-	switch strings.ToLower(value) {
-	case "true", "1", "yes", "on":
-		return true, nil
-	case "false", "0", "no", "off":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean value: %s (use true/false, 1/0, yes/no, on/off)", value)
-	}
 }
 
 // displayEntriesJSON displays entries in JSON format
@@ -1446,115 +1025,4 @@ func displayEntriesHuman(entries []*dircachefilehash.EntryInfo, notFoundPaths []
 	}
 
 	return nil
-}
-
-// Helper functions for proper dcfh pattern implementation
-
-// loadIndexIntoSkiplist loads an index file and reads its data
-func loadIndexIntoSkiplist(indexFile string) (*EntryData, error) {
-	// Read the entire index file
-	data, err := os.ReadFile(indexFile) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
-	if err != nil {
-		return nil, fmt.Errorf("failed to read index file: %w", err)
-	}
-
-	// Validate minimum size
-	if len(data) < dircachefilehash.V2HeaderSize {
-		return nil, fmt.Errorf("index file too small: %d bytes", len(data))
-	}
-
-	// Read header to get entry count
-	header := (*indexHeader)(unsafe.Pointer(&data[0]))
-
-	// Basic validation
-	if string(header.Signature[:]) != "dcfh" {
-		return nil, fmt.Errorf("invalid signature: %s", string(header.Signature[:]))
-	}
-
-	entryData := &EntryData{
-		IndexFile:    indexFile,
-		OriginalData: data,
-		EntryCount:   header.EntryCount,
-	}
-
-	return entryData, nil
-}
-
-// getIndexHeader reads and returns the current header from an index file
-func getIndexHeader(indexFile string) (*indexHeader, error) {
-	// Open the index file
-	indexAccess, err := openIndexFile(indexFile)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = indexAccess.Close() }()
-
-	// Make a copy of the header to avoid returning a pointer to mmap'd memory
-	headerCopy := *indexAccess.header
-	return &headerCopy, nil
-}
-
-// writeIndexWithModifiedHeader writes an index with a modified header
-func writeIndexWithModifiedHeader(entryData *EntryData, indexFile string, newHeader *indexHeader, options *ParsedOptions) error {
-	// Create temporary file path
-	tempFile := indexFile + ".tmp"
-	defer func() {
-		// Clean up temp file if it still exists
-		if _, err := os.Stat(tempFile); err == nil {
-			_ = os.Remove(tempFile)
-		}
-	}()
-
-	// Write the index with custom header
-	if err := writeIndexWithCustomHeader(entryData, tempFile, newHeader); err != nil {
-		return fmt.Errorf("failed to write index with custom header: %w", err)
-	}
-
-	// Preserve the original (default) then atomic replace.
-	if err := promoteRepairedIndex(tempFile, indexFile, options); err != nil {
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
-}
-
-// EntryData holds the loaded index data
-type EntryData struct {
-	IndexFile    string
-	OriginalData []byte
-	EntryCount   uint32
-}
-
-// writeIndexWithCustomHeader writes an index with a custom header (simplified approach)
-func writeIndexWithCustomHeader(entryData *EntryData, outputPath string, customHeader *indexHeader) error {
-	// Set the entry count from the original data
-	customHeader.EntryCount = entryData.EntryCount
-
-	// Create output file
-	file, err := os.Create(outputPath) //nolint:gosec // G304: repair-tool path from a user-supplied CLI argument (the index named on the command line); no trust boundary
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-
-	// Write custom header
-	headerBytes := (*[dircachefilehash.HeaderSize]byte)(unsafe.Pointer(customHeader))
-	if _, err := file.Write(headerBytes[:]); err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
-	}
-
-	// Write original entry data (skip original header using its version)
-	origHeader := (*indexHeader)(unsafe.Pointer(&entryData.OriginalData[0]))
-	origHdrSize := dircachefilehash.HeaderSizeForVersion(origHeader.Version)
-	if len(entryData.OriginalData) > origHdrSize {
-		entryBytes := entryData.OriginalData[origHdrSize:]
-		if _, err := file.Write(entryBytes); err != nil {
-			return fmt.Errorf("failed to write entries: %w", err)
-		}
-	}
-
-	// Note: This simplified approach doesn't recalculate checksums
-	// For a full implementation, we'd need to implement the vectorio approach
-
-	return file.Sync()
 }

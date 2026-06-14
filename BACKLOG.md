@@ -285,3 +285,51 @@ The CHANGELOG entry regex (CWF/Backlog.pm) requires the colon immediately after 
 ### Identified in: Task 27 retrospective (j-retrospective.md)
 
 Task 27 covered the discovery→hash boundary races (grow/shrink/file→dir) via the existing `hashPreReadHook` seam, but the earlier readdir→lstat mid-walk race in `statAndFilter` (`pkg/scan.go:224`) has no test because there is no seam: `io_seam.go` exposes only `fsRename`/`fsOpenFile`/`fsSync`/`hashPreReadHook`, not lstat. Testing the case where a path is returned by readdir but disappears (ENOENT) before `os.Lstat` deterministically needs a small production walk-phase hook mirroring `hashPreReadHook`. The current handling (silent skip) is arguably correct and low-risk, which is why Task 27 deferred this rather than add production surface for one narrow test. Take it only if the minimal seam is justified.
+
+## Task: dcfhfix: implement Manual (interactive) fix mode
+
+### Task-Type: feature
+### Priority: Low
+### Identified in: Task 28.2 retrospective (j-retrospective.md)
+
+RunFix currently returns ErrManualModeUnimplemented for FixMode == Manual (deferred in 28.2). Implement per-entry interactive prompting (ask once per change, the legacy fsck default) atop the existing collect/write split in pkg/fix_run.go. Auto-fix and dry-run already work; Manual is the remaining mode. Pick up when there is a concrete user need — the typed error is a clean placeholder until then.
+
+## Task: dcfhfix: widen backup filename timestamp to sub-second granularity
+
+### Task-Type: bugfix
+### Priority: Low
+### Identified in: Task 28.2 retrospective (j-retrospective.md)
+
+Backup stack filenames are second-granularity (<unix>-<YYYYMMDDTHHMMSS>.idx), so two edits to the same index within the same wall-clock second collide into a single stack entry rather than stacking. Pre-existing (predates 28.2); surfaced by TestRunFix_FixesDiscardAndClear. Acceptable today. If sub-second backup stacking is ever required, widen the filename timestamp (e.g. append a monotonic counter or nanoseconds) in pkg/fix_backup.go. Low priority — the common recovery path is rm -rf .dcfh && dcfh init.
+
+## Task: dcfhfix: suppress misleading "original is NOT preserved" warning on the recovery-rebuild path
+
+### Task-Type: bugfix
+### Priority: Low
+### Identified in: Task 28.3 retrospective (j-retrospective.md)
+
+PromoteRepairedIndex prints a hardcoded "original is NOT preserved" warning to stderr even when the recovery-rebuild op took a pre-recovery snapshot that did preserve the original (the write uses EditInPlace+Force). Harmless but misleading on the recovery path. Refine the message to reflect the snapshot, or suppress it when a snapshot exists. Library-only; no behaviour change beyond the message. See pkg/fix_recovery.go runRecoveryRebuild + PromoteRepairedIndex.
+
+## Task: Refresh stale dcfhfix example syntax in CLAUDE.md
+
+### Task-Type: chore
+### Priority: Low
+### Identified in: Task 28 retrospective (j-retrospective.md)
+
+CLAUDE.md still documents the pre-28.2 dcfhfix surface (scan/header example syntax). The shipped surface is the header|entry|fixes families. Update the examples to match dcfhfix --help. Doc-only; surfaced at the Task 28 parent integration smoke test.
+
+## Task: Refine PromoteRepairedIndex stderr message for snapshot-backed recovery
+
+### Task-Type: chore
+### Priority: Very Low
+### Identified in: Task 28 retrospective (j-retrospective.md)
+
+runRecoveryRebuild writes with EditInPlace/Force, so PromoteRepairedIndex prints a hardcoded "original is NOT preserved" stderr line even though the pre-recovery snapshot did preserve the original. Cosmetic message refinement for the library-only recovery path; no correctness impact (28.3 LD).
+
+## Task: Implement manual interactive fsck mode (currently ErrManualModeUnimplemented)
+
+### Task-Type: feature
+### Priority: Low
+### Identified in: Task 28 retrospective (j-retrospective.md)
+
+The per-entry interactive fsck mode is deferred by design: RunFix returns the typed ErrManualModeUnimplemented fail-closed (no write) when FixMode==Manual. Implement it as a FixRequest mode if user demand warrants. Auto-fix mode is fully shipped.

@@ -11,6 +11,5 @@ import "github.com/mattkeenan/dircachefilehash/pkg/format"
 // is 104 bytes with identical field offsets 0..92. Adopting it fixes a latent
 // 8-byte over-read in the header write path and preserves the v3 Timestamp.
 type (
-	binaryEntry = format.Entry
 	indexHeader = format.Header
 )

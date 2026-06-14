@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
 // optsWith builds a ParsedOptions with the flags promote.go reads, parsed from
@@ -46,7 +48,7 @@ func withStableSecond(t *testing.T, body func() bool) {
 
 // TC-U1 — sibling naming shape.
 func TestSiblingPreFixPath_Shape(t *testing.T) {
-	got := siblingPreFixPath("/x/main.idx")
+	got := dircachefilehash.SiblingPreFixPath("/x/main.idx")
 	const wantPrefix = "/x/main.idx.pre-fix-"
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("siblingPreFixPath = %q, want prefix %q", got, wantPrefix)
@@ -69,7 +71,7 @@ func TestPreserveOriginal_ByteIdenticalOriginalIntact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sib, err := preserveOriginal(idx)
+	sib, err := dircachefilehash.PreserveOriginal(idx)
 	if err != nil {
 		t.Fatalf("preserveOriginal: %v", err)
 	}
@@ -107,12 +109,12 @@ func TestPreserveOriginal_RefusesSymlink(t *testing.T) {
 		if err := os.WriteFile(target, []byte("SECRET"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		base := siblingPreFixPath(idx)
+		base := dircachefilehash.SiblingPreFixPath(idx)
 		if err := os.Symlink(target, base); err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := preserveOriginal(idx)
+		_, err := dircachefilehash.PreserveOriginal(idx)
 		if currentStamp() != s1 {
 			return false // straddled a second boundary; retry
 		}
@@ -140,12 +142,12 @@ func TestPreserveOriginal_RefusesDirectory(t *testing.T) {
 		if err := os.WriteFile(idx, []byte("orig"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		base := siblingPreFixPath(idx)
+		base := dircachefilehash.SiblingPreFixPath(idx)
 		if err := os.Mkdir(base, 0755); err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := preserveOriginal(idx)
+		_, err := dircachefilehash.PreserveOriginal(idx)
 		if currentStamp() != s1 {
 			return false
 		}
@@ -165,12 +167,12 @@ func TestPreserveOriginal_EEXISTAdvancesCounter(t *testing.T) {
 		if err := os.WriteFile(idx, []byte("ORIGINAL"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		base := siblingPreFixPath(idx)
+		base := dircachefilehash.SiblingPreFixPath(idx)
 		if err := os.WriteFile(base, []byte("PRIOR"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
-		sib, err := preserveOriginal(idx)
+		sib, err := dircachefilehash.PreserveOriginal(idx)
 		if currentStamp() != s1 {
 			return false
 		}
@@ -200,19 +202,19 @@ func TestPreserveOriginal_BoundExhaustion(t *testing.T) {
 		if err := os.WriteFile(idx, []byte("orig"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		base := siblingPreFixPath(idx)
+		base := dircachefilehash.SiblingPreFixPath(idx)
 		// Occupy base and base-1 .. base-<max> with regular files.
 		if err := os.WriteFile(base, []byte("x"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		for n := 1; n <= maxPreFixCollisionSuffix; n++ {
+		for n := 1; n <= dircachefilehash.MaxPreFixCollisionSuffix; n++ {
 			cand := fmt.Sprintf("%s-%d", base, n)
 			if err := os.WriteFile(cand, []byte("x"), 0644); err != nil {
 				t.Fatal(err)
 			}
 		}
 
-		_, err := preserveOriginal(idx)
+		_, err := dircachefilehash.PreserveOriginal(idx)
 		if currentStamp() != s1 {
 			return false
 		}
@@ -220,7 +222,7 @@ func TestPreserveOriginal_BoundExhaustion(t *testing.T) {
 			t.Fatal("expected error when all collision candidates exist")
 		}
 		// No candidate beyond the bound was created.
-		if _, serr := os.Stat(fmt.Sprintf("%s-%d", base, maxPreFixCollisionSuffix+1)); serr == nil {
+		if _, serr := os.Stat(fmt.Sprintf("%s-%d", base, dircachefilehash.MaxPreFixCollisionSuffix+1)); serr == nil {
 			t.Errorf("a sibling past the bound was created")
 		}
 		return true
@@ -229,16 +231,16 @@ func TestPreserveOriginal_BoundExhaustion(t *testing.T) {
 
 // TC-U7 — gate logic.
 func TestValidateEditInPlaceGate(t *testing.T) {
-	if err := validateEditInPlaceGate(optsWith(t, "--edit-in-place")); err == nil {
+	if err := dircachefilehash.ValidateEditInPlaceGate(fixFlags(optsWith(t, "--edit-in-place"))); err == nil {
 		t.Error("--edit-in-place without --force should error")
 	}
-	if err := validateEditInPlaceGate(optsWith(t, "--edit-in-place", "--force")); err != nil {
+	if err := dircachefilehash.ValidateEditInPlaceGate(fixFlags(optsWith(t, "--edit-in-place", "--force"))); err != nil {
 		t.Errorf("--edit-in-place --force should pass: %v", err)
 	}
-	if err := validateEditInPlaceGate(optsWith(t)); err != nil {
+	if err := dircachefilehash.ValidateEditInPlaceGate(fixFlags(optsWith(t))); err != nil {
 		t.Errorf("neither flag should pass: %v", err)
 	}
-	if err := validateEditInPlaceGate(optsWith(t, "--force")); err != nil {
+	if err := dircachefilehash.ValidateEditInPlaceGate(fixFlags(optsWith(t, "--force"))); err != nil {
 		t.Errorf("--force alone should pass: %v", err)
 	}
 }
@@ -258,7 +260,7 @@ func TestPromoteRepairedIndex_DefaultPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := promoteRepairedIndex(tmp, idx, optsWith(t)); err != nil {
+	if err := dircachefilehash.PromoteRepairedIndex(tmp, idx, fixFlags(optsWith(t))); err != nil {
 		t.Fatalf("promoteRepairedIndex: %v", err)
 	}
 	// Canonical now holds the repaired bytes.
@@ -288,7 +290,7 @@ func TestPromoteRepairedIndex_EditInPlaceSuppresses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := promoteRepairedIndex(tmp, idx, optsWith(t, "--edit-in-place", "--force")); err != nil {
+	if err := dircachefilehash.PromoteRepairedIndex(tmp, idx, fixFlags(optsWith(t, "--edit-in-place", "--force"))); err != nil {
 		t.Fatalf("promoteRepairedIndex: %v", err)
 	}
 	if got, _ := os.ReadFile(idx); string(got) != "REPAIRED" {
@@ -312,7 +314,7 @@ func TestPreserveOriginal_CopyFailureRemovesPartial(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := preserveOriginal(idxDir)
+		_, err := dircachefilehash.PreserveOriginal(idxDir)
 		if currentStamp() != s1 {
 			return false
 		}
@@ -337,7 +339,7 @@ func TestPromoteRepairedIndex_RenameFailure(t *testing.T) {
 	}
 	missingTmp := filepath.Join(dir, "does-not-exist.tmp")
 
-	if err := promoteRepairedIndex(missingTmp, idx, optsWith(t, "--edit-in-place", "--force")); err == nil {
+	if err := dircachefilehash.PromoteRepairedIndex(missingTmp, idx, fixFlags(optsWith(t, "--edit-in-place", "--force"))); err == nil {
 		t.Fatal("expected a rename failure for a missing temp file")
 	}
 }
@@ -359,7 +361,7 @@ func TestPromoteRepairedIndex_PreserveFailureSkipsRename(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err := promoteRepairedIndex(tmp, idxDir, optsWith(t))
+		err := dircachefilehash.PromoteRepairedIndex(tmp, idxDir, fixFlags(optsWith(t)))
 		if currentStamp() != s1 {
 			return false
 		}

@@ -1,14 +1,13 @@
-package main
+package dircachefilehash
 
 import (
 	"fmt"
 
-	dcfh "github.com/mattkeenan/dircachefilehash/pkg"
 	"github.com/mattkeenan/dircachefilehash/pkg/format"
 )
 
-// ValidatedEntry holds a validated binaryEntry along with its extracted path
-// This solves the problem of variable-length paths in the binary format
+// ValidatedEntry holds a validated binaryEntry along with its extracted path.
+// This solves the problem of variable-length paths in the binary format.
 type ValidatedEntry struct {
 	Entry *binaryEntry
 	Path  string
@@ -112,57 +111,57 @@ func NewValidatedEntry(data []byte, entryIdx int, offset int, version uint32) (*
 	}, nil
 }
 
-// ApplyFieldFix applies a field modification to this validated entry
+// ApplyFieldFix applies a field modification to this validated entry.
 func (ve *ValidatedEntry) ApplyFieldFix(field, value string) (*ValidatedEntry, error) {
 	// Create a copy to avoid modifying the original
 	fixed := *ve.Entry
 
 	switch field {
 	case "ctime":
-		wallTime, err := parseTimeValue(value)
+		wallTime, err := ParseTimeValue(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.CTimeWall = wallTime
 	case "mtime":
-		wallTime, err := parseTimeValue(value)
+		wallTime, err := ParseTimeValue(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.MTimeWall = wallTime
 	case "mode":
-		val, err := parseUint32(value)
+		val, err := ParseUint32(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.Mode = val
 	case "uid":
-		val, err := parseUint32(value)
+		val, err := ParseUint32(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.UID = val
 	case "gid":
-		val, err := parseUint32(value)
+		val, err := ParseUint32(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.GID = val
 	case "file_size":
-		val, err := parseInt64(value)
+		val, err := ParseInt64(value)
 		if err != nil {
 			return nil, err
 		}
 		fixed.FileSize = val
 	case "flag_is_deleted":
-		val, err := parseBoolValue(value)
+		val, err := ParseBoolValue(value)
 		if err != nil {
 			return nil, err
 		}
 		if val {
-			fixed.EntryFlags |= dcfh.EntryFlagDeleted
+			fixed.EntryFlags |= EntryFlagDeleted
 		} else {
-			fixed.EntryFlags &^= dcfh.EntryFlagDeleted
+			fixed.EntryFlags &^= EntryFlagDeleted
 		}
 	default:
 		return nil, fmt.Errorf("unsupported field: %s", field)

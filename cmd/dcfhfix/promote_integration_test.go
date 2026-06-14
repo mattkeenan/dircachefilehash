@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	dircachefilehash "github.com/mattkeenan/dircachefilehash/pkg"
 )
 
 // captureOutput redirects os.Stdout/os.Stderr around fn and returns what each
@@ -279,7 +281,7 @@ func TestPromoteRepairedIndex_MessageQuietMatrix(t *testing.T) {
 
 			var perr error
 			stdout, stderr := captureOutput(t, func() {
-				perr = promoteRepairedIndex(tmp, idx, optsWith(t, tc.flags...))
+				perr = dircachefilehash.PromoteRepairedIndex(tmp, idx, fixFlags(optsWith(t, tc.flags...)))
 			})
 			if perr != nil {
 				t.Fatalf("promoteRepairedIndex: %v", perr)

@@ -1,4 +1,4 @@
-package main
+package dircachefilehash
 
 import (
 	"os"
@@ -24,7 +24,7 @@ func layEntryBytes(path string, dev format.DevID, ino format.Inode) []byte {
 	return buf
 }
 
-// layHeaderBytes lays a v3 Header into a HeaderSize buffer.
+// layHeaderBytes lays a current-version Header into a HeaderSize buffer.
 func layHeaderBytes(entryCount uint32) []byte {
 	buf := make([]byte, format.HeaderSize)
 	h := (*format.Header)(unsafe.Pointer(&buf[0]))
@@ -32,20 +32,15 @@ func layHeaderBytes(entryCount uint32) []byte {
 	return buf
 }
 
-// TC-3: dcfhfix's header write path uses format.Header (104 bytes). The write
-// cast (*[HeaderSize]byte)(unsafe.Pointer(customHeader)) therefore reads exactly
-// the struct — the prior 8-byte over-read (from the deleted 96-byte indexHeader
-// duplicate) is gone. The written file must have a correct 104-byte v3 header
-// (Timestamp preserved) with the original entry intact at offset 104.
-func TestWritePath_CustomHeader_NoOverRead(t *testing.T) {
+// TestWriteHeaderAndEntries_NoOverRead is the relocated TC-3 (task 28.1, moved
+// to pkg with the surgical header writer in task 28.2). The header write casts
+// (*[HeaderSize]byte)(unsafe.Pointer(header)), reading exactly the 104-byte
+// format.Header struct — no over-read. The written file must have a correct
+// 104-byte header (distinctive Timestamp preserved) with the entry intact at
+// offset HeaderSize.
+func TestWriteHeaderAndEntries_NoOverRead(t *testing.T) {
 	entry := layEntryBytes("repo/file.go", 0x11223344, 0x55667788)
 	orig := append(layHeaderBytes(1), entry...)
-
-	entryData := &EntryData{
-		IndexFile:    "in-memory",
-		OriginalData: orig,
-		EntryCount:   1,
-	}
 
 	// Custom header carrying a distinctive Timestamp that must survive the
 	// full-struct write cast untouched.
@@ -55,8 +50,8 @@ func TestWritePath_CustomHeader_NoOverRead(t *testing.T) {
 	ch.Timestamp = 0x0123456789ABCDEF
 
 	out := filepath.Join(t.TempDir(), "out.idx")
-	if err := writeIndexWithCustomHeader(entryData, out, ch); err != nil {
-		t.Fatalf("writeIndexWithCustomHeader: %v", err)
+	if err := writeHeaderAndEntries(ch, orig[format.HeaderSize:], out); err != nil {
+		t.Fatalf("writeHeaderAndEntries: %v", err)
 	}
 
 	data, err := os.ReadFile(out)

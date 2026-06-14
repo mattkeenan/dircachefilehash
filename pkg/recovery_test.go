@@ -236,12 +236,3 @@ func TestPreRecoverySnapshot(t *testing.T) {
 			originalMainStat.Size(), backupMainStat.Size())
 	}
 }
-
-// Helper function for copying files in tests
-func copyFile(src, dst string) error {
-	sourceData, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, sourceData, 0644)
-}

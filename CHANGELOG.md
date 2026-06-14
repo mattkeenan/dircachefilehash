@@ -4,6 +4,76 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 28: Fix primitive + dcfhfix restructure (coordinating parent)
+
+### Status: Complete (completed 2026-06-14, ~3 days wall-clock across plan+subtasks+integration, far under the ~1.5–2 week / High estimate; variance ≈ −75%). Top-level task; decomposed into 28.1/28.2/28.3 (4/5 decomposition signals).
+### Impact: Completes the `Repo` library primitive set with the symmetric `Fix` primitive (fsck-shaped counterpart to `Filter`), relocates the bounds-checked repair helpers from `cmd/dcfhfix` into `pkg/`, reduces dcfhfix to a thin CLI→`FixRequest` translator, and re-lands the v0.7 recovery write path as a multi-source `recovery-rebuild` Fix op. No on-disk format change; dcfhfix CLI surface behaviour-preserving. The parent itself is a **coordinating/integration** task — it adds **zero production lines**; all production code landed via the three subtask squashes.
+
+### Changes (integration only — subtask entries below carry the production detail)
+- **Integration only** — assembled the three subtask squashes onto one branch with linear history (ff-only, no merge commits): `a0bcf0e0` (28.1) → `61efe765` (28.2) → `752cde35` (28.3). The parent's working phases verify the whole rather than author new code.
+- **f-implementation-exec**: LSP symbol-coexistence check (no collision/import cycle), clean build of all three binaries, full gate green, SC1–SC5 each mapped to a landed/tested symbol, dcfhfix translator round-trip smoke.
+- **g-testing-exec**: union regression gate (IT-1…IT-5 all PASS) — pre-existing dcfhfix/recovery suites + new `fix_*`/`fix_recovery_*` suites pass in one run; `-race -d=checkptr=0` exit 0; 460 test functions.
+
+### Notable
+- **Success criteria SC1–SC5 all met** on the assembled branch: `Repo.Fix` + single `RunFix` engine; fsck helpers in `pkg/` + thin translator (no behaviour change); multi-source recovery rebuild with mutual-exclusion + library-only confinement guards; both fsck modes (auto-fix new-file write; manual deferred fail-closed); existing tests pass + new coverage in one run.
+- **−75% time variance**: decomposition into three tightly-scoped, independently-shippable subtasks (each beating its own estimate) drove the under-run; the parent's integration phases added no code.
+- **Security**: each subtask changeset reviewed under-cap with `no findings` (28.3) or focused-surface review standing in for an over-cap split (28.1/28.2). The parent union (3732 production lines) trips the 500-line `cwf-security-reviewer-changeset` cap by construction — recorded as the expected exit-2 `error` in f/g, not a skipped review (the parent adds no new surface). `golangci-lint`(0) / `govulncheck`(0) on the assembled whole.
+- **Process recommendation**: the changeset security-review cap is a poor fit for a coordinating parent (anchored at the pre-decomposition baseline, it always diffs the union); it should anchor at the last child squash so the parent diff is empty. Captured in j-retrospective.md.
+
+## Task 28.3: Multi-source recovery rebuild
+
+### Status: Complete (completed 2026-06-13, ~1 day, under the 2–3 day / High estimate). Subtask of Task 28 (Fix primitive + dcfhfix restructure); lands on the parent 28 branch. Completes parent Task 28.
+### Impact: Lands the v0.7 recovery write path as a multi-source `recovery-rebuild` Fix op — the first real consumer of the 28.2 `Repo.Fix` batch path. Rebuilds `main.idx` from a precedence-ordered merge of surviving sources (timestamped caches newest→oldest > `cache.idx` > `main.idx`) through the single-writer atomic path, gated by an empty-merge guard, a mandatory pre-recovery snapshot with fatal readback, and fault-injection-proven atomicity (closes parent FR8/AC5/NFR5). Library-only (`writeRoot != ""` asserted — structurally off the unconfined CLI exemption); no on-disk format change; no CLI surface change.
+
+### Changes
+- **M1 (53b8f70a, merge core)**: `pkg/fix_recovery.go` — `orderedSourcePaths` (precedence ladder; every candidate `confineWriteDest`-checked to MetaDir before any open; `Lstat`-rejects non-regular leaves) and `mergeSourcesIntoEntries` (per-source read via `collectForEdit` with an empty pathSet — keep-all + truncation-tolerant; union-by-path keep-first; tombstone-drop; sort; returns `contributing` sources for the readback).
+- **M2 (53b8f70a, RunFix recovery branch)**: `FixOpRecoveryRebuild` const (write-by-omission, out of `fixOpMutatesIndex`) + an op-gated batch branch in `pkg/fix_run.go` lifting the single-ref guard; `runRecoveryRebuild` sequence — `writeRoot != ""` assert → order → merge → empty-guard → dry-run short-circuit → `createPreRecoverySnapshot` + fatal `verifyRecoverySnapshot` readback → ctx check → confine → `writeRepairedIndex` (`EditInPlace`/`Force`; the snapshot is the backup of record, and a removed `main.idx` cannot be `PreserveOriginal`-preserved).
+- **M3 (53b8f70a, fault-injection)**: TC-16 reuses the Task-23 `withSyncFault` seam (isolated to `writeRepairedIndex` because the snapshot copy uses `os.WriteFile`) — a sync fault leaves no `main.idx`/no `.fix.tmp`, and a clean rebuild after loads valid.
+- **Tests** (`pkg/fix_recovery_test.go`, `pkg/fix_recovery_run_test.go`): TC-1…TC-16 — merge union/precedence/truncation/tombstone/sort/mixed-checksum/empty, out-of-MetaDir reject (both unit and through `Repo.Fix`), dry-run, op-mixing reject, snapshot-gate, empty-guard, ctx-cancel, fault-injection atomicity.
+
+### Notable
+- **Concrete checksum policy (refines design LD5)**: the first *contributing* source establishes the output checksum type; a later source whose header type differs is skipped with its entries counted as discards (no abort, no re-hash).
+- **Verify *contributing*, not *ordered***: the snapshot readback gates only on sources that fed ≥1 entry, so a present-but-zeroed `main.idx` cannot force a false abort — resolves the AC1↔AC4 tension.
+- **Documented residual (LD6)**: `verifyRecoverySnapshot` checks presence + non-emptiness, not byte-integrity, with an acknowledged TOCTOU window. Safe today (runs entirely inside the user's MetaDir, atomic rename bounds blast radius); flagged for audit if ever reachable across a privilege boundary or with an attacker-writable `recovery/`.
+- **Security**: gosec floor clean (`golangci-lint run ./...`, 0 issues); `govulncheck` 0 applicable; no new gosec suppressions (reused confined paths). Both exec-phase `cwf-security-reviewer-changeset` reviews returned **no findings** — the 288-line production changeset stayed under the auto-cap (unlike 28.1/28.2), so no over-cap split review is owed.
+- **Process note**: the first f-exec review saw only the 23-line RunFix branch because `pkg/fix_recovery.go` was untracked and invisible to `git diff`; staging the net-new file and re-running gave the full 288-line surface and a clean verdict.
+
+## Task 28.2: Add the Repo.Fix primitive and re-express dcfhfix as a thin translator
+
+### Status: Complete (completed 2026-06-13, ~1 day, under the 3–4 day / High estimate). Subtask of Task 28 (Fix primitive + dcfhfix restructure); lands on the parent 28 branch.
+### Impact: Adds `Repo.Fix(ctx, FixRequest) → FixResult`, symmetric to `Repo.Filter`, giving library consumers a batch-mode index-repair primitive with write-destination confinement to `MetaDir`. dcfhfix becomes a thin translator that builds single-command `FixRequest`s and calls one shared `RunFix`; its CLI surface (subcommands, flags, help, exit codes, backup artefacts) is behaviour-preserving. The backup stack is relocated from `cmd/dcfhfix` into `pkg/` (FR3, descoped from 28.1). Out of scope: multi-source recovery rebuild (`mergeSourcesIntoEntries`, → 28.3); Manual interactive mode (deferred, returns `ErrManualModeUnimplemented`).
+
+### Changes
+- **M1 (76d65d1a, FR3, behaviour-preserving)**: relocated the backup-stack cluster into `pkg/fix_backup.go` (`BackupMetadata`, `BackupIndexType`, `BackupDir`, `CreateBackup`, `ListBackups`, `PopBackup`, `DiscardBackup`, `ClearBackups` + unexported `copyFile`/metadata helpers); `cmd/dcfhfix` imports them. Resolved a `copyFile` collision with the `recovery_test.go` duplicate (deleted, callers rebound).
+- **M2 (32c38169, FR1/2/5/6, D2)**: `pkg/fix_run.go` — `FixOp`/`FixCommand`/`FixRequest`/`FixResult` types; fail-closed op classification (`readOnlyFixOps` allow-list, `default`-is-write); `confineWriteDest`/`confineWriteDir` (symlink-resolved, `hasPathPrefix`, fail-closed); `RunFix` (single-source); collect/write split (`collectForEdit/Append/Removal`); shared `capExceeded` (>100, the 101st trips). `Repo.Fix` added to the interface; `repoCore.Fix` passes `MetaDir` as the confinement root (inherited by `localRepo` + `wireRepo`). Header edits keep a surgical writer relocated to `pkg/fix_header.go` (the bulk single-writer path cannot express version/flags/signature edits).
+- **M3 (a4ca494e, FR4)**: dcfhfix handlers parse args → single-command `FixRequest` → `RunFix` (`writeRoot==""` = CLI explicit-subject exemption); dry-run for non-json edits short-circuits with the preview; `entry edit json` stub preserved. Deleted dead machinery (`headerFieldEditors`, `loadIndexIntoSkiplist`, `getIndexHeader`, `writeIndexWith{Modified,Custom}Header`, `EntryData`, `parseUint16`, per-handler `createBackup`).
+- **Tests** (`pkg/fix_run_test.go`, `pkg/fix_header_test.go`): TC-R1 + TC-1…TC-12; confinement accept/reject both sides, fail-closed classification, cap boundary, dry-run gate, all 10 op families, `Repo.Fix` through the interface rejecting an out-of-MetaDir selector before any write.
+
+### Notable
+- **Write-destination confinement is the security deliverable (D2/NFR4)**: the `writeRoot` positional parameter encodes the CLI explicit-subject exemption such that `Repo.Fix` (always `MetaDir`) structurally cannot reach it. The focused `cwf-security-reviewer-changeset` review of the confinement surface returned **no findings**.
+- **AC6 test-driven fix**: `FixResult.EntriesDiscarded` now reflects discards even on a cap-trip (collectors return partial counts on error).
+- **AC5 resolved by dropping `BackupID`** from `FixResult` — `fixes-list` already exposes the equivalent.
+- **Load-bearing maintenance invariant**: three `os.Create` temp writers (`writeHeaderAndEntries`, `copyFile`, `writeRepairedIndex`) are symlink-safe only because their destination is confined first — any future unconfined caller must be audited (i-maintenance.md).
+- **Pre-existing limitation documented**: backup filenames are second-granularity, so same-second edits collide into one stack entry (not a regression; surfaced by `TestRunFix_FixesDiscardAndClear`).
+- **Security**: gosec floor clean (`golangci-lint run ./...`, 0 issues); the CWF changeset review capped out in both exec phases (~1700 production lines > 500) — recorded `error`, with the focused confinement-surface review (no findings) standing in. A full split/manual changeset pass at landing is recommended.
+
+## Task 28.1: Relocate fsck helpers to pkg/ and correct the dcfhfix entry writer
+
+### Status: Complete (completed 2026-06-13, ~2 days, within the 2–3 day / Medium estimate). Subtask of Task 28 (Fix primitive + dcfhfix restructure); lands on the parent 28 branch.
+### Impact: Behaviour-preserving prerequisite that unblocks `Repo.Fix` (28.2). Fixes FR9 — the broken `O_APPEND` entry writer that dropped variable-length paths — by routing dcfhfix entry edits through the production single-writer path, and relocates the fsck helpers into `pkg/` so 28.2 can build on them.
+
+### Changes
+- **M1 (fba94a96, behaviour-preserving)**: relocated the validated-entry / entry-processing workflow / promote / parse helpers from `cmd/dcfhfix` into `pkg/` (`fix_options.go`, `fix_parse.go`, `fix_validated_entry.go`, `fix_entry_workflow.go`, `fix_promote.go`); `cmd/dcfhfix` now imports rather than defines them.
+- **M2 (87ed3ec6, FR9)**: deleted `appendValidatedEntryToTmpIndex`/`createTempIndexWithHeader`/`finalizeTempIndex`; entry edit/append now serialise via `EntrySerialiser.Serialise` → `TempIndexWriter.WriteSerialised` → atomic rename. `newFixMetaStore` seeds the hash type from the subject header's `checksum_type` and hard-asserts `writer-type == subject-type` before write; `beScanEntryFromValidated` maps fields → v4 layout.
+- **Tests** (`pkg/fix_writer_test.go`): variable-length/CJK/long-path round-trip, `checksum_type` preserved (sha1/256/512), checksum-type assertion, legacy v3→v4 upgrade, abort-discards-temp, forward-progress past a mid-stream corrupt entry.
+- **Lint**: 11 `errorlint` findings surfaced by the relocation fixed with `%v`→`%w`.
+
+### Notable
+- Single-writer invariant preserved — the repair "writer" is just survivor-set serialisation; the produced index is valid-or-absent, never partial (new abort-discards-temp invariant).
+- Backup stack descoped to 28.2 (user-approved); `FixEntryFlags` stays `{Quiet, EditInPlace, Force}`.
+- Per-path lint carve-outs do not follow relocated code: the `cmd/dcfhfix` `errorlint` exclusion stopped applying once code moved to `pkg/`, caught only by the full `golangci-lint run ./...`.
+- Security: gosec floor clean (0 issues); the CWF changeset review capped out (1804 production lines, relocation-dominated) — the net-new M2 surface was assessed manually (no new FR4 exposure).
+
 ## Task 27: Add scan edge-case integration tests (discovery→hash boundary races)
 
 ### Status: Complete (completed 2026-06-12, single session, on the ~0.5 day / Low estimate)

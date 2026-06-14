@@ -364,6 +364,29 @@ func (r *repoCore) Filter(ctx context.Context, req FilterRequest) (*FilterResult
 	return RunFilter(ctx, refs, req, os.Stderr)
 }
 
+// Fix mirrors Filter (LD1): it resolves the selectors, then delegates to the
+// shared RunFix core with the MetaDir as the confinement root so every write
+// destination is bounded to this repo (D2/NFR4). Unlike Filter, selectors do
+// not default to "all" — Fix mutates, so the caller must name the subject
+// explicitly. localRepo and wireRepo both inherit this via the embedded
+// repoCore; wireRepo's Fix acts on the invoker-side MetaDir.
+func (r *repoCore) Fix(ctx context.Context, req FixRequest) (*FixResult, error) {
+	if len(req.IndexSelectors) == 0 {
+		return nil, fmt.Errorf("FixRequest requires at least one index selector")
+	}
+	refs, err := ResolveIndexSelectors(r.ms.MetaDir, req.IndexSelectors)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("no accessible index files found")
+	}
+	if req.Repository == "" {
+		req.Repository = r.ms.RootDir
+	}
+	return RunFix(ctx, refs, req, r.ms.MetaDir, os.Stderr)
+}
+
 func (r *repoCore) Snapshots() SnapshotRepo { return &localSnapshotRepo{ms: r.ms} }
 func (r *repoCore) Config() ConfigRepo      { return &localConfigRepo{ms: r.ms} }
 
