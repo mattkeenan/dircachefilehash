@@ -7,11 +7,12 @@
       {
         "hooks" : [
           {
-            "command" : "cat .cwf/rules-inject.txt 2>/dev/null || true",
+            "command" : ".cwf/scripts/hooks/pretooluse-bash-tool-check",
+            "timeout" : 5,
             "type" : "command"
           }
         ],
-        "matcher" : "UserPromptSubmit"
+        "matcher" : "Bash"
       }
     ],
     "Stop" : [
@@ -40,6 +41,16 @@
           }
         ],
         "matcher" : "cwf-security-reviewer-changeset"
+      }
+    ],
+    "UserPromptSubmit" : [
+      {
+        "hooks" : [
+          {
+            "command" : "cat .cwf/rules-inject.txt 2>/dev/null || true",
+            "type" : "command"
+          }
+        ]
       }
     ]
   },
@@ -94,7 +105,8 @@
       "Bash(.cwf/scripts/command-helpers/cwf-check-tree-symlinks:*)",
       "Bash(.cwf/scripts/command-helpers/security-review-classify:*)",
       "Bash(.cwf/scripts/hooks/subagentstop-security-verdict-guard)",
-      "Bash(.cwf/scripts/command-helpers/cwf-detect-merges:*)"
+      "Bash(.cwf/scripts/command-helpers/cwf-detect-merges:*)",
+      "Bash(.cwf/scripts/hooks/pretooluse-bash-tool-check)"
     ]
   }
 }

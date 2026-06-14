@@ -38,3 +38,4 @@ tags
 .cwf/task-stack
 .cwf/.update.lock
 .cwf/sandbox-violations.log
+.cwf/tool-check/*/settings.local.json

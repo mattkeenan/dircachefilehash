@@ -1,7 +1,7 @@
-cwf_install_manifest_sha=74fb7e26d2e3ac9bee9a92aedbba905090dc6f42b685a4fa7f7315cad78f4a95
-cwf_installed=2026-06-11T13:09:35Z
+cwf_install_manifest_sha=97a4e12156484a55fc44ae6200eb6acd6203b2127e8633552983afd0097b658f
+cwf_installed=2026-06-14T11:59:23Z
 cwf_method=read-tree
-cwf_ref=v1.1.189
-cwf_sha=6af636e32ad1ffaebd2601c7101dd46c8a3c30b7
+cwf_ref=v1.1.201
+cwf_sha=2933eba88cc0936d612bb0024537e63bde3861d1
 cwf_source=file:///home/matt/repo/coding-with-files
-cwf_version=v1.1.189
+cwf_version=v1.1.201

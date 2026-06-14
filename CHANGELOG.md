@@ -4,6 +4,22 @@ Per-task record of changes to dircachefilehash, maintained through the CWF workf
 
 Pre-CWF history — organised by release version under Keep a Changelog / Semantic Versioning, plus the earlier rejected-design log — is preserved in [`docs/changelog-old.md`](docs/changelog-old.md).
 
+## Task 29: Upgrade CwF from v1.1.189 to v1.1.201
+
+### Status: Complete (completed 2026-06-14, ~1.25h wall-clock vs the `<1 day` / Low estimate — within estimate). Top-level chore; 0 decomposition signals.
+### Impact: Bumps vendored CWF tooling `.cwf/` from v1.1.189 → v1.1.201 (`cwf_sha=2933eba8…`, read-tree) and reconciles the inter-repo integration surface. No Go code touched; no on-disk format change. The user-visible delta in *this* repo is confined to `.claude/settings.json` (hook reshape + one new hook), `.gitignore` (+1 defensive line), and the relaid `.cwf/**` tree.
+
+### Changes
+- **Upgrade (`682a2615`)**: `cwf-manage update v1.1.201` read-tree laydown → single non-merge commit. Tool tightened script/lib perms (0700→0500, 0600→0444 — v1.1.201's stricter posture, enforced by `cwf-manage validate`) and removed legacy `.cwf/utils/*.md`.
+- **`.claude/settings.json` (Task 195 + Task 201 migration)**: the legacy dead `PreToolUse matcher=="UserPromptSubmit"` group was reshaped — the rules-inject command (`cat .cwf/rules-inject.txt 2>/dev/null || true`) moved **byte-identical** to a proper top-level `UserPromptSubmit` hook; one new `PreToolUse/Bash` group invokes `pretooluse-bash-tool-check` (timeout 5), plus its minimal allowlist entry `Bash(.cwf/scripts/hooks/pretooluse-bash-tool-check)` (no `:*`).
+- **`.gitignore`**: +1 line `.cwf/tool-check/*/settings.local.json` (the gitignored operator-local live-rules path for the new hook). `CLAUDE.md`: no diff.
+
+### Notable
+- **All 5 success criteria met**: version recorded, single non-merge commit (linear history), `cwf-manage validate` clean, workflow helper + `security-review-changeset` ran clean against the task baseline, no untracked/unexpected files.
+- **Testing**: TC-1…TC-7 all PASS plus full regression (`make build` all three binaries + `go test ./pkg/... ./cmd/...` green — upgrade touched no Go paths).
+- **Security scope (per user instruction)**: CWF internals were *out of scope* (3 prior upstream reviews); this task's review checked only the inter-repo surface. The `cwf-security-reviewer-changeset` agent reviewed a scoped 55-line `settings.json`/`.gitignore`/`CLAUDE.md` changeset → **no findings** (fail-open/inert/timeout-bounded Bash hook, minimal perm grant, rules-inject byte-identical, defensive gitignore).
+- **Cap mismatch (4th data point)**: both exec-phase `security-review-changeset` runs exited 2 (`1384 production lines > 500`) because relaid `.cwf/**` counts as production. Handled with the scoped in-scope review rather than a `--max-lines` raise. This is the same upstream-laydown-vs-cap mismatch tracked in the open BACKLOG item (Tasks 5/9/14); Task 29 appended as a further data point.
+
 ## Task 28: Fix primitive + dcfhfix restructure (coordinating parent)
 
 ### Status: Complete (completed 2026-06-14, ~3 days wall-clock across plan+subtasks+integration, far under the ~1.5–2 week / High estimate; variance ≈ −75%). Top-level task; decomposed into 28.1/28.2/28.3 (4/5 decomposition signals).
